@@ -1,0 +1,550 @@
+{
+  "historical_reference": "benchmarks/cpython_stdlib/full/socket/reference-linux.json",
+  "historical_distribution": {
+    "pass": 681,
+    "skip": 65
+  },
+  "observed_distribution": {
+    "skip": 132,
+    "pass": 614
+  },
+  "changed_count": 67,
+  "changed": [
+    {
+      "id": "test.test_socket.BasicCANTest.testBCMConstants",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L2",
+      "raw_result": "testBCMConstants (__main__.BasicCANTest.testBCMConstants) ... skipped 'SocketCan required for this test.'"
+    },
+    {
+      "id": "test.test_socket.BasicCANTest.testBindAny",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L3",
+      "raw_result": "testBindAny (__main__.BasicCANTest.testBindAny) ... skipped 'SocketCan required for this test.'"
+    },
+    {
+      "id": "test.test_socket.BasicCANTest.testCreateBCMSocket",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L4",
+      "raw_result": "testCreateBCMSocket (__main__.BasicCANTest.testCreateBCMSocket) ... skipped 'SocketCan required for this test.'"
+    },
+    {
+      "id": "test.test_socket.BasicCANTest.testCreateSocket",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L5",
+      "raw_result": "testCreateSocket (__main__.BasicCANTest.testCreateSocket) ... skipped 'SocketCan required for this test.'"
+    },
+    {
+      "id": "test.test_socket.BasicCANTest.testCrucialConstants",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L6",
+      "raw_result": "testCrucialConstants (__main__.BasicCANTest.testCrucialConstants) ... skipped 'SocketCan required for this test.'"
+    },
+    {
+      "id": "test.test_socket.BasicCANTest.testFilter",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L7",
+      "raw_result": "testFilter (__main__.BasicCANTest.testFilter) ... skipped 'SocketCan required for this test.'"
+    },
+    {
+      "id": "test.test_socket.BasicCANTest.testLoopback",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L8",
+      "raw_result": "testLoopback (__main__.BasicCANTest.testLoopback) ... skipped 'SocketCan required for this test.'"
+    },
+    {
+      "id": "test.test_socket.BasicCANTest.testTooLongInterfaceName",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L9",
+      "raw_result": "testTooLongInterfaceName (__main__.BasicCANTest.testTooLongInterfaceName) ... skipped 'SocketCan required for this test.'"
+    },
+    {
+      "id": "test.test_socket.BasicTCPTest.testShutdown_overflow",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L38",
+      "raw_result": "testShutdown_overflow (__main__.BasicTCPTest.testShutdown_overflow) ... skipped 'requires _testcapi'"
+    },
+    {
+      "id": "test.test_socket.BasicTCPTest2.testShutdown_overflow",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L48",
+      "raw_result": "testShutdown_overflow (__main__.BasicTCPTest2.testShutdown_overflow) ... skipped 'requires _testcapi'"
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_getaddrinfo_int_port_overflow",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L144",
+      "raw_result": "test_getaddrinfo_int_port_overflow (__main__.GeneralModuleTests.test_getaddrinfo_int_port_overflow) ... skipped 'requires _testcapi'"
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_listen_backlog_overflow",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L157",
+      "raw_result": "test_listen_backlog_overflow (__main__.GeneralModuleTests.test_listen_backlog_overflow) ... skipped 'requires _testcapi'"
+    },
+    {
+      "id": "test.test_socket.ISOTPTest.testCreateISOTPSocket",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L187",
+      "raw_result": "testCreateISOTPSocket (__main__.ISOTPTest.testCreateISOTPSocket) ... skipped 'CAN ISOTP required for this test.'"
+    },
+    {
+      "id": "test.test_socket.ISOTPTest.testCreateSocket",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L188",
+      "raw_result": "testCreateSocket (__main__.ISOTPTest.testCreateSocket) ... skipped 'CAN ISOTP required for this test.'"
+    },
+    {
+      "id": "test.test_socket.ISOTPTest.testCrucialConstants",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L189",
+      "raw_result": "testCrucialConstants (__main__.ISOTPTest.testCrucialConstants) ... skipped 'CAN ISOTP required for this test.'"
+    },
+    {
+      "id": "test.test_socket.ISOTPTest.testTooLongInterfaceName",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L190",
+      "raw_result": "testTooLongInterfaceName (__main__.ISOTPTest.testTooLongInterfaceName) ... skipped 'CAN ISOTP required for this test.'"
+    },
+    {
+      "id": "test.test_socket.J1939Test.testCreateJ1939Socket",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L208",
+      "raw_result": "testCreateJ1939Socket (__main__.J1939Test.testCreateJ1939Socket) ... skipped 'CAN J1939 required for this test.'"
+    },
+    {
+      "id": "test.test_socket.J1939Test.testJ1939Constants",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L209",
+      "raw_result": "testJ1939Constants (__main__.J1939Test.testJ1939Constants) ... skipped 'CAN J1939 required for this test.'"
+    },
+    {
+      "id": "test.test_socket.LinuxKernelCryptoAPI.test_aes_cbc",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L221",
+      "raw_result": "test_aes_cbc (__main__.LinuxKernelCryptoAPI.test_aes_cbc) ... skipped 'AF_ALG required'"
+    },
+    {
+      "id": "test.test_socket.LinuxKernelCryptoAPI.test_drbg_pr_sha256",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L222",
+      "raw_result": "test_drbg_pr_sha256 (__main__.LinuxKernelCryptoAPI.test_drbg_pr_sha256) ... skipped 'AF_ALG required'"
+    },
+    {
+      "id": "test.test_socket.LinuxKernelCryptoAPI.test_hmac_sha1",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L223",
+      "raw_result": "test_hmac_sha1 (__main__.LinuxKernelCryptoAPI.test_hmac_sha1) ... skipped 'AF_ALG required'"
+    },
+    {
+      "id": "test.test_socket.LinuxKernelCryptoAPI.test_length_restriction",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L224",
+      "raw_result": "test_length_restriction (__main__.LinuxKernelCryptoAPI.test_length_restriction) ... skipped 'AF_ALG required'"
+    },
+    {
+      "id": "test.test_socket.LinuxKernelCryptoAPI.test_sendmsg_afalg_args",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L225",
+      "raw_result": "test_sendmsg_afalg_args (__main__.LinuxKernelCryptoAPI.test_sendmsg_afalg_args) ... skipped 'AF_ALG required'"
+    },
+    {
+      "id": "test.test_socket.LinuxKernelCryptoAPI.test_sha256",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L226",
+      "raw_result": "test_sha256 (__main__.LinuxKernelCryptoAPI.test_sha256) ... skipped 'AF_ALG required'"
+    },
+    {
+      "id": "test.test_socket.NonBlockingTCPTests.testSetBlocking_overflow",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L246",
+      "raw_result": "testSetBlocking_overflow (__main__.NonBlockingTCPTests.testSetBlocking_overflow) ... skipped 'requires _testcapi'"
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsg",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L312",
+      "raw_result": "testRecvmsg (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsg) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgAfterClose",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L313",
+      "raw_result": "testRecvmsgAfterClose (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgAfterClose) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgEOF",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L314",
+      "raw_result": "testRecvmsgEOF (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgEOF) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgExplicitDefaults",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L315",
+      "raw_result": "testRecvmsgExplicitDefaults (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgExplicitDefaults) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgFromSendmsg",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L316",
+      "raw_result": "testRecvmsgFromSendmsg (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgFromSendmsg) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgIntoArray",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L317",
+      "raw_result": "testRecvmsgIntoArray (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgIntoArray) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgIntoBadArgs",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L318",
+      "raw_result": "testRecvmsgIntoBadArgs (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgIntoBadArgs) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgIntoGenerator",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L319",
+      "raw_result": "testRecvmsgIntoGenerator (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgIntoGenerator) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgIntoScatter",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L320",
+      "raw_result": "testRecvmsgIntoScatter (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgIntoScatter) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgLongAncillaryBuf",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L321",
+      "raw_result": "testRecvmsgLongAncillaryBuf (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgLongAncillaryBuf) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgOverflow",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L322",
+      "raw_result": "testRecvmsgOverflow (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgOverflow) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgPeek",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L323",
+      "raw_result": "testRecvmsgPeek (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgPeek) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgShortAncillaryBuf",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L324",
+      "raw_result": "testRecvmsgShortAncillaryBuf (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgShortAncillaryBuf) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgShorter",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L325",
+      "raw_result": "testRecvmsgShorter (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgShorter) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgTimeout",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L326",
+      "raw_result": "testRecvmsgTimeout (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgTimeout) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgTrunc",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L327",
+      "raw_result": "testRecvmsgTrunc (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgTrunc) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCTPStreamTest.testRecvmsg",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L470",
+      "raw_result": "testRecvmsg (__main__.RecvmsgSCTPStreamTest.testRecvmsg) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCTPStreamTest.testRecvmsgAfterClose",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L471",
+      "raw_result": "testRecvmsgAfterClose (__main__.RecvmsgSCTPStreamTest.testRecvmsgAfterClose) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCTPStreamTest.testRecvmsgBadArgs",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L472",
+      "raw_result": "testRecvmsgBadArgs (__main__.RecvmsgSCTPStreamTest.testRecvmsgBadArgs) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCTPStreamTest.testRecvmsgEOF",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L473",
+      "raw_result": "testRecvmsgEOF (__main__.RecvmsgSCTPStreamTest.testRecvmsgEOF) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCTPStreamTest.testRecvmsgExplicitDefaults",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L474",
+      "raw_result": "testRecvmsgExplicitDefaults (__main__.RecvmsgSCTPStreamTest.testRecvmsgExplicitDefaults) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCTPStreamTest.testRecvmsgFromSendmsg",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L475",
+      "raw_result": "testRecvmsgFromSendmsg (__main__.RecvmsgSCTPStreamTest.testRecvmsgFromSendmsg) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCTPStreamTest.testRecvmsgLongAncillaryBuf",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L476",
+      "raw_result": "testRecvmsgLongAncillaryBuf (__main__.RecvmsgSCTPStreamTest.testRecvmsgLongAncillaryBuf) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCTPStreamTest.testRecvmsgOverflow",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L477",
+      "raw_result": "testRecvmsgOverflow (__main__.RecvmsgSCTPStreamTest.testRecvmsgOverflow) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCTPStreamTest.testRecvmsgPeek",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L478",
+      "raw_result": "testRecvmsgPeek (__main__.RecvmsgSCTPStreamTest.testRecvmsgPeek) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCTPStreamTest.testRecvmsgShortAncillaryBuf",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L479",
+      "raw_result": "testRecvmsgShortAncillaryBuf (__main__.RecvmsgSCTPStreamTest.testRecvmsgShortAncillaryBuf) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCTPStreamTest.testRecvmsgShorter",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L480",
+      "raw_result": "testRecvmsgShorter (__main__.RecvmsgSCTPStreamTest.testRecvmsgShorter) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCTPStreamTest.testRecvmsgTimeout",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L481",
+      "raw_result": "testRecvmsgTimeout (__main__.RecvmsgSCTPStreamTest.testRecvmsgTimeout) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCTPStreamTest.testRecvmsgTrunc",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L482",
+      "raw_result": "testRecvmsgTrunc (__main__.RecvmsgSCTPStreamTest.testRecvmsgTrunc) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.SendmsgSCTPStreamTest.testSendmsg",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L576",
+      "raw_result": "testSendmsg (__main__.SendmsgSCTPStreamTest.testSendmsg) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.SendmsgSCTPStreamTest.testSendmsgAfterClose",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L577",
+      "raw_result": "testSendmsgAfterClose (__main__.SendmsgSCTPStreamTest.testSendmsgAfterClose) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.SendmsgSCTPStreamTest.testSendmsgAncillaryGenerator",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L578",
+      "raw_result": "testSendmsgAncillaryGenerator (__main__.SendmsgSCTPStreamTest.testSendmsgAncillaryGenerator) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.SendmsgSCTPStreamTest.testSendmsgArray",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L579",
+      "raw_result": "testSendmsgArray (__main__.SendmsgSCTPStreamTest.testSendmsgArray) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.SendmsgSCTPStreamTest.testSendmsgBadArgs",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L580",
+      "raw_result": "testSendmsgBadArgs (__main__.SendmsgSCTPStreamTest.testSendmsgBadArgs) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.SendmsgSCTPStreamTest.testSendmsgBadCmsg",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L581",
+      "raw_result": "testSendmsgBadCmsg (__main__.SendmsgSCTPStreamTest.testSendmsgBadCmsg) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.SendmsgSCTPStreamTest.testSendmsgBadMultiCmsg",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L582",
+      "raw_result": "testSendmsgBadMultiCmsg (__main__.SendmsgSCTPStreamTest.testSendmsgBadMultiCmsg) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.SendmsgSCTPStreamTest.testSendmsgDataGenerator",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L583",
+      "raw_result": "testSendmsgDataGenerator (__main__.SendmsgSCTPStreamTest.testSendmsgDataGenerator) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.SendmsgSCTPStreamTest.testSendmsgDontWait",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L584",
+      "raw_result": "testSendmsgDontWait (__main__.SendmsgSCTPStreamTest.testSendmsgDontWait) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.SendmsgSCTPStreamTest.testSendmsgExcessCmsgReject",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L585",
+      "raw_result": "testSendmsgExcessCmsgReject (__main__.SendmsgSCTPStreamTest.testSendmsgExcessCmsgReject) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.SendmsgSCTPStreamTest.testSendmsgExplicitNoneAddr",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L586",
+      "raw_result": "testSendmsgExplicitNoneAddr (__main__.SendmsgSCTPStreamTest.testSendmsgExplicitNoneAddr) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.SendmsgSCTPStreamTest.testSendmsgGather",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L587",
+      "raw_result": "testSendmsgGather (__main__.SendmsgSCTPStreamTest.testSendmsgGather) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    },
+    {
+      "id": "test.test_socket.SendmsgSCTPStreamTest.testSendmsgTimeout",
+      "occurrence": 1,
+      "historical": "pass",
+      "stock": "skip",
+      "evidence": "benchmarks/compatibility/evidence/socket/stock.stderr#L588",
+      "raw_result": "testSendmsgTimeout (__main__.SendmsgSCTPStreamTest.testSendmsgTimeout) ... skipped \"can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported\""
+    }
+  ]
+}

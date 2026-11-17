@@ -1,0 +1,46 @@
+{
+  "source_repository": "https://github.com/astral-experiments/imre.git",
+  "source_revision": "49f0dc2ef78b82692e333252faf71b4fc7730949",
+  "worktree": "/workspace/scratch/socket-imre-pin",
+  "source_clean": true,
+  "command": [
+    "cargo",
+    "build",
+    "--offline",
+    "--release",
+    "--locked",
+    "-p",
+    "imre-compiler",
+    "-p",
+    "imre-runtime",
+    "--target-dir",
+    "/workspace/imre/target"
+  ],
+  "environment": {
+    "CARGO_HOME": "/workspace/.toolchains/cargo",
+    "RUSTUP_HOME": "/workspace/.toolchains/rustup",
+    "PATH_prefix": "/workspace/.toolchains/cargo/bin"
+  },
+  "build_log": "benchmarks/compatibility/evidence/socket/imre-build.log",
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1\nLLVM version: 22.1.8",
+  "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)",
+  "artifacts": {
+    "/workspace/imre/target/release/imre": "7231eb3143cf0299ccf2cd37c1929d767b4bdeb8e9170ec3ba6ce5261cc2bbba",
+    "/workspace/imre/target/release/libimre_runtime.a": "896d8a5aa2404ded4a998334b4712abe33374175f63cf0111755b08682a582e5",
+    "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+    "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+  },
+  "stock_python_version": "Python 3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+  "cpython_source_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "cpython_source_archive_sha256": "0d838be32b52da92a4293ecd99bc91f7be8b4acc573423665bd1a1428be46e47",
+  "verified_manifest_files": {
+    "LICENSE": "20cf39097c68baa17cc566b64e76d34ebf034044",
+    "Lib/socket.py": "bbb476f2fc010e2e3178b97d1253b26f30f7e900",
+    "Lib/test/support/socket_helper.py": "a41e487f3e4bc52012425e30eab9b430a3b3a7ab",
+    "Lib/test/support/threading_helper.py": "cf87233f0e2e938a9f2e7d7906844ca009416432",
+    "Lib/test/test_socket.py": "249bfeaa14cf374a047c58176da6cbb6e6ff43f4",
+    "Modules/socketmodule.c": "f92b7995840fa4dacced4b6b3ab76264c0f76e11",
+    "Modules/socketmodule.h": "6f8f4b21599cfb735ef005b6c2f2bb2bad812345"
+  },
+  "staged_test_fixture_tree": "complete unmodified CPython Lib/test tree"
+}

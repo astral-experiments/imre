@@ -1,0 +1,9 @@
+Socket replay evidence for the frozen 746-original family
+
+The canonical stock run used the installed stock CPython 3.14.5 binary and the intact `Lib/test/test_socket.py` from CPython commit `5607950ef232dad16d75c0cf53101d9649d89115`. It ran on the Cloud Linux x86-64 host outside the command sandbox, with a 900-second bound. `discovery.json` gives the exact discovery invocation; `stock.inventory.json` retains all original IDs and occurrence numbers. The canonical `stock.stderr` includes each individual result and skip reason. Its 746 IDs match discovery and the historical reference exactly. The 132 observed skips are platform/interpreter capability skips, including SCTP, Bluetooth, CAN, RDS, Hyper-V, AF_ALG and `_testcapi`; the historical 65 skips were observed on a different host. No skip counts as a paired pass.
+
+An earlier sandboxed stock attempt is retained as `stock.sandbox.*` for diagnosis. It reported four interface-enumeration errors because the command sandbox denied the relevant network operation. It is not the canonical stock result.
+
+`build.json` and `imre-build.log` identify the tested Imre CLI/runtime source and artifacts. `run.json` records the exact per-tier commands, environment overrides, time bounds, exit statuses and declared modules. Native compilation or collection failure leaves the affected originals `not_run`. No accepted omissions were applied.
+
+Both native builds exited 1 before collection. Their raw diagnostics are in `O0.build.stderr` and `O3.build.stderr`; the first rejects the original tuple-container call to `TestCase.assertIn` at upstream line 1538. Other diagnostics reject assertion arguments such as socket classes and floats. All 746 originals therefore remain `not_run` at each native tier. There were no build timeouts, individual native results, paired passes, or accepted omissions.

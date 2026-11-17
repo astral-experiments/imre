@@ -1,0 +1,2991 @@
+{
+  "module": "test.test_socket",
+  "count": 746,
+  "unique": 746,
+  "ids": [
+    {
+      "id": "test.test_socket.BasicBluetoothTest.testBluetoothConstants",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicCANTest.testBCMConstants",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicCANTest.testBindAny",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicCANTest.testCreateBCMSocket",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicCANTest.testCreateSocket",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicCANTest.testCrucialConstants",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicCANTest.testFilter",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicCANTest.testLoopback",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicCANTest.testTooLongInterfaceName",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicHyperVTest.testCreateHyperVSocketAddrNotTupleFailure",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicHyperVTest.testCreateHyperVSocketAddrNotTupleOf2StrsFailure",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicHyperVTest.testCreateHyperVSocketAddrNotTupleOfStrsFailure",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicHyperVTest.testCreateHyperVSocketAddrServiceIdNotValidUUIDFailure",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicHyperVTest.testCreateHyperVSocketAddrVmIdNotValidUUIDFailure",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicHyperVTest.testCreateHyperVSocketWithUnknownProtoFailure",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicHyperVTest.testHyperVConstants",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicQIPCRTRTest.testAutoBindSock",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicQIPCRTRTest.testBindSock",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicQIPCRTRTest.testCreateSocket",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicQIPCRTRTest.testCrucialConstants",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicQIPCRTRTest.testInvalidBindSock",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicQIPCRTRTest.testUnbound",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicRDSTest.testCreateSocket",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicRDSTest.testCrucialConstants",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicRDSTest.testSocketBufferSize",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicSocketPairTest.testDefaults",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicSocketPairTest.testRecv",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicSocketPairTest.testSend",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicTCPTest.testDetach",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicTCPTest.testDup",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicTCPTest.testFromFd",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicTCPTest.testOverFlowRecv",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicTCPTest.testOverFlowRecvFrom",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicTCPTest.testRecv",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicTCPTest.testRecvFrom",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicTCPTest.testSendAll",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicTCPTest.testShutdown",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicTCPTest.testShutdown_overflow",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicTCPTest2.testDetach",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicTCPTest2.testDup",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicTCPTest2.testFromFd",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicTCPTest2.testOverFlowRecv",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicTCPTest2.testOverFlowRecvFrom",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicTCPTest2.testRecv",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicTCPTest2.testRecvFrom",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicTCPTest2.testSendAll",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicTCPTest2.testShutdown",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicTCPTest2.testShutdown_overflow",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicUDPLITETest.testRecvFrom",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicUDPLITETest.testRecvFromNegative",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicUDPLITETest.testSendtoAndRecv",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicUDPTest.testRecvFrom",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicUDPTest.testRecvFromNegative",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicUDPTest.testSendtoAndRecv",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicVSOCKTest.testCreateSocket",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicVSOCKTest.testCrucialConstants",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicVSOCKTest.testSocketBufferSize",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BasicVSOCKTest.testVSOCKConstants",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BluetoothTest.testBadHciAddr",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BluetoothTest.testBadL2capAddr",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BluetoothTest.testBadRfcommAddr",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BluetoothTest.testBadScoAddr",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BluetoothTest.testBindBrEdrL2capSocket",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BluetoothTest.testBindHciSocket",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BluetoothTest.testBindLeAttL2capSocket",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BluetoothTest.testBindLePsmL2capSocket",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BluetoothTest.testBindRfcommSocket",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BluetoothTest.testBindScoSocket",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BluetoothTest.testCreateHciSocket",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BluetoothTest.testCreateL2capSocket",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BluetoothTest.testCreateRfcommSocket",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BluetoothTest.testCreateScoSocket",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BufferIOTest.testRecvFromIntoArray",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BufferIOTest.testRecvFromIntoBytearray",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BufferIOTest.testRecvFromIntoEmptyBuffer",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BufferIOTest.testRecvFromIntoMemoryview",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BufferIOTest.testRecvFromIntoSmallBuffer",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BufferIOTest.testRecvIntoArray",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BufferIOTest.testRecvIntoBytearray",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.BufferIOTest.testRecvIntoMemoryview",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.CANTest.testBCM",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.CANTest.testSendFrame",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.CANTest.testSendMaxFrame",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.CANTest.testSendMultiFrames",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.CmsgMacroTests.testCMSG_LEN",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.CmsgMacroTests.testCMSG_SPACE",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.ContextManagersTest.testCreateConnectionBase",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.ContextManagersTest.testCreateConnectionClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.CreateServerFunctionalTest.test_dual_stack_client_v4",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.CreateServerFunctionalTest.test_dual_stack_client_v6",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.CreateServerFunctionalTest.test_tcp4",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.CreateServerFunctionalTest.test_tcp6",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.CreateServerTest.test_address",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.CreateServerTest.test_dualstack_ipv6_family",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.CreateServerTest.test_family_and_type",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.CreateServerTest.test_ipv6_only_default",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.CreateServerTest.test_reuse_port",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.FileObjectClassTestCase.testAttributes",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.FileObjectClassTestCase.testCloseAfterMakefile",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.FileObjectClassTestCase.testClosedAttr",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.FileObjectClassTestCase.testFullRead",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.FileObjectClassTestCase.testMakefileAfterMakefileClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.FileObjectClassTestCase.testReadAfterTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.FileObjectClassTestCase.testReadline",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.FileObjectClassTestCase.testRealClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.FileObjectClassTestCase.testSmallRead",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.FileObjectClassTestCase.testUnbufferedRead",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.FreeThreadingTests.test_close_detach_race",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test3542SocketOptions",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testCloseException",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testCrucialConstants",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testCrucialIpProtoConstants",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testDefaultTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testGetServBy",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testGetSockOpt",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testGetaddrinfo",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testHostnameRes",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testIPv4_inet_aton_fourbytes",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testIPv4toString",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testIPv6toString",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testInterfaceNameIndex",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testInterpreterCrash",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testInvalidInterfaceIndexToName",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testInvalidInterfaceNameToIndex",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testNewAttributes",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testNtoH",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testNtoHErrors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testRefCountGetNameInfo",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testSendAfterClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testSendtoErrors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testSetSockOpt",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testSockName",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testSocketError",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testStringToIPv4",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testStringToIPv6",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.testWindowsSpecificConstants",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_SocketType_is_socketobject",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test__sendfile_use_sendfile",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_addressfamily_enum",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_addressinfo_enum",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_csocket_repr",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_dealloc_warn",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_flowinfo",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_getaddrinfo_int_port_overflow",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_getaddrinfo_ipv6_basic",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_getaddrinfo_ipv6_scopeid_numeric",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_getaddrinfo_ipv6_scopeid_symbolic",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_getfqdn_filter_localhost",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_getnameinfo",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_getnameinfo_ipv6_scopeid_numeric",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_getnameinfo_ipv6_scopeid_symbolic",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_getsockaddrarg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_host_resolution",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_host_resolution_bad_address",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_idna",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_listen_backlog",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_listen_backlog_overflow",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_makefile_invalid_mode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_makefile_mode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_msgflag_enum",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_name_closed_socketio",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_pickle",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_repr",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_sendall_interrupted",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_sendall_interrupted_with_timeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_sendmsg_reentrant_ancillary_mutation",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_sethostname",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_sio_loopback_fast_path",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_sock_ioctl",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_socket_close",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_socket_consistent_sock_type",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_socket_fileno",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_socket_fileno_rejects_float",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_socket_fileno_rejects_invalid_socket",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_socket_fileno_rejects_negative",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_socket_fileno_rejects_other_types",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_socket_fileno_requires_socket_fd",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_socket_fileno_requires_valid_fd",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_socket_methods",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_socket_type",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_socketkind_enum",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_str_for_enums",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_unknown_socket_family_repr",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_unusable_closed_socketio",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.GeneralModuleTests.test_weakref",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.ISOTPTest.testBind",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.ISOTPTest.testCreateISOTPSocket",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.ISOTPTest.testCreateSocket",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.ISOTPTest.testCrucialConstants",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.ISOTPTest.testTooLongInterfaceName",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.InheritanceTest.test_SOCK_CLOEXEC",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.InheritanceTest.test_default_inheritable",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.InheritanceTest.test_dup",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.InheritanceTest.test_get_inheritable_cloexec",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.InheritanceTest.test_set_inheritable",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.InheritanceTest.test_set_inheritable_cloexec",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.InheritanceTest.test_socketpair",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.InterruptedRecvTimeoutTest.testInterruptedRecvIntoTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.InterruptedRecvTimeoutTest.testInterruptedRecvTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.InterruptedRecvTimeoutTest.testInterruptedRecvfromIntoTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.InterruptedRecvTimeoutTest.testInterruptedRecvfromTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.InterruptedRecvTimeoutTest.testInterruptedRecvmsgIntoTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.InterruptedRecvTimeoutTest.testInterruptedRecvmsgTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.InterruptedSendTimeoutTest.testInterruptedSendTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.InterruptedSendTimeoutTest.testInterruptedSendmsgTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.InterruptedSendTimeoutTest.testInterruptedSendtoTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.J1939Test.testBind",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.J1939Test.testCreateJ1939Socket",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.J1939Test.testJ1939Constants",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.LineBufferedFileObjectClassTestCase.testAttributes",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.LineBufferedFileObjectClassTestCase.testCloseAfterMakefile",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.LineBufferedFileObjectClassTestCase.testClosedAttr",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.LineBufferedFileObjectClassTestCase.testFullRead",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.LineBufferedFileObjectClassTestCase.testMakefileAfterMakefileClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.LineBufferedFileObjectClassTestCase.testReadAfterTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.LineBufferedFileObjectClassTestCase.testReadline",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.LineBufferedFileObjectClassTestCase.testRealClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.LineBufferedFileObjectClassTestCase.testSmallRead",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.LineBufferedFileObjectClassTestCase.testUnbufferedRead",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.LinuxKernelCryptoAPI.test_aead_aes_gcm",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.LinuxKernelCryptoAPI.test_aes_cbc",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.LinuxKernelCryptoAPI.test_drbg_pr_sha256",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.LinuxKernelCryptoAPI.test_hmac_sha1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.LinuxKernelCryptoAPI.test_length_restriction",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.LinuxKernelCryptoAPI.test_sendmsg_afalg_args",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.LinuxKernelCryptoAPI.test_sha256",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.NetworkConnectionAttributesTest.testFamily",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.NetworkConnectionAttributesTest.testSourceAddress",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.NetworkConnectionAttributesTest.testTimeoutDefault",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.NetworkConnectionAttributesTest.testTimeoutNone",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.NetworkConnectionAttributesTest.testTimeoutValueNamed",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.NetworkConnectionAttributesTest.testTimeoutValueNonamed",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.NetworkConnectionBehaviourTest.testInsideTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.NetworkConnectionBehaviourTest.testOutsideTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.NetworkConnectionNoServer.test_connect",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.NetworkConnectionNoServer.test_create_connection",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.NetworkConnectionNoServer.test_create_connection_all_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.NetworkConnectionNoServer.test_create_connection_timeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.NonBlockingTCPTests.testAccept",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.NonBlockingTCPTests.testInheritFlagsBlocking",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.NonBlockingTCPTests.testInheritFlagsTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.NonBlockingTCPTests.testInitNonBlocking",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.NonBlockingTCPTests.testLargeTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.NonBlockingTCPTests.testRecv",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.NonBlockingTCPTests.testSetBlocking",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.NonBlockingTCPTests.testSetBlocking_overflow",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.NonblockConstantTest.test_SOCK_NONBLOCK",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.PurePythonSocketPairTest.test_injected_authentication_failure",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.PurePythonSocketPairTest.test_ipv4",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.PurePythonSocketPairTest.test_ipv6",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.PurePythonSocketPairTest.test_recv",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.PurePythonSocketPairTest.test_send",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RDSTest.testPeek",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RDSTest.testSelect",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RDSTest.testSendAndRecv",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RDSTest.testSendAndRecvMsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RDSTest.testSendAndRecvMulti",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDP6Test.testCmsgTruncNoBufSize",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDP6Test.testOddCmsgSize",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDP6Test.testRecvHopLimit",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDP6Test.testRecvHopLimitCMSG_SPACE",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDP6Test.testRecvTrafficClassAndHopLimit",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDP6Test.testRecvTrafficClassAndHopLimitCMSG_SPACE",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDP6Test.testSecondCmsgTrunc0",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDP6Test.testSecondCmsgTrunc1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDP6Test.testSecondCmsgTrunc2Int",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDP6Test.testSecondCmsgTruncInData",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDP6Test.testSecondCmsgTruncLen0Minus1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDP6Test.testSetHopLimit",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDP6Test.testSetTrafficClassAndHopLimit",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDP6Test.testSingleCmsgTrunc0",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDP6Test.testSingleCmsgTrunc1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDP6Test.testSingleCmsgTrunc2Int",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDP6Test.testSingleCmsgTruncInData",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDP6Test.testSingleCmsgTruncLen0Minus1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testCmsgTruncNoBufSize",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testOddCmsgSize",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testRecvHopLimit",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testRecvHopLimitCMSG_SPACE",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testRecvTrafficClassAndHopLimit",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testRecvTrafficClassAndHopLimitCMSG_SPACE",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testSecondCmsgTrunc0",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testSecondCmsgTrunc1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testSecondCmsgTrunc2Int",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testSecondCmsgTruncInData",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testSecondCmsgTruncLen0Minus1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testSetHopLimit",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testSetTrafficClassAndHopLimit",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testSingleCmsgTrunc0",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testSingleCmsgTrunc1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testSingleCmsgTrunc2Int",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testSingleCmsgTruncInData",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testSingleCmsgTruncLen0Minus1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCMRightsStreamTest.testCmsgTrunc0",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCMRightsStreamTest.testCmsgTrunc1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCMRightsStreamTest.testCmsgTrunc2Int",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCMRightsStreamTest.testCmsgTruncLen0",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCMRightsStreamTest.testCmsgTruncLen0Minus1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCMRightsStreamTest.testCmsgTruncLen0Plus1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCMRightsStreamTest.testCmsgTruncLen1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCMRightsStreamTest.testCmsgTruncLen2Minus1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCMRightsStreamTest.testCmsgTruncNoBufSize",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCMRightsStreamTest.testFDPassCMSG_LEN",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCMRightsStreamTest.testFDPassCMSG_SPACE",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCMRightsStreamTest.testFDPassEmpty",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCMRightsStreamTest.testFDPassPartialInt",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCMRightsStreamTest.testFDPassPartialIntInMiddle",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCMRightsStreamTest.testFDPassSeparate",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCMRightsStreamTest.testFDPassSeparateMinSpace",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCMRightsStreamTest.testFDPassSimple",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCMRightsStreamTest.testMultipleFDPass",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgAfterClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgEOF",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgExplicitDefaults",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgFromSendmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgIntoArray",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgIntoBadArgs",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgIntoGenerator",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgIntoScatter",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgLongAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgOverflow",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgPeek",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgShortAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgShorter",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoSCTPStreamTest.testRecvmsgTrunc",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoTCPTest.testRecvmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoTCPTest.testRecvmsgAfterClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoTCPTest.testRecvmsgEOF",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoTCPTest.testRecvmsgExplicitDefaults",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoTCPTest.testRecvmsgFromSendmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoTCPTest.testRecvmsgIntoArray",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoTCPTest.testRecvmsgIntoBadArgs",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoTCPTest.testRecvmsgIntoGenerator",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoTCPTest.testRecvmsgIntoScatter",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoTCPTest.testRecvmsgLongAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoTCPTest.testRecvmsgOverflow",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoTCPTest.testRecvmsgPeek",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoTCPTest.testRecvmsgShortAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoTCPTest.testRecvmsgShorter",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoTCPTest.testRecvmsgTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoTCPTest.testRecvmsgTrunc",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDP6Test.testRecvmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDP6Test.testRecvmsgAfterClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDP6Test.testRecvmsgExplicitDefaults",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDP6Test.testRecvmsgFromSendmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDP6Test.testRecvmsgIntoArray",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDP6Test.testRecvmsgIntoBadArgs",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDP6Test.testRecvmsgIntoGenerator",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDP6Test.testRecvmsgIntoScatter",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDP6Test.testRecvmsgLongAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDP6Test.testRecvmsgPeek",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDP6Test.testRecvmsgShortAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDP6Test.testRecvmsgShorter",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDP6Test.testRecvmsgTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDP6Test.testRecvmsgTrunc",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITE6Test.testRecvmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITE6Test.testRecvmsgAfterClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITE6Test.testRecvmsgExplicitDefaults",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITE6Test.testRecvmsgFromSendmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITE6Test.testRecvmsgIntoArray",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITE6Test.testRecvmsgIntoBadArgs",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITE6Test.testRecvmsgIntoGenerator",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITE6Test.testRecvmsgIntoScatter",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITE6Test.testRecvmsgLongAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITE6Test.testRecvmsgPeek",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITE6Test.testRecvmsgShortAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITE6Test.testRecvmsgShorter",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITE6Test.testRecvmsgTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITE6Test.testRecvmsgTrunc",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITETest.testRecvmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITETest.testRecvmsgAfterClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITETest.testRecvmsgExplicitDefaults",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITETest.testRecvmsgFromSendmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITETest.testRecvmsgIntoArray",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITETest.testRecvmsgIntoBadArgs",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITETest.testRecvmsgIntoGenerator",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITETest.testRecvmsgIntoScatter",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITETest.testRecvmsgLongAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITETest.testRecvmsgPeek",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITETest.testRecvmsgShortAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITETest.testRecvmsgShorter",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITETest.testRecvmsgTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPLITETest.testRecvmsgTrunc",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPTest.testRecvmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPTest.testRecvmsgAfterClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPTest.testRecvmsgExplicitDefaults",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPTest.testRecvmsgFromSendmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPTest.testRecvmsgIntoArray",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPTest.testRecvmsgIntoBadArgs",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPTest.testRecvmsgIntoGenerator",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPTest.testRecvmsgIntoScatter",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPTest.testRecvmsgLongAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPTest.testRecvmsgPeek",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPTest.testRecvmsgShortAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPTest.testRecvmsgShorter",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPTest.testRecvmsgTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUDPTest.testRecvmsgTrunc",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUnixStreamTest.testRecvmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUnixStreamTest.testRecvmsgAfterClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUnixStreamTest.testRecvmsgEOF",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUnixStreamTest.testRecvmsgExplicitDefaults",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUnixStreamTest.testRecvmsgFromSendmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUnixStreamTest.testRecvmsgIntoArray",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUnixStreamTest.testRecvmsgIntoBadArgs",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUnixStreamTest.testRecvmsgIntoGenerator",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUnixStreamTest.testRecvmsgIntoScatter",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUnixStreamTest.testRecvmsgLongAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUnixStreamTest.testRecvmsgOverflow",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUnixStreamTest.testRecvmsgPeek",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUnixStreamTest.testRecvmsgShortAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUnixStreamTest.testRecvmsgShorter",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUnixStreamTest.testRecvmsgTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgIntoUnixStreamTest.testRecvmsgTrunc",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDP6Test.testCmsgTruncNoBufSize",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDP6Test.testOddCmsgSize",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDP6Test.testRecvHopLimit",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDP6Test.testRecvHopLimitCMSG_SPACE",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDP6Test.testRecvTrafficClassAndHopLimit",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDP6Test.testRecvTrafficClassAndHopLimitCMSG_SPACE",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDP6Test.testSecondCmsgTrunc0",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDP6Test.testSecondCmsgTrunc1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDP6Test.testSecondCmsgTrunc2Int",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDP6Test.testSecondCmsgTruncInData",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDP6Test.testSecondCmsgTruncLen0Minus1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDP6Test.testSetHopLimit",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDP6Test.testSetTrafficClassAndHopLimit",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDP6Test.testSingleCmsgTrunc0",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDP6Test.testSingleCmsgTrunc1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDP6Test.testSingleCmsgTrunc2Int",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDP6Test.testSingleCmsgTruncInData",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDP6Test.testSingleCmsgTruncLen0Minus1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDPLITE6Test.testCmsgTruncNoBufSize",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDPLITE6Test.testOddCmsgSize",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDPLITE6Test.testRecvHopLimit",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDPLITE6Test.testRecvHopLimitCMSG_SPACE",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDPLITE6Test.testRecvTrafficClassAndHopLimit",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDPLITE6Test.testRecvTrafficClassAndHopLimitCMSG_SPACE",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDPLITE6Test.testSecondCmsgTrunc0",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDPLITE6Test.testSecondCmsgTrunc1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDPLITE6Test.testSecondCmsgTrunc2Int",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDPLITE6Test.testSecondCmsgTruncInData",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDPLITE6Test.testSecondCmsgTruncLen0Minus1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDPLITE6Test.testSetHopLimit",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDPLITE6Test.testSetTrafficClassAndHopLimit",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDPLITE6Test.testSingleCmsgTrunc0",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDPLITE6Test.testSingleCmsgTrunc1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDPLITE6Test.testSingleCmsgTrunc2Int",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDPLITE6Test.testSingleCmsgTruncInData",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgRFC3542AncillaryUDPLITE6Test.testSingleCmsgTruncLen0Minus1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCMRightsStreamTest.testCmsgTrunc0",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCMRightsStreamTest.testCmsgTrunc1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCMRightsStreamTest.testCmsgTrunc2Int",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCMRightsStreamTest.testCmsgTruncLen0",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCMRightsStreamTest.testCmsgTruncLen0Minus1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCMRightsStreamTest.testCmsgTruncLen0Plus1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCMRightsStreamTest.testCmsgTruncLen1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCMRightsStreamTest.testCmsgTruncLen2Minus1",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCMRightsStreamTest.testCmsgTruncNoBufSize",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCMRightsStreamTest.testFDPassCMSG_LEN",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCMRightsStreamTest.testFDPassCMSG_SPACE",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCMRightsStreamTest.testFDPassEmpty",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCMRightsStreamTest.testFDPassPartialInt",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCMRightsStreamTest.testFDPassPartialIntInMiddle",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCMRightsStreamTest.testFDPassSeparate",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCMRightsStreamTest.testFDPassSeparateMinSpace",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCMRightsStreamTest.testFDPassSimple",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCMRightsStreamTest.testMultipleFDPass",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCTPStreamTest.testRecvmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCTPStreamTest.testRecvmsgAfterClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCTPStreamTest.testRecvmsgBadArgs",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCTPStreamTest.testRecvmsgEOF",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCTPStreamTest.testRecvmsgExplicitDefaults",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCTPStreamTest.testRecvmsgFromSendmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCTPStreamTest.testRecvmsgLongAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCTPStreamTest.testRecvmsgOverflow",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCTPStreamTest.testRecvmsgPeek",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCTPStreamTest.testRecvmsgShortAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCTPStreamTest.testRecvmsgShorter",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCTPStreamTest.testRecvmsgTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgSCTPStreamTest.testRecvmsgTrunc",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgTCPTest.testRecvmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgTCPTest.testRecvmsgAfterClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgTCPTest.testRecvmsgBadArgs",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgTCPTest.testRecvmsgEOF",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgTCPTest.testRecvmsgExplicitDefaults",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgTCPTest.testRecvmsgFromSendmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgTCPTest.testRecvmsgLongAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgTCPTest.testRecvmsgOverflow",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgTCPTest.testRecvmsgPeek",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgTCPTest.testRecvmsgShortAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgTCPTest.testRecvmsgShorter",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgTCPTest.testRecvmsgTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgTCPTest.testRecvmsgTrunc",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDP6Test.testRecvmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDP6Test.testRecvmsgAfterClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDP6Test.testRecvmsgBadArgs",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDP6Test.testRecvmsgExplicitDefaults",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDP6Test.testRecvmsgFromSendmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDP6Test.testRecvmsgLongAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDP6Test.testRecvmsgPeek",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDP6Test.testRecvmsgShortAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDP6Test.testRecvmsgShorter",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDP6Test.testRecvmsgTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDP6Test.testRecvmsgTrunc",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPLITE6Test.testRecvmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPLITE6Test.testRecvmsgAfterClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPLITE6Test.testRecvmsgBadArgs",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPLITE6Test.testRecvmsgExplicitDefaults",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPLITE6Test.testRecvmsgFromSendmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPLITE6Test.testRecvmsgLongAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPLITE6Test.testRecvmsgPeek",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPLITE6Test.testRecvmsgShortAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPLITE6Test.testRecvmsgShorter",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPLITE6Test.testRecvmsgTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPLITE6Test.testRecvmsgTrunc",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPLITETest.testRecvmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPLITETest.testRecvmsgAfterClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPLITETest.testRecvmsgBadArgs",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPLITETest.testRecvmsgExplicitDefaults",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPLITETest.testRecvmsgFromSendmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPLITETest.testRecvmsgLongAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPLITETest.testRecvmsgPeek",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPLITETest.testRecvmsgShortAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPLITETest.testRecvmsgShorter",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPLITETest.testRecvmsgTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPLITETest.testRecvmsgTrunc",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPTest.testRecvmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPTest.testRecvmsgAfterClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPTest.testRecvmsgBadArgs",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPTest.testRecvmsgExplicitDefaults",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPTest.testRecvmsgFromSendmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPTest.testRecvmsgLongAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPTest.testRecvmsgPeek",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPTest.testRecvmsgShortAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPTest.testRecvmsgShorter",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPTest.testRecvmsgTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUDPTest.testRecvmsgTrunc",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUnixStreamTest.testRecvmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUnixStreamTest.testRecvmsgAfterClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUnixStreamTest.testRecvmsgBadArgs",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUnixStreamTest.testRecvmsgEOF",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUnixStreamTest.testRecvmsgExplicitDefaults",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUnixStreamTest.testRecvmsgFromSendmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUnixStreamTest.testRecvmsgLongAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUnixStreamTest.testRecvmsgOverflow",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUnixStreamTest.testRecvmsgPeek",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUnixStreamTest.testRecvmsgShortAncillaryBuf",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUnixStreamTest.testRecvmsgShorter",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUnixStreamTest.testRecvmsgTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.RecvmsgUnixStreamTest.testRecvmsgTrunc",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendRecvFdsTests.testSendAndRecvFds",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendfileUsingSendTest.testCount",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendfileUsingSendTest.testCountSmall",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendfileUsingSendTest.testCountWithOffset",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendfileUsingSendTest.testEmptyFileSend",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendfileUsingSendTest.testNonBlocking",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendfileUsingSendTest.testNonRegularFile",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendfileUsingSendTest.testOffset",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendfileUsingSendTest.testRegularFile",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendfileUsingSendTest.testWithTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendfileUsingSendTest.testWithTimeoutTriggeredSend",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendfileUsingSendTest.test_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendfileUsingSendfileTest.testCount",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendfileUsingSendfileTest.testCountSmall",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendfileUsingSendfileTest.testCountWithOffset",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendfileUsingSendfileTest.testEmptyFileSend",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendfileUsingSendfileTest.testNonBlocking",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendfileUsingSendfileTest.testNonRegularFile",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendfileUsingSendfileTest.testOffset",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendfileUsingSendfileTest.testRegularFile",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendfileUsingSendfileTest.testWithTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendfileUsingSendfileTest.testWithTimeoutTriggeredSend",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendfileUsingSendfileTest.test_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgSCTPStreamTest.testSendmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgSCTPStreamTest.testSendmsgAfterClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgSCTPStreamTest.testSendmsgAncillaryGenerator",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgSCTPStreamTest.testSendmsgArray",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgSCTPStreamTest.testSendmsgBadArgs",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgSCTPStreamTest.testSendmsgBadCmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgSCTPStreamTest.testSendmsgBadMultiCmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgSCTPStreamTest.testSendmsgDataGenerator",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgSCTPStreamTest.testSendmsgDontWait",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgSCTPStreamTest.testSendmsgExcessCmsgReject",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgSCTPStreamTest.testSendmsgExplicitNoneAddr",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgSCTPStreamTest.testSendmsgGather",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgSCTPStreamTest.testSendmsgTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgTCPTest.testSendmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgTCPTest.testSendmsgAfterClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgTCPTest.testSendmsgAncillaryGenerator",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgTCPTest.testSendmsgArray",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgTCPTest.testSendmsgBadArgs",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgTCPTest.testSendmsgBadCmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgTCPTest.testSendmsgBadMultiCmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgTCPTest.testSendmsgDataGenerator",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgTCPTest.testSendmsgDontWait",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgTCPTest.testSendmsgExcessCmsgReject",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgTCPTest.testSendmsgExplicitNoneAddr",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgTCPTest.testSendmsgGather",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgTCPTest.testSendmsgTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDP6Test.testSendmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDP6Test.testSendmsgAfterClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDP6Test.testSendmsgAncillaryGenerator",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDP6Test.testSendmsgArray",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDP6Test.testSendmsgBadArgs",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDP6Test.testSendmsgBadCmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDP6Test.testSendmsgBadMultiCmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDP6Test.testSendmsgDataGenerator",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDP6Test.testSendmsgExcessCmsgReject",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDP6Test.testSendmsgGather",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDP6Test.testSendmsgNoDestAddr",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPLITE6Test.testSendmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPLITE6Test.testSendmsgAfterClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPLITE6Test.testSendmsgAncillaryGenerator",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPLITE6Test.testSendmsgArray",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPLITE6Test.testSendmsgBadArgs",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPLITE6Test.testSendmsgBadCmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPLITE6Test.testSendmsgBadMultiCmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPLITE6Test.testSendmsgDataGenerator",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPLITE6Test.testSendmsgExcessCmsgReject",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPLITE6Test.testSendmsgGather",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPLITE6Test.testSendmsgNoDestAddr",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPLITETest.testSendmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPLITETest.testSendmsgAfterClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPLITETest.testSendmsgAncillaryGenerator",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPLITETest.testSendmsgArray",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPLITETest.testSendmsgBadArgs",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPLITETest.testSendmsgBadCmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPLITETest.testSendmsgBadMultiCmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPLITETest.testSendmsgDataGenerator",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPLITETest.testSendmsgExcessCmsgReject",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPLITETest.testSendmsgGather",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPLITETest.testSendmsgNoDestAddr",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPTest.testSendmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPTest.testSendmsgAfterClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPTest.testSendmsgAncillaryGenerator",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPTest.testSendmsgArray",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPTest.testSendmsgBadArgs",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPTest.testSendmsgBadCmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPTest.testSendmsgBadMultiCmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPTest.testSendmsgDataGenerator",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPTest.testSendmsgExcessCmsgReject",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPTest.testSendmsgGather",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUDPTest.testSendmsgNoDestAddr",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUnixStreamTest.testSendmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUnixStreamTest.testSendmsgAfterClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUnixStreamTest.testSendmsgAncillaryGenerator",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUnixStreamTest.testSendmsgArray",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUnixStreamTest.testSendmsgBadArgs",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUnixStreamTest.testSendmsgBadCmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUnixStreamTest.testSendmsgBadMultiCmsg",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUnixStreamTest.testSendmsgDataGenerator",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUnixStreamTest.testSendmsgDontWait",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUnixStreamTest.testSendmsgExcessCmsgReject",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUnixStreamTest.testSendmsgExplicitNoneAddr",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUnixStreamTest.testSendmsgGather",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SendmsgUnixStreamTest.testSendmsgTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SmallBufferedFileObjectClassTestCase.testAttributes",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SmallBufferedFileObjectClassTestCase.testCloseAfterMakefile",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SmallBufferedFileObjectClassTestCase.testClosedAttr",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SmallBufferedFileObjectClassTestCase.testFullRead",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SmallBufferedFileObjectClassTestCase.testMakefileAfterMakefileClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SmallBufferedFileObjectClassTestCase.testReadAfterTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SmallBufferedFileObjectClassTestCase.testReadline",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SmallBufferedFileObjectClassTestCase.testRealClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SmallBufferedFileObjectClassTestCase.testSmallRead",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.SmallBufferedFileObjectClassTestCase.testUnbufferedRead",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TCPCloserTest.testClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TCPTimeoutTest.testInterruptedTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TCPTimeoutTest.testTCPTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TCPTimeoutTest.testTimeoutZero",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TIPCTest.testRDM",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TIPCThreadableTest.testStream",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TestExceptions.testExceptionTree",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TestExceptions.test_setblocking_invalidfd",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TestLazyImport.test_lazy_import",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TestLinuxAbstractNamespace.testAutobind",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TestLinuxAbstractNamespace.testBytearrayName",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TestLinuxAbstractNamespace.testLinuxAbstractNamespace",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TestLinuxAbstractNamespace.testMaxName",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TestLinuxAbstractNamespace.testNameOverflow",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TestLinuxAbstractNamespace.testStrName",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TestMSWindowsTCPFlags.test_new_tcp_flags",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TestMacOSTCPFlags.test_tcp_keepalive",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TestQuickackFlag.test_set_quickack",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TestSocketSharing.testShare",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TestSocketSharing.testShareLength",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TestSocketSharing.testShareLocal",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TestSocketSharing.testTypes",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TestUnixDomain.testBytesAddr",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TestUnixDomain.testEmptyAddress",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TestUnixDomain.testStrAddr",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TestUnixDomain.testSurrogateescapeBind",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TestUnixDomain.testUnbound",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.TestUnixDomain.testUnencodableAddr",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.ThreadedVSOCKSocketStreamTest.testStream",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UDPLITETimeoutTest.testTimeoutZero",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UDPLITETimeoutTest.testUDPLITETimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UDPTimeoutTest.testTimeoutZero",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UDPTimeoutTest.testUDPTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnbufferedFileObjectClassTestCase.testAttributes",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnbufferedFileObjectClassTestCase.testCloseAfterMakefile",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnbufferedFileObjectClassTestCase.testClosedAttr",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnbufferedFileObjectClassTestCase.testFullRead",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnbufferedFileObjectClassTestCase.testMakefileAfterMakefileClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnbufferedFileObjectClassTestCase.testMakefileClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnbufferedFileObjectClassTestCase.testMakefileCloseSocketDestroy",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnbufferedFileObjectClassTestCase.testReadAfterTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnbufferedFileObjectClassTestCase.testReadline",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnbufferedFileObjectClassTestCase.testRealClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnbufferedFileObjectClassTestCase.testSmallRead",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnbufferedFileObjectClassTestCase.testSmallReadNonBlocking",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnbufferedFileObjectClassTestCase.testUnbufferedRead",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnbufferedFileObjectClassTestCase.testUnbufferedReadline",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnbufferedFileObjectClassTestCase.testWriteNonBlocking",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeReadFileObjectClassTestCase.testAttributes",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeReadFileObjectClassTestCase.testCloseAfterMakefile",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeReadFileObjectClassTestCase.testClosedAttr",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeReadFileObjectClassTestCase.testFullRead",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeReadFileObjectClassTestCase.testMakefileAfterMakefileClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeReadFileObjectClassTestCase.testReadAfterTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeReadFileObjectClassTestCase.testReadline",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeReadFileObjectClassTestCase.testRealClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeReadFileObjectClassTestCase.testSmallRead",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeReadFileObjectClassTestCase.testUnbufferedRead",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeReadWriteFileObjectClassTestCase.testAttributes",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeReadWriteFileObjectClassTestCase.testCloseAfterMakefile",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeReadWriteFileObjectClassTestCase.testClosedAttr",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeReadWriteFileObjectClassTestCase.testFullRead",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeReadWriteFileObjectClassTestCase.testMakefileAfterMakefileClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeReadWriteFileObjectClassTestCase.testReadAfterTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeReadWriteFileObjectClassTestCase.testReadline",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeReadWriteFileObjectClassTestCase.testRealClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeReadWriteFileObjectClassTestCase.testSmallRead",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeReadWriteFileObjectClassTestCase.testUnbufferedRead",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeWriteFileObjectClassTestCase.testAttributes",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeWriteFileObjectClassTestCase.testCloseAfterMakefile",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeWriteFileObjectClassTestCase.testClosedAttr",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeWriteFileObjectClassTestCase.testFullRead",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeWriteFileObjectClassTestCase.testMakefileAfterMakefileClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeWriteFileObjectClassTestCase.testReadAfterTimeout",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeWriteFileObjectClassTestCase.testReadline",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeWriteFileObjectClassTestCase.testRealClose",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeWriteFileObjectClassTestCase.testSmallRead",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_socket.UnicodeWriteFileObjectClassTestCase.testUnbufferedRead",
+      "occurrence": 1
+    }
+  ]
+}
