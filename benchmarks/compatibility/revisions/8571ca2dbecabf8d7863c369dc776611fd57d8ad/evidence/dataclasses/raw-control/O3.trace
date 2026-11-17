@@ -1,0 +1,225 @@
+9195  execve("/workspace/scratch/raw-control-probe", ["/workspace/scratch/raw-control-probe", "withdraw", "/workspace/scratch/dataclasses-857-fixtures/Lib/test", "/workspace/scratch/dataclasses-857-fixtures/Lib/test.raw-control-stash", "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/__init__.py", "/workspace/scratch/dataclasses-857-images/O3.exe"], 0x7ffea9186798 /* 78 vars */) = 0
+9195  openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+9195  openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+9195  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/__init__.py", {st_mode=S_IFREG|0600, st_size=174040, ...}, 0) = 0
+9195  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test.raw-control-stash", 0x7fff6d2feec0, 0) = -1 ENOENT (No such file or directory)
+9195  rename("/workspace/scratch/dataclasses-857-fixtures/Lib/test", "/workspace/scratch/dataclasses-857-fixtures/Lib/test.raw-control-stash") = 0
+9195  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test", 0x7fff6d2feec0, 0) = -1 ENOENT (No such file or directory)
+9195  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/__init__.py", 0x7fff6d2feec0, 0) = -1 ENOENT (No such file or directory)
+9195  wait4(9196,  <unfinished ...>
+9196  execve("/workspace/scratch/dataclasses-857-images/O3.exe", ["/workspace/scratch/dataclasses-857-images/O3.exe"], 0x7fff6d2ff1a0 /* 78 vars */) = 0
+9196  openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+9196  openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3
+9196  openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3
+9196  openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+9196  openat(AT_FDCWD, "/usr/lib/locale/locale-archive", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9196  openat(AT_FDCWD, "/usr/share/locale/locale.alias", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9196  openat(AT_FDCWD, "/usr/lib/locale/C.UTF-8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9196  openat(AT_FDCWD, "/usr/lib/locale/C.utf8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = 3
+9196  openat(AT_FDCWD, "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache", O_RDONLY|O_CLOEXEC) = 3
+9196  openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  open("/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  open("/workspace/scratch/dataclasses-857-fixtures/Lib", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  openat(AT_FDCWD, "/workspace/scratch/dataclasses-857-images/O3.exe", O_RDONLY|O_CLOEXEC) = 3
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3
+9196  openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  openat(AT_FDCWD, "/etc/localtime", O_RDONLY|O_CLOEXEC) = 3
+9196  openat(AT_FDCWD, "/workspace/scratch/dataclasses-857-images/O3.exe", O_RDONLY|O_CLOEXEC) = 3
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  openat(AT_FDCWD, "/workspace/scratch/dataclasses-857-images/O3.exe", O_RDONLY|O_CLOEXEC) = 3
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre/target/release/Modules/Setup", 0x7ffe61bade08, 0) = -1 ENOENT (No such file or directory)
+9196  newfstatat(AT_FDCWD, "/workspace/imre/target/release/Modules/Setup.local", 0x7ffe61bade08, 0) = -1 ENOENT (No such file or directory)
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/support", 0x7ffe61bb3168, 0) = -1 ENOENT (No such file or directory)
+9196  openat(AT_FDCWD, "/workspace/scratch/dataclasses-857-images/O3.exe", O_RDONLY|O_CLOEXEC) = 3
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  openat(AT_FDCWD, "/workspace/scratch/dataclasses-857-images/O3.exe", O_RDONLY|O_CLOEXEC) = 3
+9196  openat(AT_FDCWD, "/workspace/scratch/dataclasses-857-images/O3.exe", O_RDONLY|O_CLOEXEC) = 3
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  openat(AT_FDCWD, "/workspace/scratch/dataclasses-857-images/O3.exe", O_RDONLY|O_CLOEXEC) = 3
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/support", 0x7ffe61baf7c8, 0) = -1 ENOENT (No such file or directory)
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/__init__.py", 0x7ffe61bb6808, 0) = -1 ENOENT (No such file or directory)
+9196  openat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/__init__.py", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9196  newfstatat(AT_FDCWD, "<imre stdlib>/dataclasses.py", 0x7ffe61bb6808, 0) = -1 ENOENT (No such file or directory)
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/__init__.py", 0x7ffe61bb5978, 0) = -1 ENOENT (No such file or directory)
+9196  openat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/__init__.py", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/__init__.py", 0x7ffe61bb5978, 0) = -1 ENOENT (No such file or directory)
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/__init__.py", 0x7ffe61bb5978, 0) = -1 ENOENT (No such file or directory)
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/__init__.py", 0x7ffe61bb5978, 0) = -1 ENOENT (No such file or directory)
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/__init__.py", 0x7ffe61bb5978, 0) = -1 ENOENT (No such file or directory)
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/__init__.py", 0x7ffe61bb5978, 0) = -1 ENOENT (No such file or directory)
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/__init__.py", 0x7ffe61bb5978, 0) = -1 ENOENT (No such file or directory)
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/__init__.py", 0x7ffe61bb5978, 0) = -1 ENOENT (No such file or directory)
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/__init__.py", 0x7ffe61bb5978, 0) = -1 ENOENT (No such file or directory)
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/__init__.py", 0x7ffe61bb5978, 0) = -1 ENOENT (No such file or directory)
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/__init__.py", 0x7ffe61bb5978, 0) = -1 ENOENT (No such file or directory)
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/__init__.py", 0x7ffe61bb5978, 0) = -1 ENOENT (No such file or directory)
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses", 0x7ffe61bb3e88, 0) = -1 ENOENT (No such file or directory)
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses", 0x7ffe61bb3e88, 0) = -1 ENOENT (No such file or directory)
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses", 0x7ffe61bb3e88, 0) = -1 ENOENT (No such file or directory)
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses", 0x7ffe61bb3e88, 0) = -1 ENOENT (No such file or directory)
+9196  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses", 0x7ffe61bb3ef8, 0) = -1 ENOENT (No such file or directory)
+9196  exit_group(0)                     = ?
+9195  <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 9196
+9195  --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=9196, si_uid=1000, si_status=0, si_utime=1234 /* 12.34 s */, si_stime=15 /* 0.15 s */} ---
+9195  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test", 0x7fff6d2feec0, 0) = -1 ENOENT (No such file or directory)
+9195  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/__init__.py", 0x7fff6d2feec0, 0) = -1 ENOENT (No such file or directory)
+9195  rename("/workspace/scratch/dataclasses-857-fixtures/Lib/test.raw-control-stash", "/workspace/scratch/dataclasses-857-fixtures/Lib/test") = 0
+9195  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/__init__.py", {st_mode=S_IFREG|0600, st_size=174040, ...}, 0) = 0
+9195  exit_group(0)                     = ?
