@@ -3,6 +3,7 @@ import copy
 import hashlib
 import json
 import tempfile
+import shutil
 import os
 import unittest
 import sys
@@ -57,6 +58,15 @@ class SnapshotTests(unittest.TestCase):
     def validate(self, r):
         scorecard.validate_record(r, "stdlib", scorecard.families())
         scorecard.verify_stdlib_evidence(r)
+
+    def test_successful_open_paths_distinguishes_fd_returns_and_resolves_dirfds(self):
+        trace = "\n".join((
+            '10 open("/etc/ld.so.cache", O_RDONLY) = 3',
+            '10 openat(AT_FDCWD, "/Lib/test", O_RDONLY|O_DIRECTORY) = 4',
+            '10 openat2(4, "__pycache__/test_leaf.pyc", {flags=O_RDONLY}, 24) = 5',
+            '10 openat(AT_FDCWD, "/Lib/test/missing.py", O_RDONLY) = -1 ENOENT (No such file or directory)',
+        ))
+        self.assertEqual(list(scorecard.successful_open_paths(trace, "/work")), [Path("/etc/ld.so.cache"), Path("/Lib/test"), Path("/Lib/test/__pycache__/test_leaf.pyc")])
 
     def test_selector_pins_cohort_and_keeps_repository_root(self):
         canonical_root = scorecard.ROOT
@@ -184,6 +194,47 @@ class PublishedShardTests(unittest.TestCase):
             return obj
         with patch.object(scorecard, "artifact_json", side_effect=changed):
             with self.assertRaisesRegex(ValueError, "poisoned launcher or import binding"): self.validate(self.row("pathlib"))
+
+    def isolated_pathlib_trace(self, temporary, label, injected):
+        """Copy only the activated pathlib evidence into a disposable tree."""
+        root = Path(temporary); shutil.copytree(self.root / "evidence/pathlib", root / "evidence/pathlib")
+        (root / "stdlib").mkdir(); old_prefix = self.root.relative_to(scorecard.ROOT).as_posix(); new_prefix = root.relative_to(scorecard.ROOT).as_posix()
+        def remap(locator):
+            self.assertTrue(locator.startswith(old_prefix + "/")); return new_prefix + locator[len(old_prefix):]
+        entry = copy.deepcopy(self.activation["families"]["pathlib"])
+        entry["receipt"] = remap(entry["receipt"]); entry["sources"] = {k:remap(v) for k,v in entry["sources"].items()}
+        rows = [json.loads(line) for line in (self.root / "stdlib/pathlib.jsonl").read_text().splitlines()]
+        for row in rows:
+            for run in row["runs"].values():
+                file, line = run["evidence"].split("#L"); run["evidence"] = remap(file) + "#L" + line
+        (root / "stdlib/pathlib.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+        run_path = root / "evidence/pathlib/run.json"; manifest = json.loads(run_path.read_text()); manifest["gate"] = remap(manifest["gate"])
+        for tier in ("O0", "O3"):
+            for phase in ("baseline", "withdrawn"):
+                obs = manifest["tiers"][tier][phase]; obs["trace"] = remap(obs["trace"])
+        trace = root / "evidence/pathlib" / f"O0.{label}.trace"; trace.write_bytes(trace.read_bytes() + injected.encode())
+        manifest["tiers"]["O0"][label]["trace_sha256"] = hashlib.sha256(trace.read_bytes()).hexdigest()
+        run_path.write_text(json.dumps(manifest) + "\n")
+        entry["files"] = {remap(k):hashlib.sha256((scorecard.ROOT / remap(k)).read_bytes()).hexdigest() for k in entry["files"]}
+        (root / "activation.json").write_text(json.dumps({"schema":"imre.compatibility.snapshot-activation.v1", "imre_revision":PIN, "families":{"pathlib":entry}}))
+        return root
+
+    def test_pathlib_trace_mutation_rejects_successful_source_and_bytecode_opens(self):
+        gate = json.loads((self.root / "evidence/pathlib/gate.json").read_text()); leaf = Path(gate["control"]["launcher"]); tree = leaf.parents[1]
+        cases = (("baseline", f'9900 open("{leaf}", O_RDONLY) = 3\n', False),
+                 ("withdrawn", f'9900 openat(AT_FDCWD, "{leaf.parent}/__pycache__/{leaf.stem}.cpython-314.pyc", O_RDONLY) = 3\n', False),
+                 ("baseline", '9900 openat(AT_FDCWD, "test_join_posix.py", O_RDONLY) = 4\n', False),
+                 ("baseline", '9900 openat(AT_FDCWD, "/other/cpython/Lib/test/test_pathlib/test_join_posix.py", O_RDONLY) = 4\n', False),
+                 ("withdrawn", f'9900 openat2(AT_FDCWD, "{tree}/support/__init__.py", {{flags=O_RDONLY}}, 24) = 4\n', False),
+                 ("withdrawn", f'9900 openat(AT_FDCWD, "{leaf}", O_RDONLY) = -1 ENOENT (No such file or directory)\n9900 open("/etc/localtime", O_RDONLY) = 3\n', True))
+        for label, injected, accepted in cases:
+            with self.subTest(label=label, injected=injected), tempfile.TemporaryDirectory(prefix=".scorecard-pathlib-trace-", dir=scorecard.ROOT) as temporary:
+                root = self.isolated_pathlib_trace(temporary, label, injected); self.clear()
+                with patch.object(scorecard, "DATA_ROOT", root):
+                    if accepted:
+                        fs, _ = scorecard.summary(); self.assertEqual(fs["pathlib"]["paired"], 6)
+                    else:
+                        with self.assertRaisesRegex(ValueError, "successfully opened test source, bytecode or withdrawn test tree"): scorecard.summary()
 
     def test_wrong_runtime(self):
         original = scorecard.artifact_json

@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import base64
 import binascii
 import csv
 import hashlib
 import json
 import os
+import posixpath
 import re
 from collections import Counter
 from functools import lru_cache
@@ -440,10 +442,45 @@ def matched_build(argv, tier, compiler, runtime):
     require(runtime_argument(argv) == runtime and argv[0] == compiler and option(argv, "--runtime") == runtime and option(argv, "--opt-level") == tier[1:] and "--no-cache" in argv, f"{tier} compiler/runtime or build flags differ")
 
 
-def validate_trace(path, digest, image):
+def successful_open_paths(text, cwd):
+    """Decode successful strace open calls, resolving relative dirfd paths."""
+    descriptors = {}; quoted = r'"(?:\\.|[^"\\])*"'
+    for line in text.splitlines():
+        call = re.search(r"\b(open|openat|openat2)\((.*)\)\s+=\s+(-?\d+)(?:<[^>]*>)?(?:\s|$)", line)
+        if not call or int(call.group(3)) < 0: continue
+        operation, args, fd = call.group(1), call.group(2), int(call.group(3))
+        pid = re.match(r"\s*(?:\[pid\s+(\d+)\]|(\d+))\s+", line)
+        pid = (pid.group(1) or pid.group(2)) if pid else "main"
+        if operation == "open":
+            match = re.match(rf"({quoted})(?:,|$)", args); base = cwd
+        else:
+            match = re.match(rf"([^,]+),\s*({quoted})(?:,|$)", args)
+            dirfd = match.group(1).strip() if match else ""
+            base = cwd if dirfd == "AT_FDCWD" else descriptors.get((pid, dirfd.split("<", 1)[0]))
+            if base is None and "<" in dirfd and dirfd.endswith(">"):
+                base = dirfd.split("<", 1)[1][:-1]
+        require(match is not None, "cannot decode successful open in saved-image trace")
+        try: name = ast.literal_eval(match.group(1 if operation == "open" else 2))
+        except (ValueError, SyntaxError): require(False, "invalid open path in saved-image trace")
+        require(isinstance(name, str) and (name.startswith("/") or isinstance(base, str) and base.startswith("/")), "unresolved successful relative open in saved-image trace")
+        path = posixpath.normpath(name if name.startswith("/") else posixpath.join(base, name))
+        descriptors[(pid, str(fd))] = path
+        yield Path(path)
+
+
+def validate_trace(path, digest, image, source_leaf, source_path, cwd, forbidden_trees=()):
     text = checked_file(path, digest).read_text()
     calls = [line for line in text.splitlines() if re.search(r"execve(?:at)?\(", line)]
     require(len(calls) == 1 and f'"{image}"' in calls[0] and re.search(r"= 0(?:\s|$)", calls[0]) and "libpython" not in text.lower(), "saved image spawned a child or accessed libpython")
+    leaf = Path(posixpath.normpath(source_leaf)); cache = leaf.parent / "__pycache__"
+    bytecode = {leaf.with_suffix(".pyc"), leaf.with_suffix(".pyo")}
+    trees = tuple(Path(posixpath.normpath(str(tree))) for tree in forbidden_trees)
+    canonical = Path(source_path); suffixes = (canonical.parts, canonical.with_suffix(".pyc").parts, canonical.with_suffix(".pyo").parts); cache_parts = (*canonical.parent.parts, "__pycache__")
+    for opened in successful_open_paths(text, cwd):
+        parts = opened.parts; same_leaf = opened.name in {leaf.name, leaf.with_suffix(".pyc").name, leaf.with_suffix(".pyo").name} or any(parts[-len(suffix):] == suffix for suffix in suffixes)
+        matching_cached_bytecode = opened.parent.name == "__pycache__" and opened.name.startswith(leaf.stem + ".") and opened.suffix in {".pyc", ".pyo"}
+        same_cache = any(parts[i:i+len(cache_parts)] == cache_parts for i in range(len(parts)-len(cache_parts)+1))
+        require(opened != leaf and opened not in bytecode and not opened.is_relative_to(cache) and not same_leaf and not same_cache and not matching_cached_bytecode and not any(opened.is_relative_to(tree) for tree in trees), f"saved image successfully opened test source, bytecode or withdrawn test tree: {opened}")
 
 
 @lru_cache(maxsize=None)
@@ -465,6 +502,9 @@ def adapt_pathlib(root, revision, source_path, source_sha, source_blob):
     gate_diagnostic(directory / "gate.stderr", control.get("stderr_sha256"), control.get("exit_code"), control.get("timed_out"), control.get("image_exists"))
     w = run.get("withdrawal", {})
     require(w.get("test_root_absent") is True and w.get("restored_by_hash") is True and w.get("leaf_sha256_before") == source_sha == w.get("leaf_sha256_after") and w.get("sources_before") == w.get("sources_after") and w.get("sources_before", {}).get("files", 0) > 0, "pathlib source/bytecode tree withdrawal missing")
+    module_root = Path(option(argv, "--module-root")); leaf = Path(argv[2]); source_parts = Path(source_path).parts
+    require(source_parts[:2] == ("Lib", "test") and leaf == module_root.joinpath(*source_parts[1:]) and module_root.is_absolute() and Path(w.get("withdrawn_root", "")).is_absolute(), "pathlib source or withdrawn tree path differs")
+    test_root = module_root / "test"
     mod = source_module(source_path); stock = raw_sequence(directory / "stock.stderr", mod)
     checked_file(directory / "stock.stderr", run.get("stock", {}).get("stderr_sha256"))
     for tier in ("O0", "O3"):
@@ -473,7 +513,9 @@ def adapt_pathlib(root, revision, source_path, source_sha, source_blob):
         image = option(pos, "-o"); baseline, withdrawn = meta.get("baseline", {}), meta.get("withdrawn", {})
         for label, observation in (("baseline", baseline), ("withdrawn", withdrawn)):
             require(observation.get("exit_code") == 0 and observation.get("timed_out") is False and image in observation.get("argv", []) and observation.get("initial_image_exec_only") is True and observation.get("libpython_access") is False and observation.get("test_source_access") is False, f"{tier} pathlib {label} run differs")
-            trace = repository_file(observation.get("trace"), root); validate_trace(trace, observation.get("trace_sha256"), image)
+            trace = repository_file(observation.get("trace"), root)
+            trees = (test_root, w["withdrawn_root"]) if label == "withdrawn" else ()
+            validate_trace(trace, observation.get("trace_sha256"), image, str(leaf), source_path, observation.get("cwd"), trees)
             raw = checked_file(directory / f"{tier}.{label}.stderr", observation.get("stderr_sha256"))
             require(raw_sequence(raw, mod) == stock and stock, f"{tier} pathlib {label} exact outcomes differ")
         readelf = checked_file(directory / f"{tier}.readelf.stdout", meta.get("readelf", {}).get("stdout_sha256"))
