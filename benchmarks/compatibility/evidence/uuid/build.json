@@ -1,0 +1,16 @@
+{
+  "source_repository": "https://github.com/astral-experiments/imre.git",
+  "source_revision": "49f0dc2ef78b82692e333252faf71b4fc7730949",
+  "source_clean": true,
+  "worktree": "/workspace/scratch/imre-pin",
+  "command": "CARGO_HOME=/workspace/.toolchains/cargo RUSTUP_HOME=/workspace/.toolchains/rustup PATH=/workspace/.toolchains/cargo/bin:$PATH cargo build --offline --release --locked -p imre-compiler -p imre-runtime --target-dir /workspace/imre/target",
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1\nLLVM version: 22.1.8",
+  "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)",
+  "artifacts": {
+    "/workspace/imre/target/release/imre": "3c0d06385248cd1053f38d9d038da56f7cf6c614a8acd0f9b3747f462335f327",
+    "/workspace/imre/target/release/libimre_runtime.a": "4366b4378be3d02a7332375da1c277026111fb78eeccbd365de6e3b21cfdc694",
+    "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+    "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+  },
+  "cpython_source_archive_sha256": "0d838be32b52da92a4293ecd99bc91f7be8b4acc573423665bd1a1428be46e47"
+}

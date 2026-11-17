@@ -1,0 +1,55 @@
+testApproximateCos1 (__main__.FractionTest.testApproximateCos1) ... ok
+testApproximatePi (__main__.FractionTest.testApproximatePi) ... ok
+testArithmetic (__main__.FractionTest.testArithmetic) ... ok
+testBigComplexComparisons (__main__.FractionTest.testBigComplexComparisons) ... ok
+testBigFloatComparisons (__main__.FractionTest.testBigFloatComparisons) ... ok
+testBoolGuarateesBoolReturn (__main__.FractionTest.testBoolGuarateesBoolReturn) ... ok
+testComparisons (__main__.FractionTest.testComparisons) ... ok
+testComparisonsDummyFloat (__main__.FractionTest.testComparisonsDummyFloat) ... ok
+testComparisonsDummyRational (__main__.FractionTest.testComparisonsDummyRational) ... ok
+testConversions (__main__.FractionTest.testConversions) ... ok
+testFromDecimal (__main__.FractionTest.testFromDecimal) ... ok
+testFromFloat (__main__.FractionTest.testFromFloat) ... ok
+testFromNumber (__main__.FractionTest.testFromNumber) ... ok
+testFromNumber_subclass (__main__.FractionTest.testFromNumber_subclass) ... ok
+testFromString (__main__.FractionTest.testFromString) ... ok
+testHash (__main__.FractionTest.testHash) ... ok
+testImmutable (__main__.FractionTest.testImmutable) ... ok
+testInit (__main__.FractionTest.testInit) ... ok
+testInitFromDecimal (__main__.FractionTest.testInitFromDecimal) ... ok
+testInitFromFloat (__main__.FractionTest.testInitFromFloat) ... ok
+testInitFromIntegerRatio (__main__.FractionTest.testInitFromIntegerRatio) ... ok
+testIntGuaranteesIntReturn (__main__.FractionTest.testIntGuaranteesIntReturn) ... ok
+testLargeArithmetic (__main__.FractionTest.testLargeArithmetic) ... ok
+testLimitDenominator (__main__.FractionTest.testLimitDenominator) ... ok
+testMixedArithmetic (__main__.FractionTest.testMixedArithmetic) ... ok
+testMixedDivision (__main__.FractionTest.testMixedDivision) ... ok
+testMixedEqual (__main__.FractionTest.testMixedEqual) ... ok
+testMixedIntegerDivision (__main__.FractionTest.testMixedIntegerDivision) ... ok
+testMixedLess (__main__.FractionTest.testMixedLess) ... ok
+testMixedLessEqual (__main__.FractionTest.testMixedLessEqual) ... ok
+testMixedMultiplication (__main__.FractionTest.testMixedMultiplication) ... ok
+testMixedPower (__main__.FractionTest.testMixedPower) ... ok
+testMixingWithDecimal (__main__.FractionTest.testMixingWithDecimal) ... ok
+testRound (__main__.FractionTest.testRound) ... ok
+testStringification (__main__.FractionTest.testStringification) ... ok
+testSupportsInt (__main__.FractionTest.testSupportsInt) ... ok
+test_as_integer_ratio (__main__.FractionTest.test_as_integer_ratio) ... ok
+test_complex_handling (__main__.FractionTest.test_complex_handling) ... ok
+test_copy_deepcopy_pickle (__main__.FractionTest.test_copy_deepcopy_pickle) ... ok
+test_float_format_testfile (__main__.FractionTest.test_float_format_testfile) ... ok
+test_format_e_presentation_type (__main__.FractionTest.test_format_e_presentation_type) ... ok
+test_format_f_presentation_type (__main__.FractionTest.test_format_f_presentation_type) ... ok
+test_format_g_presentation_type (__main__.FractionTest.test_format_g_presentation_type) ... ok
+test_format_no_presentation_type (__main__.FractionTest.test_format_no_presentation_type) ... ok
+test_int_subclass (__main__.FractionTest.test_int_subclass) ... ok
+test_invalid_formats (__main__.FractionTest.test_invalid_formats) ... ok
+test_is_integer (__main__.FractionTest.test_is_integer) ... ok
+test_limit_int (__main__.FractionTest.test_limit_int) ... ok
+test_slots (__main__.FractionTest.test_slots) ... ok
+test_three_argument_pow (__main__.FractionTest.test_three_argument_pow) ... ok
+
+----------------------------------------------------------------------
+Ran 50 tests in 0.031s
+
+OK

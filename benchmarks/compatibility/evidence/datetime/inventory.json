@@ -1,0 +1,42 @@
+{
+  "unrestricted": {
+    "argv": [
+      "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+      "-B",
+      "-c",
+      "import collections, hashlib, json, unittest\nfrom test import support\npass\ndef walk(s):\n    for x in s:\n        if isinstance(x, unittest.TestSuite): yield from walk(x)\n        else: yield x.id()\nids=list(walk(unittest.defaultTestLoader.loadTestsFromName(\"test.test_datetime\")))\nc=collections.Counter(ids)\nprint(json.dumps({\"occurrences\":len(ids),\"unique_ids\":len(c),\"repeated_occurrences\":sum(n-1 for n in c.values()),\"sorted_ids_sha256\":hashlib.sha256((\"\\n\".join(sorted(ids))+\"\\n\").encode()).hexdigest()}))"
+    ],
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1"
+    },
+    "observed": {
+      "occurrences": 3606,
+      "unique_ids": 3606,
+      "repeated_occurrences": 0,
+      "sorted_ids_sha256": "c41baadce740b91297a8d26bd82deb86fc1144b2f3b4d143f0e2e6f6e46581c8"
+    }
+  },
+  "frozen_regrtest": {
+    "argv": [
+      "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+      "-B",
+      "-c",
+      "import collections, hashlib, json, unittest\nfrom test import support\nsupport.use_resources = []\ndef walk(s):\n    for x in s:\n        if isinstance(x, unittest.TestSuite): yield from walk(x)\n        else: yield x.id()\nids=list(walk(unittest.defaultTestLoader.loadTestsFromName(\"test.test_datetime\")))\nc=collections.Counter(ids)\nprint(json.dumps({\"occurrences\":len(ids),\"unique_ids\":len(c),\"repeated_occurrences\":sum(n-1 for n in c.values()),\"sorted_ids_sha256\":hashlib.sha256((\"\\n\".join(sorted(ids))+\"\\n\").encode()).hexdigest()}))"
+    ],
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1"
+    },
+    "observed": {
+      "occurrences": 1098,
+      "unique_ids": 1098,
+      "repeated_occurrences": 0,
+      "sorted_ids_sha256": "294d15210e806bc0f29575a2a42e4230461ed74be675c53cd7cde6baa77b6077"
+    }
+  },
+  "frozen_denominator": 1098,
+  "reference_sorted_ids_sha256": "294d15210e806bc0f29575a2a42e4230461ed74be675c53cd7cde6baa77b6077",
+  "frozen_matches_reference": true,
+  "mismatch": "Unrestricted unittest inventory exceeds the frozen denominator by 2508 zone-database cases; default regrtest resources reproduce the frozen 1098 IDs."
+}
