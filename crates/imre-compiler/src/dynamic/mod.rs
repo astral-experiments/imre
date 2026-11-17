@@ -1269,7 +1269,7 @@ pub(crate) fn compile(
     }
     let registered_imports = typed_graph
         .filter(|_| object_imports && first.invalid_executable.is_none())
-        .map(import_module::registered_imports)
+        .map(|graph| import_module::registered_imports(graph, &options.launcher_arguments))
         .unwrap_or_default();
     first
         .names
@@ -3027,25 +3027,8 @@ fn add_late_bundled_imports(
             }
         }
     }
-    if computed_import {
-        for name in [
-            "cmd",
-            "graphlib",
-            "html",
-            "http.cookies",
-            "ipaddress",
-            "shlex",
-            "statistics",
-            "wave",
-            "xml.etree.ElementTree",
-            "xml.parsers.expat",
-        ] {
-            if !seen.contains(name) {
-                imports.add(0, name);
-            }
-        }
-    } else if uses_exec && !seen.contains("xml") {
-        imports.add(0, "xml");
+    if computed_import && !seen.contains("xml.parsers.expat") {
+        imports.names.push((0, "xml.parsers.expat".to_owned()));
     }
     // Register the mock provider for imports from source-loaded modules.
     if uses_import_builtin && seen.contains("unittest") && !seen.contains("unittest.mock") {

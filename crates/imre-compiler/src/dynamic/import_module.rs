@@ -264,10 +264,14 @@ pub(crate) struct RegisteredImports {
 
 /// Include literal import_module and find_spec targets in the same source registry as import statements.
 /// Runtime expressions still select their target when the call executes.
-pub(crate) fn registered_imports(graph: &SourceGraph) -> RegisteredImports {
+pub(crate) fn registered_imports(
+    graph: &SourceGraph,
+    arguments: &[Option<String>],
+) -> RegisteredImports {
     struct Calls<'a> {
         graph: &'a SourceGraph,
         module: usize,
+        arguments: &'a [Option<String>],
         imports: RegisteredImports,
     }
     impl<'ast> Visitor<'ast> for Calls<'_> {
@@ -286,6 +290,11 @@ pub(crate) fn registered_imports(graph: &SourceGraph) -> RegisteredImports {
                     self.imports.targets.push(name);
                 } else if !self.graph.modules[self.module].bundled {
                     self.imports.computed = true;
+                    if let Some(name) =
+                        launcher_target(self.graph, self.module, call, self.arguments)
+                    {
+                        self.imports.targets.push(name);
+                    }
                 }
             }
             visitor::walk_expr(self, expr);
@@ -294,6 +303,7 @@ pub(crate) fn registered_imports(graph: &SourceGraph) -> RegisteredImports {
     let mut calls = Calls {
         graph,
         module: 0,
+        arguments,
         imports: RegisteredImports::default(),
     };
     for (id, module) in graph.modules.iter().enumerate() {
@@ -315,6 +325,32 @@ pub(crate) fn registered_imports(graph: &SourceGraph) -> RegisteredImports {
         .targets
         .extend_from_slice(&graph.doctest_imports);
     calls.imports
+}
+
+/// An actual launcher argument can name a source winner without scanning unrelated files.
+fn launcher_target(
+    graph: &SourceGraph,
+    module: usize,
+    call: &ast::ExprCall,
+    arguments: &[Option<String>],
+) -> Option<String> {
+    let operand = call
+        .arguments
+        .find_argument_value("name", 0)?
+        .as_subscript_expr()?;
+    let argv = operand.value.as_attribute_expr()?;
+    if argv.attr.as_str() != "argv"
+        || graph.resolve(module, &argv.value)
+            != Some(Binding::IntrinsicModule(IntrinsicModule::Sys))
+    {
+        return None;
+    }
+    let ast::Number::Int(index) = &operand.slice.as_number_literal_expr()?.value else {
+        return None;
+    };
+    let index = usize::try_from(index.as_i64()?).ok()?.checked_sub(1)?;
+    let name = arguments.get(index)?.as_deref()?;
+    crate::modules::valid_module_operand(name).then(|| name.to_owned())
 }
 
 fn target(call: &ast::ExprCall) -> Option<String> {
