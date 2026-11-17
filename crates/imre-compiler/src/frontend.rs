@@ -4674,7 +4674,7 @@ impl<'a> Checker<'a> {
     }
 
     fn expect(&self, expected: Type, actual: Type, node: &impl Ranged) -> Result<(), String> {
-        if expected == actual || expected == Type::PythonObject {
+        if phase::accepts_exact_type(expected, actual) {
             Ok(())
         } else if actual == Type::PythonObject {
             Err(self.classified_error(

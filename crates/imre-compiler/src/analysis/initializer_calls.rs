@@ -1001,7 +1001,7 @@ impl Session {
         let layout = Self::scalar_layout(db, &env, actual, ScalarMatch::Assignable);
         let expected = if actual.is_assignable_to(db, &env, expected) {
             let parameter = Self::scalar_layout(db, &env, expected, ScalarMatch::Exact)?;
-            if layout? == parameter || !evaluated() {
+            if crate::frontend::phase::accepts_exact_type(parameter, layout?) || !evaluated() {
                 return None;
             }
             parameter.to_string()

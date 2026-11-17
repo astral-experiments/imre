@@ -284,7 +284,6 @@ def dispatch(command: Command, comparison: Comparison | None) -> int:
                 skipped.as_deref(),
                 &overloads,
                 None,
-                None,
             )
         };
         let error = diagnostics(&CompileOptions::default()).unwrap_err();

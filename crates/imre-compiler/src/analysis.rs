@@ -14,6 +14,7 @@ pub(crate) use initializer_calls::{
 };
 mod run_path;
 mod shipped_exports;
+mod source_contracts;
 mod tuple_displays;
 
 use std::cell::Cell;
@@ -201,7 +202,6 @@ impl SourceContract {
                     skipped.as_deref(),
                     &overloads,
                     Some(native),
-                    Some(&graph.registered_source_errors.borrow()),
                 )
             }),
         }
@@ -911,7 +911,7 @@ pub(crate) fn check_registered_project<'a>(
     let winners = (first_winner..).zip(sources);
     session.check_registered_execution(
         || {
-            session.closed_program_errors(&paths, None, &[], refusal, None)?;
+            session.closed_program_errors(&paths, None, &[], refusal)?;
             if let Some((graph, report, owner, class)) = requested_class {
                 session
                     .check_selected_class_return(graph, owner, class, winners.clone())
@@ -3866,7 +3866,6 @@ impl Session {
         skipped: Option<&[Vec<TextRange>]>,
         overloads: &[Vec<CheckedDiagnostic>],
         native: Option<&crate::frontend::phase::Diagnostic>,
-        checked_bodies: Option<&crate::modules::RegisteredSourceErrors>,
     ) -> Result<(), String> {
         use ty_python_core::definition::DefinitionKind;
 
@@ -3990,20 +3989,13 @@ impl Session {
                 }
             }
             let mut dormant = Vec::new();
+            self.exact_source_contracts(index, path, skipped, declarations, &mut dormant);
             if !declarations.parameters(&self.db).is_empty() {
                 self.dormant_call_errors(index, path, declarations, &mut dormant);
-                // Parameter order can differ from the order of the written arguments.
-                dormant.sort_by_key(|(start, _)| *start);
             }
+            // Parameter order can differ from the order of the written arguments.
+            dormant.sort_by_key(|(start, _)| *start);
             let mut dormant = dormant.into_iter().peekable();
-            // The default body check covers ty's declaration rules on the same bindings.
-            if checked_bodies
-                .and_then(|bodies| bodies.get(&index))
-                .is_some_and(Vec::is_empty)
-            {
-                errors.extend(dormant.map(|(_, message)| message));
-                continue;
-            }
             let checked = CheckedFile::new(
                 &self.db,
                 file,

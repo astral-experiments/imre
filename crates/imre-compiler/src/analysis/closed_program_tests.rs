@@ -4,6 +4,68 @@ use std::fs;
 use tempfile::tempdir;
 
 #[test]
+fn capability_refusals_cannot_hide_exact_source_declarations() {
+    let project = tempdir().unwrap();
+    let main = project.path().join("main.py");
+    let dynamic = "buffer = bytearray()\nbuffer.append(97)\nprint(buffer)\n";
+    fs::write(&main, format!("{dynamic}status: int = True\n")).unwrap();
+    let check = || {
+        let diagnostic = crate::check_file(&main, None).unwrap_err();
+        assert!(
+            diagnostic.contains("expected int, got bool"),
+            "{diagnostic}"
+        );
+        let diagnostic = crate::compile_file(&main, None, &Default::default())
+            .err()
+            .unwrap();
+        assert!(
+            diagnostic.contains("expected int, got bool"),
+            "{diagnostic}"
+        );
+    };
+    check();
+    for declaration in [
+        "def f() -> int:\n    return True\nprint(f())\n",
+        "def f(value: int) -> None:\n    pass\nf(True)\n",
+        "def good() -> int: return 1\ndef f(a: int, b: int) -> None: pass\nf(good(), True)\n",
+        "items: list[int] = [True]\n",
+        "items: dict[str, int] = {'x': True}\n",
+        "items: tuple[int] = (True,)\n",
+        "type Items = list[int]\nitems: Items = [True]\n",
+        "def f():\n    status: int = True\nf()\n",
+        "status: int = 1\nstatus = True\n",
+    ] {
+        fs::write(&main, format!("{dynamic}{declaration}")).unwrap();
+        check();
+    }
+
+    for (value, expected) in [
+        ("1", "expected float, got int"),
+        ("True", "expected float, got bool"),
+    ] {
+        fs::write(&main, format!("{dynamic}status: float = {value}\n")).unwrap();
+        for diagnostic in [
+            crate::check_file(&main, None).unwrap_err(),
+            crate::compile_file(&main, None, &Default::default())
+                .err()
+                .unwrap(),
+        ] {
+            assert!(diagnostic.contains(expected), "{diagnostic}");
+        }
+    }
+
+    fs::write(project.path().join("dynamic.py"), dynamic).unwrap();
+    fs::write(project.path().join("bad.py"), "status: int = True\n").unwrap();
+    fs::write(&main, "import dynamic\nimport bad\n").unwrap();
+    check();
+
+    fs::write(project.path().join("bad.py"), "status: int = 1\n").unwrap();
+    crate::check_file(&main, None).unwrap();
+    fs::write(&main, format!("{dynamic}status: int | bool = True\ntype Choice = int | bool\nother: Choice = True\ndef take(value: Choice) -> None: pass\ntake(True)\n")).unwrap();
+    crate::check_file(&main, None).unwrap();
+}
+
+#[test]
 fn heterogeneous_unannotated_lists_use_object_storage_without_erasing_contracts() {
     let project = tempdir().unwrap();
     let main = project.path().join("main.py");
@@ -370,7 +432,7 @@ fn closed_program_keeps_first_party_contracts_across_cached_edits() {
             graph
                 .session
                 .closed_program_session(cache, &graph.inputs)?
-                .closed_program_errors(&graph.modules, skipped.as_deref(), &proofs, native, None)
+                .closed_program_errors(&graph.modules, skipped.as_deref(), &proofs, native)
         };
         let result = check(Some(&mut cache));
         let fresh = check(None);

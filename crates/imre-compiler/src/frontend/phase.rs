@@ -96,6 +96,11 @@ pub(crate) enum Failure<M = String> {
     },
 }
 
+/// Whether a statically known operand satisfies the fixed representation contract.
+pub(crate) fn accepts_exact_type(expected: crate::ir::Type, actual: crate::ir::Type) -> bool {
+    expected == actual || expected == crate::ir::Type::PythonObject
+}
+
 impl Diagnostic {
     pub(crate) fn exact_type(
         source: &str,
