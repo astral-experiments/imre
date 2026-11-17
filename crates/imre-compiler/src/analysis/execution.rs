@@ -1091,38 +1091,27 @@ impl Session {
         source: &str,
         inherited_flags: u32,
         candidates: &[TextRange],
-        launcher_arguments: &[Option<String>],
+        (launcher_arguments, site_lines): (&[Option<String>], &[String]),
     ) -> Vec<(LiteralSite, Result<ParsedLiteral, String>)> {
         use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
         if candidates.is_empty() {
             return Vec::new();
         }
         let model = SemanticModel::new(&self.db, self.db.program_file(parent));
-        candidates
-            .iter()
-            .filter_map(|&range| {
-                let AnyNodeRef::ExprCall(call) =
-                    covering_node(parsed.syntax().into(), range).node()
-                else {
-                    return None;
-                };
-                if call.range() != range {
-                    return None;
-                }
-                let operand = call.arguments.args.first()?.start();
-                let original = if let Some(literal) =
-                    self.selected_exec_literal(parent, parsed, &model, call)
-                {
-                    crate::frontend::exec_literal_text(literal, source).map_err(str::to_owned)
-                } else {
-                    Ok(self.selected_launcher_exec_source(
-                        parent,
-                        parsed,
-                        &model,
-                        call,
-                        launcher_arguments,
-                    )?)
-                };
+        let mut sites = Vec::new();
+        for &range in candidates {
+            let AnyNodeRef::ExprCall(call) = covering_node(parsed.syntax().into(), range).node()
+            else {
+                continue;
+            };
+            if call.range() != range {
+                continue;
+            }
+            let Some(argument) = crate::frontend::exec_source_operand(call) else {
+                continue;
+            };
+            let operand = argument.start();
+            let mut add = |original: Result<&str, String>, optional| {
                 let module = original.and_then(|original| {
                     let (file, text, parsed) =
                         checked_literal_source(&self.db, parent, operand, original)?;
@@ -1134,15 +1123,37 @@ impl Session {
                         inherited_flags,
                     ))
                 });
-                Some((
+                sites.push((
                     LiteralSite {
                         call: range,
                         operand,
+                        optional,
                     },
                     module,
-                ))
-            })
-            .collect()
+                ));
+            };
+            if let Some(literal) = self.selected_exec_literal(parent, parsed, &model, call) {
+                add(
+                    crate::frontend::exec_literal_text(literal, source).map_err(str::to_owned),
+                    false,
+                );
+            } else if let Some(original) =
+                self.selected_launcher_exec_source(parent, parsed, &model, call, launcher_arguments)
+            {
+                add(Ok(original), false);
+            } else if !site_lines.is_empty()
+                && argument
+                    .as_name_expr()
+                    .is_some_and(|name| name.id == "line")
+                && !self.reads_custom_builtins(parent, parsed, &call.func)
+                && ExecutionIntrinsic::resolve(&model, &call.func) == Some(ExecutionIntrinsic::Exec)
+            {
+                for line in site_lines {
+                    add(Ok(line), true);
+                }
+            }
+        }
+        sites
     }
 
     /// Check the resolved nested operations in their originating project database.

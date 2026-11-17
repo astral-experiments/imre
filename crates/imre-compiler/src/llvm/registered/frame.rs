@@ -1944,10 +1944,12 @@ impl RegisteredFrame<'_, '_> {
                 "declare i64 @imre_dyn_exec_operand(ptr, i64, i64, ptr, i32, ptr)\n",
             );
             let source = &mut values[0];
-            *source = self.checked(&format!(
-                "call i64 @imre_dyn_exec_operand(ptr %ctx, i64 {callable}, i64 {source}, ptr {}, i32 {}, ptr {})",
-                child.entry, child.flags, child.source
-            ));
+            for child in child.alternatives {
+                *source = self.checked(&format!(
+                    "call i64 @imre_dyn_exec_operand(ptr %ctx, i64 {callable}, i64 {source}, ptr {}, i32 {}, ptr {})",
+                    child.entry, child.flags, child.source
+                ));
+            }
         }
         self.handle_array(&values)
     }

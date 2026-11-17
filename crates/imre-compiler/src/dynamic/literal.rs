@@ -17,6 +17,7 @@ use crate::frontend::module_source::ParsedModule;
 pub(crate) struct LiteralSite {
     pub(crate) call: TextRange,
     pub(crate) operand: TextSize,
+    pub(crate) optional: bool,
 }
 
 pub(super) struct PreparedLiteral {
@@ -29,13 +30,26 @@ pub(super) struct PreparedLiteral {
 /// independent tables, and a live rebinding still receives the original string.
 #[derive(Default)]
 pub(crate) struct LiteralSites {
-    sites: HashMap<TextRange, Result<Box<PreparedLiteral>, (TextSize, String)>>,
+    sites: HashMap<TextRange, Result<Vec<PreparedLiteral>, (TextSize, String)>>,
 }
 
 impl LiteralSites {
     fn insert(&mut self, site: LiteralSite, body: Result<PreparedLiteral, String>) {
-        let entry = body.map(Box::new).map_err(|reason| (site.operand, reason));
-        self.sites.insert(site.call, entry);
+        match body {
+            Ok(body) => {
+                if let Ok(bodies) = self
+                    .sites
+                    .entry(site.call)
+                    .or_insert_with(|| Ok(Vec::new()))
+                {
+                    bodies.push(body);
+                }
+            }
+            Err(reason) if !site.optional => {
+                self.sites.insert(site.call, Err((site.operand, reason)));
+            }
+            Err(_) => {}
+        }
     }
 
     pub(crate) fn contains(&self, site: TextRange) -> bool {
@@ -56,6 +70,19 @@ impl LiteralSites {
         &self,
         site: TextRange,
     ) -> Option<Result<&PreparedLiteral, (TextSize, &str)>> {
+        Some(
+            self.sites
+                .get(&site)?
+                .as_ref()
+                .map(|bodies| bodies.first().expect("selected literal body"))
+                .map_err(|(operand, reason)| (*operand, reason.as_str())),
+        )
+    }
+
+    pub(super) fn bodies(
+        &self,
+        site: TextRange,
+    ) -> Option<Result<&[PreparedLiteral], (TextSize, &str)>> {
         Some(
             self.sites
                 .get(&site)?
@@ -187,7 +214,7 @@ impl LiteralForest {
                 &source.text,
                 source.flags,
                 &source.candidates,
-                &[],
+                (&[], &[]),
             );
             let names = self.record(Parent::Literal(index), unit, sites);
             if !names.is_empty() {
