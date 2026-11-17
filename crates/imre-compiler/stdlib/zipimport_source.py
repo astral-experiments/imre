@@ -3,11 +3,25 @@ from _imre_importlib import _zip_path_importers as _path_importers, compile_file
 
 
 class zipimporter(_ZipResourceLoader):
+    def __init__(self, path):
+        linked = _linked_archive(path)
+        self._has_linked = linked is not None
+        self._linked_enabled = self._has_linked
+        if linked is None:
+            super().__init__(path)
+        else:
+            self.archive, self.prefix = linked
+            self._indexed_archive = self.archive
+
     def invalidate_caches(self):
         """Invalidate the cached directory of this importer's archive."""
         _invalidate(self.archive)
+        self._linked_enabled = self._has_linked and not _exists(self.archive)
 
     def _member(self, fullname):
+        if self._linked_enabled:
+            origin = _linked_member(self.archive + '/' + self.prefix, fullname)
+            return None if origin is None else origin[len(self.archive) + 1:]
         stem = self.prefix + fullname.rpartition('.')[2]
         for suffix in ('/__init__.pyc', '/__init__.py', '.pyc', '.py'):
             entry = stem + suffix
@@ -40,6 +54,11 @@ class zipimporter(_ZipResourceLoader):
 
     def get_code(self, fullname):
         filename = self.get_filename(fullname)
+        if self._linked_enabled:
+            code = _linked_code(fullname, filename)
+            if code is None:
+                raise ZipImportError(f"no linked code for {fullname!r}", name=fullname)
+            return code
         return _compile_file(compile, self.get_data(filename), filename)
 
     def create_module(self, spec):
@@ -55,6 +74,9 @@ class zipimporter(_ZipResourceLoader):
         if entry is not None:
             return self.archive + '/' + entry, self
         directory = self.prefix + fullname.rpartition('.')[2] + '/'
+        if self._linked_enabled:
+            namespace = _linked_namespace(self.archive + '/' + self.prefix, fullname)
+            return None if namespace is None else (namespace, None)
         if _contains(self._indexed_archive, directory):
             return self.archive + '/' + directory[:-1], None
         return None

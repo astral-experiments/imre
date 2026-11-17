@@ -56,6 +56,7 @@ pub(super) struct RegisteredBodies<'a> {
     // Decoded installed files retain the fingerprint of their original loader bytes.
     pub(super) physical_files: HashMap<PathBuf, PhysicalFile>,
     pub(super) archive_members: HashMap<PathBuf, [u8; 32]>,
+    pub(super) archive_paths: HashMap<PathBuf, PathBuf>,
     // Each source slot has its own ownership, even if two names resolve to one file.
     // Providers contribute declarations to the checked program. Their Python bodies
     // retain Python argument binding, including annotations available to reflection.
@@ -139,6 +140,11 @@ impl crate::ProgramOutput {
                 // The selected project entry shares its launcher's native object.
                 let separate = separate && (whole_requested || application_entry != Some(unit));
                 let (name, path, source) = prepared.module;
+                if let Some(archive) = prepared.archive {
+                    for state in std::iter::once(&mut *root).chain(whole.as_mut()) {
+                        state.register_zip_archive(archive);
+                    }
+                }
                 let initializer = match &prepared.initializer {
                     Ok(initializer) => initializer,
                     Err(error) => {

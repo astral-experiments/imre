@@ -927,7 +927,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | (
             "_imre_zipimport",
-            "exists" | "isfile" | "index" | "read" | "contains" | "invalidate" | "names",
+            "exists" | "isfile" | "index" | "read" | "contains" | "invalidate" | "names"
+            | "linked_archive" | "linked_member" | "linked_namespace" | "linked_code",
         )
         | ("platform", "system" | "node" | "release" | "version" | "machine" | "mac_ver")
         | (
