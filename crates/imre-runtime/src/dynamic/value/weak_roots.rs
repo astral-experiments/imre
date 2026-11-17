@@ -1,6 +1,7 @@
 use super::{CycleSet, END, FindReferences, Heap, Id, MarkMode, Scope, UNMARKED, Value};
 use crate::dynamic::stdlib::{BinaryFile, io::MemoryStream};
 use indexmap::{IndexMap, map::Entry};
+use std::cell::{Ref, RefCell};
 use std::collections::{HashSet, VecDeque};
 
 type IdSet = HashSet<Id, hashbrown::DefaultHashBuilder>;
@@ -38,6 +39,9 @@ pub(super) struct RootPaths {
     // Kept sorted between searches for membership checks at collection points.
     nodes: Vec<Id>,
     edges: Vec<(Id, Option<usize>, Id)>,
+    // Indexed once for partial validation when independent finalizer paths change.
+    edge_indices: Vec<(usize, usize)>,
+    live: RefCell<Vec<bool>>,
     retry: u8,
     // Dictionary slots must be interpreted the same way during discovery and validation.
     dict_keys: bool,
@@ -358,6 +362,62 @@ impl RootPaths {
             && self.edges.iter().all(|&(parent, slot, child)| {
                 has_strong_edge(heap.get(parent), child, slot, self.dict_keys)
             })
+    }
+
+    /// Prepare parent/child positions after discovery has sorted the path nodes.
+    fn index_edges(&mut self) -> Option<()> {
+        self.edge_indices.try_reserve_exact(self.edges.len()).ok()?;
+        for &(parent, _, child) in &self.edges {
+            self.edge_indices.push((
+                self.nodes.binary_search(&parent).ok()?,
+                self.nodes.binary_search(&child).ok()?,
+            ));
+        }
+        self.live
+            .get_mut()
+            .try_reserve_exact(self.nodes.len())
+            .ok()?;
+        self.live.get_mut().resize(self.nodes.len(), false);
+        Some(())
+    }
+
+    /// A resumed generator can invalidate one path without invalidating other rooted owners.
+    /// Validate each edge only after its parent has been proven live.
+    fn live_nodes(&self, heap: &Heap, globals: [Id; 2]) -> Option<Ref<'_, Vec<bool>>> {
+        if self.nodes.is_empty() || self.edge_indices.len() != self.edges.len() {
+            return None;
+        }
+        let mut live = self.live.borrow_mut();
+        if live.len() != self.nodes.len() {
+            return None;
+        }
+        live.fill(false);
+        for &(origin, root) in &self.anchors {
+            let valid = match origin {
+                Root::Frame(index) => heap
+                    .execution
+                    .frames
+                    .get(index)
+                    .is_some_and(|frame| frame.scope == root),
+                Root::Global(index) => globals[index] == root,
+                Root::Surviving => false,
+            };
+            if valid {
+                live[self.nodes.binary_search(&root).ok()?] = true;
+            }
+        }
+        for (&(parent, slot, child), &(parent_index, child_index)) in
+            self.edges.iter().zip(&self.edge_indices)
+        {
+            if live[parent_index]
+                && !live[child_index]
+                && has_strong_edge(heap.get(parent), child, slot, self.dict_keys)
+            {
+                live[child_index] = true;
+            }
+        }
+        drop(live);
+        Some(self.live.borrow())
     }
 
     fn discover(
@@ -779,9 +839,11 @@ impl Heap {
                 !streams.is_some_and(|roots| roots.contains(id))
                     && !self.operand_keeps_finalizer(*id, 0)
             });
-        let Some(paths) = RootPaths::discover(self, globals, endpoints, true, false) else {
+        let Some(mut paths) = RootPaths::discover(self, globals, endpoints, true, false) else {
             return false;
         };
+        // Failure leaves the ordinary all-or-nothing proof available.
+        let _ = paths.index_edges();
         self.finalizer_roots = RootPaths {
             retry: SEARCH_BACKOFF,
             ..paths
@@ -866,11 +928,14 @@ impl Heap {
         }
         let paths_valid = self.finalizer_roots.valid(self, globals);
         let retained = self.temporary_mark();
-        if self
-            .descriptor_owners
-            .iter()
-            .any(|&owner| !self.root_keeps_owner(owner, paths_valid, streams, retained))
-        {
+        if self.descriptor_owners.iter().any(|&owner| {
+            !self.root_keeps_owner(
+                owner,
+                paths_valid && self.finalizer_roots.contains(owner),
+                streams,
+                retained,
+            )
+        }) {
             self.learn_finalizer_paths(globals, streams);
         }
     }
@@ -879,11 +944,11 @@ impl Heap {
     fn root_keeps_owner(
         &self,
         owner: Id,
-        paths_valid: bool,
+        path_keeps_owner: bool,
         streams: Option<&crate::dynamic::stdlib::io::StandardStreamRoots>,
         retained_current: usize,
     ) -> bool {
-        (paths_valid && self.finalizer_roots.contains(owner))
+        path_keeps_owner
             || streams.is_some_and(|roots| roots.contains(&owner))
             || self.cached_operand_keeps_finalizer(owner, retained_current)
             || self.bound_in_active_frame(owner)
@@ -909,12 +974,18 @@ impl Heap {
         discard_from: Option<usize>,
         except: &[Id],
     ) -> bool {
-        let paths_valid = self.finalizer_roots.valid(self, globals);
+        let live = self.finalizer_roots.live_nodes(self, globals);
+        let paths_valid = live.is_none() && self.finalizer_roots.valid(self, globals);
         let kept = |owner: &Id| {
             except.contains(owner)
                 || self.root_keeps_owner(
                     *owner,
-                    paths_valid,
+                    live.as_ref().is_some_and(|nodes| {
+                        self.finalizer_roots
+                            .nodes
+                            .binary_search(owner)
+                            .is_ok_and(|i| nodes[i])
+                    }) || (paths_valid && self.finalizer_roots.contains(*owner)),
                     streams,
                     discard_from.unwrap_or(usize::MAX),
                 )

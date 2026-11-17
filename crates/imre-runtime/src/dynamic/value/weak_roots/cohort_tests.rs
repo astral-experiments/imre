@@ -2,6 +2,35 @@ use super::super::{FrameOwner, Id, NONE, Value};
 use crate::dynamic::{ffi, stdlib, weakref};
 
 #[test]
+fn partial_finalizer_paths_keep_independent_branches_and_reject_stale_edges() {
+    let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+    let first = ctx.alloc(Value::List(Vec::new()));
+    let second = ctx.alloc(Value::List(Vec::new()));
+    let left = ctx.alloc(Value::Cell(Some(first)));
+    let right = ctx.alloc(Value::Cell(Some(second)));
+    let holder = ctx.alloc(Value::List(vec![left, right]));
+    let roots = [holder, NONE];
+    let mut paths =
+        super::RootPaths::discover(&ctx.heap, roots, [first, second].into_iter(), true, false)
+            .unwrap();
+    paths.index_edges().unwrap();
+    {
+        let live = paths.live_nodes(&ctx.heap, roots).unwrap();
+        assert!(live[paths.nodes.binary_search(&first).unwrap()]);
+        assert!(live[paths.nodes.binary_search(&second).unwrap()]);
+    }
+    *ctx.heap.get_mut(left) = Value::Cell(None);
+    assert!(!paths.valid(&ctx.heap, roots));
+    {
+        let live = paths.live_nodes(&ctx.heap, roots).unwrap();
+        assert!(!live[paths.nodes.binary_search(&first).unwrap()]);
+        assert!(live[paths.nodes.binary_search(&second).unwrap()]);
+    }
+    let live = paths.live_nodes(&ctx.heap, [NONE, NONE]).unwrap();
+    assert!(!live.iter().any(|&node| node));
+}
+
+#[test]
 fn retained_closure_owner_rechecks_the_cell_and_its_contents() {
     let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
     let scope = ctx.scope("sample", None);
