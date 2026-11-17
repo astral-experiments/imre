@@ -3480,19 +3480,21 @@ impl Session {
         ]
         .into_iter()
         .find(|(class, _)| {
-            let mut instance = class.to_instance(db, env);
-            if matches!(rule, ScalarMatch::Exact) {
-                return ty == instance;
-            }
-            if matches!(class, KnownClass::Float) {
-                instance = ty_python_semantic::types::UnionType::from_two_elements(
+            let instance = class.to_instance(db, env);
+            let accepted = if matches!(class, KnownClass::Float) {
+                ty_python_semantic::types::UnionType::from_two_elements(
                     db,
                     env,
-                    instance,
                     KnownClass::Int.to_instance(db, env),
-                );
+                    instance,
+                )
+            } else {
+                instance
+            };
+            match rule {
+                ScalarMatch::Exact => ty == instance || ty == accepted,
+                ScalarMatch::Assignable => ty.is_assignable_to(db, env, accepted),
             }
-            ty.is_assignable_to(db, env, instance)
         })
         .map(|(_, ty)| ty)
     }
@@ -3860,7 +3862,13 @@ impl Session {
         }
     }
 
-    /// Check exact scalar stores that Python assignability alone cannot reject.
+    /// Validate first-party scalar stores before admitting object fallback. Python
+    /// assignability may accept a value that cannot satisfy Imre's fixed representation:
+    ///
+    /// ```python
+    /// status: int = True
+    /// ```
+    /// Unreachable, type-checking-only, and excluded source spans do not execute stores.
     fn exact_scalar_stores(
         &self,
         module: usize,
@@ -3892,24 +3900,18 @@ impl Session {
                     DefinitionKind::AnnotatedAssignment(a) if a.target(&parsed).is_name_expr() => {
                         (Some(a.annotation(&parsed)), a.value(&parsed))
                     }
-                    DefinitionKind::Assignment(a) if a.unpack().is_none() => {
-                        let Some(name) = a.target(&parsed).as_name_expr() else {
-                            continue;
-                        };
-                        let Some(symbol) = index.place_table(scope).symbol_id(name.id.as_str())
-                        else {
-                            continue;
-                        };
+                    DefinitionKind::Assignment(a)
+                        if a.unpack().is_none() && a.target(&parsed).is_name_expr() =>
+                    {
                         let mut annotations = definitions
-                            .reachable_symbol_declarations(symbol)
+                            .declarations_at_binding(definition)
                             .filter_map(|d| d.declaration.definition())
                             .filter_map(|d| match d.kind(db) {
                                 DefinitionKind::AnnotatedAssignment(a) => {
                                     Some(a.annotation(&parsed))
                                 }
                                 _ => None,
-                            })
-                            .filter(|ann| ann.start() < a.value(&parsed).start());
+                            });
                         let first = annotations.next();
                         (
                             first.filter(|_| annotations.next().is_none()),
@@ -3923,9 +3925,6 @@ impl Session {
                 };
                 if index.is_in_type_checking_block(scope, value.range())
                     || skipped.iter().any(|r| r.contains_range(value.range()))
-                    || unreachable
-                        .iter()
-                        .any(|r| r.range.contains_range(value.range()))
                 {
                     continue;
                 }
@@ -3935,6 +3934,7 @@ impl Session {
                     && actual.is_assignable_to(db, &env, expected)
                     && !Self::written_scalar_union_accepts(&model, annotation, actual)
                     && let Some(error) = Self::scalar_contract_error(&model, expected, value, actual, || true)
+                    && !unreachable.iter().any(|r| r.range.contains_range(value.range()))
                 {
                     errors.push((value.start(), error.with_path(path).to_string()));
                 }
@@ -5328,12 +5328,8 @@ fn concrete_scalar<'db>(
     env: &ty_python_semantic::types::ProgramEnvironment<'db>,
     declared: ty_python_semantic::types::Type<'db>,
 ) -> bool {
-    use ty_python_semantic::types::{KnownClass, UnionType};
-    let scalar = |class: KnownClass| class.to_instance(db, env);
-    [KnownClass::Int, KnownClass::Bool, KnownClass::Float, KnownClass::Str, KnownClass::Bytes]
-        .into_iter().any(|class| declared == scalar(class))
-        // ty widens a float annotation to float | int.
-        || declared == UnionType::from_two_elements(db, env, scalar(KnownClass::Float), scalar(KnownClass::Int))
+    Session::scalar_layout(db, env, declared, ScalarMatch::Exact)
+        .is_some_and(|layout| layout != crate::ir::Type::None)
 }
 
 fn primary_range(diagnostic: &Diagnostic, file: File) -> Option<TextRange> {

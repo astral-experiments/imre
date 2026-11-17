@@ -30,7 +30,15 @@ fn object_fallback_checks_first_party_scalar_stores() {
     fs::write(project.path().join("bad.py"), "status: int = True\n").unwrap();
     fs::write(&main, "import dynamic\nimport bad\n").unwrap();
     reject();
-    fs::write(&main, format!("{dynamic}status: int = 1\nchoice: int | bool = True\ntype Choice = int | bool\nother: Choice = True\nif False:\n    dead: int = True\nfrom typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    hidden: int = True\n")).unwrap();
+    for (value, expected) in [
+        ("1", "expected float, got int"),
+        ("True", "expected float, got bool"),
+    ] {
+        fs::write(&main, format!("{dynamic}status: float = {value}\n")).unwrap();
+        let error = crate::check_file(&main, None).unwrap_err();
+        assert!(error.contains(expected), "{error}");
+    }
+    fs::write(&main, format!("from typing import TYPE_CHECKING\n{dynamic}status: int = 1\nchoice: int | bool = True\ntype Choice = int | bool\nother: Choice = True\nif False:\n    dead: int = True\nif TYPE_CHECKING:\n    hidden: int = True\n")).unwrap();
     crate::check_file(&main, None).unwrap();
 }
 
