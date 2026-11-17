@@ -2129,12 +2129,30 @@ impl CompoundSuites<'_, '_> {
         Ok((child.into_child(&mut self.suites), falls))
     }
 
-    fn value(&mut self, scope: &mut SourceScope<'_>, expr: &ast::Expr) -> StdResult<Expr, ()> {
+    fn value(
+        &mut self,
+        scope: &mut SourceScope<'_>,
+        expr: &ast::Expr,
+        site: Option<(TextRange, TextSize)>,
+    ) -> StdResult<Expr, ()> {
         let Some(prepare) = self.physical.as_deref_mut() else {
             return scope.frame_value(expr).ok_or(());
         };
         let value = scope.try_operand(|scope| scope.selected_operand(expr, self.selection));
-        Ok(prepare.region_operand(expr, scope.kind, &mut self.operands, value, self.suspended))
+        let value =
+            prepare.region_operand(expr, scope.kind, &mut self.operands, value, self.suspended);
+        Ok(match site {
+            Some((range, at)) => values::located(range, at, value),
+            None => value,
+        })
+    }
+
+    fn binding_sites(&mut self, body: &[Statement]) {
+        if let Some(prepare) = self.physical.as_deref_mut() {
+            prepare.refusal = prepare
+                .refusal
+                .or_else(|| prepare.literal_refusal(RegionRoot::Suite(body)));
+        }
     }
 
     fn condition(
@@ -2149,13 +2167,13 @@ impl CompoundSuites<'_, '_> {
         if !branch && let ast::Expr::BooleanLiteral(value) = expr {
             return Ok(Expr::boolean(value.value));
         }
-        let input = if branch && !self.suspended {
-            prepare.physical_operand(expr, scope.kind, self.selection, false)
-        } else {
-            prepare.owned_operand(expr, scope.kind, self.suspended, |owner| {
+        let input = prepare.owned_operand(expr, scope.kind, self.suspended, |owner| {
+            if branch && !self.suspended {
+                owner.selected_operand(expr, self.selection)
+            } else {
                 owner.condition_operand(expr)
-            })
-        };
+            }
+        });
         Ok(bind_operand(&mut self.operands, input, Type::Bool))
     }
 
@@ -2201,8 +2219,7 @@ impl CompoundSuites<'_, '_> {
         out: &mut Vec<Statement>,
     ) -> StdResult<bool, ()> {
         let condition = self.condition(scope, &loop_.test, false)?;
-        let disabled =
-            self.physical.is_none() && ir::control::boolean_literal(&condition) == Some(false);
+        let disabled = ir::control::boolean_literal(&condition) == Some(false);
         let body = if disabled {
             Vec::new()
         } else {
@@ -2225,7 +2242,7 @@ impl CompoundSuites<'_, '_> {
     ) -> StdResult<bool, ()> {
         let pull = for_pull(loop_);
         let mut input = if self.physical.is_some() {
-            let iter = self.value(scope, &loop_.iter)?;
+            let iter = self.value(scope, &loop_.iter, None)?;
             cursor_input(iter, Some(loop_.iter.range()), pull, |ty, cursor| {
                 scope.reserve_cursor_slot(ty, cursor)
             })
@@ -2237,16 +2254,11 @@ impl CompoundSuites<'_, '_> {
         let binding = input
             .bind_loop_target(scope, &loop_.target)
             .inspect_err(|_| {
-                scope.refusal.get_or_insert((
-                    loop_.target.range(),
-                    "cannot compile this assignment target ahead of time",
-                ));
+                if self.physical.is_some() {
+                    scope.refusal = Some(scope.target_refusal(&loop_.target));
+                }
             })?;
-        if let Some(prepare) = self.physical.as_deref_mut() {
-            prepare.refusal = prepare
-                .refusal
-                .or_else(|| prepare.literal_refusal(RegionRoot::Suite(binding)));
-        }
+        self.binding_sites(binding);
         let (body, _) = scope.in_loop(LoopScope::WithCursor, |scope| {
             self.block(scope, &loop_.body, true)
         })?;
@@ -2272,12 +2284,7 @@ impl CompoundSuites<'_, '_> {
         let mut handler_falls = false;
         for ast::ExceptHandler::ExceptHandler(handler) in &region.handlers {
             let matcher = exception_matcher(handler, region.is_star, |class, site| {
-                let value = self.value(scope, class)?;
-                Ok::<_, ()>(if self.physical.is_some() {
-                    values::located(site, class.start(), value)
-                } else {
-                    value
-                })
+                self.value(scope, class, Some((site, class.start())))
             })?;
             let name = handler.name.as_ref().map(|name| scope.slot(name.as_str()));
             let (body, falls) = self.block(scope, &handler.body, true)?;
@@ -2311,48 +2318,36 @@ impl CompoundSuites<'_, '_> {
     ) -> StdResult<bool, ()> {
         let mut protected = out;
         for item in &stmt.items {
-            let manager = self.value(scope, &item.context_expr)?;
             let site = context_site(scope.source.text, &item.context_expr, stmt.is_async);
-            let manager = if self.physical.is_some() {
-                values::located(site.range, site.anchor, manager)
-            } else {
-                manager
-            };
-            let mut fault = None;
-            let binding = if let Some(target) = item.optional_vars.as_deref() {
-                let report = scope.report_child_refusals;
-                scope.report_child_refusals |= self.physical.is_some();
-                let binding = contexts::python_binding(scope, target);
-                scope.report_child_refusals = report;
-                match (binding, self.physical.as_deref_mut()) {
-                    (Ok(binding), prepare) => {
-                        if let Some(prepare) = prepare {
-                            prepare.refusal = prepare.refusal.or_else(|| {
-                                prepare.literal_refusal(RegionRoot::Suite(&binding.body))
-                            });
-                        }
-                        Some(binding)
+            let manager = self.value(scope, &item.context_expr, Some((site.range, site.anchor)))?;
+            let report = scope.report_child_refusals;
+            scope.report_child_refusals |= self.physical.is_some();
+            let binding = item
+                .optional_vars
+                .as_deref()
+                .map(|target| contexts::python_binding(scope, target))
+                .transpose();
+            scope.report_child_refusals = report;
+            match binding {
+                Ok(binding) => {
+                    if let Some(binding) = &binding {
+                        self.binding_sites(&binding.body);
                     }
-                    (Err(()), Some(prepare)) => {
-                        let reason = scope.refusal.unwrap_or((
-                            target.range(),
-                            "cannot compile this assignment target ahead of time",
-                        ));
-                        prepare
-                            .refusal
-                            .get_or_insert(PreparedRefusal::Operand(reason));
-                        fault = Some(reason);
-                        None
-                    }
-                    (Err(()), None) => return Err(()),
+                    protected = contexts::enter_python(protected, site, manager, binding);
                 }
-            } else {
-                None
-            };
-            protected = contexts::enter_python(protected, site, manager, binding);
-            if let Some(fault) = fault {
-                protected.push(RegisteredSuite::bind_refusal(&mut self.operands, fault));
-                return Ok(true);
+                Err(()) => {
+                    let Some(prepare) = self.physical.as_deref_mut() else {
+                        return Err(());
+                    };
+                    let target = item.optional_vars.as_deref().expect("refused with target");
+                    let fault = scope.target_refusal(target);
+                    prepare
+                        .refusal
+                        .get_or_insert(PreparedRefusal::Operand(fault));
+                    contexts::enter_python(protected, site, manager, None)
+                        .push(RegisteredSuite::bind_refusal(&mut self.operands, fault));
+                    return Ok(true);
+                }
             }
         }
         statements::append_block(protected, self.block(scope, &stmt.body, true)?.0);
@@ -2761,18 +2756,6 @@ impl<'a> SuitePreparation<'a> {
             }
         };
         refusal.map_or(Ok(continues), Err)
-    }
-
-    fn physical_operand(
-        &mut self,
-        expr: &ast::Expr,
-        kind: RegisteredScope,
-        selection: SuiteSelection,
-        suspended: bool,
-    ) -> PhysicalOperand {
-        self.owned_operand(expr, kind, suspended, |scope| {
-            scope.selected_operand(expr, selection)
-        })
     }
 
     /// Prepare the operand in the scope that already owns its consuming operation.
@@ -3813,13 +3796,6 @@ fn disabled_while(loop_: &ast::StmtWhile) -> bool {
     matches!(&*loop_.test, ast::Expr::BooleanLiteral(literal) if !literal.value)
 }
 
-/// The declaration and fall-through policy of a completed control statement.
-enum PhysicalRegion {
-    Fallthrough,
-    Loop,
-    Protected,
-}
-
 fn class_argument_layout(class: &ast::StmtClassDef) -> ir::PackedArguments {
     class
         .arguments
@@ -3882,6 +3858,13 @@ impl SourceScope<'_> {
         checked_local_scalar(expected, value)
     }
 
+    fn target_refusal(&self, target: &ast::Expr) -> OperandRefusal {
+        self.refusal.unwrap_or((
+            target.range(),
+            "cannot compile this assignment target ahead of time",
+        ))
+    }
+
     fn assignment_targets(
         &mut self,
         targets: &[ast::Expr],
@@ -3923,26 +3906,34 @@ impl SourceScope<'_> {
     }
 
     fn checked_physical_statement(&self, stmt: &ast::Stmt) -> bool {
-        if let ast::Stmt::Assign(assign) = stmt {
-            // The physical frame owns an assignment that yields or awaits its value.
-            return ir::SuspendValue::operand(&assign.value).is_none();
+        match stmt {
+            // A physical frame owns the yielded or awaited assignment value.
+            ast::Stmt::Assign(assign) => ir::SuspendValue::operand(&assign.value).is_none(),
+            ast::Stmt::If(_)
+            | ast::Stmt::For(_)
+            | ast::Stmt::While(_)
+            | ast::Stmt::Try(_)
+            | ast::Stmt::With(_)
+            | ast::Stmt::Match(_)
+            | ast::Stmt::Break(_)
+            | ast::Stmt::Continue(_)
+            | ast::Stmt::IpyEscapeCommand(_) => false,
+            ast::Stmt::TypeAlias(_)
+            | ast::Stmt::Pass(_)
+            | ast::Stmt::Global(_)
+            | ast::Stmt::Nonlocal(_)
+            | ast::Stmt::Import(_)
+            | ast::Stmt::ImportFrom(_)
+            | ast::Stmt::ClassDef(_)
+            | ast::Stmt::Assert(_)
+            | ast::Stmt::Return(_)
+            | ast::Stmt::Expr(_)
+            | ast::Stmt::Delete(_)
+            | ast::Stmt::AnnAssign(_)
+            | ast::Stmt::AugAssign(_)
+            | ast::Stmt::Raise(_)
+            | ast::Stmt::FunctionDef(_) => true,
         }
-        stmt.is_type_alias_stmt()
-            || matches!(
-                stmt,
-                ast::Stmt::Pass(_) | ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_)
-            )
-            || stmt.is_import_stmt()
-            || stmt.is_import_from_stmt()
-            || stmt.is_class_def_stmt()
-            || stmt.is_assert_stmt()
-            || stmt.is_return_stmt()
-            || stmt.is_expr_stmt()
-            || stmt.is_delete_stmt()
-            || stmt.is_ann_assign_stmt()
-            || stmt.is_aug_assign_stmt()
-            || stmt.is_raise_stmt()
-            || stmt.is_function_def_stmt()
     }
 
     fn physical_statement(
@@ -3955,37 +3946,24 @@ impl SourceScope<'_> {
         if !matches!(self.kind, RegisteredScope::Function { .. }) {
             return Err(());
         }
-        let region = match stmt {
+        match stmt {
             ast::Stmt::Match(_) => return self.statement(stmt, body),
-            ast::Stmt::If(_) => PhysicalRegion::Fallthrough,
-            ast::Stmt::While(_) => PhysicalRegion::Loop,
-            ast::Stmt::For(loop_) if !loop_.is_async => {
-                return self.statement(stmt, body);
-            }
-            ast::Stmt::Try(region) if !region.is_star => PhysicalRegion::Protected,
+            ast::Stmt::For(loop_) if !loop_.is_async => return self.statement(stmt, body),
+            ast::Stmt::If(_) | ast::Stmt::While(_) => {}
+            ast::Stmt::Try(region) if !region.is_star => {}
             _ => return Err(()),
-        };
+        }
         let begin = body.len();
         let continues = self.statement(stmt, body)?;
         let checked = &body[begin..];
-        let complete = match region {
-            PhysicalRegion::Fallthrough => {
-                // The declaration scan can continue after a raise even when both arms exit.
-                // A pruned literal arm still needs a block with its unconditional transfer.
-                preparation
-                    .check_required_sites(RegionRoot::Suite(checked), true)
-                    .is_ok_and(|reaches_next| !continues || reaches_next)
-            }
-            // A disabled loop takes the normal edge of its selected else suite.
-            PhysicalRegion::Loop
-                if matches!(checked.last(), Some(Statement::While(test, _, _))
-                    if ir::control::boolean_literal(test) == Some(false)) =>
-            {
-                false
-            }
-            PhysicalRegion::Loop | PhysicalRegion::Protected => {
-                preparation.checked_declaration_refusal(checked).is_none()
-            }
+        let complete = if stmt.is_if_stmt() {
+            // A checked raise can still lead the declaration scanner into the next statement.
+            preparation
+                .check_required_sites(RegionRoot::Suite(checked), true)
+                .is_ok_and(|reaches_next| !continues || reaches_next)
+        } else {
+            !matches!(checked.last(), Some(Statement::While(test, _, _)) if ir::control::boolean_literal(test) == Some(false))
+                && preparation.checked_declaration_refusal(checked).is_none()
         };
         if complete {
             return Ok(continues);
