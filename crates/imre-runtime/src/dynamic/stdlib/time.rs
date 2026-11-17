@@ -21,6 +21,7 @@ pub(in crate::dynamic) fn is_function(name: &str) -> bool {
             | "strftime"
             | "strptime"
             | "ctime"
+            | "asctime"
             | "tzset"
     ) || text_signature(name).is_some()
 }
@@ -345,6 +346,19 @@ pub(super) fn call(
                 ),
             )),
         },
+        "asctime" => {
+            let clock = match args {
+                [] => LocalTime::now()?,
+                [value] => tuple_time(ctx, *value, name)?,
+                _ => {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("asctime() takes at most 1 argument ({} given)", args.len()),
+                    ));
+                }
+            };
+            Ok(ctx.text(ctime_text(clock.asctime_fields()?, 0)))
+        }
         "strptime" => {
             let mark = ctx.heap.temporary_mark();
             let parser = ctx

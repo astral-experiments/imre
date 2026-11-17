@@ -17,7 +17,7 @@ from suite_inventory import (
     verify_files,
     verify_interpreter_tests,
 )
-from suite_native import NativeCompileError, Toolchain, method_bytes, run_evidence
+from suite_native import Toolchain, method_bytes, run_evidence
 
 OWNER = "TimeTestCase"
 SOURCE = HERE / "upstream/Lib/test/test_time.py"
@@ -75,6 +75,8 @@ def source(name, wrong=False):
 
 def control(name):
     module = b"from time import time, struct_time\nimport time as original\n"
+    if name == "test_conversions":
+        return module + b"from time import asctime, localtime, mktime\ndef ctime(t: float) -> str:\n    return 'wrong'\n"
     if name == "test_mktime":
         return (
             module
@@ -98,30 +100,6 @@ def control(name):
 def prepare(tool, work, name):
     key = f"test.test_time.{OWNER}.{name}"
     body = method_bytes(SOURCE, OWNER, name)
-    if name == "test_conversions":
-        try:
-            tool.build(source(name), work)
-        except NativeCompileError as error:
-            diagnostic = str(error).rsplit("Imre: ", 1)
-            if len(diagnostic) != 2 or "name is not a local value" not in diagnostic[1]:
-                raise
-            return key, {
-                "outcome": "blocked",
-                "reason": diagnostic[1].strip(),
-                "roles": roles(
-                    body="unobserved",
-                    assertions="unobserved",
-                    operation="unobserved",
-                    fixture="unobserved",
-                ),
-                "evidence": {
-                    "stage": "compile",
-                    "source": "Lib/test/test_time.py:156",
-                    "method_sha256": hashlib.sha256(body).hexdigest(),
-                },
-            }
-        raise AssertionError("review the newly compiled original conversion method")
-
     (work / "clock_control.py").write_bytes(control(name))
     wrong = tool.build(source(name, wrong=True), work)
     result = subprocess.run([wrong], capture_output=True, timeout=30)
@@ -146,8 +124,8 @@ def prepare(tool, work, name):
                     method_bytes(SOURCE, OWNER, "setUp")
                 ).hexdigest(),
                 "operation": "The unchanged method and setUp call native time functions.",
-                "fixture": "CPython runs suite discovery and outer hooks. The native class supplies typed numeric or tuple assertions through TestCase.assertTrue.",
-                "negative_control": "A displaced native timestamp fails the unchanged method.",
+                "fixture": "CPython runs suite discovery and outer hooks. The unchanged conversion assertions use native TestCase.assertEqual." if name == "test_conversions" else "CPython runs suite discovery and outer hooks. The native class supplies typed numeric or tuple assertions through TestCase.assertTrue.",
+                "negative_control": "An incorrect ctime result fails the unchanged method." if name == "test_conversions" else "A displaced native timestamp fails the unchanged method.",
             },
         }
 

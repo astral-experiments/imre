@@ -19,12 +19,8 @@ def validity_window() -> None:
 validity_window()
 """
 
-# Local time and full datetime arithmetic are available in CPython.
+# Full datetime arithmetic is available in CPython but remains unsupported here.
 REJECTED = [
-    ("print(datetime.now())", 'missing required argument "tz"'),
-    ("print(datetime.now(None))", "expected datetime.timezone, got None"),
-    ("print(datetime(2020, 1, 1).astimezone())", 'missing required argument "tz"'),
-    ("print(datetime(2020, 1, 1).astimezone(None))", "expected datetime.timezone, got None"),
     (
         "print(datetime(2000, 1, 1) - datetime(1999, 1, 1))",
         "unsupported arithmetic between these datetime values",
@@ -54,6 +50,15 @@ def clock(argv):
     )
 
 
+def local_clock(argv):
+    start = datetime.now()
+    got = run(argv)
+    end = datetime.now()
+    assert got.returncode == 0 and got.stderr == b"", got
+    first, second = map(datetime.fromisoformat, got.stdout.decode().splitlines())
+    assert first.tzinfo is second.tzinfo is None and start <= first <= second <= end, (start, first, second, end)
+
+
 def main():
     parser = argparse.ArgumentParser()
     for flag in ("imre", "runtime", "clang"):
@@ -64,12 +69,18 @@ def main():
         live = directory / "live.py"
         live.write_bytes(CLOCK)
         clock([sys.executable, live])
+        local_live = directory / "local_live.py"
+        local_live.write_text("from datetime import datetime\nprint(datetime.now())\nprint(datetime.now(None))\n")
+        local_clock([sys.executable, local_live])
+        local_zone = directory / "local_zone.py"
+        local_zone.write_text("from datetime import datetime\nprint(datetime(2020, 1, 1).astimezone())\nprint(datetime(2020, 1, 1).astimezone(None))\n")
         fixed = [
             HERE / "certificate_clock.py",
             HERE / "behavior.py",
             HERE / "date_values.py",
             HERE / "date_assertions.py",
         ]
+        fixed.append(local_zone)
         reference = {src: run([sys.executable, src]) for src in fixed}
         for src, result in reference.items():
             assert result.returncode == 0 and result.stderr == b"", (src, result)
@@ -103,11 +114,13 @@ def main():
                         cmd.append("--reachable-only")
                     return run(cmd)
 
-                for src in [*fixed, live, conversions]:
+                for src in [*fixed, live, local_live, conversions]:
                     built = build(src)
                     assert built.returncode == 0, (level, reachable, src, built.stderr)
                     if src == live:
                         clock([directory / "case"])
+                    elif src == local_live:
+                        local_clock([directory / "case"])
                     elif src == conversions:
                         for zone, expected in zone_reference.items():
                             got = run([directory / "case"], env={**os.environ, "TZ": zone})

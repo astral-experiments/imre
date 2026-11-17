@@ -9,11 +9,6 @@ import textwrap
 HERE = Path(__file__).resolve().parent
 CASES = ("bindings", "tasks", "cancel", "old_values", "representations", "first_use", "error_order", "shared_frame")
 BLOCKED = {
-    "thread": ("""
-        import threading
-        from contextvars import Context
-        t = threading.Thread(context=Context()); t.start(); t.join()
-    """, "unsupported sealed standard-library export threading.Thread"),
     "task_context": ("""
         import asyncio
         from contextvars import Context
@@ -60,6 +55,13 @@ BLOCKED = {
         print("custom" in repr(v))
     """, "default with native repr"),
 }
+RUNTIME_BLOCKED = {
+    "thread": ("""
+        import threading
+        from contextvars import Context
+        t = threading.Thread(context=Context()); t.start(); t.join()
+    """, "NotImplementedError: native workers cannot enter a Python context"),
+}
 
 
 def run(argv):
@@ -75,12 +77,13 @@ def main():
         p.error("use CPython 3.14.5")
     with tempfile.TemporaryDirectory() as d:
         directory = Path(d)
-        entries = [(name, HERE / (name + ".py"), None) for name in CASES]
-        for name, (body, diagnostic) in BLOCKED.items():
-            entry = directory / (name + ".py")
-            entry.write_text(textwrap.dedent(body))
-            entries.append((name, entry, diagnostic))
-        for name, entry, diagnostic in entries:
+        entries = [(name, HERE / (name + ".py"), None, None) for name in CASES]
+        for stage, cases in (("compile", BLOCKED), ("runtime", RUNTIME_BLOCKED)):
+            for name, (body, diagnostic) in cases.items():
+                entry = directory / (name + ".py")
+                entry.write_text(textwrap.dedent(body))
+                entries.append((name, entry, diagnostic, stage))
+        for name, entry, diagnostic, stage in entries:
             reference = run([sys.executable, "-IB", entry])
             if reference.returncode or reference.stderr:
                 raise AssertionError((name, reference))
@@ -93,7 +96,7 @@ def main():
                     if reachable:
                         cmd.append("--reachable-only")
                     built = run(cmd)
-                    if diagnostic is not None:
+                    if stage == "compile":
                         expected = diagnostic[int(reachable)] if isinstance(diagnostic, tuple) else diagnostic
                         if not built.returncode or expected not in built.stderr.decode():
                             raise AssertionError((name, level, reachable, built.stderr))
@@ -101,11 +104,14 @@ def main():
                         if built.returncode:
                             raise AssertionError((name, level, reachable, built.stderr))
                         actual = run([exe])
-                        if (actual.returncode, actual.stdout, actual.stderr) != (
+                        if stage == "runtime":
+                            if actual.returncode != 1 or actual.stdout or not actual.stderr.endswith((diagnostic + "\n").encode()):
+                                raise AssertionError((name, level, reachable, actual))
+                        elif (actual.returncode, actual.stdout, actual.stderr) != (
                             reference.returncode, reference.stdout, reference.stderr
                         ):
                             raise AssertionError((name, level, reachable, actual, reference))
-            print(name, "explicit diagnostic" if diagnostic else "four native matches", flush=True)
+            print(name, f"explicit {stage} diagnostic" if stage else "four native matches", flush=True)
 
 
 if __name__ == "__main__":
