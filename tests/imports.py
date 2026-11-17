@@ -14,6 +14,11 @@ import tempfile
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "imports"
 HELPER = "def f(value: int) -> int:\n    return value + 1\n"
 IMPORT = "from helper import f\nprint(f(2))\n"
+LATE_LOADER_PLUGIN = (
+    "def check():\n    from importlib import abc, util\n"
+    "    from importlib._abc import Loader\n"
+    "    assert abc.Loader is util.Loader is Loader\n"
+)
 ORDERED_DEFINITIONS = (
     "from helper import f\n"
     "def scale(value: int) -> int: return value * 7 + 3\n"
@@ -1847,12 +1852,11 @@ ACCEPTED = {
             "name = 'installed_loader_plugin'\n"
             "path = os.path.join(os.path.dirname(__file__), name + '.py')\n"
             "with open(path, 'w') as file:\n"
-            "    file.write('def check():\\n    from importlib import abc, util\\n'\n"
-            "               '    from importlib._abc import Loader\\n'\n"
-            "               '    assert abc.Loader is util.Loader is Loader\\n')\n"
+            f"    file.write({LATE_LOADER_PLUGIN!r})\n"
             "try:\n    importlib.import_module(name).check()\n"
             "finally:\n    os.remove(path)\n"
         ),
+        "installed_loader_plugin.py": LATE_LOADER_PLUGIN,
     },
     "unregistered_source_loader": {
         "main.py": (
@@ -2244,6 +2248,14 @@ _loader = ACCEPTED["loader_source_to_code"]["main.py"].replace(
     "    print(code.co_filename, code.co_name)",
 )
 ACCEPTED["loader_source_to_code"] = {"main.py": _loader}
+NATIVE_REFUSALS = {"unregistered_source_loader": ACCEPTED.pop("unregistered_source_loader")}
+FINITE_IMPORTS = {
+    "reload_source_plugin": ("plugins.report",),
+    "late_importlib_abc": ("installed_loader_plugin",),
+    "lazy_loader": ("price_plugin",),
+    "frozen_importer": ("frozen_price_plugin",),
+    "builtin_importer": ("price_plugin",),
+}
 
 
 def run(command: list[str], cwd: Path, *, timeout: int = 60) -> subprocess.CompletedProcess[str]:
@@ -2427,11 +2439,13 @@ def main() -> None:
                 continue
             for level in args.opt_levels:
                 executable = temporary / f"accepted-{name}-{level}"
+                if name == "late_importlib_abc":
+                    (case / "installed_loader_plugin.py").write_text(LATE_LOADER_PLUGIN)
                 command = [compiler, "build", str(case / "main.py"), "-o", str(executable),
                            "--runtime", runtime, "--clang", args.clang, "--opt-level", str(level),
                            *build_flags]
-                if name == "reload_source_plugin":
-                    command += ["--include-module", "plugins.report"]
+                for module in FINITE_IMPORTS.get(name, ()):
+                    command += ["--include-module", module]
                 if name == "zip_source_spec":
                     command += ["--extension-path", str(case / "zip-provider"), "--include-module", "zipfile"]
                     for pkg in ("stored", "deflated"):
@@ -2453,6 +2467,8 @@ def main() -> None:
                 }
                 timeout = 300 if slow_optimized and level > 0 else build_timeout
                 require_success(run(command, temporary, timeout=timeout))
+                if name == "late_importlib_abc":
+                    (case / "installed_loader_plugin.py").unlink()
                 arguments = ["41"] if name == "source_loader_external_code" else []
                 result = run([str(executable), *arguments], temporary)
                 require_success(result)
@@ -2669,6 +2685,25 @@ def main() -> None:
                 assert result.stderr.splitlines()[-1] == exception, result
                 checks += 1
 
+        for name, files in NATIVE_REFUSALS.items():
+            case = temporary / name
+            write_files(case, files)
+            baseline = run([args.python, "-E", "-m", "main"], case)
+            assert baseline.returncode == 0 and baseline.stdout == "caf\u00e9\nTrue\n", baseline
+            for level in args.opt_levels:
+                executable = temporary / f"refusal-{name}-{level}"
+                command = [compiler, "build", str(case / "main.py"), "-o", str(executable),
+                           "--runtime", runtime, "--clang", args.clang, "--opt-level", str(level),
+                           *build_flags]
+                if args.sanitize:
+                    command.append("--sanitize")
+                require_success(run(command, temporary, timeout=build_timeout))
+                result = run([str(executable)], temporary)
+                expected = f"NotImplementedError: no compiled Python body for <module> ({case / 'main.py.plugin.py'}:1)"
+                assert result.returncode == 1 and not result.stdout, result
+                assert result.stderr.splitlines()[-1] == expected, result
+                checks += 1
+
         # A provider can return to the application's check without acquiring its signature policy.
         app = temporary / "provider-owner"
         provider = temporary / "provider-search"
@@ -2829,7 +2864,7 @@ def main() -> None:
         result = run([compiler, "check", str(escape / "main.py")], temporary)
         assert result.returncode != 0 and "outside" in result.stderr, result.stderr
         checks += 1
-    print(f"{checks} import checks passed")
+    print(f"{checks} import checks passed ({len(NATIVE_REFUSALS)} native refusal cases)")
 
 
 if __name__ == "__main__":
