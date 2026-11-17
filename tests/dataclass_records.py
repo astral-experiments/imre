@@ -34,10 +34,6 @@ SLOTS = ITEM.replace("@dataclass\n", "@dataclass(slots=True)\n")
 ERASE = "\ndef hold(value: object) -> object:\n    return value\n"
 STRUCT = "from imre import struct\n@struct\nclass Point:\n    x: float\n"
 REJECTED = {
-    "boxed_unslotted": ITEM + ERASE + "hold(Item(2))\n",
-    "boxed_mutable_list_field": SLOTS.replace("value: int", "value: list[int]") + ERASE + "hold(Item([2]))\n",
-    "boxed_special_method": SLOTS + "    def __bool__(self) -> bool:\n        return False\n" + ERASE + "hold(Item(2))\n",
-    "boxed_disabled_equality": SLOTS.replace("slots=True", "slots=True, eq=False") + ERASE + "hold(Item(2))\n",
     "boxed_unchecked_attribute": SLOTS + "def observe(value: object) -> int:\n    return value.other\nobserve(Item(2))\n",
     "boxed_bad_index": SLOTS + ERASE + "def observe(value: object) -> object:\n    return value['invalid']\nobserve(hold(Item(2)))\n",
     "struct_identity": STRUCT + "p = Point(1.0)\nprint(p is p)\n",

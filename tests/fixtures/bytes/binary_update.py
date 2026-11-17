@@ -1,0 +1,5 @@
+value = open("out", "wb+")
+value.write(b"abc")
+value.seek(0)
+print(value.read())
+value.close()

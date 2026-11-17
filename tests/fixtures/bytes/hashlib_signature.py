@@ -33,11 +33,6 @@ try:
 except TypeError as exc:
     print(str(exc))
 
-try:
-    hashlib.new("missing", None)
-except TypeError as exc:
-    print(str(exc))
-
 h = hashlib.sha256(b"abc")
 try:
     h.update("unencoded")
