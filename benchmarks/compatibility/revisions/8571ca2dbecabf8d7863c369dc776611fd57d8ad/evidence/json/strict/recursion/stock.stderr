@@ -1,0 +1,29 @@
+IMRE_UNITTEST {"event": "collection", "count": 9}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_recursion.TestCRecursion.test_dictrecursion"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_recursion.TestCRecursion.test_endless_recursion"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_recursion.TestCRecursion.test_highly_nested_objects_decoding"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_recursion.TestCRecursion.test_highly_nested_objects_encoding"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_recursion.TestCRecursion.test_listrecursion"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_recursion.TestPyRecursion.test_defaultrecursion"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_recursion.TestPyRecursion.test_dictrecursion"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_recursion.TestPyRecursion.test_endless_recursion"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_recursion.TestPyRecursion.test_listrecursion"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_recursion.TestCRecursion.test_dictrecursion"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_recursion.TestCRecursion.test_dictrecursion", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_recursion.TestCRecursion.test_endless_recursion"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_recursion.TestCRecursion.test_endless_recursion", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_recursion.TestCRecursion.test_highly_nested_objects_decoding"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_recursion.TestCRecursion.test_highly_nested_objects_decoding", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_recursion.TestCRecursion.test_highly_nested_objects_encoding"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_recursion.TestCRecursion.test_highly_nested_objects_encoding", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_recursion.TestCRecursion.test_listrecursion"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_recursion.TestCRecursion.test_listrecursion", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_recursion.TestPyRecursion.test_defaultrecursion"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_recursion.TestPyRecursion.test_defaultrecursion", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_recursion.TestPyRecursion.test_dictrecursion"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_recursion.TestPyRecursion.test_dictrecursion", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_recursion.TestPyRecursion.test_endless_recursion"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_recursion.TestPyRecursion.test_endless_recursion", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_recursion.TestPyRecursion.test_listrecursion"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_recursion.TestPyRecursion.test_listrecursion", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "summary", "run": 9, "successful": true}
