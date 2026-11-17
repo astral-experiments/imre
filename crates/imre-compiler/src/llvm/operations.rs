@@ -339,9 +339,6 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         .flatten()
         .and_then(|value| match &value.without_location().kind {
             ExprKind::Str(text) => Some(text.as_str()),
-            ExprKind::Builtin(ir::Builtin::RegisteredString(bytes), _) => {
-                std::str::from_utf8(bytes).ok()
-            }
             _ => None,
         });
         let exec = frame.exec_literal_at(call.range, expression);

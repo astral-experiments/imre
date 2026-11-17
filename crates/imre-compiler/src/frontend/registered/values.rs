@@ -561,7 +561,7 @@ pub(in crate::frontend) fn callable_target(call: &ast::ExprCall) -> ir::Register
                 .arguments
                 .args
                 .first()
-                .is_some_and(|arg| !arg.is_starred_expr()),
+                .is_some_and(ast::Expr::is_string_literal_expr),
     }
 }
 

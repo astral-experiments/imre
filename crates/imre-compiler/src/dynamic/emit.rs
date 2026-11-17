@@ -1319,7 +1319,7 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
                 return None;
             }
         };
-        let mut alternatives = Vec::new();
+        let mut alternatives = Vec::with_capacity(children.size_hint().0);
         for child in children {
             let path = match &child {
                 LiteralBody::Suite(child) => child.file.as_deref(),
