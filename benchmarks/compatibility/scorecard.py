@@ -29,6 +29,8 @@ HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 RESULT = re.compile(r"^([^\s]+) \(([^)]+)\) \.\.\. (ok|FAIL|ERROR|skipped .+|expected failure|unexpected success)$")
 START = "<!-- compatibility-scorecard:start -->"
 END = "<!-- compatibility-scorecard:end -->"
+ROOT_SUMMARY_START = "<!-- current-compatibility-snapshot:start -->"
+ROOT_SUMMARY_END = "<!-- current-compatibility-snapshot:end -->"
 
 
 def require(condition, message):
@@ -868,7 +870,8 @@ def render(view):
     raw, received, observed, paired = totals(frozen)
     sup_raw, sup_received, sup_observed, sup_paired = totals(supplemental)
     expected = COHORT["scripts"]["expected_commands"]
-    lines = [START, "### Pinned compatibility scorecard", "", f"Revision `{COHORT['imre_revision']}` · CPython **{COHORT['cpython_version']}** · Linux x86-64. These are original-test receipts at this revision, not cumulative credits.", "", f"Frozen {len(frozen)}-family cohort: **{received:,} pinned receipts** of **{raw:,} raw upstream originals**, **{observed:,} observed stock/O0/O3 pass intersections**, **{paired:,} verified credited pairs**; **{raw-received:,} originals have no receipt**.", "", f"Supplemental pilots, outside the frozen cohort: **{sup_received:,} receipts** of **{sup_raw:,} originals**, **{sup_observed:,} observed intersections**, **{sup_paired:,} verified credited pairs**.", "", f"Scripts: **{len(scripts)} of {expected} original commands have receipts**, **{sum(r['paired'] for r in scripts)} verified paired passes**; **{expected-len(scripts)} not run**."]
+    missing = "originals have no validated receipt" if is_snapshot() else "originals have no receipt"
+    lines = [START, "### Pinned compatibility scorecard", "", f"Revision `{COHORT['imre_revision']}` · CPython **{COHORT['cpython_version']}** · Linux x86-64. These are original-test receipts at this revision, not cumulative credits.", "", f"Frozen {len(frozen)}-family cohort: **{received:,} pinned receipts** of **{raw:,} raw upstream originals**, **{observed:,} observed stock/O0/O3 pass intersections**, **{paired:,} verified credited pairs**; **{raw-received:,} {missing}**.", "", f"Supplemental pilots, outside the frozen cohort: **{sup_received:,} receipts** of **{sup_raw:,} originals**, **{sup_observed:,} observed intersections**, **{sup_paired:,} verified credited pairs**.", "", f"Scripts: **{len(scripts)} of {expected} original commands have receipts**, **{sum(r['paired'] for r in scripts)} verified paired passes**; **{expected-len(scripts)} not run**."]
     if is_snapshot():
         script_observed = sum(all(r["runs"][t]["outcome"] == "pass" for t in TIERS) for r in scripts)
         lines[-1] = f"Scripts: **{len(scripts)} of {expected} original commands have receipts**, **{script_observed} observed intersections**, **{sum(r['paired'] for r in scripts)} verified credited pairs**; **{expected-len(scripts)} not run**."
@@ -895,11 +898,33 @@ def replace_block(text, block):
     return before + block + after
 
 
+def render_root_summary(fs):
+    """Render the explicitly selected snapshot's staged modules for the root README."""
+    require(is_snapshot(), "root summary requires a snapshot")
+    pin = COHORT["imre_revision"]
+    staged = {name: row for name, row in fs.items() if row["receipts"] or row.get("pending")}
+    lines = [ROOT_SUMMARY_START, "### Current compatibility snapshot", "", f"Revision `{pin}` · **{sum(r['receipts'] for r in staged.values()):,} validated receipts**, **{sum(r['paired'] for r in staged.values()):,} verified pairs**.", "", "| Module | Raw originals | Verified pairs / status |", "| --- | ---: | --- |"]
+    for name, row in sorted(staged.items()):
+        status = f"pending ({row['pending']:,} staged)" if row.get("pending") else f"{row['paired']:,} verified"
+        lines.append(f"| `{name}` | {row['originals']:,} | {status} |")
+    lines.extend(["", f"[Full revision table](benchmarks/compatibility/revisions/{pin}/docs/stdlib.md)", ROOT_SUMMARY_END])
+    return "\n".join(lines)
+
+
+def replace_root_summary(text, block):
+    require(text.count(ROOT_SUMMARY_START) == text.count(ROOT_SUMMARY_END) == 1, "expected exactly one current snapshot block")
+    before, rest = text.split(ROOT_SUMMARY_START); _, after = rest.split(ROOT_SUMMARY_END)
+    return before + block + after
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--check", action="store_true"); p.add_argument("--validate", action="store_true")
     p.add_argument("--snapshot", metavar="REVISION", help="select revisions/<40-hex-sha> receipt data")
+    p.add_argument("--root-summary", action="store_true", help="explicitly update or check the root README current-snapshot block")
     args = p.parse_args()
+    if args.root_summary and not args.snapshot: p.error("--root-summary requires --snapshot")
+    if args.root_summary and args.validate: p.error("--root-summary cannot be combined with --validate")
     if args.snapshot: select_snapshot(args.snapshot)
     fs, scripts = summary()
     from check_omissions import validate as validate_omissions
@@ -912,6 +937,10 @@ def main():
             new = render(view) + "\n"
             if args.check: require(path.is_file() and path.read_text() == new, f"stale snapshot scorecard: {path.relative_to(ROOT)}")
             else: path.parent.mkdir(parents=True, exist_ok=True); path.write_text(new)
+        if args.root_summary:
+            path = ROOT / "README.md"; old = path.read_text(); new = replace_root_summary(old, render_root_summary(fs))
+            if args.check: require(old == new, "stale current snapshot summary: README.md")
+            else: path.write_text(new)
         return
     for path, view in ((ROOT / "README.md", "readme"), (ROOT / "docs/stdlib.md", "stdlib")):
         old = path.read_text(); new = replace_block(old, render(view))
