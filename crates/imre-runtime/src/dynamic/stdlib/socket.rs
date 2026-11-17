@@ -1006,6 +1006,7 @@ impl PublicAddrInfo {
                 // SAFETY: no Context borrow crosses the constructor, which can be monkeypatched.
                 match unsafe { nested_call(context, class, vec![*value]) } {
                     Ok(member) => *value = member,
+                    // SAFETY: the nested constructor has returned and no Context reference survives it.
                     Err(error) if unsafe { &*context }.is_builtin_error(&error, "ValueError") => {}
                     Err(error) => return Err(error),
                 }
