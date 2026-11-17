@@ -4726,7 +4726,7 @@ print(globals()["label"](2.0, True))
             "boxed_thread_dangling.py", "boxed_threading_rlock.py", "boxed_indirect_threading_rlock.py",
             "boxed_threading_condition_event.py", "boxed_threading_timer.py",
             "boxed_thread_captured_lock.py",
-            "boxed_thread_bound_lock.py", "boxed_thread_argument_lifetime.py",
+            "boxed_thread_bound_lock.py", "boxed_thread_subclass_run.py", "boxed_thread_argument_lifetime.py",
             "boxed_thread_captured_acquire.py", "boxed_thread_method_closure.py",
             "boxed_thread_finalization.py",
             "boxed_thread_hash_update.py",

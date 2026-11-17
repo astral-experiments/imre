@@ -369,9 +369,26 @@ impl Handle {
     }
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum RunMode {
+    Default,
+    Bound,
+}
+
+enum RunEntry {
+    Default { target: Id, args: Id, kwargs: Id },
+    Bound { function: Id },
+}
+
+struct ThreadOperands {
+    entry: RunEntry,
+    handle: Id,
+}
+
 struct RegisteredThread {
     daemon: bool,
     owner: Id,
+    run: RunMode,
 }
 
 struct Entry {
@@ -392,11 +409,11 @@ pub(super) struct Registry {
 
 impl Context {
     /// Look up worker inputs only when the default Python attribute accesses cannot run user code.
-    fn thread_operands(&self, owner: Id) -> Result<[Id; 4]> {
+    fn thread_operands(&self, owner: Id) -> Result<ThreadOperands> {
         let unsupported = || {
             Error::new(
                 "NotImplementedError",
-                "native workers require an ordinary Thread with the original run method",
+                "native workers require an ordinary Thread with a supported run method",
             )
         };
         let Value::Instance {
@@ -412,7 +429,6 @@ impl Context {
             return Err(unsupported());
         };
         if !self.direct_subclass(*class, thread_class)
-            || self.class_attr(*class, "run") != Some(run)
             || !matches!(*self.heap.get(run), Value::Function { code: current, .. } if code == current)
         {
             return Err(unsupported());
@@ -459,12 +475,24 @@ impl Context {
         {
             return Err(unsupported());
         }
-        Ok([
-            field("_target").ok_or_else(unsupported)?,
-            field("_args").ok_or_else(unsupported)?,
-            field("_kwargs").ok_or_else(unsupported)?,
-            field("_os_thread_handle").ok_or_else(unsupported)?,
-        ])
+        // Inspect the class slot directly: binding a plain function here cannot invoke a
+        // descriptor or an instance attribute hook. Admission still belongs to Callback.
+        let function = self.class_attr(*class, "run").ok_or_else(unsupported)?;
+        let entry = if function == run {
+            RunEntry::Default {
+                target: field("_target").ok_or_else(unsupported)?,
+                args: field("_args").ok_or_else(unsupported)?,
+                kwargs: field("_kwargs").ok_or_else(unsupported)?,
+            }
+        } else if matches!(self.heap.get(function), Value::Function { .. }) {
+            RunEntry::Bound { function }
+        } else {
+            return Err(unsupported());
+        };
+        Ok(ThreadOperands {
+            entry,
+            handle: field("_os_thread_handle").ok_or_else(unsupported)?,
+        })
     }
 
     /// Retain the original Python function and code after the sealed module initializes.
@@ -550,9 +578,15 @@ impl Heap {
             let entry = &self.workers.entries[index];
             if include(entry) && !entry.handle.awaiting_exit() {
                 let owner = entry.thread.as_ref().map(|thread| thread.owner);
-                // A failed field removal leaves the registration intact for the next checkpoint.
+                let cleanup_owner = entry
+                    .thread
+                    .as_ref()
+                    .filter(|thread| thread.run == RunMode::Default)
+                    .map(|thread| thread.owner);
+                // Only default Thread.run performs target cleanup. A failed field removal
+                // leaves the registration intact for the next checkpoint.
                 if entry.handle.ident() == 0
-                    || owner.is_none_or(|owner| RegisteredThread::clear_target(owner, self))
+                    || cleanup_owner.is_none_or(|owner| RegisteredThread::clear_target(owner, self))
                 {
                     let operands = std::mem::take(&mut self.workers.entries[index].operands);
                     for root in owner.into_iter().chain(operands) {
@@ -1085,13 +1119,38 @@ pub(super) fn prepare_start(
             "native workers cannot enter a Python context",
         ));
     }
-    let [target, pos, kw, handle_id] = ctx.thread_operands(owner)?;
+    let ThreadOperands {
+        entry,
+        handle: handle_id,
+    } = ctx.thread_operands(owner)?;
     let Value::ThreadHandle(handle) = ctx.heap.get(handle_id) else {
         return Err(Error::new("TypeError", "'handle' must be a _ThreadHandle"));
     };
     let handle = Arc::clone(handle);
     handle.check_new()?;
-    let (operation, roots) = worker_target(ctx, target, pos, kw)?;
+    let (operation, roots, run) = match entry {
+        RunEntry::Default {
+            target,
+            args,
+            kwargs,
+        } => {
+            let (operation, roots) = worker_target(ctx, target, args, kwargs)?;
+            (operation, roots, RunMode::Default)
+        }
+        RunEntry::Bound { function } => {
+            // The synthetic bound value stays on the creator. Only Callback's certified
+            // native operation crosses into the independent worker; the registry roots
+            // the function, owner, and projected operand until actual exit.
+            let method = Value::Method {
+                callable: function,
+                receiver: owner,
+                explicit: true,
+            };
+            let (operation, roots) = Callback::capture(ctx, &method, &[function], &[], None, true)?
+                .ok_or_else(super::thread_callback::unsupported_target)?;
+            (operation, roots, RunMode::Bound)
+        }
+    };
     let Value::Bool(daemon) = *ctx.heap.get(daemon) else {
         return Err(Error::new("TypeError", "expected a boolean daemon flag"));
     };
@@ -1107,7 +1166,7 @@ pub(super) fn prepare_start(
         ));
     }
     ctx.heap.workers.reserve_entry()?;
-    let thread = RegisteredThread { daemon, owner };
+    let thread = RegisteredThread { daemon, owner, run };
     Ok(Start::new(
         ctx,
         operation,

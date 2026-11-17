@@ -240,7 +240,11 @@ fn registered(handle: &Arc<Handle>, daemon: bool, owner: Id) -> Registration {
     Registration::Thread {
         handle: Arc::clone(handle),
         handle_id: NONE,
-        thread: RegisteredThread { daemon, owner },
+        thread: RegisteredThread {
+            daemon,
+            owner,
+            run: RunMode::Default,
+        },
     }
 }
 
@@ -332,6 +336,37 @@ fn startup_wrapper_is_a_temporary_of_the_registered_caller() {
     ] {
         ctx.set_attr(owner, name, value).unwrap();
     }
+    // Refuse unsupported functions, descriptors, and attribute hooks before consuming
+    // the handle. The same receiver must remain startable after its class is restored.
+    let other = ctx
+        .define_function(code, scope, name, defaults, name, NONE, NONE, false)
+        .unwrap();
+    let property = ctx.builtin("property");
+    let descriptor = ctx.call(property, vec![method], vec![]).unwrap();
+    for replacement in [other, descriptor] {
+        ctx.set_attr(class, "run", replacement).unwrap();
+        assert_eq!(
+            prepare_start(&mut ctx, &[owner, super::super::FALSE], &[])
+                .err()
+                .unwrap()
+                .kind,
+            "NotImplementedError"
+        );
+        handle.check_new().unwrap();
+        assert_eq!(ctx.raw_instance_field(owner, "_handle"), Some(NONE));
+        assert_eq!(ctx.raw_instance_field(owner, "_target"), Some(NONE));
+    }
+    ctx.set_attr(class, "run", method).unwrap();
+    ctx.set_attr(class, "__getattribute__", other).unwrap();
+    assert_eq!(
+        prepare_start(&mut ctx, &[owner, super::super::FALSE], &[])
+            .err()
+            .unwrap()
+            .kind,
+        "NotImplementedError"
+    );
+    handle.check_new().unwrap();
+    ctx.delete_attr(class, "__getattribute__").unwrap();
     ctx.bind(scope, "receiver", owner);
     ctx.bind(scope, "watch", watch);
     ctx.unwind_operands(setup);
@@ -375,7 +410,11 @@ fn worker_waits_for_the_creator_to_publish_its_receiver() {
     let class = ctx
         .call(metaclass, vec![name, bases, namespace], vec![])
         .unwrap();
-    for cancel in [true, false] {
+    for (cancel, run) in [
+        (true, RunMode::Default),
+        (false, RunMode::Default),
+        (false, RunMode::Bound),
+    ] {
         let owner = ctx.instance(class, None);
         let target = ctx.alloc(Value::List(Vec::new()));
         ctx.set_attr(owner, "_target", target).unwrap();
@@ -383,13 +422,17 @@ fn worker_waits_for_the_creator_to_publish_its_receiver() {
         let prefix = Arc::<PrimitiveLock>::default();
         let body = Arc::<PrimitiveLock>::default();
         assert!(prefix.acquire(false, None));
+        let mut registration = registered(&handle, false, owner);
+        if let Registration::Thread { thread, .. } = &mut registration {
+            thread.run = run;
+        }
         let request = super::Start::new(
             &ctx,
             Operation::Acquire {
                 wait: Arc::clone(&body),
                 release: Some(prefix.clone()),
             },
-            registered(&handle, false, owner),
+            registration,
             vec![target],
         );
         let (ready, entry) = super::launch(request).unwrap();
@@ -412,11 +455,10 @@ fn worker_waits_for_the_creator_to_publish_its_receiver() {
         assert!(ctx.heap.workers.entries.is_empty());
         assert_eq!(prefix.locked(), cancel);
         assert_eq!(body.locked(), !cancel);
-        if cancel {
-            assert_eq!(handle.ident(), 0);
+        assert_eq!(handle.ident(), if cancel { 0 } else { ident });
+        if cancel || run == RunMode::Bound {
             assert_eq!(ctx.lookup_attr(owner, "_target").unwrap(), target);
         } else {
-            assert_eq!(handle.ident(), ident);
             assert_eq!(
                 ctx.lookup_attr(owner, "_target").unwrap_err().kind,
                 "AttributeError"
@@ -865,6 +907,7 @@ fn registered_observers_park_through_native_tls_teardown() {
                     thread: Some(RegisteredThread {
                         owner,
                         daemon: false,
+                        run: RunMode::Default,
                     }),
                     handle: Arc::clone(&handle),
                     operands: vec![],
