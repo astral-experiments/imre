@@ -166,6 +166,24 @@ pub(in crate::dynamic) fn prepare_descriptor(
             receiver,
             size,
             flags,
+            mode: RecvMode::Bytes,
+        }));
+    }
+    if name == "recvfrom" {
+        check_args(name, args, kwargs, 2, &[])?;
+        let n = receive_size(ctx, argument(args, 0)?)?;
+        let flags = args
+            .get(1)
+            .map(|&id| ctx.index_c_int(id))
+            .transpose()?
+            .unwrap_or(0);
+        let size = usize::try_from(n)
+            .map_err(|_| Error::new("ValueError", "negative buffersize in recvfrom"))?;
+        return Ok(RegisteredCall::Recv(Recv {
+            receiver,
+            size,
+            flags,
+            mode: RecvMode::From,
         }));
     }
     let socket = socket.clone();
@@ -227,23 +245,47 @@ unsafe fn registered_read<T: Send>(
     )
 }
 
+enum RecvMode {
+    Bytes,
+    From,
+}
+
 /// The requesting frame roots the socket across the wait and any signal callbacks.
 pub(in crate::dynamic) struct Recv {
     receiver: Id,
     size: usize,
     flags: i32,
+    mode: RecvMode,
 }
 
 impl Recv {
     /// # Safety
     /// The registered caller owns the context on this thread through signal dispatch and return.
     pub(in crate::dynamic) unsafe fn run(self, context: *mut Context) -> Result<Id> {
-        let bytes = native::recv_bytes(self.size, self.flags, |read| {
-            // SAFETY: the registered frame roots the receiver. The read owns its private buffer.
-            unsafe { registered_read(self.receiver, context, read) }
-        })?;
+        let (bytes, peer) = match self.mode {
+            RecvMode::Bytes => (
+                native::recv_bytes(self.size, self.flags, |read| {
+                    // SAFETY: the registered frame roots the receiver. The buffer is private.
+                    unsafe { registered_read(self.receiver, context, read) }
+                })?,
+                None,
+            ),
+            RecvMode::From => {
+                let (bytes, peer) = native::recv_from(self.size, self.flags, |read| {
+                    // SAFETY: only the private buffer and native address enter the read.
+                    unsafe { registered_read(self.receiver, context, read) }
+                })?;
+                (bytes, Some(peer))
+            }
+        };
         // SAFETY: the native wait and its signal callbacks have returned.
-        Ok(unsafe { (&mut *context).alloc(Value::Bytes(bytes)) })
+        let ctx = unsafe { &mut *context };
+        let bytes = ctx.alloc(Value::Bytes(bytes));
+        let Some(peer) = peer else {
+            return Ok(bytes);
+        };
+        let peer = pack_socket_name(ctx, peer)?;
+        Ok(ctx.alloc(Value::Tuple(vec![bytes, peer])))
     }
 }
 
@@ -1930,7 +1972,7 @@ fn call_method(
     }
     let max = match method {
         "bind" | "listen" | "setblocking" | "settimeout" | "shutdown" => 1,
-        "recvfrom" | "send" | "sendall" => 2,
+        "send" | "sendall" => 2,
         _ => 0,
     };
     check_args(method, args, kwargs, max, &[])?;
@@ -1972,20 +2014,6 @@ fn call_method(
             &address(ctx, native::family(&s), argument(args, 0)?, method)?,
         )?,
         "shutdown" => native::shutdown(&s, integer(ctx, argument(args, 0)?)?)?,
-        "recvfrom" => {
-            let n = receive_size(ctx, argument(args, 0)?)?;
-            let flags = args
-                .get(1)
-                .map(|&id| ctx.index_c_int(id))
-                .transpose()?
-                .unwrap_or(0);
-            let size = usize::try_from(n)
-                .map_err(|_| Error::new("ValueError", "negative buffersize in recvfrom"))?;
-            let (data, peer) = native::recv_from(&s, size, flags, || ctx.dispatch_signals())?;
-            let data = ctx.alloc(Value::Bytes(data));
-            let peer = pack_socket_name(ctx, peer)?;
-            return Ok(ctx.alloc(Value::Tuple(vec![data, peer])));
-        }
         "send" | "sendall" => {
             let data = argument(args, 0)?;
             ctx.check_buffer_exporter(data)?;
