@@ -1,0 +1,1363 @@
+{
+  "status": "pending",
+  "reason": "Paired credit withheld pending a passing real poisoned-import build control in this positive launcher; matching raw results do not establish compiler soundness.",
+  "withheld_count": 339,
+  "originals": [
+    {
+      "id": "test.test_configparser.BlatantOverrideConvertersTestCase.test_converters_at_init",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.BlatantOverrideConvertersTestCase.test_inheritance",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.BlatantOverrideConvertersTestCase.test_instance_assignment",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CompatibleTestCase.test_comment_handling",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserNoValueAndExtendedInterpolationTest.test_explicit_none",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserNoValueAndExtendedInterpolationTest.test_interpolation_with_allow_no_value",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_add_section_default",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_basic",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_basic_from_dict",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_boolean",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_case_sensitivity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_case_sensitivity_mapping_access",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_clear",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_default_case_sensitivity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_defaults_keyword",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_get_after_duplicate_option_error",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_interpolation",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_interpolation_missing_value",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_invalid_multiline_value",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_items",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_parse_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_popitem",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_query_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_read_returns_file_list",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_read_returns_file_list_with_bytestring_path",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_safe_interpolation",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_set_malformatted_interpolation",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_set_nonstring_types",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_set_string_types",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_setitem",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_weird_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_write",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_basic",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_basic_from_dict",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_boolean",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_case_sensitivity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_case_sensitivity_basic",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_case_sensitivity_conflicts",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_case_sensitivity_mapping_access",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_clear",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_default_case_sensitivity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_endless_loop",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_extended_interpolation",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_get_after_duplicate_option_error",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_invalid_multiline_value",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_other_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_parse_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_popitem",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_query_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_read_returns_file_list",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_read_returns_file_list_with_bytestring_path",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_set_string_types",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_setitem",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_strange_options",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_weird_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_write",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseInvalidInterpolationType.test_error_on_wrong_type_for_interpolation",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_basic",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_basic_from_dict",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_boolean",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_case_sensitivity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_case_sensitivity_mapping_access",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_clear",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_default_case_sensitivity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_empty_case",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_get_after_duplicate_option_error",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_invalid_multiline_value",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_no_interpolation",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_none_as_default_interpolation",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_parse_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_popitem",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_query_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_read_returns_file_list",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_read_returns_file_list_with_bytestring_path",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_set_string_types",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_setitem",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_weird_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_write",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_add_section_default",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_basic",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_basic_from_dict",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_boolean",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_case_sensitivity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_case_sensitivity_mapping_access",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_clear",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_default_case_sensitivity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_defaults_keyword",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_get_after_duplicate_option_error",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_interpolation",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_interpolation_missing_value",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_items",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_parse_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_popitem",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_query_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_read_returns_file_list",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_read_returns_file_list_with_bytestring_path",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_safe_interpolation",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_set_malformatted_interpolation",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_set_nonstring_types",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_set_string_types",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_setitem",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_weird_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_write",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_add_section_default",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_basic",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_basic_from_dict",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_boolean",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_case_sensitivity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_case_sensitivity_mapping_access",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_clear",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_default_case_sensitivity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_defaults_keyword",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_get_after_duplicate_option_error",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_interpolation",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_interpolation_missing_value",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_invalid_multiline_value",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_items",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_parse_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_popitem",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_query_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_read_returns_file_list",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_read_returns_file_list_with_bytestring_path",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_safe_interpolation",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_set_malformatted_interpolation",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_set_nonstring_types",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_set_string_types",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_setitem",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_weird_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_write",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_add_section_default",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_basic",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_basic_from_dict",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_boolean",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_case_sensitivity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_case_sensitivity_mapping_access",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_clear",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_default_case_sensitivity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_defaults_keyword",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_get_after_duplicate_option_error",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_interpolation",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_interpolation_missing_value",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_invalid_multiline_value",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_items",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_parse_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_popitem",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_query_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_safe_interpolation",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_set_malformatted_interpolation",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_set_nonstring_types",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_set_string_types",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_setitem",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_weird_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_write",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseTrickyFile.test_cfgparser_dot_3",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseTrickyFile.test_unicode_failure",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_basic",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_basic_from_dict",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_boolean",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_case_sensitivity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_case_sensitivity_mapping_access",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_clear",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_converters",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_default_case_sensitivity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_get_after_duplicate_option_error",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_invalid_multiline_value",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_parse_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_popitem",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_query_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_read_returns_file_list",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_read_returns_file_list_with_bytestring_path",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_set_string_types",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_setitem",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_weird_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_write",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_basic",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_basic_from_dict",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_boolean",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_case_sensitivity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_case_sensitivity_mapping_access",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_clear",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_default_case_sensitivity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_get_after_duplicate_option_error",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_invalid_multiline_value",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_parse_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_popitem",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_query_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_read_returns_file_list",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_read_returns_file_list_with_bytestring_path",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_set_string_types",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_setitem",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_weird_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_write",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CoverageOneHundredTestCase.test_duplicate_option_error",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CoverageOneHundredTestCase.test_inconsistent_converters_state",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CoverageOneHundredTestCase.test_interpolation_depth_error",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CoverageOneHundredTestCase.test_interpolation_validation",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CoverageOneHundredTestCase.test_parsing_error",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CoverageOneHundredTestCase.test_sectionproxy_repr",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionContextTestCase.test_get_basic_interpolation",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionContextTestCase.test_get_extended_interpolation",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionContextTestCase.test_missing_options",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionContextTestCase.test_missing_section",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionContextTestCase.test_remove_option",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionPicklingTestCase.test_combine_error_linear_complexity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionPicklingTestCase.test_duplicateoptionerror",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionPicklingTestCase.test_duplicatesectionerror",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionPicklingTestCase.test_error",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionPicklingTestCase.test_interpolationdeptherror",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionPicklingTestCase.test_interpolationerror",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionPicklingTestCase.test_interpolationmissingoptionerror",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionPicklingTestCase.test_interpolationsyntaxerror",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionPicklingTestCase.test_missingsectionheadererror",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionPicklingTestCase.test_nooptionerror",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionPicklingTestCase.test_nosectionerror",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionPicklingTestCase.test_parsingerror",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.InlineCommentStrippingTestCase.test_stripping",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.InvalidInputTestCase.test_delimiter_in_key",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.InvalidInputTestCase.test_section_bracket_in_key",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.Issue7005TestCase.test_none_as_value_stringified",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.Issue7005TestCase.test_none_as_value_stringified_raw",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MiscTestCase.test__all__",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_basic",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_basic_from_dict",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_boolean",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_case_sensitivity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_case_sensitivity_mapping_access",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_clear",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_default_case_sensitivity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_dominating_multiline_values",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_get_after_duplicate_option_error",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_invalid_multiline_value",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_parse_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_popitem",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_query_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_read_returns_file_list",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_read_returns_file_list_with_bytestring_path",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_set_string_types",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_setitem",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_weird_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_write",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserNoValueAndExtendedInterpolationTest.test_explicit_none",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserNoValueAndExtendedInterpolationTest.test_interpolation_with_allow_no_value",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_basic",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_basic_from_dict",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_boolean",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_case_sensitivity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_case_sensitivity_mapping_access",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_clear",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_default_case_sensitivity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_defaults_keyword",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_get_after_duplicate_option_error",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_interpolation",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_invalid_multiline_value",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_items",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_parse_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_popitem",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_query_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_read_returns_file_list",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_read_returns_file_list_with_bytestring_path",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_set_nonstring_types",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_set_string_types",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_setitem",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_weird_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_write",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_basic",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_basic_from_dict",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_boolean",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_case_sensitivity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_case_sensitivity_mapping_access",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_clear",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_default_case_sensitivity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_defaults_keyword",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_get_after_duplicate_option_error",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_interpolation",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_invalid_multiline_value",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_items",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_parse_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_popitem",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_query_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_set_nonstring_types",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_set_string_types",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_setitem",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_weird_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_write",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestSambaConf.test_reading",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ReDoSTestCase.test_option_regex_does_not_backtrack",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ReDoSTestCase.test_option_regex_no_value_does_not_backtrack",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ReadFileTestCase.test_file",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ReadFileTestCase.test_iterable",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ReadFileTestCase.test_keys_without_value_with_extra_whitespace",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ReadFileTestCase.test_readline_generator",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ReadFileTestCase.test_source_as_bytes",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SectionlessTestCase.test_add_section",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SectionlessTestCase.test_disabled_error",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SectionlessTestCase.test_empty_unnamed_section",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SectionlessTestCase.test_multiple_configs",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SectionlessTestCase.test_no_first_section",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SectionlessTestCase.test_no_section",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_basic",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_basic_from_dict",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_boolean",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_case_sensitivity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_case_sensitivity_mapping_access",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_clear",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_default_case_sensitivity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_defaults_keyword",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_get_after_duplicate_option_error",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_interpolation",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_invalid_multiline_value",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_items",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_parse_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_popitem",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_query_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_read_returns_file_list",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_read_returns_file_list_with_bytestring_path",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_set_nonstring_types",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_set_string_types",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_setitem",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_sorted",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_weird_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_write",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_basic",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_basic_from_dict",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_boolean",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_case_sensitivity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_case_sensitivity_mapping_access",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_clear",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_default_case_sensitivity",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_get_after_duplicate_option_error",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_invalid_multiline_value",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_parse_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_popitem",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_query_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_read_returns_file_list",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_read_returns_file_list_with_bytestring_path",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_set_string_types",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_setitem",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_weird_errors",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_write",
+      "occurrence": 1
+    }
+  ]
+}

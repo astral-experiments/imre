@@ -1,0 +1,75 @@
+{
+  "status": "pending",
+  "reason": "Paired credit withheld pending a passing real poisoned-import build control in this positive launcher; native pass observations are retained but native compilation of the original bodies is not yet established.",
+  "withheld_count": 17,
+  "originals": [
+    {
+      "id": "test.test_tomllib.test_data.TestData.test_invalid",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_tomllib.test_data.TestData.test_valid",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_tomllib.test_error.TestError.test_deprecated_tomldecodeerror",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_tomllib.test_error.TestError.test_invalid_char_quotes",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_tomllib.test_error.TestError.test_invalid_parse_float",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_tomllib.test_error.TestError.test_line_and_col",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_tomllib.test_error.TestError.test_missing_value",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_tomllib.test_error.TestError.test_module_name",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_tomllib.test_error.TestError.test_tomldecodeerror",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_tomllib.test_error.TestError.test_type_error",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_tomllib.test_misc.TestMiscellaneous.test_deepcopy",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_tomllib.test_misc.TestMiscellaneous.test_incorrect_load",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_tomllib.test_misc.TestMiscellaneous.test_inline_array_recursion_limit",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_tomllib.test_misc.TestMiscellaneous.test_inline_table_recursion_limit",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_tomllib.test_misc.TestMiscellaneous.test_load",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_tomllib.test_misc.TestMiscellaneous.test_parse_float",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_tomllib.test_misc.TestMiscellaneous.test_types_import",
+      "occurrence": 1
+    }
+  ]
+}
