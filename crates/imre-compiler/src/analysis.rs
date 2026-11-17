@@ -1563,7 +1563,7 @@ impl Session {
             sources
                 .clone()
                 .filter(|(_, source)| source.check_execution)
-                .map(|(id, source)| (id, source.path, source.has_open_exec)),
+                .map(|(id, source)| (id, source.path, source.has_open_exec, source.linked_exec)),
             captures,
         );
         let files = self.check_run_path_callers(sources, has_file_body);

@@ -74,7 +74,11 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<ExitCode, String> {
-    let mut args = std::env::args_os().skip(1).peekable();
+    let mut args = std::env::args_os()
+        .skip(1)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .peekable();
     let command = args.next().ok_or(USAGE)?;
     if command == "--help" || command == "-h" {
         println!("{USAGE}");
@@ -187,8 +191,13 @@ fn run() -> Result<ExitCode, String> {
             eprintln!("imre: can't open file '{}': {error}", path.display());
             return Ok(ExitCode::from(2));
         }
+        let links_argument_source = matches!(&invocation, python_command::Invocation::Command(command) if command.source.contains("exec"));
         let mut options = BuildOptions::for_python(invocation)?;
         options.compile.include_modules.extend(include_modules);
+        if links_argument_source {
+            options.compile.launcher_arguments =
+                args.clone().map(|arg| arg.into_string().ok()).collect();
+        }
         (options, true)
     } else {
         return Err(USAGE.to_owned());

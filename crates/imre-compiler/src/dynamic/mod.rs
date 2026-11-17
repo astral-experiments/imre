@@ -230,6 +230,7 @@ struct LiteralImports {
     origins: HashMap<usize, (bool, bool, ImportOrigin)>,
     seeded_winners: usize,
     open_exec: HashSet<usize>,
+    linked_exec: HashMap<usize, HashSet<TextRange>>,
 }
 
 impl LiteralImports {
@@ -947,6 +948,7 @@ pub(crate) enum EntryStart<'a> {
 #[derive(Clone, Copy)]
 pub(crate) struct RegisteredSource<'a> {
     pub(crate) has_open_exec: bool,
+    pub(crate) linked_exec: Option<&'a HashSet<TextRange>>,
     pub(crate) unit: Option<usize>,
     /// The first application initializer and its selected startup predecessor, if any.
     pub(crate) initial: Option<EntryStart<'a>>,
@@ -996,6 +998,7 @@ impl<'a> RegisteredSource<'a> {
     ) -> Self {
         Self {
             has_open_exec: false,
+            linked_exec: None,
             unit: None,
             name,
             path,
@@ -1543,7 +1546,15 @@ pub(crate) fn compile(
                         source.as_str(),
                         flags,
                         &candidates,
+                        &options.launcher_arguments,
                     );
+                    if !options.launcher_arguments.is_empty() && !sites.is_empty() {
+                        literals
+                            .linked_exec
+                            .entry(unit)
+                            .or_default()
+                            .extend(sites.iter().map(|(site, _)| site.call));
+                    }
                     let names = literals.forest.record_root(unit, sites);
                     imports.push((unit, names));
                 }
@@ -2620,6 +2631,7 @@ pub(crate) fn compile(
                 }
             }
             registration.has_open_exec = literals.open_exec.contains(&id);
+            registration.linked_exec = literals.linked_exec.get(&id);
             registration.unit = output.is_some().then_some(id);
             registration.declares_signatures = application;
             if application && let Some(graph) = checked_graph {
@@ -3015,8 +3027,25 @@ fn add_late_bundled_imports(
             }
         }
     }
-    if computed_import && !seen.contains("xml.parsers.expat") {
-        imports.names.push((0, "xml.parsers.expat".to_owned()));
+    if computed_import {
+        for name in [
+            "cmd",
+            "graphlib",
+            "html",
+            "http.cookies",
+            "ipaddress",
+            "shlex",
+            "statistics",
+            "wave",
+            "xml.etree.ElementTree",
+            "xml.parsers.expat",
+        ] {
+            if !seen.contains(name) {
+                imports.add(0, name);
+            }
+        }
+    } else if uses_exec && !seen.contains("xml") {
+        imports.add(0, "xml");
     }
     // Register the mock provider for imports from source-loaded modules.
     if uses_import_builtin && seen.contains("unittest") && !seen.contains("unittest.mock") {

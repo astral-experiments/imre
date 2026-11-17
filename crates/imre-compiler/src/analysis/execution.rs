@@ -167,6 +167,7 @@ struct Escape<'a, 'db> {
     guarded_names: Vec<TextRange>,
     session: &'db Session,
     open_providers: &'a [File],
+    linked_exec: Option<&'a std::collections::HashSet<TextRange>>,
     path: &'a Path,
     first: Option<ExecutionRequirement>,
     captured: FunctionImports,
@@ -849,7 +850,10 @@ impl<'a> Escape<'a, '_> {
                     || self
                         .session
                         .selected_exec_literal(self.model.file(), self.parsed, self.model, call)
-                        .is_some()))
+                        .is_some()
+                    || self
+                        .linked_exec
+                        .is_some_and(|sites| sites.contains(&call.range()))))
             && !self.has_executable_entry(operand)
         {
             self.first = Some(self.required(
@@ -1034,6 +1038,37 @@ impl Session {
         selected_module_exec_literal(model, file, parsed, call)
     }
 
+    /// The launcher can link the initial text of a fixed sys.argv operand. The
+    /// runtime still evaluates the operand and checks its exact text at the call.
+    fn selected_launcher_exec_source<'a>(
+        &self,
+        file: File,
+        parsed: &ParsedModuleRef,
+        model: &SemanticModel<'_>,
+        call: &ExprCall,
+        arguments: &'a [Option<String>],
+    ) -> Option<&'a str> {
+        if self.reads_custom_builtins(file, parsed, &call.func)
+            || ExecutionIntrinsic::resolve(model, &call.func) != Some(ExecutionIntrinsic::Exec)
+        {
+            return None;
+        }
+        let operand = crate::frontend::exec_source_operand(call)?.as_subscript_expr()?;
+        let argv = operand.value.as_attribute_expr()?;
+        if argv.attr.as_str() != "argv"
+            || !matches!(argv.value.inferred_type(model), Some(Type::ModuleLiteral(module))
+                if module.module(&self.db).name(&self.db).as_str() == "sys")
+        {
+            return None;
+        }
+        let ruff_python_ast::Number::Int(index) = &operand.slice.as_number_literal_expr()?.value
+        else {
+            return None;
+        };
+        let index = usize::try_from(index.as_i64()?).ok()?.checked_sub(1)?;
+        arguments.get(index)?.as_deref()
+    }
+
     pub(crate) fn fixed_exec_call(&self, module: usize, call: &ExprCall) -> bool {
         let Some(operand) = crate::frontend::exec_source_operand(call) else {
             return false;
@@ -1056,6 +1091,7 @@ impl Session {
         source: &str,
         inherited_flags: u32,
         candidates: &[TextRange],
+        launcher_arguments: &[Option<String>],
     ) -> Vec<(LiteralSite, Result<ParsedLiteral, String>)> {
         use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
         if candidates.is_empty() {
@@ -1073,21 +1109,31 @@ impl Session {
                 if call.range() != range {
                     return None;
                 }
-                let literal = self.selected_exec_literal(parent, parsed, &model, call)?;
                 let operand = call.arguments.args.first()?.start();
-                let module = crate::frontend::exec_literal_text(literal, source)
-                    .map_err(str::to_owned)
-                    .and_then(|original| {
-                        let (file, text, parsed) =
-                            checked_literal_source(&self.db, parent, operand, original)?;
-                        Ok(ParsedLiteral::new(
-                            file,
-                            text,
-                            original,
-                            parsed,
-                            inherited_flags,
-                        ))
-                    });
+                let original = if let Some(literal) =
+                    self.selected_exec_literal(parent, parsed, &model, call)
+                {
+                    crate::frontend::exec_literal_text(literal, source).map_err(str::to_owned)
+                } else {
+                    Ok(self.selected_launcher_exec_source(
+                        parent,
+                        parsed,
+                        &model,
+                        call,
+                        launcher_arguments,
+                    )?)
+                };
+                let module = original.and_then(|original| {
+                    let (file, text, parsed) =
+                        checked_literal_source(&self.db, parent, operand, original)?;
+                    Ok(ParsedLiteral::new(
+                        file,
+                        text,
+                        original,
+                        parsed,
+                        inherited_flags,
+                    ))
+                });
                 Some((
                     LiteralSite {
                         call: range,
@@ -1140,6 +1186,7 @@ impl Session {
             guarded_names: Vec::new(),
             session: self,
             open_providers: &[],
+            linked_exec: None,
             path,
             first: None,
             captured: Default::default(),
@@ -1260,21 +1307,28 @@ impl Session {
         sources: impl Iterator<Item = (usize, &'a std::path::Path)> + Clone,
     ) -> Result<(), String> {
         self.check_execution_with_imports(
-            sources.map(|(id, path)| (id, path, false)),
+            sources.map(|(id, path)| (id, path, false, None)),
             CapturedImports::default(),
         )
     }
 
     pub(super) fn check_execution_with_imports<'a>(
         &self,
-        sources: impl Iterator<Item = (usize, &'a Path, bool)> + Clone,
+        sources: impl Iterator<
+            Item = (
+                usize,
+                &'a Path,
+                bool,
+                Option<&'a std::collections::HashSet<TextRange>>,
+            ),
+        > + Clone,
         mut captures: CapturedImports,
     ) -> Result<(), String> {
         let open_providers: Vec<_> = sources
             .clone()
-            .filter_map(|(id, _, open)| open.then_some(self.files[id]))
+            .filter_map(|(id, _, open, _)| open.then_some(self.files[id]))
             .collect();
-        for (index, path, _) in sources {
+        for (index, path, _, linked_exec) in sources {
             let file = self.files[index];
             if path.extension().is_some_and(|extension| extension == "pyi") {
                 continue;
@@ -1284,6 +1338,7 @@ impl Session {
             let model = SemanticModel::new(&self.db, source);
             let mut visitor = self.execution_visitor(path, &parsed, &model);
             visitor.open_providers = &open_providers;
+            visitor.linked_exec = linked_exec;
             let mut body = parsed.suite().as_slice();
             if let Some(imports) = captures.remove(&index) {
                 if let Some(stop) = imports.stop {

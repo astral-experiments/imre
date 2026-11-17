@@ -187,6 +187,7 @@ impl LiteralForest {
                 &source.text,
                 source.flags,
                 &source.candidates,
+                &[],
             );
             let names = self.record(Parent::Literal(index), unit, sites);
             if !names.is_empty() {

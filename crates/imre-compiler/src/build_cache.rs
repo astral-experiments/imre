@@ -595,7 +595,7 @@ impl Cache {
                 options.path_entry,
                 options.python_startup(),
                 (&options.extension_paths, &options.pythonpath),
-                &options.include_modules,
+                (&options.include_modules, &options.launcher_arguments),
                 &options.python_archive_indices,
                 (&options.stdlib_dir, &options.site_dirs),
                 (&options.user_site_pth, &options.venv_site_pth),
