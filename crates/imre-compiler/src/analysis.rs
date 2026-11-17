@@ -177,6 +177,10 @@ pub(crate) struct Session {
     hint_reads: Cell<usize>,
     /// Explicit checks can report conversions that executables perform at runtime.
     pub(crate) explicit_check: bool,
+    python_optimization: i32,
+    eval_entries: std::cell::RefCell<
+        HashMap<File, HashMap<TextRange, std::rc::Rc<crate::dynamic::PreparedEval>>>,
+    >,
 }
 
 /// The fixed checker's declaration proof can be consumed by more than one
@@ -282,6 +286,14 @@ impl RegisteredLayouts {
 
     pub(crate) fn is_empty(&self) -> bool {
         self.modules.is_empty()
+    }
+
+    pub(crate) fn take_eval_entries(
+        &mut self,
+        unit: usize,
+    ) -> Option<HashMap<TextRange, std::rc::Rc<crate::dynamic::PreparedEval>>> {
+        let file = self.session.files[*self.modules.get(&unit)?];
+        self.session.eval_entries.borrow_mut().remove(&file)
     }
 
     pub(crate) fn take(&mut self, unit: usize) -> Option<OperandTypes<'_>> {
@@ -822,6 +834,7 @@ pub(crate) fn check_registered_project<'a>(
                 .any(|winner| winner.matches_bundled_source(path))
         }),
     )?;
+    session.python_optimization = sources.clone().next().map_or(0, |s| s.python_optimization);
     let mut paths = Vec::with_capacity(capacity);
     for (path, source) in declarations {
         session.register_file(path, source, crate::SourceKind::File)?;
@@ -1586,6 +1599,21 @@ impl Session {
 }
 
 impl Session {
+    fn prepare_eval_entry(&self, file: File, site: TextRange, text: &str) -> Result<(), String> {
+        let mut entries = self.eval_entries.borrow_mut();
+        let file_entries = entries.entry(file).or_default();
+        if !file_entries.contains_key(&site) {
+            file_entries.insert(
+                site,
+                std::rc::Rc::new(crate::dynamic::PreparedEval::new(
+                    text,
+                    self.python_optimization,
+                )?),
+            );
+        }
+        Ok(())
+    }
+
     pub(crate) fn registered_syntax<'a>(
         slot: &'a mut Option<Self>,
         root: &Path,
@@ -1984,6 +2012,8 @@ impl Session {
             extension_roots: extension_roots.to_vec(),
             hint_reads: Cell::new(0),
             explicit_check: false,
+            python_optimization: 0,
+            eval_entries: Default::default(),
         })
     }
 

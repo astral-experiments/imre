@@ -1024,6 +1024,30 @@ struct SourceInfo<'a> {
     text: Cow<'a, str>,
 }
 
+/// A checked eval entry owned by its source unit from checking through emission.
+pub(crate) struct PreparedEval {
+    text: String,
+    body: crate::frontend::AnnotationBody<Box<SourceInfo<'static>>>,
+}
+
+impl PreparedEval {
+    pub(crate) fn new(text: &str, optimization: i32) -> Result<Self, String> {
+        crate::analysis::check_source_complexity(text).map_err(str::to_owned)?;
+        let parsed = ruff_python_parser::parse_expression(text)
+            .map_err(|error| format!("SyntaxError: {error}"))?;
+        let body = PreparedBody::prepare_annotation(text, &parsed, optimization)
+            .ok_or_else(|| "cannot compile this eval expression ahead of time".to_owned())?;
+        Ok(Self {
+            text: text.to_owned(),
+            body,
+        })
+    }
+
+    pub(super) fn text(&self) -> &str {
+        &self.text
+    }
+}
+
 impl SourceInfo<'_> {
     fn literal_diagnostic(&self, site: TextSize, reason: &str) -> String {
         crate::frontend::phase::Diagnostic::at(&self.text, &TextRange::empty(site), reason)
@@ -1323,7 +1347,7 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
         for child in children {
             let path = match &child {
                 LiteralBody::Suite(child) => child.file.as_deref(),
-                LiteralBody::Expression(_) => None,
+                LiteralBody::Expression(_, _) => None,
             };
             let file = match path {
                 Some(path) => output.data(path.as_os_str().as_encoded_bytes()),
@@ -1346,15 +1370,17 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
                         false,
                     )
                 }
-                LiteralBody::Expression(text) => {
-                    crate::analysis::check_source_complexity(text).ok()?;
-                    let parsed = ruff_python_parser::parse_expression(text).ok()?;
-                    let body = PreparedBody::prepare_annotation(
-                        text,
-                        &parsed,
-                        self.source.python_optimization,
-                    )?;
-                    let code = body.emit(output, self.source.unit, &file);
+                LiteralBody::Expression(text, checked) => {
+                    let prepared;
+                    let checked = match checked {
+                        Some(checked) => checked,
+                        None => {
+                            prepared =
+                                PreparedEval::new(text, self.source.python_optimization).ok()?;
+                            &prepared
+                        }
+                    };
+                    let code = checked.body.emit(output, self.source.unit, &file);
                     (code, text, self.source.future_flags, true)
                 }
             };

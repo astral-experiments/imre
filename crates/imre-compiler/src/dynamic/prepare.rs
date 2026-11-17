@@ -104,7 +104,15 @@ pub(super) fn units<'a>(
             let checked = checked_units.get(&unit);
             let file = checked.and_then(|unit| unit.source);
             let module_id = checked.and_then(|unit| unit.module);
-            let literals = literal_sites.remove(&unit);
+            let mut literals = literal_sites.remove(&unit);
+            if let Some(expressions) = layouts
+                .iter_mut()
+                .find_map(|layout| layout.take_eval_entries(unit))
+            {
+                literals
+                    .get_or_insert_with(Default::default)
+                    .extend_expressions(expressions);
+            }
             let scanned = scanned_modules.remove(&unit);
             let discovered = entry_source
                 .take()

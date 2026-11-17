@@ -8,7 +8,7 @@ use ruff_python_ast::visitor::Visitor;
 use ruff_text_size::{TextRange, TextSize};
 
 use super::Imports;
-use super::emit::{ModuleOrigin, PreparedBody};
+use super::emit::{ModuleOrigin, PreparedBody, PreparedEval};
 use crate::analysis::Session;
 use crate::frontend::module_source::ParsedModule;
 
@@ -30,7 +30,7 @@ pub(crate) struct LiteralCandidate {
 /// The selected source is either a prepared suite or a checked literal expression.
 pub(super) enum LiteralBody<'a> {
     Suite(&'a PreparedLiteral),
-    Expression(&'a str),
+    Expression(&'a str, Option<&'a PreparedEval>),
 }
 
 pub(super) struct PreparedLiteral {
@@ -45,6 +45,7 @@ pub(super) struct PreparedLiteral {
 #[derive(Default)]
 pub(crate) struct LiteralSites {
     sites: HashMap<TextRange, Result<Vec<PreparedLiteral>, (TextSize, String)>>,
+    expressions: HashMap<TextRange, std::rc::Rc<PreparedEval>>,
 }
 
 impl LiteralSites {
@@ -59,10 +60,24 @@ impl LiteralSites {
             Some(Err((operand, reason))) => return Some(Err((*operand, reason.as_str()))),
             None => (&[][..], Some(expression?)),
         };
-        Some(Ok(suites
-            .iter()
-            .map(LiteralBody::Suite)
-            .chain(expression.map(LiteralBody::Expression))))
+        Some(Ok(suites.iter().map(LiteralBody::Suite).chain(
+            expression.map(|text| {
+                LiteralBody::Expression(
+                    text,
+                    self.expressions
+                        .get(&site)
+                        .filter(|entry| entry.text() == text)
+                        .map(|entry| entry.as_ref()),
+                )
+            }),
+        )))
+    }
+
+    pub(super) fn extend_expressions(
+        &mut self,
+        expressions: HashMap<TextRange, std::rc::Rc<PreparedEval>>,
+    ) {
+        self.expressions.extend(expressions);
     }
 
     fn insert(&mut self, site: LiteralSite, body: Result<PreparedLiteral, String>) {

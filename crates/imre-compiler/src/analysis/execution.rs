@@ -842,6 +842,25 @@ impl<'a> Escape<'a, '_> {
         if self.first.is_some() {
             return;
         }
+        if source_callable == Some(SourceCallable::Builtin(ExecutionIntrinsic::Eval))
+            && call
+                .func
+                .as_name_expr()
+                .is_some_and(|name| name.id == "eval")
+            && let Some(Expr::StringLiteral(literal)) = call.arguments.args.first()
+            && let Err(reason) = self.session.prepare_eval_entry(
+                self.model.file(),
+                call.range(),
+                literal.value.to_str(),
+            )
+        {
+            self.first = Some(self.required(
+                SourceCallable::Builtin(ExecutionIntrinsic::Eval),
+                literal.range(),
+                format!("cannot prepare a checked builtins.eval entry: {reason}"),
+            ));
+            return;
+        }
         if let Some(source_callable) = source_callable
             && let Some(operand) = call.arguments.args.first()
             && !(source_callable == SourceCallable::Builtin(ExecutionIntrinsic::Eval)
