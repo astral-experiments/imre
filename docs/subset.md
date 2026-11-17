@@ -1678,6 +1678,23 @@ explicit task `context=`, context iteration and mapping equality remain outside
 the subset. See the [contextvars scope and CPython evidence](../benchmarks/cpython_stdlib/full/contextvars/README.md)
 for value layouts and test roles.
 
+### Future work: shared Python objects in thread workers
+
+Imre admits certified independent thread workers. Python worker entries run in
+fresh private boxed heaps and can capture only locks or selected builtins. A
+program containing `Thread(target=peer.recv, args=(1,))`, or a target that
+mutates a captured list or dictionary, can pass checking and compilation but
+currently raises `NotImplementedError` at `Thread.start()` in Imre.
+
+Generic socket- or fd-bearing workers and shared mutable identity are future
+work. The milestone is one checked compiled entry in which the creator and
+worker observe the same Python objects and aliases, with explicit ownership,
+rooting, reentry, and shutdown rules. It must not copy mutable objects or rely
+on target-specific whitelists.
+
+Parking a blocking socket `send` is a separate I/O safety and performance step;
+it cannot by itself admit a socket-bearing worker.
+
 ### Native asyncio subprocesses
 
 Typed coroutines support `await`, `asyncio.TaskGroup`, `asyncio.gather` and `asyncio.Semaphore` for subprocess-backed work. A coroutine starts when it is awaited or scheduled. A callback with an `Awaitable[T]` return type must be an `async def` function. A synchronous function that creates a coroutine can be called directly. A task retains its result across awaits. Exceptions returned by `gather(..., return_exceptions=True)` retain their positions among the results. Standard output and standard error are drained concurrently. Ruff’s live ecosystem checker also exercises loop signal handlers, `functools.cache`, suspended generator context managers, and `TemporaryDirectory` cleanup on exception paths.
