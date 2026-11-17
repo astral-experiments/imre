@@ -1,0 +1,286 @@
+test_clear_cache (test.test_zoneinfo.test_zoneinfo.CCallingConventionTest.test_clear_cache) ... ok
+test_from_file (test.test_zoneinfo.test_zoneinfo.CCallingConventionTest.test_from_file) ... ok
+test_bad_keys (test.test_zoneinfo.test_zoneinfo.CTZDataTests.test_bad_keys) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_bad_keys_paths (test.test_zoneinfo.test_zoneinfo.CTZDataTests.test_bad_keys_paths) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_bad_zones (test.test_zoneinfo.test_zoneinfo.CTZDataTests.test_bad_zones) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_cache_exception (test.test_zoneinfo.test_zoneinfo.CTZDataTests.test_cache_exception) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_folds_and_gaps (test.test_zoneinfo.test_zoneinfo.CTZDataTests.test_folds_and_gaps) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_folds_from_utc (test.test_zoneinfo.test_zoneinfo.CTZDataTests.test_folds_from_utc) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_fromutc_errors (test.test_zoneinfo.test_zoneinfo.CTZDataTests.test_fromutc_errors) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_key_attribute (test.test_zoneinfo.test_zoneinfo.CTZDataTests.test_key_attribute) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_repr (test.test_zoneinfo.test_zoneinfo.CTZDataTests.test_repr) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_str (test.test_zoneinfo.test_zoneinfo.CTZDataTests.test_str) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_time_fixed_offset (test.test_zoneinfo.test_zoneinfo.CTZDataTests.test_time_fixed_offset) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_time_variable_offset (test.test_zoneinfo.test_zoneinfo.CTZDataTests.test_time_variable_offset) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_unambiguous (test.test_zoneinfo.test_zoneinfo.CTZDataTests.test_unambiguous) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_utc (test.test_zoneinfo.test_zoneinfo.CTZDataTests.test_utc) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_extreme_tzstr (test.test_zoneinfo.test_zoneinfo.CTZStrTest.test_extreme_tzstr) ... ok
+test_invalid_tzstr (test.test_zoneinfo.test_zoneinfo.CTZStrTest.test_invalid_tzstr) ... ok
+test_tzstr_from_utc (test.test_zoneinfo.test_zoneinfo.CTZStrTest.test_tzstr_from_utc) ... ok
+test_tzstr_localized (test.test_zoneinfo.test_zoneinfo.CTZStrTest.test_tzstr_localized) ... ok
+test_available_timezones (test.test_zoneinfo.test_zoneinfo.CTestModule.test_available_timezones) ... ok
+test_available_timezones_weirdzone (test.test_zoneinfo.test_zoneinfo.CTestModule.test_available_timezones_weirdzone) ... ok
+test_dir_contains_all (test.test_zoneinfo.test_zoneinfo.CTestModule.test_dir_contains_all)
+dir(self.module) should at least contain everything in __all__. ... ok
+test_dir_unique (test.test_zoneinfo.test_zoneinfo.CTestModule.test_dir_unique)
+Test that there are no duplicates in dir(self.module) ... ok
+test_exclude_posixrules (test.test_zoneinfo.test_zoneinfo.CTestModule.test_exclude_posixrules) ... ok
+test_folder_exclusions (test.test_zoneinfo.test_zoneinfo.CTestModule.test_folder_exclusions) ... ok
+test_getattr_error (test.test_zoneinfo.test_zoneinfo.CTestModule.test_getattr_error) ... ok
+test_env_variable (test.test_zoneinfo.test_zoneinfo.CTzPathTest.test_env_variable)
+Tests that the environment variable works with reset_tzpath. ... ok
+test_env_variable_relative_paths (test.test_zoneinfo.test_zoneinfo.CTzPathTest.test_env_variable_relative_paths) ... ok
+test_env_variable_relative_paths_warning_location (test.test_zoneinfo.test_zoneinfo.CTzPathTest.test_env_variable_relative_paths_warning_location) ... ok
+test_reset_tzpath_kwarg (test.test_zoneinfo.test_zoneinfo.CTzPathTest.test_reset_tzpath_kwarg) ... ok
+test_reset_tzpath_relative_paths (test.test_zoneinfo.test_zoneinfo.CTzPathTest.test_reset_tzpath_relative_paths) ... ok
+test_tzpath_attribute (test.test_zoneinfo.test_zoneinfo.CTzPathTest.test_tzpath_attribute) ... ok
+test_tzpath_type_error (test.test_zoneinfo.test_zoneinfo.CTzPathTest.test_tzpath_type_error) ... ok
+test_empty_zone (test.test_zoneinfo.test_zoneinfo.CWeirdZoneTest.test_empty_zone) ... ok
+test_fixed_offset_phantom_transition (test.test_zoneinfo.test_zoneinfo.CWeirdZoneTest.test_fixed_offset_phantom_transition) ... ok
+test_invalid_transition_index (test.test_zoneinfo.test_zoneinfo.CWeirdZoneTest.test_invalid_transition_index) ... ok
+test_no_tz_str (test.test_zoneinfo.test_zoneinfo.CWeirdZoneTest.test_no_tz_str) ... ok
+test_one_transition (test.test_zoneinfo.test_zoneinfo.CWeirdZoneTest.test_one_transition) ... ok
+test_one_zone_dst (test.test_zoneinfo.test_zoneinfo.CWeirdZoneTest.test_one_zone_dst) ... ok
+test_transition_lookahead_out_of_bounds (test.test_zoneinfo.test_zoneinfo.CWeirdZoneTest.test_transition_lookahead_out_of_bounds) ... ok
+test_tz_before_only (test.test_zoneinfo.test_zoneinfo.CWeirdZoneTest.test_tz_before_only) ... ok
+test_zone_very_large_timestamp (test.test_zoneinfo.test_zoneinfo.CWeirdZoneTest.test_zone_very_large_timestamp)
+Test when a transition is in the far past or future. ... ok
+test_cache_reset_tzpath (test.test_zoneinfo.test_zoneinfo.CZoneInfoCacheTest.test_cache_reset_tzpath)
+Test that the cache persists when tzpath has been changed. ... ok
+test_clear_cache_explicit_none (test.test_zoneinfo.test_zoneinfo.CZoneInfoCacheTest.test_clear_cache_explicit_none) ... ok
+test_clear_cache_one_key (test.test_zoneinfo.test_zoneinfo.CZoneInfoCacheTest.test_clear_cache_one_key)
+Tests that you can clear a single key from the cache. ... ok
+test_clear_cache_refleak (test.test_zoneinfo.test_zoneinfo.CZoneInfoCacheTest.test_clear_cache_refleak) ... ok
+test_clear_cache_two_keys (test.test_zoneinfo.test_zoneinfo.CZoneInfoCacheTest.test_clear_cache_two_keys) ... ok
+test_deleted_weak_cache (test.test_zoneinfo.test_zoneinfo.CZoneInfoCacheTest.test_deleted_weak_cache) ... ok
+test_ephemeral_zones (test.test_zoneinfo.test_zoneinfo.CZoneInfoCacheTest.test_ephemeral_zones) ... ok
+test_inconsistent_weak_cache_get (test.test_zoneinfo.test_zoneinfo.CZoneInfoCacheTest.test_inconsistent_weak_cache_get) ... ok
+test_inconsistent_weak_cache_setdefault (test.test_zoneinfo.test_zoneinfo.CZoneInfoCacheTest.test_inconsistent_weak_cache_setdefault) ... ok
+test_no_cache (test.test_zoneinfo.test_zoneinfo.CZoneInfoCacheTest.test_no_cache) ... ok
+test_strong_refs (test.test_zoneinfo.test_zoneinfo.CZoneInfoCacheTest.test_strong_refs) ... ok
+test_weak_cache_descriptor_use_after_free (test.test_zoneinfo.test_zoneinfo.CZoneInfoCacheTest.test_weak_cache_descriptor_use_after_free) ... ok
+test_bad_keys (test.test_zoneinfo.test_zoneinfo.CZoneInfoDatetimeSubclassTest.test_bad_keys) ... ok
+test_bad_keys_paths (test.test_zoneinfo.test_zoneinfo.CZoneInfoDatetimeSubclassTest.test_bad_keys_paths) ... ok
+test_bad_zones (test.test_zoneinfo.test_zoneinfo.CZoneInfoDatetimeSubclassTest.test_bad_zones) ... ok
+test_cache_exception (test.test_zoneinfo.test_zoneinfo.CZoneInfoDatetimeSubclassTest.test_cache_exception) ... ok
+test_fold_mutate (test.test_zoneinfo.test_zoneinfo.CZoneInfoDatetimeSubclassTest.test_fold_mutate)
+Test that fold isn't mutated when no change is necessary. ... ok
+test_folds_and_gaps (test.test_zoneinfo.test_zoneinfo.CZoneInfoDatetimeSubclassTest.test_folds_and_gaps) ... ok
+test_folds_from_utc (test.test_zoneinfo.test_zoneinfo.CZoneInfoDatetimeSubclassTest.test_folds_from_utc) ... ok
+test_fromutc_errors (test.test_zoneinfo.test_zoneinfo.CZoneInfoDatetimeSubclassTest.test_fromutc_errors) ... ok
+test_key_attribute (test.test_zoneinfo.test_zoneinfo.CZoneInfoDatetimeSubclassTest.test_key_attribute) ... ok
+test_repr (test.test_zoneinfo.test_zoneinfo.CZoneInfoDatetimeSubclassTest.test_repr) ... ok
+test_signatures (test.test_zoneinfo.test_zoneinfo.CZoneInfoDatetimeSubclassTest.test_signatures)
+Ensure that C module has valid method signatures. ... ok
+test_str (test.test_zoneinfo.test_zoneinfo.CZoneInfoDatetimeSubclassTest.test_str) ... ok
+test_time_fixed_offset (test.test_zoneinfo.test_zoneinfo.CZoneInfoDatetimeSubclassTest.test_time_fixed_offset) ... ok
+test_time_variable_offset (test.test_zoneinfo.test_zoneinfo.CZoneInfoDatetimeSubclassTest.test_time_variable_offset) ... ok
+test_unambiguous (test.test_zoneinfo.test_zoneinfo.CZoneInfoDatetimeSubclassTest.test_unambiguous) ... ok
+test_utc (test.test_zoneinfo.test_zoneinfo.CZoneInfoDatetimeSubclassTest.test_utc) ... ok
+test_cache_hit (test.test_zoneinfo.test_zoneinfo.CZoneInfoPickleTest.test_cache_hit) ... ok
+test_cache_miss (test.test_zoneinfo.test_zoneinfo.CZoneInfoPickleTest.test_cache_miss) ... ok
+test_from_file (test.test_zoneinfo.test_zoneinfo.CZoneInfoPickleTest.test_from_file) ... ok
+test_no_cache (test.test_zoneinfo.test_zoneinfo.CZoneInfoPickleTest.test_no_cache) ... ok
+test_pickle_after_from_file (test.test_zoneinfo.test_zoneinfo.CZoneInfoPickleTest.test_pickle_after_from_file) ... ok
+test_bad_keys (test.test_zoneinfo.test_zoneinfo.CZoneInfoSubclassTest.test_bad_keys) ... ok
+test_bad_keys_paths (test.test_zoneinfo.test_zoneinfo.CZoneInfoSubclassTest.test_bad_keys_paths) ... ok
+test_bad_zones (test.test_zoneinfo.test_zoneinfo.CZoneInfoSubclassTest.test_bad_zones) ... ok
+test_cache_exception (test.test_zoneinfo.test_zoneinfo.CZoneInfoSubclassTest.test_cache_exception) ... ok
+test_folds_and_gaps (test.test_zoneinfo.test_zoneinfo.CZoneInfoSubclassTest.test_folds_and_gaps) ... ok
+test_folds_from_utc (test.test_zoneinfo.test_zoneinfo.CZoneInfoSubclassTest.test_folds_from_utc) ... ok
+test_fromutc_errors (test.test_zoneinfo.test_zoneinfo.CZoneInfoSubclassTest.test_fromutc_errors) ... ok
+test_key_attribute (test.test_zoneinfo.test_zoneinfo.CZoneInfoSubclassTest.test_key_attribute) ... ok
+test_repr (test.test_zoneinfo.test_zoneinfo.CZoneInfoSubclassTest.test_repr) ... ok
+test_str (test.test_zoneinfo.test_zoneinfo.CZoneInfoSubclassTest.test_str) ... ok
+test_subclass_own_cache (test.test_zoneinfo.test_zoneinfo.CZoneInfoSubclassTest.test_subclass_own_cache) ... ok
+test_time_fixed_offset (test.test_zoneinfo.test_zoneinfo.CZoneInfoSubclassTest.test_time_fixed_offset) ... ok
+test_time_variable_offset (test.test_zoneinfo.test_zoneinfo.CZoneInfoSubclassTest.test_time_variable_offset) ... ok
+test_unambiguous (test.test_zoneinfo.test_zoneinfo.CZoneInfoSubclassTest.test_unambiguous) ... ok
+test_utc (test.test_zoneinfo.test_zoneinfo.CZoneInfoSubclassTest.test_utc) ... ok
+test_bad_keys (test.test_zoneinfo.test_zoneinfo.CZoneInfoTest.test_bad_keys) ... ok
+test_bad_keys_paths (test.test_zoneinfo.test_zoneinfo.CZoneInfoTest.test_bad_keys_paths) ... ok
+test_bad_zones (test.test_zoneinfo.test_zoneinfo.CZoneInfoTest.test_bad_zones) ... ok
+test_cache_exception (test.test_zoneinfo.test_zoneinfo.CZoneInfoTest.test_cache_exception) ... ok
+test_fold_mutate (test.test_zoneinfo.test_zoneinfo.CZoneInfoTest.test_fold_mutate)
+Test that fold isn't mutated when no change is necessary. ... ok
+test_folds_and_gaps (test.test_zoneinfo.test_zoneinfo.CZoneInfoTest.test_folds_and_gaps) ... ok
+test_folds_from_utc (test.test_zoneinfo.test_zoneinfo.CZoneInfoTest.test_folds_from_utc) ... ok
+test_fromutc_errors (test.test_zoneinfo.test_zoneinfo.CZoneInfoTest.test_fromutc_errors) ... ok
+test_key_attribute (test.test_zoneinfo.test_zoneinfo.CZoneInfoTest.test_key_attribute) ... ok
+test_repr (test.test_zoneinfo.test_zoneinfo.CZoneInfoTest.test_repr) ... ok
+test_signatures (test.test_zoneinfo.test_zoneinfo.CZoneInfoTest.test_signatures)
+Ensure that C module has valid method signatures. ... ok
+test_str (test.test_zoneinfo.test_zoneinfo.CZoneInfoTest.test_str) ... ok
+test_time_fixed_offset (test.test_zoneinfo.test_zoneinfo.CZoneInfoTest.test_time_fixed_offset) ... ok
+test_time_variable_offset (test.test_zoneinfo.test_zoneinfo.CZoneInfoTest.test_time_variable_offset) ... ok
+test_unambiguous (test.test_zoneinfo.test_zoneinfo.CZoneInfoTest.test_unambiguous) ... ok
+test_utc (test.test_zoneinfo.test_zoneinfo.CZoneInfoTest.test_utc) ... ok
+test_bad_keys (test.test_zoneinfo.test_zoneinfo.CZoneInfoV1Test.test_bad_keys) ... ok
+test_bad_keys_paths (test.test_zoneinfo.test_zoneinfo.CZoneInfoV1Test.test_bad_keys_paths) ... ok
+test_bad_zones (test.test_zoneinfo.test_zoneinfo.CZoneInfoV1Test.test_bad_zones) ... ok
+test_cache_exception (test.test_zoneinfo.test_zoneinfo.CZoneInfoV1Test.test_cache_exception) ... ok
+test_folds_and_gaps (test.test_zoneinfo.test_zoneinfo.CZoneInfoV1Test.test_folds_and_gaps) ... ok
+test_folds_from_utc (test.test_zoneinfo.test_zoneinfo.CZoneInfoV1Test.test_folds_from_utc) ... ok
+test_fromutc_errors (test.test_zoneinfo.test_zoneinfo.CZoneInfoV1Test.test_fromutc_errors) ... ok
+test_key_attribute (test.test_zoneinfo.test_zoneinfo.CZoneInfoV1Test.test_key_attribute) ... ok
+test_repr (test.test_zoneinfo.test_zoneinfo.CZoneInfoV1Test.test_repr) ... ok
+test_str (test.test_zoneinfo.test_zoneinfo.CZoneInfoV1Test.test_str) ... ok
+test_time_fixed_offset (test.test_zoneinfo.test_zoneinfo.CZoneInfoV1Test.test_time_fixed_offset) ... ok
+test_time_variable_offset (test.test_zoneinfo.test_zoneinfo.CZoneInfoV1Test.test_time_variable_offset) ... ok
+test_unambiguous (test.test_zoneinfo.test_zoneinfo.CZoneInfoV1Test.test_unambiguous) ... ok
+test_utc (test.test_zoneinfo.test_zoneinfo.CZoneInfoV1Test.test_utc) ... ok
+test_clear_cache (test.test_zoneinfo.test_zoneinfo.CallingConventionTest.test_clear_cache) ... ok
+test_from_file (test.test_zoneinfo.test_zoneinfo.CallingConventionTest.test_from_file) ... ok
+test_cache_location (test.test_zoneinfo.test_zoneinfo.ExtensionBuiltTest.test_cache_location) ... ok
+test_gc_tracked (test.test_zoneinfo.test_zoneinfo.ExtensionBuiltTest.test_gc_tracked) ... ok
+test_pydatetime (test.test_zoneinfo.test_zoneinfo.MiscTests.test_pydatetime) ... ok
+test_bad_keys (test.test_zoneinfo.test_zoneinfo.TZDataTests.test_bad_keys) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_bad_keys_paths (test.test_zoneinfo.test_zoneinfo.TZDataTests.test_bad_keys_paths) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_bad_zones (test.test_zoneinfo.test_zoneinfo.TZDataTests.test_bad_zones) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_cache_exception (test.test_zoneinfo.test_zoneinfo.TZDataTests.test_cache_exception) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_folds_and_gaps (test.test_zoneinfo.test_zoneinfo.TZDataTests.test_folds_and_gaps) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_folds_from_utc (test.test_zoneinfo.test_zoneinfo.TZDataTests.test_folds_from_utc) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_fromutc_errors (test.test_zoneinfo.test_zoneinfo.TZDataTests.test_fromutc_errors) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_key_attribute (test.test_zoneinfo.test_zoneinfo.TZDataTests.test_key_attribute) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_repr (test.test_zoneinfo.test_zoneinfo.TZDataTests.test_repr) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_str (test.test_zoneinfo.test_zoneinfo.TZDataTests.test_str) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_time_fixed_offset (test.test_zoneinfo.test_zoneinfo.TZDataTests.test_time_fixed_offset) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_time_variable_offset (test.test_zoneinfo.test_zoneinfo.TZDataTests.test_time_variable_offset) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_unambiguous (test.test_zoneinfo.test_zoneinfo.TZDataTests.test_unambiguous) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_utc (test.test_zoneinfo.test_zoneinfo.TZDataTests.test_utc) ... skipped 'Skipping tzdata-specific tests: tzdata not installed'
+test_extreme_tzstr (test.test_zoneinfo.test_zoneinfo.TZStrTest.test_extreme_tzstr) ... ok
+test_invalid_tzstr (test.test_zoneinfo.test_zoneinfo.TZStrTest.test_invalid_tzstr) ... ok
+test_tzstr_from_utc (test.test_zoneinfo.test_zoneinfo.TZStrTest.test_tzstr_from_utc) ... ok
+test_tzstr_localized (test.test_zoneinfo.test_zoneinfo.TZStrTest.test_tzstr_localized) ... ok
+test_available_timezones (test.test_zoneinfo.test_zoneinfo.TestModule.test_available_timezones) ... ok
+test_available_timezones_weirdzone (test.test_zoneinfo.test_zoneinfo.TestModule.test_available_timezones_weirdzone) ... ok
+test_dir_contains_all (test.test_zoneinfo.test_zoneinfo.TestModule.test_dir_contains_all)
+dir(self.module) should at least contain everything in __all__. ... ok
+test_dir_unique (test.test_zoneinfo.test_zoneinfo.TestModule.test_dir_unique)
+Test that there are no duplicates in dir(self.module) ... ok
+test_exclude_posixrules (test.test_zoneinfo.test_zoneinfo.TestModule.test_exclude_posixrules) ... ok
+test_folder_exclusions (test.test_zoneinfo.test_zoneinfo.TestModule.test_folder_exclusions) ... ok
+test_getattr_error (test.test_zoneinfo.test_zoneinfo.TestModule.test_getattr_error) ... ok
+test_env_variable (test.test_zoneinfo.test_zoneinfo.TzPathTest.test_env_variable)
+Tests that the environment variable works with reset_tzpath. ... ok
+test_env_variable_relative_paths (test.test_zoneinfo.test_zoneinfo.TzPathTest.test_env_variable_relative_paths) ... ok
+test_env_variable_relative_paths_warning_location (test.test_zoneinfo.test_zoneinfo.TzPathTest.test_env_variable_relative_paths_warning_location) ... ok
+test_reset_tzpath_kwarg (test.test_zoneinfo.test_zoneinfo.TzPathTest.test_reset_tzpath_kwarg) ... ok
+test_reset_tzpath_relative_paths (test.test_zoneinfo.test_zoneinfo.TzPathTest.test_reset_tzpath_relative_paths) ... ok
+test_tzpath_attribute (test.test_zoneinfo.test_zoneinfo.TzPathTest.test_tzpath_attribute) ... ok
+test_tzpath_type_error (test.test_zoneinfo.test_zoneinfo.TzPathTest.test_tzpath_type_error) ... ok
+test_empty_zone (test.test_zoneinfo.test_zoneinfo.WeirdZoneTest.test_empty_zone) ... ok
+test_fixed_offset_phantom_transition (test.test_zoneinfo.test_zoneinfo.WeirdZoneTest.test_fixed_offset_phantom_transition) ... ok
+test_invalid_transition_index (test.test_zoneinfo.test_zoneinfo.WeirdZoneTest.test_invalid_transition_index) ... ok
+test_no_tz_str (test.test_zoneinfo.test_zoneinfo.WeirdZoneTest.test_no_tz_str) ... ok
+test_one_transition (test.test_zoneinfo.test_zoneinfo.WeirdZoneTest.test_one_transition) ... ok
+test_one_zone_dst (test.test_zoneinfo.test_zoneinfo.WeirdZoneTest.test_one_zone_dst) ... ok
+test_transition_lookahead_out_of_bounds (test.test_zoneinfo.test_zoneinfo.WeirdZoneTest.test_transition_lookahead_out_of_bounds) ... ok
+test_tz_before_only (test.test_zoneinfo.test_zoneinfo.WeirdZoneTest.test_tz_before_only) ... ok
+test_zone_very_large_timestamp (test.test_zoneinfo.test_zoneinfo.WeirdZoneTest.test_zone_very_large_timestamp)
+Test when a transition is in the far past or future. ... ok
+test_cache_reset_tzpath (test.test_zoneinfo.test_zoneinfo.ZoneInfoCacheTest.test_cache_reset_tzpath)
+Test that the cache persists when tzpath has been changed. ... ok
+test_clear_cache_explicit_none (test.test_zoneinfo.test_zoneinfo.ZoneInfoCacheTest.test_clear_cache_explicit_none) ... ok
+test_clear_cache_one_key (test.test_zoneinfo.test_zoneinfo.ZoneInfoCacheTest.test_clear_cache_one_key)
+Tests that you can clear a single key from the cache. ... ok
+test_clear_cache_refleak (test.test_zoneinfo.test_zoneinfo.ZoneInfoCacheTest.test_clear_cache_refleak) ... ok
+test_clear_cache_two_keys (test.test_zoneinfo.test_zoneinfo.ZoneInfoCacheTest.test_clear_cache_two_keys) ... ok
+test_ephemeral_zones (test.test_zoneinfo.test_zoneinfo.ZoneInfoCacheTest.test_ephemeral_zones) ... ok
+test_no_cache (test.test_zoneinfo.test_zoneinfo.ZoneInfoCacheTest.test_no_cache) ... ok
+test_strong_refs (test.test_zoneinfo.test_zoneinfo.ZoneInfoCacheTest.test_strong_refs) ... ok
+test_weak_cache_descriptor_use_after_free (test.test_zoneinfo.test_zoneinfo.ZoneInfoCacheTest.test_weak_cache_descriptor_use_after_free) ... ok
+test_bad_keys (test.test_zoneinfo.test_zoneinfo.ZoneInfoDatetimeSubclassTest.test_bad_keys) ... ok
+test_bad_keys_paths (test.test_zoneinfo.test_zoneinfo.ZoneInfoDatetimeSubclassTest.test_bad_keys_paths) ... ok
+test_bad_zones (test.test_zoneinfo.test_zoneinfo.ZoneInfoDatetimeSubclassTest.test_bad_zones) ... ok
+test_cache_exception (test.test_zoneinfo.test_zoneinfo.ZoneInfoDatetimeSubclassTest.test_cache_exception) ... ok
+test_folds_and_gaps (test.test_zoneinfo.test_zoneinfo.ZoneInfoDatetimeSubclassTest.test_folds_and_gaps) ... ok
+test_folds_from_utc (test.test_zoneinfo.test_zoneinfo.ZoneInfoDatetimeSubclassTest.test_folds_from_utc) ... ok
+test_fromutc_errors (test.test_zoneinfo.test_zoneinfo.ZoneInfoDatetimeSubclassTest.test_fromutc_errors) ... ok
+test_key_attribute (test.test_zoneinfo.test_zoneinfo.ZoneInfoDatetimeSubclassTest.test_key_attribute) ... ok
+test_repr (test.test_zoneinfo.test_zoneinfo.ZoneInfoDatetimeSubclassTest.test_repr) ... ok
+test_str (test.test_zoneinfo.test_zoneinfo.ZoneInfoDatetimeSubclassTest.test_str) ... ok
+test_time_fixed_offset (test.test_zoneinfo.test_zoneinfo.ZoneInfoDatetimeSubclassTest.test_time_fixed_offset) ... ok
+test_time_variable_offset (test.test_zoneinfo.test_zoneinfo.ZoneInfoDatetimeSubclassTest.test_time_variable_offset) ... ok
+test_unambiguous (test.test_zoneinfo.test_zoneinfo.ZoneInfoDatetimeSubclassTest.test_unambiguous) ... ok
+test_utc (test.test_zoneinfo.test_zoneinfo.ZoneInfoDatetimeSubclassTest.test_utc) ... ok
+test_cache_hit (test.test_zoneinfo.test_zoneinfo.ZoneInfoPickleTest.test_cache_hit) ... ok
+test_cache_miss (test.test_zoneinfo.test_zoneinfo.ZoneInfoPickleTest.test_cache_miss) ... ok
+test_from_file (test.test_zoneinfo.test_zoneinfo.ZoneInfoPickleTest.test_from_file) ... ok
+test_no_cache (test.test_zoneinfo.test_zoneinfo.ZoneInfoPickleTest.test_no_cache) ... ok
+test_pickle_after_from_file (test.test_zoneinfo.test_zoneinfo.ZoneInfoPickleTest.test_pickle_after_from_file) ... ok
+test_bad_keys (test.test_zoneinfo.test_zoneinfo.ZoneInfoSubclassTest.test_bad_keys) ... ok
+test_bad_keys_paths (test.test_zoneinfo.test_zoneinfo.ZoneInfoSubclassTest.test_bad_keys_paths) ... ok
+test_bad_zones (test.test_zoneinfo.test_zoneinfo.ZoneInfoSubclassTest.test_bad_zones) ... ok
+test_cache_exception (test.test_zoneinfo.test_zoneinfo.ZoneInfoSubclassTest.test_cache_exception) ... ok
+test_folds_and_gaps (test.test_zoneinfo.test_zoneinfo.ZoneInfoSubclassTest.test_folds_and_gaps) ... ok
+test_folds_from_utc (test.test_zoneinfo.test_zoneinfo.ZoneInfoSubclassTest.test_folds_from_utc) ... ok
+test_fromutc_errors (test.test_zoneinfo.test_zoneinfo.ZoneInfoSubclassTest.test_fromutc_errors) ... ok
+test_key_attribute (test.test_zoneinfo.test_zoneinfo.ZoneInfoSubclassTest.test_key_attribute) ... ok
+test_repr (test.test_zoneinfo.test_zoneinfo.ZoneInfoSubclassTest.test_repr) ... ok
+test_str (test.test_zoneinfo.test_zoneinfo.ZoneInfoSubclassTest.test_str) ... ok
+test_subclass_own_cache (test.test_zoneinfo.test_zoneinfo.ZoneInfoSubclassTest.test_subclass_own_cache) ... ok
+test_time_fixed_offset (test.test_zoneinfo.test_zoneinfo.ZoneInfoSubclassTest.test_time_fixed_offset) ... ok
+test_time_variable_offset (test.test_zoneinfo.test_zoneinfo.ZoneInfoSubclassTest.test_time_variable_offset) ... ok
+test_unambiguous (test.test_zoneinfo.test_zoneinfo.ZoneInfoSubclassTest.test_unambiguous) ... ok
+test_utc (test.test_zoneinfo.test_zoneinfo.ZoneInfoSubclassTest.test_utc) ... ok
+test_bad_keys (test.test_zoneinfo.test_zoneinfo.ZoneInfoTest.test_bad_keys) ... ok
+test_bad_keys_paths (test.test_zoneinfo.test_zoneinfo.ZoneInfoTest.test_bad_keys_paths) ... ok
+test_bad_zones (test.test_zoneinfo.test_zoneinfo.ZoneInfoTest.test_bad_zones) ... ok
+test_cache_exception (test.test_zoneinfo.test_zoneinfo.ZoneInfoTest.test_cache_exception) ... ok
+test_folds_and_gaps (test.test_zoneinfo.test_zoneinfo.ZoneInfoTest.test_folds_and_gaps) ... ok
+test_folds_from_utc (test.test_zoneinfo.test_zoneinfo.ZoneInfoTest.test_folds_from_utc) ... ok
+test_fromutc_errors (test.test_zoneinfo.test_zoneinfo.ZoneInfoTest.test_fromutc_errors) ... ok
+test_key_attribute (test.test_zoneinfo.test_zoneinfo.ZoneInfoTest.test_key_attribute) ... ok
+test_repr (test.test_zoneinfo.test_zoneinfo.ZoneInfoTest.test_repr) ... ok
+test_str (test.test_zoneinfo.test_zoneinfo.ZoneInfoTest.test_str) ... ok
+test_time_fixed_offset (test.test_zoneinfo.test_zoneinfo.ZoneInfoTest.test_time_fixed_offset) ... ok
+test_time_variable_offset (test.test_zoneinfo.test_zoneinfo.ZoneInfoTest.test_time_variable_offset) ... ok
+test_unambiguous (test.test_zoneinfo.test_zoneinfo.ZoneInfoTest.test_unambiguous) ... ok
+test_utc (test.test_zoneinfo.test_zoneinfo.ZoneInfoTest.test_utc) ... ok
+test_bad_keys (test.test_zoneinfo.test_zoneinfo.ZoneInfoV1Test.test_bad_keys) ... ok
+test_bad_keys_paths (test.test_zoneinfo.test_zoneinfo.ZoneInfoV1Test.test_bad_keys_paths) ... ok
+test_bad_zones (test.test_zoneinfo.test_zoneinfo.ZoneInfoV1Test.test_bad_zones) ... ok
+test_cache_exception (test.test_zoneinfo.test_zoneinfo.ZoneInfoV1Test.test_cache_exception) ... ok
+test_folds_and_gaps (test.test_zoneinfo.test_zoneinfo.ZoneInfoV1Test.test_folds_and_gaps) ... ok
+test_folds_from_utc (test.test_zoneinfo.test_zoneinfo.ZoneInfoV1Test.test_folds_from_utc) ... ok
+test_fromutc_errors (test.test_zoneinfo.test_zoneinfo.ZoneInfoV1Test.test_fromutc_errors) ... ok
+test_key_attribute (test.test_zoneinfo.test_zoneinfo.ZoneInfoV1Test.test_key_attribute) ... ok
+test_repr (test.test_zoneinfo.test_zoneinfo.ZoneInfoV1Test.test_repr) ... ok
+test_str (test.test_zoneinfo.test_zoneinfo.ZoneInfoV1Test.test_str) ... ok
+test_time_fixed_offset (test.test_zoneinfo.test_zoneinfo.ZoneInfoV1Test.test_time_fixed_offset) ... ok
+test_time_variable_offset (test.test_zoneinfo.test_zoneinfo.ZoneInfoV1Test.test_time_variable_offset) ... ok
+test_unambiguous (test.test_zoneinfo.test_zoneinfo.ZoneInfoV1Test.test_unambiguous) ... ok
+test_utc (test.test_zoneinfo.test_zoneinfo.ZoneInfoV1Test.test_utc) ... ok
+test_cache (test.test_zoneinfo.test_zoneinfo_property.CZoneInfoCacheTest.test_cache) ... ok
+test_no_cache (test.test_zoneinfo.test_zoneinfo_property.CZoneInfoCacheTest.test_no_cache) ... ok
+test_pickle_unpickle_cache (test.test_zoneinfo.test_zoneinfo_property.CZoneInfoPickleTest.test_pickle_unpickle_cache) ... ok
+test_pickle_unpickle_cache_multiple_rounds (test.test_zoneinfo.test_zoneinfo_property.CZoneInfoPickleTest.test_pickle_unpickle_cache_multiple_rounds)
+Test that pickle/unpickle is idempotent. ... ok
+test_pickle_unpickle_no_cache (test.test_zoneinfo.test_zoneinfo_property.CZoneInfoPickleTest.test_pickle_unpickle_no_cache) ... ok
+test_pickle_unpickle_no_cache_multiple_rounds (test.test_zoneinfo.test_zoneinfo_property.CZoneInfoPickleTest.test_pickle_unpickle_no_cache_multiple_rounds)
+Test that pickle/unpickle is idempotent. ... ok
+test_key (test.test_zoneinfo.test_zoneinfo_property.CZoneInfoTest.test_key) ... ok
+test_str (test.test_zoneinfo.test_zoneinfo_property.CZoneInfoTest.test_str) ... ok
+test_utc (test.test_zoneinfo.test_zoneinfo_property.CZoneInfoTest.test_utc) ... ok
+test_cross_module_pickle (test.test_zoneinfo.test_zoneinfo_property.PythonCConsistencyTest.test_cross_module_pickle) ... ok
+test_same_from_utc (test.test_zoneinfo.test_zoneinfo_property.PythonCConsistencyTest.test_same_from_utc) ... ok
+test_same_offsets_and_names (test.test_zoneinfo.test_zoneinfo_property.PythonCConsistencyTest.test_same_offsets_and_names) ... ok
+test_same_str (test.test_zoneinfo.test_zoneinfo_property.PythonCConsistencyTest.test_same_str) ... ok
+test_same_to_utc (test.test_zoneinfo.test_zoneinfo_property.PythonCConsistencyTest.test_same_to_utc) ... ok
+test_cache (test.test_zoneinfo.test_zoneinfo_property.ZoneInfoCacheTest.test_cache) ... ok
+test_no_cache (test.test_zoneinfo.test_zoneinfo_property.ZoneInfoCacheTest.test_no_cache) ... ok
+test_pickle_unpickle_cache (test.test_zoneinfo.test_zoneinfo_property.ZoneInfoPickleTest.test_pickle_unpickle_cache) ... ok
+test_pickle_unpickle_cache_multiple_rounds (test.test_zoneinfo.test_zoneinfo_property.ZoneInfoPickleTest.test_pickle_unpickle_cache_multiple_rounds)
+Test that pickle/unpickle is idempotent. ... ok
+test_pickle_unpickle_no_cache (test.test_zoneinfo.test_zoneinfo_property.ZoneInfoPickleTest.test_pickle_unpickle_no_cache) ... ok
+test_pickle_unpickle_no_cache_multiple_rounds (test.test_zoneinfo.test_zoneinfo_property.ZoneInfoPickleTest.test_pickle_unpickle_no_cache_multiple_rounds)
+Test that pickle/unpickle is idempotent. ... ok
+test_key (test.test_zoneinfo.test_zoneinfo_property.ZoneInfoTest.test_key) ... ok
+test_str (test.test_zoneinfo.test_zoneinfo_property.ZoneInfoTest.test_str) ... ok
+test_utc (test.test_zoneinfo.test_zoneinfo_property.ZoneInfoTest.test_utc) ... ok
+
+----------------------------------------------------------------------
+Ran 261 tests in 0.600s
+
+OK (skipped=28)
