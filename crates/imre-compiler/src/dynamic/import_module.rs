@@ -318,6 +318,10 @@ pub(crate) fn registered_imports(
         }) {
             calls.module = id;
             calls.visit_body(&module.parsed.syntax().body);
+            calls
+                .imports
+                .targets
+                .extend(relative_star_targets(graph, id));
         }
     }
     calls
@@ -373,9 +377,214 @@ fn target(call: &ast::ExprCall) -> Option<String> {
         .then_some(absolute)
 }
 
+/// Register children named by a fixed package `__all__` when a literal exec imports
+/// them through an explicitly supplied package namespace. The registry only makes
+/// their bodies available; the live import still chooses and executes each child.
+fn relative_star_targets(graph: &SourceGraph, module: usize) -> Vec<String> {
+    use std::collections::HashMap;
+
+    if graph.modules[module].bundled {
+        return Vec::new();
+    }
+
+    fn package_namespace(value: &Expr) -> Option<String> {
+        let dict = value.as_dict_expr()?;
+        let mut package = None;
+        for item in &dict.items {
+            let key = item.key.as_ref()?.as_string_literal_expr()?;
+            if key.value.to_str() == "__builtins__" {
+                return None;
+            }
+            if key.value.to_str() == "__package__" {
+                package = Some(item.value.as_string_literal_expr()?.value.to_string());
+            }
+        }
+        package
+    }
+
+    fn contains_call(statement: &ast::Stmt) -> bool {
+        struct Calls(bool);
+        impl<'a> Visitor<'a> for Calls {
+            fn visit_expr(&mut self, expression: &'a Expr) {
+                if expression.is_call_expr() {
+                    self.0 = true;
+                } else {
+                    visitor::walk_expr(self, expression);
+                }
+            }
+        }
+        let mut calls = Calls(false);
+        calls.visit_stmt(statement);
+        calls.0
+    }
+
+    fn exports(value: &Expr) -> Option<Vec<String>> {
+        let values = match value {
+            Expr::List(list) => &list.elts,
+            Expr::Tuple(tuple) => &tuple.elts,
+            _ => return None,
+        };
+        values
+            .iter()
+            .map(|value| {
+                let name = value.as_string_literal_expr()?.value.to_str();
+                ruff_python_stdlib::identifiers::is_identifier(name).then(|| name.to_owned())
+            })
+            .collect()
+    }
+
+    let mut packages = HashMap::<String, String>::new();
+    let mut namespaces = HashMap::<String, (String, usize)>::new();
+    let mut all = HashMap::<String, Vec<String>>::new();
+    let mut targets = Vec::new();
+    for (index, statement) in graph.modules[module]
+        .parsed
+        .syntax()
+        .body
+        .iter()
+        .enumerate()
+    {
+        if let ast::Stmt::Assign(assign) = statement {
+            for destination in &assign.targets {
+                if let Some(name) = destination.as_name_expr() {
+                    packages.remove(name.id.as_str());
+                    namespaces.remove(name.id.as_str());
+                    if let Some(call) = assign.value.as_call_expr()
+                        && matches!(
+                            graph.resolve(module, &call.func),
+                            Some(Binding::Intrinsic(Intrinsic::RegisteredImport(
+                                "importlib.import_module"
+                            )))
+                        )
+                        && graph.session.is_stdlib_function(
+                            module,
+                            &call.func,
+                            "importlib",
+                            "import_module",
+                        )
+                        && let Some(package) = target(call)
+                    {
+                        packages.insert(name.id.to_string(), package);
+                    } else if let Some(package) = package_namespace(&assign.value) {
+                        namespaces.insert(name.id.to_string(), (package, index));
+                    }
+                } else if let Some(attribute) = destination.as_attribute_expr()
+                    && attribute.attr.as_str() == "__all__"
+                    && let Some(name) = attribute.value.as_name_expr()
+                    && let Some(package) = packages.get(name.id.as_str())
+                {
+                    all.remove(package);
+                    if let Some(names) = exports(&assign.value) {
+                        all.insert(package.clone(), names);
+                    }
+                } else {
+                    all.clear();
+                }
+            }
+        } else if !matches!(statement, ast::Stmt::Assert(_) | ast::Stmt::Expr(_)) {
+            all.clear();
+        }
+
+        let call = statement
+            .as_expr_stmt()
+            .and_then(|statement| statement.value.as_call_expr());
+        let exec = call.filter(|call| {
+            call.func
+                .as_name_expr()
+                .is_some_and(|name| name.id == "exec")
+                && graph
+                    .session
+                    .is_stdlib_function(module, &call.func, "builtins", "exec")
+        });
+        if let Some(call) = exec
+            && let Some(source) = call
+                .arguments
+                .find_argument_value("source", 0)
+                .and_then(Expr::as_string_literal_expr)
+            && let Some(namespace) = call.arguments.find_argument_value("globals", 1)
+            && let Some(package) = package_namespace(namespace).or_else(|| {
+                namespace
+                    .as_name_expr()
+                    .and_then(|name| namespaces.get(name.id.as_str()))
+                    .filter(|(_, assigned)| assigned.checked_add(1) == Some(index))
+                    .map(|(package, _)| package.clone())
+            })
+            && let Ok(parsed) = ruff_python_parser::parse_module(source.value.to_str())
+            && let [ast::Stmt::ImportFrom(import)] = parsed.syntax().body.as_slice()
+            && import.level != 0
+            && import.names.iter().any(|name| name.name.as_str() == "*")
+            && let Some(owner) = crate::modules::resolve_import(
+                &package,
+                import.level,
+                import.module.as_ref().map_or("", |name| name.as_str()),
+            )
+            && let Some(names) = all.get(&owner)
+        {
+            targets.extend(names.iter().map(|name| format!("{owner}.{name}")));
+        }
+        if !all.is_empty() && contains_call(statement) {
+            all.clear();
+        }
+    }
+    targets
+}
+
 #[cfg(test)]
 mod tests {
-    use super::bundled_module_source;
+    use super::{bundled_module_source, registered_imports};
+
+    #[test]
+    fn relative_star_registration_requires_a_current_fixed_package_namespace() {
+        let root = tempfile::tempdir().unwrap();
+        let package = root.path().join("sample");
+        std::fs::create_dir(&package).unwrap();
+        std::fs::write(package.join("__init__.py"), "").unwrap();
+        std::fs::write(package.join("found.py"), "value = 37\n").unwrap();
+        std::fs::write(package.join("unrelated.py"), "invalid syntax !\n").unwrap();
+        let app = root.path().join("app.py");
+        let prefix = concat!(
+            "from importlib import import_module\n",
+            "sample = import_module('sample')\n",
+            "sample.__all__ = ['found']\n",
+        );
+        for (tail, expected) in [
+            (
+                "namespace = {'__package__': 'sample'}\nexec('from . import *', namespace)\n",
+                true,
+            ),
+            (
+                "namespace = {'__package__': 'sample'}\nnamespace['__package__'] = 'other'\nexec('from . import *', namespace)\n",
+                false,
+            ),
+            (
+                "sample.__all__.clear()\nnamespace = {'__package__': 'sample'}\nexec('from . import *', namespace)\n",
+                false,
+            ),
+            (
+                "exec('from . import *', {'__package__': 'sample', '__builtins__': {}})\n",
+                false,
+            ),
+            (
+                "def exec(source, namespace): pass\nnamespace = {'__package__': 'sample'}\nexec('from . import *', namespace)\n",
+                false,
+            ),
+        ] {
+            std::fs::write(&app, format!("{prefix}{tail}")).unwrap();
+            let graph = crate::modules::SourceGraph::load(&app, None, &[]).unwrap();
+            let imports = registered_imports(&graph, &[]);
+            assert_eq!(
+                imports.targets.iter().any(|name| name == "sample.found"),
+                expected,
+                "{tail}"
+            );
+            assert!(
+                !imports
+                    .targets
+                    .iter()
+                    .any(|name| name == "sample.unrelated")
+            );
+        }
+    }
 
     #[test]
     fn inspect_compiles_the_tracked_python_verbatim() {
