@@ -1749,7 +1749,7 @@ def check_ffi_result_roots(imre, root, run):
     subprocess.run(["cc", "-c", fixtures / "ffi_result_roots_refuse.c", "-o", wrapper], check=True)
     result_flags = "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_lookup,--wrap=realloc",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_lookup,--wrap=imre_dyn_lookup_local,--wrap=realloc",
     ])
     import_path = f"import sys; sys.path.insert(0, {str(fixtures)!r}); "
     source = import_path + "import boxed_ffi_result_roots as fixture; fixture.allocation()"

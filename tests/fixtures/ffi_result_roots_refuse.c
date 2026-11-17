@@ -6,6 +6,7 @@
 
 void *__real_realloc(void *ptr, size_t size);
 uint64_t __real_imre_dyn_lookup(void *, uint64_t, const unsigned char *, size_t);
+uint64_t __real_imre_dyn_lookup_local(void *, uint64_t, const unsigned char *, size_t);
 
 static _Thread_local int in_operand_lookup, refused;
 
@@ -20,14 +21,23 @@ void *__wrap_realloc(void *ptr, size_t size) {
     return __real_realloc(ptr, size);
 }
 
-uint64_t __wrap_imre_dyn_lookup(void *ctx, uint64_t scope, const unsigned char *name, size_t len) {
+static uint64_t lookup(void *ctx, uint64_t scope, const unsigned char *name, size_t len,
+                       uint64_t (*real)(void *, uint64_t, const unsigned char *, size_t)) {
     static const char operand[] = "parameter_for_call_storage_with_a_deliberately_long_name";
     if (len != sizeof(operand) - 1 || memcmp(name, operand, len) != 0)
-        return __real_imre_dyn_lookup(ctx, scope, name, len);
+        return real(ctx, scope, name, len);
 
     const char *enabled = getenv("IMRE_TEST_GETTER_ALLOCATION");
     in_operand_lookup = enabled && strcmp(enabled, "1") == 0;
-    uint64_t result = __real_imre_dyn_lookup(ctx, scope, name, len);
+    uint64_t result = real(ctx, scope, name, len);
     in_operand_lookup = 0;
     return result;
+}
+
+uint64_t __wrap_imre_dyn_lookup(void *ctx, uint64_t scope, const unsigned char *name, size_t len) {
+    return lookup(ctx, scope, name, len, __real_imre_dyn_lookup);
+}
+
+uint64_t __wrap_imre_dyn_lookup_local(void *ctx, uint64_t scope, const unsigned char *name, size_t len) {
+    return lookup(ctx, scope, name, len, __real_imre_dyn_lookup_local);
 }
