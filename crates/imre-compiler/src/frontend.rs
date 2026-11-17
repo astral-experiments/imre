@@ -10206,10 +10206,9 @@ impl<'a> Checker<'a> {
             && self.graph.modules[self.module].is_program_source()
             && let ast::Expr::Attribute(attribute) = expression
             && let ast::Expr::Name(module) = &*attribute.value
-            && matches!(
-                receiver(&attribute.value),
-                Some(Binding::IntrinsicModule(_))
-            )
+            && let Some(Binding::IntrinsicModule(target)) = receiver(&attribute.value)
+            && !(target == crate::modules::IntrinsicModule::Importlib
+                && matches!(attribute.attr.as_str(), "machinery" | "metadata" | "util"))
             && self
                 .graph
                 .session
