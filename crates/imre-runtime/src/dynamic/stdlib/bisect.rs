@@ -178,7 +178,10 @@ pub(super) fn call(
             crate::signed_index(&index).ok_or_else(|| {
                 Error::new(
                     "OverflowError",
-                    "Python int too large to convert to C ssize_t",
+                    format!(
+                        "cannot fit '{}' into an index-sized integer",
+                        ctx.type_name(n)
+                    ),
                 )
             })? as i64
         }
