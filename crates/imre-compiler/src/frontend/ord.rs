@@ -32,6 +32,9 @@ impl Checker<'_> {
             });
         }
         let Some(actual) = self.exact_argument_type_name(value.ty) else {
+            if ty == Type::PythonObject {
+                return Err(self.scoped_builtin_error("ord of a Python object", at));
+            }
             return Err(error(
                 self.source,
                 at,

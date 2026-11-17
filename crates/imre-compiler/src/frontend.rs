@@ -2734,7 +2734,8 @@ fn lower_function(
         )?;
         (vec![Statement::Return(value)], false)
     } else if signature.method.is_some_and(|m| {
-        definition.name.as_str() == "__post_init__"
+        checker.registered.is_none()
+            && definition.name.as_str() == "__post_init__"
             && checker.normalized_record_input(m.class).is_some()
     }) {
         // The generated initializer stores the normalized field on all input paths.
@@ -5181,6 +5182,9 @@ impl<'a> Checker<'a> {
             });
         }
         let target = self.types.payload(expected).unwrap_or(expected);
+        if value.ty == Type::JsonRoot && expected == Type::JsonValue {
+            return Err(self.scoped_builtin_error("JSON document insertion", node));
+        }
         if matches!(value.ty, Type::JsonValue | Type::JsonRoot)
             && (target == value.ty
                 || matches!(
@@ -11226,7 +11230,10 @@ impl<'a> Checker<'a> {
                             vec![key, receiver],
                             None,
                         ));
-                    } else if receiver.ty == Type::PythonObject {
+                    } else if receiver.ty == Type::PythonObject
+                        || (key.ty == Type::Float
+                            && self.types.element(receiver.ty) == Some(Type::Float))
+                    {
                         return Err(self.scoped_builtin_error("membership", expression));
                     } else {
                         return Err(error(
@@ -12609,6 +12616,16 @@ impl<'a> Checker<'a> {
                     receiver.ty,
                     Type::Exception | Type::ImportException | Type::TimeoutExpired
                 ) {
+                    if receiver.ty == Type::Exception
+                        && matches!(
+                            attribute.attr.as_str(),
+                            "encoding" | "object" | "start" | "end" | "reason"
+                        )
+                    {
+                        return Err(
+                            self.scoped_builtin_error("Unicode exception attributes", attribute)
+                        );
+                    }
                     if attribute.attr.as_str() == "args"
                         && let ExprKind::Local(slot) = receiver.kind
                         && let Some(issue) = self
@@ -16540,6 +16557,12 @@ impl<'a> Checker<'a> {
                 return Err(
                     self.scoped_builtin_error("urllib.parse.urlsplit result identity", call)
                 );
+            }
+            "id" if args.len() == 1
+                && args[0].ty == Type::Float
+                && self.unshadowed_builtin(&call.func, "id") =>
+            {
+                return Err(self.scoped_builtin_error("float identity", call));
             }
             "id" if args.len() == 1
                 && matches!(args[0].ty, Type::Hash | Type::VarTuple(_))
