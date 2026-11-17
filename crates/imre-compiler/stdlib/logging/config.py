@@ -107,13 +107,12 @@ def _resolve(name):
 
 def _resolve_handler(name):
     """Look up a handler in logging, or resolve an absolute qualified name."""
-    found = logging
-    try:
-        for part in name.split('.'):
-            found = getattr(found, part)
-    except AttributeError:
-        return _resolve(name)
-    return found
+    namespace = vars(logging)
+    if name in namespace:
+        return namespace[name]
+    if name.split('.', 1)[0] in namespace:
+        name = 'logging.' + name
+    return _resolve(name)
 
 
 def _literal_config_value(text, section, option):
