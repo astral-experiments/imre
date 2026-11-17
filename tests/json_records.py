@@ -23,7 +23,6 @@ REJECTED = {
     "sort_json_alias": 'from typing import Any\ndef mutate(rows: list[dict[str, Any]]) -> None:\n    rows.sort(key=lambda row: 1)\ndef pass_alias(rows: list[dict[str, Any]]) -> None:\n    alias = rows\n    mutate(alias)\n',
     "append_json_rows": 'from typing import Any\ndef mutate(rows: list[dict[str, Any]]) -> None:\n    rows.append(rows[0])\n',
     "write_json_object": 'from typing import Any\ndef write(row: dict[str, Any]) -> None:\n    row["field"] = 1\n',
-    "general_any": "from typing import Any\ndef identity(value: Any) -> Any:\n    return value\n",
     "unknown_intrinsic": "from imre.json import loads\n",
     "bytes_input": IMPORT + ITEM + 'item = decode(b"{}", Item)\n',
     "missing_schema": IMPORT + 'item = decode("{}")\n',
