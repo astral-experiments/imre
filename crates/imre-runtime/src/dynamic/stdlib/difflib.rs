@@ -5,6 +5,8 @@ use super::super::{
     value::{Code, Id, NONE, Result, Value},
 };
 
+mod matcher;
+
 /// Run the canonical string constructor path after Python method lookup, binding, and frame entry.
 ///
 /// # Safety
@@ -40,6 +42,7 @@ fn receiver(ctx: &Context, scope: Id) -> Option<Id> {
     };
     if ctx.scope_name(root, "SequenceMatcher") != Some(*class)
         || ctx.class_attr(*class, "__setattr__").is_some()
+        || ctx.class_attr(*class, "__del__").is_some()
     {
         return None;
     }
@@ -76,6 +79,16 @@ fn unobserved_checkpoints(ctx: &Context) -> bool {
         .finalizers_within(&[input, buffer, raw, stdout, stderr])
 }
 
+fn canonical_builtins(ctx: &Context, root: Id, names: &[&str]) -> bool {
+    let Some(builtins) = ctx.source_builtins else {
+        return false;
+    };
+    names.iter().all(|name| {
+        ctx.scope_name(root, name).is_none()
+            && ctx.dict_named_item(builtins, name) == ctx.builtins.get(*name).copied()
+    })
+}
+
 /// Build the public b2j dictionary and junk/popular sets from flat ASCII character positions.
 fn chain_b(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     let Some(receiver) = receiver(ctx, scope) else {
@@ -110,13 +123,8 @@ fn chain_b(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
         return Ok(None);
     }
     let root = ctx.root_scope(scope);
-    let Some(builtins) = ctx.source_builtins else {
-        return Ok(None);
-    };
-    if ["enumerate", "set", "len"].iter().any(|name| {
-        ctx.scope_name(root, name).is_some()
-            || ctx.dict_named_item(builtins, name) != ctx.builtins.get(*name).copied()
-    }) || !unobserved_checkpoints(ctx)
+    if !canonical_builtins(ctx, root, &["enumerate", "set", "len"])
+        || !unobserved_checkpoints(ctx)
     {
         return Ok(None);
     }
@@ -205,4 +213,292 @@ fn chain_b(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
         super::super::builtins::set_add(ctx, popular, key)?;
     }
     Ok(Some(NONE))
+}
+
+/// Search the current public `b2j`/`bjunk` state from the original bound source method.
+///
+/// # Safety
+/// The compiler supplies the entered source frame and the original linked entry for fallback.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_difflib_find_longest(
+    raw: *mut Context,
+    scope: Id,
+    fallback: Code,
+) -> Id {
+    // SAFETY: the compiler enters this authenticated source frame before the wrapper runs.
+    let ctx = unsafe { &mut *raw };
+    match find_longest(ctx, scope) {
+        Ok(Some(value)) => ffi::finish(ctx, Ok(value)),
+        Ok(None) => {
+            // SAFETY: fallback is the original source entry for this same frame and scope.
+            unsafe { fallback(raw, scope) }
+        }
+        Err(error) => ffi::finish(ctx, Err(error)),
+    }
+}
+
+fn exact_index(ctx: &Context, value: Id) -> Option<usize> {
+    let Value::Int(value) = ctx.heap.get(value) else {
+        return None;
+    };
+    usize::try_from(value.to_i64()?).ok()
+}
+
+fn bound(ctx: &Context, scope: Id, name: &str, default: Option<usize>) -> Option<usize> {
+    let value = ctx.scope_name(scope, name)?;
+    if value == NONE {
+        default
+    } else {
+        exact_index(ctx, value)
+    }
+}
+
+fn single_char(ctx: &Context, value: Id) -> Option<char> {
+    let Value::Str(value) = ctx.heap.get(value) else {
+        return None;
+    };
+    let mut chars = value.chars();
+    let first = chars.next()?;
+    chars.next().is_none().then_some(first)
+}
+
+struct AsciiPositions {
+    offsets: [usize; 257],
+    positions: Vec<usize>,
+    junk: [bool; 256],
+}
+
+fn ascii_positions(ctx: &Context, b2j: Id, bjunk: Id) -> Result<Option<AsciiPositions>> {
+    let Value::Dict(entries) = ctx.heap.get(b2j) else {
+        return Ok(None);
+    };
+    let Value::Set {
+        entries: junk_entries,
+        frozen: false,
+    } = ctx.heap.get(bjunk)
+    else {
+        return Ok(None);
+    };
+    let mut counts = [0usize; 256];
+    let mut lists = [NONE; 256];
+    for &(key, value) in entries.iter() {
+        let Some(key) = single_char(ctx, key).filter(char::is_ascii) else {
+            return Ok(None);
+        };
+        let Value::List(items) = ctx.heap.get(value) else {
+            return Ok(None);
+        };
+        counts[key as usize] = items.len();
+        lists[key as usize] = value;
+    }
+    let mut offsets = [0usize; 257];
+    for i in 0..256 {
+        offsets[i + 1] = offsets[i]
+            .checked_add(counts[i])
+            .ok_or_else(crate::Error::memory_error)?;
+    }
+    let mut positions = Vec::new();
+    positions
+        .try_reserve_exact(offsets[256])
+        .map_err(|_| crate::Error::memory_error())?;
+    for list in lists {
+        if list == NONE {
+            continue;
+        }
+        let Value::List(items) = ctx.heap.get(list) else {
+            unreachable!()
+        };
+        for &item in items {
+            let Some(index) = exact_index(ctx, item) else {
+                return Ok(None);
+            };
+            positions.push(index);
+        }
+    }
+    let mut junk = [false; 256];
+    for &(key, _) in junk_entries.iter() {
+        let Some(key) = single_char(ctx, key).filter(char::is_ascii) else {
+            return Ok(None);
+        };
+        junk[key as usize] = true;
+    }
+    Ok(Some(AsciiPositions {
+        offsets,
+        positions,
+        junk,
+    }))
+}
+
+struct UnicodePositions {
+    keys: Vec<char>,
+    offsets: Vec<usize>,
+    positions: Vec<usize>,
+    junk: Vec<char>,
+}
+
+fn unicode_positions(ctx: &Context, b2j: Id, bjunk: Id) -> Result<Option<UnicodePositions>> {
+    let Value::Dict(entries) = ctx.heap.get(b2j) else {
+        return Ok(None);
+    };
+    let Value::Set {
+        entries: junk_entries,
+        frozen: false,
+    } = ctx.heap.get(bjunk)
+    else {
+        return Ok(None);
+    };
+    let mut groups = Vec::new();
+    groups
+        .try_reserve_exact(entries.len())
+        .map_err(|_| crate::Error::memory_error())?;
+    for &(key, value) in entries.iter() {
+        let Some(key) = single_char(ctx, key) else {
+            return Ok(None);
+        };
+        let Value::List(_) = ctx.heap.get(value) else {
+            return Ok(None);
+        };
+        groups.push((key, value));
+    }
+    groups.sort_unstable_by_key(|&(key, _)| key);
+    let mut keys = Vec::new();
+    let mut offsets = Vec::new();
+    let mut positions = Vec::new();
+    keys.try_reserve_exact(groups.len())
+        .map_err(|_| crate::Error::memory_error())?;
+    offsets
+        .try_reserve_exact(groups.len().saturating_add(1))
+        .map_err(|_| crate::Error::memory_error())?;
+    offsets.push(0);
+    for (key, value) in groups {
+        keys.push(key);
+        let Value::List(items) = ctx.heap.get(value) else {
+            unreachable!()
+        };
+        positions
+            .try_reserve(items.len())
+            .map_err(|_| crate::Error::memory_error())?;
+        for &item in items {
+            let Some(index) = exact_index(ctx, item) else {
+                return Ok(None);
+            };
+            positions.push(index);
+        }
+        offsets.push(positions.len());
+    }
+    let mut junk = Vec::new();
+    junk.try_reserve_exact(junk_entries.len())
+        .map_err(|_| crate::Error::memory_error())?;
+    for &(key, _) in junk_entries.iter() {
+        let Some(key) = single_char(ctx, key) else {
+            return Ok(None);
+        };
+        junk.push(key);
+    }
+    junk.sort_unstable();
+    Ok(Some(UnicodePositions {
+        keys,
+        offsets,
+        positions,
+        junk,
+    }))
+}
+
+fn find_longest(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
+    let Some(receiver) = receiver(ctx, scope) else {
+        return Ok(None);
+    };
+    let root = ctx.root_scope(scope);
+    if !canonical_builtins(ctx, root, &["len", "range"]) {
+        return Ok(None);
+    }
+    let Some(a) = ctx.plain_instance_field(receiver, "a") else {
+        return Ok(None);
+    };
+    let Some(b) = ctx.plain_instance_field(receiver, "b") else {
+        return Ok(None);
+    };
+    let Some(b2j) = ctx.plain_instance_field(receiver, "b2j") else {
+        return Ok(None);
+    };
+    let Some(bjunk) = ctx.plain_instance_field(receiver, "bjunk") else {
+        return Ok(None);
+    };
+    let (a_len, b_len, ascii) = match (ctx.heap.get(a), ctx.heap.get(b)) {
+        (Value::Str(a), Value::Str(b)) => {
+            let ascii = a.is_ascii() && b.is_ascii();
+            (
+                if ascii { a.len() } else { a.chars().count() },
+                if ascii { b.len() } else { b.chars().count() },
+                ascii,
+            )
+        }
+        _ => return Ok(None),
+    };
+    let Some(alo) = bound(ctx, scope, "alo", None) else {
+        return Ok(None);
+    };
+    let Some(ahi) = bound(ctx, scope, "ahi", Some(a_len)) else {
+        return Ok(None);
+    };
+    let Some(blo) = bound(ctx, scope, "blo", None) else {
+        return Ok(None);
+    };
+    let Some(bhi) = bound(ctx, scope, "bhi", Some(b_len)) else {
+        return Ok(None);
+    };
+    if alo > ahi || ahi > a_len || blo > bhi || bhi > b_len {
+        return Ok(None);
+    }
+    let best = if ascii {
+        let Some(index) = ascii_positions(ctx, b2j, bjunk)? else {
+            return Ok(None);
+        };
+        let (Value::Str(a), Value::Str(b)) = (ctx.heap.get(a), ctx.heap.get(b)) else {
+            unreachable!()
+        };
+        matcher::longest_ascii(
+            a.as_bytes(),
+            b.as_bytes(),
+            (alo, ahi, blo, bhi),
+            &index.offsets,
+            &index.positions,
+            &index.junk,
+        )?
+    } else {
+        let Some(index) = unicode_positions(ctx, b2j, bjunk)? else {
+            return Ok(None);
+        };
+        let (Value::Str(a), Value::Str(b)) = (ctx.heap.get(a), ctx.heap.get(b)) else {
+            unreachable!()
+        };
+        let mut left = Vec::new();
+        let mut right = Vec::new();
+        left.try_reserve_exact(a_len)
+            .map_err(|_| crate::Error::memory_error())?;
+        right
+            .try_reserve_exact(b_len)
+            .map_err(|_| crate::Error::memory_error())?;
+        left.extend(a.chars());
+        right.extend(b.chars());
+        matcher::longest_unicode(
+            &left,
+            &right,
+            (alo, ahi, blo, bhi),
+            &index.keys,
+            &index.offsets,
+            &index.positions,
+            &index.junk,
+        )?
+    };
+    let constructor = ctx.lookup(root, "Match")?;
+    ctx.heap.reserve_temporaries(3)?;
+    let left = ctx.int(best.0 as i64);
+    ctx.heap.keep(left);
+    let right = ctx.int(best.1 as i64);
+    ctx.heap.keep(right);
+    let size = ctx.int(best.2 as i64);
+    ctx.heap.keep(size);
+    ctx.call(constructor, vec![left, right, size], Vec::new())
+        .map(Some)
 }

@@ -1787,6 +1787,9 @@ print("result", call(b=2, a=1))
             .unwrap()
             .llvm_ir;
         assert!(ir.contains("call i64 @imre_dyn_difflib_chain_b(ptr %ctx, i64 %scope, ptr @code"));
+        assert!(
+            ir.contains("call i64 @imre_dyn_difflib_find_longest(ptr %ctx, i64 %scope, ptr @code")
+        );
 
         std::fs::write(
             dir.path().join("difflib.py"),

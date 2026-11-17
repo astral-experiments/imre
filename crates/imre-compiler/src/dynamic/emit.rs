@@ -1154,6 +1154,7 @@ impl SourceMap<'_> {
             .then_some(prefix.name)
             .and_then(|name| match name {
                 "SequenceMatcher.__chain_b" => Some("imre_dyn_difflib_chain_b"),
+                "SequenceMatcher.find_longest_match" => Some("imre_dyn_difflib_find_longest"),
                 _ => None,
             });
         match accelerator {
