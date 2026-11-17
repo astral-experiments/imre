@@ -211,6 +211,10 @@ def main() -> None:
                 if case.name == "file_finder_data":
                     # The optimized filesystem-discovery links can take over 150 seconds.
                     timeout = 900
+                included = {
+                    "live_module_cache": ["--include-module", "pkg.replace_parent"],
+                    "module_cache_cleanup": ["--include-module", "flaky"],
+                }.get(case.name, [])
                 build = run_build(
                     [
                         compiler,
@@ -226,6 +230,7 @@ def main() -> None:
                         level,
                         "-o",
                         str(binary),
+                        *included,
                         *flags,
                     ],
                     temporary,
