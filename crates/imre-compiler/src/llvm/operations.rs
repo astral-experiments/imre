@@ -1130,34 +1130,26 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     CheckedValue::handle(handle)
                 }
             },
-            ExprKind::List(items) | ExprKind::Tuple(items) => {
-                let tuple = matches!(expr.kind, ExprKind::Tuple(_));
+            ExprKind::List(items)
+            | ExprKind::Tuple(items)
+            | ExprKind::Set { values: items, .. } => {
+                let display = match &expr.kind {
+                    ExprKind::Tuple(_) => DisplayKind::Tuple,
+                    ExprKind::Set { .. } => DisplayKind::Set,
+                    _ => DisplayKind::List,
+                };
                 match &mut self.0 {
-                    Entry::Native(emitter) if tuple => {
+                    Entry::Native(emitter) if display == DisplayKind::Tuple => {
                         CheckedValue::owned(emitter.tuple(expr.ty, items, None))
                     }
                     Entry::Native(emitter) => {
                         CheckedValue::owned(emitter.native_sequence(expr.ty, items, false))
                     }
-                    Entry::Registered(frame) => CheckedValue::handle(frame.sequence(
-                        items,
-                        if tuple {
-                            DisplayKind::Tuple
-                        } else {
-                            DisplayKind::List
-                        },
-                        usage,
-                    )),
+                    Entry::Registered(frame) => {
+                        CheckedValue::handle(frame.sequence(items, display, usage))
+                    }
                 }
             }
-            ExprKind::Set { values, .. } => match &mut self.0 {
-                Entry::Native(emitter) => {
-                    CheckedValue::owned(emitter.native_sequence(expr.ty, values, false))
-                }
-                Entry::Registered(frame) => {
-                    CheckedValue::handle(frame.sequence(values, DisplayKind::Set, usage))
-                }
-            },
             ExprKind::Compare(values, ops) => {
                 let truth =
                     matches!(self.0, Entry::Native(_)) || usage == ValueUse::ComparisonTruth;
