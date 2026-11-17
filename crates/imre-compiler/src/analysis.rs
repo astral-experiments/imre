@@ -1572,6 +1572,13 @@ impl Session {
         if let Some(report) = report {
             return Err(report.to_string());
         }
+        let mut selected_providers = HashMap::new();
+        for (id, source) in sources.clone() {
+            if source.has_open_execution && source.is_original_sdk_source() {
+                selected_providers.entry(source.name).or_insert(self.files[id]);
+            }
+        }
+        let selected_provider = |owner: &str| selected_providers.get(owner).copied();
         let ordinary = self.check_execution_with_imports(
             sources
                 .clone()
@@ -1580,12 +1587,13 @@ impl Session {
                     (
                         id,
                         source.path,
-                        source.has_open_exec,
+                        source.has_open_execution,
                         source.linked_exec,
                         source.literal_unit,
                     )
                 }),
             captures,
+            &selected_provider,
         );
         let files = self.check_run_path_callers(sources, has_file_body);
         match (ordinary, files) {

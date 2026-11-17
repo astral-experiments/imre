@@ -179,7 +179,7 @@ struct Imports {
     uses_exec: bool,
     literal_calls: Vec<literal::LiteralCandidate>,
     file_write_targets: HashMap<String, PathBuf>,
-    has_open_exec: bool,
+    has_open_execution: bool,
     computed_import: bool,
     argument_imports: Vec<usize>,
     site_names: HashMap<String, Option<usize>>,
@@ -239,7 +239,7 @@ struct LiteralImports {
     pending_roots: Vec<(usize, u32, Vec<literal::LiteralCandidate>)>,
     origins: HashMap<usize, (bool, bool, ImportOrigin)>,
     seeded_winners: usize,
-    open_exec: HashSet<usize>,
+    open_execution: HashSet<usize>,
     linked_exec: HashMap<usize, HashSet<TextRange>>,
 }
 
@@ -252,8 +252,8 @@ impl LiteralImports {
         selected: bool,
         origin: ImportOrigin,
     ) {
-        if imports.has_open_exec {
-            self.open_exec.insert(unit);
+        if imports.has_open_execution {
+            self.open_execution.insert(unit);
         }
         if !imports.literal_calls.is_empty() {
             self.pending_roots.push((
@@ -705,7 +705,19 @@ impl<'a> Visitor<'a> for Imports {
                 });
             }
             // Until binding resolution, a name can still hold arbitrary source.
-            self.has_open_exec |= !source.is_some_and(Expr::is_string_literal_expr);
+            self.has_open_execution |= !source.is_some_and(Expr::is_string_literal_expr);
+        }
+        if let Expr::Call(call) = e
+            && call
+                .func
+                .as_name_expr()
+                .is_some_and(|name| name.id == "eval")
+        {
+            self.has_open_execution |= !call
+                .arguments
+                .args
+                .first()
+                .is_some_and(Expr::is_string_literal_expr);
         }
         if let Expr::Call(call) = e
             && let Some(function) = call.func.as_attribute_expr()
@@ -1075,7 +1087,7 @@ fn imports_from_body(
             getter.visit_body(statements);
         }
         imports.literal_calls.append(&mut getter.literal_calls);
-        imports.has_open_exec |= getter.has_open_exec;
+        imports.has_open_execution |= getter.has_open_execution;
     }
     Ok(imports)
 }
@@ -1104,7 +1116,7 @@ pub(crate) enum EntryStart<'a> {
 
 #[derive(Clone, Copy)]
 pub(crate) struct RegisteredSource<'a> {
-    pub(crate) has_open_exec: bool,
+    pub(crate) has_open_execution: bool,
     pub(crate) linked_exec: Option<&'a HashSet<TextRange>>,
     pub(crate) literal_unit: Option<literal::LiteralUnit<'a>>,
     pub(crate) unit: Option<usize>,
@@ -1133,6 +1145,22 @@ impl<'a> RegisteredSource<'a> {
             && self.is_original_bundled_source(bundled_module_source(self.name, false))
     }
 
+    /// Verify an original SDK winner, including a decoded member of the installed standard-library archive.
+    pub(crate) fn is_original_sdk_source(&self) -> bool {
+        !self.main_body
+            && !self.declares_signatures
+            && !self.check_execution
+            && (bundled_module_source(self.name, false).is_some_and(|(filename, body)| {
+                self.path.strip_prefix(BUNDLED_SOURCE_ROOT) == Ok(Path::new(filename))
+                    && self.source == body
+            }) || crate::zip_entry::packaged_member(self.name).is_some_and(|member| {
+                self.kind == SourceKind::DecodedFile
+                    && self.path.ends_with(member)
+                    && crate::zip_entry::installed_source(member)
+                        .is_ok_and(|body| body == self.source)
+            }))
+    }
+
     /// Pair a checked declaration only with its own selected SDK file.
     pub(crate) fn matches_bundled_source(&self, path: &Path) -> bool {
         self.path.strip_prefix(BUNDLED_SOURCE_ROOT) == Ok(path)
@@ -1155,7 +1183,7 @@ impl<'a> RegisteredSource<'a> {
         checked_module: Option<crate::modules::ModuleId>,
     ) -> Self {
         Self {
-            has_open_exec: false,
+            has_open_execution: false,
             linked_exec: None,
             literal_unit: None,
             unit: None,
@@ -2184,6 +2212,9 @@ pub(crate) fn compile(
                         Some(&mut getter),
                     )
                     .map_err(|e| format!("{}: {e}", path.display()))?;
+                    if imports.has_open_execution {
+                        literals.open_execution.insert(sources.len());
+                    }
                     // unittest's loader imports application modules by name, including during discovery.
                     // Other bundled imports are implementation details of a known provider.
                     if prefix != "unittest.loader" {
@@ -2722,6 +2753,9 @@ pub(crate) fn compile(
                     if let Some(module) = scanned.and_then(ScannedModule::from_input) {
                         scanned_modules.insert(sources.len(), module);
                     }
+                    if imports.has_open_execution {
+                        literals.open_execution.insert(sources.len());
+                    }
                     registrations.python_providers.insert(sources.len());
                     if let Some(digest) = digest {
                         registrations.archive_members.insert(path.clone(), digest);
@@ -2946,7 +2980,7 @@ pub(crate) fn compile(
                     registrations.checked_units.entry(id).or_default().module = Some(module_id);
                 }
             }
-            registration.has_open_exec = literals.open_exec.contains(&id);
+            registration.has_open_execution = literals.open_execution.contains(&id);
             registration.linked_exec = literals.linked_exec.get(&id);
             registration.literal_unit = Some(literal::LiteralUnit {
                 sites: &literal_sites,

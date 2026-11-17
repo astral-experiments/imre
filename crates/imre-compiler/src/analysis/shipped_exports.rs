@@ -318,6 +318,68 @@ impl Session {
         )
     }
 
+    /// Match a resolved typeshed callable to the declaration in its selected, original bundled provider.
+    pub(super) fn selected_callable_definition<'db>(
+        &'db self,
+        interface: Definition<'db>,
+        provider: &dyn Fn(&str) -> Option<File>,
+    ) -> Option<Definition<'db>> {
+        use ty_python_core::scope::{NodeWithScopeKind, NodeWithScopeRef};
+        let db = &self.db;
+        if !interface.file(db).path(db).is_vendored_path() {
+            return None;
+        }
+        let module =
+            ty_module_resolver::file_to_module(db, interface.program_file(db).resolver_file(db))?;
+        let owner = module.name(db).as_str();
+        let file = provider(owner)?;
+        let DefinitionKind::Function(function) = interface.kind(db) else {
+            return None;
+        };
+        let stub = self.parsed(interface.file(db));
+        let name = function.node(&stub).name.as_str();
+        match interface.scope(db).node(db) {
+            NodeWithScopeKind::Module => {
+                let Binding::RegisteredValue(site) =
+                    self.shipped_declaration_at(file, owner, name)?
+                else {
+                    return None;
+                };
+                let selected = self.final_module_binding(site.file(), name)?;
+                (selected.focus_range(db, &self.parsed(site.file())) == site).then_some(selected)
+            }
+            NodeWithScopeKind::Class(class) => {
+                let Binding::RegisteredClass(site) =
+                    self.shipped_declaration_at(file, owner, class.node(&stub).name.as_str())?
+                else {
+                    return None;
+                };
+                if site.file() != file {
+                    return None;
+                }
+                let selected = self.final_module_binding(file, class.node(&stub).name.as_str())?;
+                let DefinitionKind::Class(class) = selected.kind(db) else {
+                    return None;
+                };
+                let parsed = self.parsed(file);
+                if selected.focus_range(db, &parsed) != site {
+                    return None;
+                }
+                let index = ty_python_core::semantic_index(db, db.program_file(file));
+                let scope = index.try_node_scope(NodeWithScopeRef::Class(class.node(&parsed)))?;
+                let symbol = index.place_table(scope).symbol_id(name)?;
+                let mut bindings = index
+                    .use_def_map(scope)
+                    .end_of_scope_symbol_bindings(symbol);
+                let selected = bindings.next()?.binding.definition()?;
+                (bindings.next().is_none()
+                    && matches!(selected.kind(db), DefinitionKind::Function(_)))
+                .then_some(selected)
+            }
+            _ => None,
+        }
+    }
+
     pub(crate) fn shipped_declaration(&self, owner: &str, name: &str) -> Option<Binding> {
         let (filename, _) = crate::dynamic::bundled_module_source(owner, false)?;
         let file = shipped_file(&self.db, filename)?;
