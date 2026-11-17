@@ -3480,19 +3480,21 @@ impl Session {
         ]
         .into_iter()
         .find(|(class, _)| {
-            let mut instance = class.to_instance(db, env);
-            if matches!(rule, ScalarMatch::Exact) {
-                return ty == instance;
-            }
-            if matches!(class, KnownClass::Float) {
-                instance = ty_python_semantic::types::UnionType::from_two_elements(
+            let instance = class.to_instance(db, env);
+            let accepted = if matches!(class, KnownClass::Float) {
+                ty_python_semantic::types::UnionType::from_two_elements(
                     db,
                     env,
-                    instance,
                     KnownClass::Int.to_instance(db, env),
-                );
+                    instance,
+                )
+            } else {
+                instance
+            };
+            match rule {
+                ScalarMatch::Exact => ty == instance || ty == accepted,
+                ScalarMatch::Assignable => ty.is_assignable_to(db, env, accepted),
             }
-            ty.is_assignable_to(db, env, instance)
         })
         .map(|(_, ty)| ty)
     }
@@ -3860,6 +3862,88 @@ impl Session {
         }
     }
 
+    /// Validate first-party scalar stores before admitting object fallback. Python
+    /// assignability may accept a value that cannot satisfy Imre's fixed representation:
+    ///
+    /// ```python
+    /// status: int = True
+    /// ```
+    /// Unreachable, type-checking-only, and excluded source spans do not execute stores.
+    fn exact_scalar_stores(
+        &self,
+        module: usize,
+        path: &Path,
+        skipped: &[TextRange],
+        errors: &mut Vec<(TextSize, String)>,
+    ) {
+        use ty_python_core::{definition::DefinitionKind, scope::NodeWithScopeKind};
+
+        let db = &self.db;
+        let file = self.files[module];
+        let source = db.program_file(file);
+        let index = ty_python_core::semantic_index(db, source);
+        let parsed = self.parsed(file);
+        let model = SemanticModel::new(db, source);
+        let env = model.program_environment();
+        let unreachable = std::cell::LazyCell::new(|| {
+            ty_python_semantic::types::ide_support::unreachable_ranges(db, source)
+        });
+        for scope in index.scope_ids() {
+            // A metaclass can interpret class annotations as schema fields.
+            if matches!(scope.node(db), NodeWithScopeKind::Class(_)) {
+                continue;
+            }
+            let scope = scope.file_scope_id(db);
+            let definitions = index.use_def_map(scope);
+            for (_, definition, _) in definitions.definitions_with_usage() {
+                let (annotation, value) = match definition.kind(db) {
+                    DefinitionKind::AnnotatedAssignment(a) if a.target(&parsed).is_name_expr() => {
+                        (Some(a.annotation(&parsed)), a.value(&parsed))
+                    }
+                    DefinitionKind::Assignment(a)
+                        if a.unpack().is_none() && a.target(&parsed).is_name_expr() =>
+                    {
+                        let mut annotations = definitions
+                            .declarations_at_binding(definition)
+                            .filter_map(|d| d.declaration.definition())
+                            .filter_map(|d| match d.kind(db) {
+                                DefinitionKind::AnnotatedAssignment(a) => {
+                                    Some(a.annotation(&parsed))
+                                }
+                                _ => None,
+                            });
+                        let first = annotations.next();
+                        (
+                            first.filter(|_| annotations.next().is_none()),
+                            Some(a.value(&parsed)),
+                        )
+                    }
+                    _ => continue,
+                };
+                let (Some(annotation), Some(value)) = (annotation, value) else {
+                    continue;
+                };
+                if index.is_in_type_checking_block(scope, value.range())
+                    || skipped.iter().any(|r| r.contains_range(value.range()))
+                {
+                    continue;
+                }
+                if let Some(expected) = annotation_type(db, &model, annotation)
+                    && let Some(actual) = value.inferred_type(&model)
+                    // Keep ty's diagnostic where the declared-initializer check covers it;
+                    // other scalar stores still need an independent contract diagnostic.
+                    && (actual.is_assignable_to(db, &env, expected)
+                        || contract_initializer(db, file, &parsed, value.range()).is_none())
+                    && !Self::written_scalar_union_accepts(&model, annotation, actual)
+                    && let Some(error) = Self::scalar_contract_error(&model, expected, value, actual, || true)
+                    && !unreachable.iter().any(|r| r.range.contains_range(value.range()))
+                {
+                    errors.push((value.start(), error.with_path(path).to_string()));
+                }
+            }
+        }
+    }
+
     pub(crate) fn closed_program_errors(
         &self,
         modules: &[impl ClosedSource],
@@ -3990,11 +4074,17 @@ impl Session {
                 }
             }
             let mut dormant = Vec::new();
+            self.exact_scalar_stores(
+                index,
+                path,
+                skipped.map_or(&[], |ranges| ranges[index].as_slice()),
+                &mut dormant,
+            );
             if !declarations.parameters(&self.db).is_empty() {
                 self.dormant_call_errors(index, path, declarations, &mut dormant);
-                // Parameter order can differ from the order of the written arguments.
-                dormant.sort_by_key(|(start, _)| *start);
             }
+            // Merge source diagnostics in operand order, including cached ty-clean bodies.
+            dormant.sort_by_key(|(start, _)| *start);
             let mut dormant = dormant.into_iter().peekable();
             // The default body check covers ty's declaration rules on the same bindings.
             if checked_bodies
@@ -5240,12 +5330,8 @@ fn concrete_scalar<'db>(
     env: &ty_python_semantic::types::ProgramEnvironment<'db>,
     declared: ty_python_semantic::types::Type<'db>,
 ) -> bool {
-    use ty_python_semantic::types::{KnownClass, UnionType};
-    let scalar = |class: KnownClass| class.to_instance(db, env);
-    [KnownClass::Int, KnownClass::Bool, KnownClass::Float, KnownClass::Str, KnownClass::Bytes]
-        .into_iter().any(|class| declared == scalar(class))
-        // ty widens a float annotation to float | int.
-        || declared == UnionType::from_two_elements(db, env, scalar(KnownClass::Float), scalar(KnownClass::Int))
+    Session::scalar_layout(db, env, declared, ScalarMatch::Exact)
+        .is_some_and(|layout| layout != crate::ir::Type::None)
 }
 
 fn primary_range(diagnostic: &Diagnostic, file: File) -> Option<TextRange> {

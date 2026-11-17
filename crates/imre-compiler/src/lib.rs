@@ -779,6 +779,12 @@ fn object_fallback(
     let check = |mut checked_graph: Option<&mut modules::SourceGraph>,
                  entry_requests_objects,
                  registered: Option<dynamic::RegisteredSources<'_>>| {
+        // A lowering refusal does not prove the original first-party scalar stores.
+        if let Some(graph) = checked_graph.as_deref()
+            && let Some(contract) = &graph.source_contract
+        {
+            contract.original(graph).clone()?;
+        }
         check_returns(
             checked_graph.as_deref_mut(),
             entry_requests_objects,
