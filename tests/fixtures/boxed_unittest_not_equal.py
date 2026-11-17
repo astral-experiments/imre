@@ -25,6 +25,7 @@ class Failure(AssertionError):
 
 
 def current():
+    assert TestCase.assertNotEqual.__annotations__ == {}
     case = TestCase()
     case.assertNotEqual("self", "__dataclass_self__")
     left = Unequal()

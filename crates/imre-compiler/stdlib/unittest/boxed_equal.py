@@ -1,3 +1,8 @@
+# Keep runtime Python signatures unannotated while checked callers use source contracts.
+_safe_repr.__annotations__ = {}
+TestCase._formatMessage.__annotations__ = {}
+TestCase.fail.__annotations__ = {}
+TestCase.assertNotEqual.__annotations__ = {}
 _baseAssertEqual.__annotations__ = {}
 assertMultiLineEqual = TestCase.assertMultiLineEqual
 # Keep the public Python signature while fixed callers use the class declaration.
