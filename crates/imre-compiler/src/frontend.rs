@@ -15056,6 +15056,9 @@ impl<'a> Checker<'a> {
             if matches!(receiver.ty, Type::CompletedProcess(..)) {
                 return self.process_method(receiver, attribute, call);
             }
+            if matches!(receiver.ty, Type::Coroutine(_)) && attribute.attr.as_str() == "send" {
+                return Err(self.object_builtin_error_with_checked_calls("coroutine.send", call));
+            }
             if matches!(
                 receiver.ty,
                 Type::TaskGroup | Type::EventLoop | Type::Task(_)
