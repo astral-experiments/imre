@@ -30,7 +30,10 @@ impl Emitter<'_, '_> {
             Builtin::SortByKeys(source) => {
                 let (values, keys, key, reverse) = match (source, args) {
                     (ir::SortKeys::ObjectText, [values, reverse]) => {
-                        assert_eq!(self.module.types.element(values.value.ty), Some(Type::ObjectValue));
+                        assert_eq!(
+                            self.module.types.element(values.value.ty),
+                            Some(Type::ObjectValue)
+                        );
                         (values, values, Type::Str, reverse)
                     }
                     (ir::SortKeys::Stored, [values, keys, reverse]) => {
