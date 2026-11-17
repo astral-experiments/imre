@@ -1,0 +1,125 @@
+test_arp_getnode (__main__.TestInternalsWithExtModule.test_arp_getnode) ... skipped 'arp is not used for introspection on this platform'
+test_find_mac_near_keyword (__main__.TestInternalsWithExtModule.test_find_mac_near_keyword) ... ok
+test_find_under_heading (__main__.TestInternalsWithExtModule.test_find_under_heading) ... ok
+test_find_under_heading_ipv6 (__main__.TestInternalsWithExtModule.test_find_under_heading_ipv6) ... ok
+test_ifconfig_getnode (__main__.TestInternalsWithExtModule.test_ifconfig_getnode) ... skipped 'requires ifconfig'
+test_ip_getnode (__main__.TestInternalsWithExtModule.test_ip_getnode) ... ok
+test_lanscan_getnode (__main__.TestInternalsWithExtModule.test_lanscan_getnode) ... skipped 'lanscan is not used for introspection on this platform'
+test_netstat_getnode (__main__.TestInternalsWithExtModule.test_netstat_getnode) ... skipped 'netstat is not used for introspection on this platform'
+test_parse_mac (__main__.TestInternalsWithExtModule.test_parse_mac) ... ok
+test_parse_mac_aix (__main__.TestInternalsWithExtModule.test_parse_mac_aix) ... ok
+test_random_getnode (__main__.TestInternalsWithExtModule.test_random_getnode) ... ok
+test_unix_getnode (__main__.TestInternalsWithExtModule.test_unix_getnode) ... skipped 'requires unix'
+test_windll_getnode (__main__.TestInternalsWithExtModule.test_windll_getnode) ... skipped 'requires Windows'
+test_arp_getnode (__main__.TestInternalsWithoutExtModule.test_arp_getnode) ... skipped 'arp is not used for introspection on this platform'
+test_find_mac_near_keyword (__main__.TestInternalsWithoutExtModule.test_find_mac_near_keyword) ... ok
+test_find_under_heading (__main__.TestInternalsWithoutExtModule.test_find_under_heading) ... ok
+test_find_under_heading_ipv6 (__main__.TestInternalsWithoutExtModule.test_find_under_heading_ipv6) ... ok
+test_ifconfig_getnode (__main__.TestInternalsWithoutExtModule.test_ifconfig_getnode) ... skipped 'requires ifconfig'
+test_ip_getnode (__main__.TestInternalsWithoutExtModule.test_ip_getnode) ... ok
+test_lanscan_getnode (__main__.TestInternalsWithoutExtModule.test_lanscan_getnode) ... skipped 'lanscan is not used for introspection on this platform'
+test_netstat_getnode (__main__.TestInternalsWithoutExtModule.test_netstat_getnode) ... skipped 'netstat is not used for introspection on this platform'
+test_parse_mac (__main__.TestInternalsWithoutExtModule.test_parse_mac) ... ok
+test_parse_mac_aix (__main__.TestInternalsWithoutExtModule.test_parse_mac_aix) ... ok
+test_random_getnode (__main__.TestInternalsWithoutExtModule.test_random_getnode) ... ok
+testIssue8621 (__main__.TestUUIDWithExtModule.testIssue8621) ... ok
+test_UUID (__main__.TestUUIDWithExtModule.test_UUID) ... ok
+test_cli_name_required_for_uuid3 (__main__.TestUUIDWithExtModule.test_cli_name_required_for_uuid3) ... ok
+test_cli_namespace_required_for_uuid3 (__main__.TestUUIDWithExtModule.test_cli_namespace_required_for_uuid3) ... ok
+test_cli_uuid1 (__main__.TestUUIDWithExtModule.test_cli_uuid1) ... ok
+test_cli_uuid3_outputted_with_custom_namespace_and_name (__main__.TestUUIDWithExtModule.test_cli_uuid3_outputted_with_custom_namespace_and_name) ... ok
+test_cli_uuid3_outputted_with_valid_namespace_and_name (__main__.TestUUIDWithExtModule.test_cli_uuid3_outputted_with_valid_namespace_and_name) ... ok
+test_cli_uuid3_with_invalid_namespace (__main__.TestUUIDWithExtModule.test_cli_uuid3_with_invalid_namespace) ... ok
+test_cli_uuid4_outputted_with_count (__main__.TestUUIDWithExtModule.test_cli_uuid4_outputted_with_count) ... ok
+test_cli_uuid4_outputted_with_no_args (__main__.TestUUIDWithExtModule.test_cli_uuid4_outputted_with_no_args) ... ok
+test_cli_uuid5_ouputted_with_custom_namespace_and_name (__main__.TestUUIDWithExtModule.test_cli_uuid5_ouputted_with_custom_namespace_and_name) ... ok
+test_cli_uuid5_outputted_with_valid_namespace_and_name (__main__.TestUUIDWithExtModule.test_cli_uuid5_outputted_with_valid_namespace_and_name) ... ok
+test_cli_uuid5_with_invalid_namespace (__main__.TestUUIDWithExtModule.test_cli_uuid5_with_invalid_namespace) ... ok
+test_cli_uuid6 (__main__.TestUUIDWithExtModule.test_cli_uuid6) ... ok
+test_cli_uuid7 (__main__.TestUUIDWithExtModule.test_cli_uuid7) ... ok
+test_cli_uuid8 (__main__.TestUUIDWithExtModule.test_cli_uuid8) ... ok
+test_exceptions (__main__.TestUUIDWithExtModule.test_exceptions) ... ok
+test_getnode (__main__.TestUUIDWithExtModule.test_getnode) ... ok
+test_max_uuid (__main__.TestUUIDWithExtModule.test_max_uuid) ... ok
+test_nil_uuid (__main__.TestUUIDWithExtModule.test_nil_uuid) ... ok
+test_pickle_roundtrip (__main__.TestUUIDWithExtModule.test_pickle_roundtrip) ... ok
+test_safe_uuid_enum (__main__.TestUUIDWithExtModule.test_safe_uuid_enum) ... ok
+test_unix_getnode_from_libuuid (__main__.TestUUIDWithExtModule.test_unix_getnode_from_libuuid) ... skipped 'libuuid cannot deduce MAC address'
+test_unpickle_previous_python_versions (__main__.TestUUIDWithExtModule.test_unpickle_previous_python_versions) ... ok
+test_uuid1 (__main__.TestUUIDWithExtModule.test_uuid1) ... ok
+test_uuid1_bogus_return_value (__main__.TestUUIDWithExtModule.test_uuid1_bogus_return_value) ... ok
+test_uuid1_eui64 (__main__.TestUUIDWithExtModule.test_uuid1_eui64) ... ok
+test_uuid1_is_safe (__main__.TestUUIDWithExtModule.test_uuid1_is_safe) ... ok
+test_uuid1_is_unsafe (__main__.TestUUIDWithExtModule.test_uuid1_is_unsafe) ... ok
+test_uuid1_safe (__main__.TestUUIDWithExtModule.test_uuid1_safe) ... ok
+test_uuid1_time (__main__.TestUUIDWithExtModule.test_uuid1_time) ... ok
+test_uuid1_unknown (__main__.TestUUIDWithExtModule.test_uuid1_unknown) ... ok
+test_uuid3 (__main__.TestUUIDWithExtModule.test_uuid3) ... ok
+test_uuid4 (__main__.TestUUIDWithExtModule.test_uuid4) ... ok
+test_uuid5 (__main__.TestUUIDWithExtModule.test_uuid5) ... ok
+test_uuid6 (__main__.TestUUIDWithExtModule.test_uuid6) ... ok
+test_uuid6_clock_seq (__main__.TestUUIDWithExtModule.test_uuid6_clock_seq) ... ok
+test_uuid6_node (__main__.TestUUIDWithExtModule.test_uuid6_node) ... ok
+test_uuid6_test_vectors (__main__.TestUUIDWithExtModule.test_uuid6_test_vectors) ... ok
+test_uuid6_uniqueness (__main__.TestUUIDWithExtModule.test_uuid6_uniqueness) ... ok
+test_uuid7 (__main__.TestUUIDWithExtModule.test_uuid7) ... ok
+test_uuid7_monotonicity (__main__.TestUUIDWithExtModule.test_uuid7_monotonicity) ... ok
+test_uuid7_overflow_counter (__main__.TestUUIDWithExtModule.test_uuid7_overflow_counter) ... ok
+test_uuid7_timestamp_backwards (__main__.TestUUIDWithExtModule.test_uuid7_timestamp_backwards) ... ok
+test_uuid7_uniqueness (__main__.TestUUIDWithExtModule.test_uuid7_uniqueness) ... ok
+test_uuid8 (__main__.TestUUIDWithExtModule.test_uuid8) ... ok
+test_uuid8_uniqueness (__main__.TestUUIDWithExtModule.test_uuid8_uniqueness) ... ok
+test_uuid_weakref (__main__.TestUUIDWithExtModule.test_uuid_weakref) ... ok
+test_windows_getnode_from_libuuid (__main__.TestUUIDWithExtModule.test_windows_getnode_from_libuuid) ... skipped 'Windows only'
+testIssue8621 (__main__.TestUUIDWithoutExtModule.testIssue8621) ... ok
+test_UUID (__main__.TestUUIDWithoutExtModule.test_UUID) ... ok
+test_cli_name_required_for_uuid3 (__main__.TestUUIDWithoutExtModule.test_cli_name_required_for_uuid3) ... ok
+test_cli_namespace_required_for_uuid3 (__main__.TestUUIDWithoutExtModule.test_cli_namespace_required_for_uuid3) ... ok
+test_cli_uuid1 (__main__.TestUUIDWithoutExtModule.test_cli_uuid1) ... ok
+test_cli_uuid3_outputted_with_custom_namespace_and_name (__main__.TestUUIDWithoutExtModule.test_cli_uuid3_outputted_with_custom_namespace_and_name) ... ok
+test_cli_uuid3_outputted_with_valid_namespace_and_name (__main__.TestUUIDWithoutExtModule.test_cli_uuid3_outputted_with_valid_namespace_and_name) ... ok
+test_cli_uuid3_with_invalid_namespace (__main__.TestUUIDWithoutExtModule.test_cli_uuid3_with_invalid_namespace) ... ok
+test_cli_uuid4_outputted_with_count (__main__.TestUUIDWithoutExtModule.test_cli_uuid4_outputted_with_count) ... ok
+test_cli_uuid4_outputted_with_no_args (__main__.TestUUIDWithoutExtModule.test_cli_uuid4_outputted_with_no_args) ... ok
+test_cli_uuid5_ouputted_with_custom_namespace_and_name (__main__.TestUUIDWithoutExtModule.test_cli_uuid5_ouputted_with_custom_namespace_and_name) ... ok
+test_cli_uuid5_outputted_with_valid_namespace_and_name (__main__.TestUUIDWithoutExtModule.test_cli_uuid5_outputted_with_valid_namespace_and_name) ... ok
+test_cli_uuid5_with_invalid_namespace (__main__.TestUUIDWithoutExtModule.test_cli_uuid5_with_invalid_namespace) ... ok
+test_cli_uuid6 (__main__.TestUUIDWithoutExtModule.test_cli_uuid6) ... ok
+test_cli_uuid7 (__main__.TestUUIDWithoutExtModule.test_cli_uuid7) ... ok
+test_cli_uuid8 (__main__.TestUUIDWithoutExtModule.test_cli_uuid8) ... ok
+test_exceptions (__main__.TestUUIDWithoutExtModule.test_exceptions) ... ok
+test_getnode (__main__.TestUUIDWithoutExtModule.test_getnode) ... ok
+test_max_uuid (__main__.TestUUIDWithoutExtModule.test_max_uuid) ... ok
+test_nil_uuid (__main__.TestUUIDWithoutExtModule.test_nil_uuid) ... ok
+test_pickle_roundtrip (__main__.TestUUIDWithoutExtModule.test_pickle_roundtrip) ... ok
+test_safe_uuid_enum (__main__.TestUUIDWithoutExtModule.test_safe_uuid_enum) ... ok
+test_unpickle_previous_python_versions (__main__.TestUUIDWithoutExtModule.test_unpickle_previous_python_versions) ... ok
+test_uuid1 (__main__.TestUUIDWithoutExtModule.test_uuid1) ... ok
+test_uuid1_bogus_return_value (__main__.TestUUIDWithoutExtModule.test_uuid1_bogus_return_value) ... skipped 'need uuid._generate_time_safe'
+test_uuid1_eui64 (__main__.TestUUIDWithoutExtModule.test_uuid1_eui64) ... ok
+test_uuid1_is_safe (__main__.TestUUIDWithoutExtModule.test_uuid1_is_safe) ... skipped 'need uuid._generate_time_safe'
+test_uuid1_is_unsafe (__main__.TestUUIDWithoutExtModule.test_uuid1_is_unsafe) ... skipped 'need uuid._generate_time_safe'
+test_uuid1_safe (__main__.TestUUIDWithoutExtModule.test_uuid1_safe) ... skipped 'requires uuid_generate_time_safe(3)'
+test_uuid1_time (__main__.TestUUIDWithoutExtModule.test_uuid1_time) ... ok
+test_uuid1_unknown (__main__.TestUUIDWithoutExtModule.test_uuid1_unknown) ... skipped 'need uuid._generate_time_safe'
+test_uuid3 (__main__.TestUUIDWithoutExtModule.test_uuid3) ... ok
+test_uuid4 (__main__.TestUUIDWithoutExtModule.test_uuid4) ... ok
+test_uuid5 (__main__.TestUUIDWithoutExtModule.test_uuid5) ... ok
+test_uuid6 (__main__.TestUUIDWithoutExtModule.test_uuid6) ... ok
+test_uuid6_clock_seq (__main__.TestUUIDWithoutExtModule.test_uuid6_clock_seq) ... ok
+test_uuid6_node (__main__.TestUUIDWithoutExtModule.test_uuid6_node) ... ok
+test_uuid6_test_vectors (__main__.TestUUIDWithoutExtModule.test_uuid6_test_vectors) ... ok
+test_uuid6_uniqueness (__main__.TestUUIDWithoutExtModule.test_uuid6_uniqueness) ... ok
+test_uuid7 (__main__.TestUUIDWithoutExtModule.test_uuid7) ... ok
+test_uuid7_monotonicity (__main__.TestUUIDWithoutExtModule.test_uuid7_monotonicity) ... ok
+test_uuid7_overflow_counter (__main__.TestUUIDWithoutExtModule.test_uuid7_overflow_counter) ... ok
+test_uuid7_timestamp_backwards (__main__.TestUUIDWithoutExtModule.test_uuid7_timestamp_backwards) ... ok
+test_uuid7_uniqueness (__main__.TestUUIDWithoutExtModule.test_uuid7_uniqueness) ... ok
+test_uuid8 (__main__.TestUUIDWithoutExtModule.test_uuid8) ... ok
+test_uuid8_uniqueness (__main__.TestUUIDWithoutExtModule.test_uuid8_uniqueness) ... ok
+test_uuid_weakref (__main__.TestUUIDWithoutExtModule.test_uuid_weakref) ... ok
+
+----------------------------------------------------------------------
+Ran 120 tests in 0.164s
+
+OK (skipped=17)

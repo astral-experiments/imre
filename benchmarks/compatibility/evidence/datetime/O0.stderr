@@ -1,0 +1,44 @@
+test_PyDateTime_DATE_GET (test.datetimetester.CapiTest_Pure.test_PyDateTime_DATE_GET) ... skipped 'need _testcapi module'
+test_PyDateTime_DELTA_GET (test.datetimetester.CapiTest_Pure.test_PyDateTime_DELTA_GET) ... skipped 'need _testcapi module'
+test_PyDateTime_GET (test.datetimetester.CapiTest_Pure.test_PyDateTime_GET) ... skipped 'need _testcapi module'
+test_PyDateTime_TIME_GET (test.datetimetester.CapiTest_Pure.test_PyDateTime_TIME_GET) ... skipped 'need _testcapi module'
+test_check_date (test.datetimetester.CapiTest_Pure.test_check_date) ... skipped 'need _testcapi module'
+test_check_datetime (test.datetimetester.CapiTest_Pure.test_check_datetime) ... skipped 'need _testcapi module'
+test_check_delta (test.datetimetester.CapiTest_Pure.test_check_delta) ... skipped 'need _testcapi module'
+test_check_time (test.datetimetester.CapiTest_Pure.test_check_time) ... skipped 'need _testcapi module'
+test_check_tzinfo (test.datetimetester.CapiTest_Pure.test_check_tzinfo) ... skipped 'need _testcapi module'
+test_date_from_date (test.datetimetester.CapiTest_Pure.test_date_from_date) ... skipped 'need _testcapi module'
+test_date_from_timestamp (test.datetimetester.CapiTest_Pure.test_date_from_timestamp) ... skipped 'need _testcapi module'
+test_datetime_from_dateandtime (test.datetimetester.CapiTest_Pure.test_datetime_from_dateandtime) ... skipped 'need _testcapi module'
+test_datetime_from_dateandtimeandfold (test.datetimetester.CapiTest_Pure.test_datetime_from_dateandtimeandfold) ... skipped 'need _testcapi module'
+test_datetime_from_timestamp (test.datetimetester.CapiTest_Pure.test_datetime_from_timestamp) ... skipped 'need _testcapi module'
+test_delta_from_dsu (test.datetimetester.CapiTest_Pure.test_delta_from_dsu) ... skipped 'need _testcapi module'
+test_time_from_time (test.datetimetester.CapiTest_Pure.test_time_from_time) ... skipped 'need _testcapi module'
+test_time_from_timeandfold (test.datetimetester.CapiTest_Pure.test_time_from_timeandfold) ... skipped 'need _testcapi module'
+test_timezones_capi (test.datetimetester.CapiTest_Pure.test_timezones_capi) ... skipped 'need _testcapi module'
+test_timezones_offset_zero (test.datetimetester.CapiTest_Pure.test_timezones_offset_zero) ... skipped 'need _testcapi module'
+test_type_check_in_subinterp (test.datetimetester.CapiTest_Pure.test_type_check_in_subinterp) ... skipped 'need _testcapi module'
+test_utc_capi (test.datetimetester.CapiTest_Pure.test_utc_capi) ... skipped 'need _testcapi module'
+test_concurrent_initialization_subinterpreter (test.datetimetester.ExtensionModuleTests_Pure.test_concurrent_initialization_subinterpreter) ... skipped 'Not relevant in pure Python'
+test_gh_120161 (test.datetimetester.ExtensionModuleTests_Pure.test_gh_120161) ... skipped 'implementation detail specific to cpython'
+test_update_type_cache (test.datetimetester.ExtensionModuleTests_Pure.test_update_type_cache) ... skipped 'Not relevant in pure Python'
+test_folds (test.datetimetester.IranTest_Pure.test_folds) ... ok
+test_gaps (test.datetimetester.IranTest_Pure.test_gaps) ... ok
+test_system_transitions (test.datetimetester.IranTest_Pure.test_system_transitions) ... ok
+test_check_arg_types (test.datetimetester.Oddballs_Pure.test_check_arg_types) ... ok
+test_date_datetime_comparison (test.datetimetester.Oddballs_Pure.test_date_datetime_comparison) ... ok
+test_extra_attributes (test.datetimetester.Oddballs_Pure.test_extra_attributes) ... ok
+test_backdoor_resistance (test.datetimetester.TestDate_Pure.test_backdoor_resistance) ... ok
+test_bad_constructor_arguments (test.datetimetester.TestDate_Pure.test_bad_constructor_arguments) ... ok
+test_basic_attributes (test.datetimetester.TestDate_Pure.test_basic_attributes) ... ok
+test_bool (test.datetimetester.TestDate_Pure.test_bool) ... ok
+test_compare (test.datetimetester.TestDate_Pure.test_compare) ... ok
+test_compat_unpickle (test.datetimetester.TestDate_Pure.test_compat_unpickle) ... ok
+test_computations (test.datetimetester.TestDate_Pure.test_computations) ... ok
+test_ctime (test.datetimetester.TestDate_Pure.test_ctime) ... ok
+test_extreme_ordinals (test.datetimetester.TestDate_Pure.test_extreme_ordinals) ... ok
+test_extreme_timedelta (test.datetimetester.TestDate_Pure.test_extreme_timedelta) ... ok
+test_format (test.datetimetester.TestDate_Pure.test_format) ... ok
+test_fromisocalendar (test.datetimetester.TestDate_Pure.test_fromisocalendar) ... ok
+test_fromisocalendar_type_errors (test.datetimetester.TestDate_Pure.test_fromisocalendar_type_errors) ... ok
+test_fromisocalendar_value_errors (test.datetimetester.TestDate_Pure.test_fromisocalendar_value_errors) ... 
