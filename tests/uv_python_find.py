@@ -27,7 +27,8 @@ def main():
             "UV_PYTHON_DOWNLOADS": "never",
         }
         env.pop("VIRTUAL_ENV", None)
-        (root / "sitecustomize.py").write_text("raise SystemExit('ignored under -I')\n")
+        sitecustomize = root / "sitecustomize.py"
+        sitecustomize.write_text("raise SystemExit('ignored under -I')\n")
 
         def find(*options):
             return subprocess.check_output(
@@ -41,6 +42,8 @@ def main():
         version = find("--show-version").split(".")
         assert version[:2] == target["python_version"].split("."), version
 
+        # uv run starts a normal interpreter, which must honor sitecustomize.
+        sitecustomize.unlink()
         app = root / "app.py"
         app.write_text(
             "import sys\nprint(f'{sys.implementation.name} {sys.argv[1]}')\n"
