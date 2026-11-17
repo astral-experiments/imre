@@ -5378,6 +5378,9 @@ impl<'a> Checker<'a> {
                             == Some(expected)
                     {
                         let checked = registered::checked_local_scalar(Some(expected), value);
+                        checker
+                            .graph
+                            .checked_frame_scalar_store(checker.module, site.range());
                         return Ok(Expr {
                             ty: expected,
                             ..checked
