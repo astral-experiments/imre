@@ -99,7 +99,14 @@ pub(super) fn module_source(
         "shutil" => bundled_source!("shutil.py"),
         "socket" => bundled_source!("socket.py"),
         "tempfile" => bundled_source!("tempfile.py"),
-        "doctest" => Some(("doctest.py", include_str!("../../stdlib/doctest.py"))),
+        "doctest" => Some((
+            "doctest.py",
+            concat!(
+                include_str!("../../stdlib/doctest.py"),
+                "\n",
+                include_str!("../../stdlib/doctest_boxed.py"),
+            ),
+        )),
         "_imre_doctest" => bundled_source!("_imre_doctest.py"),
         "unittest" => Some((
             "unittest/__init__.py",
