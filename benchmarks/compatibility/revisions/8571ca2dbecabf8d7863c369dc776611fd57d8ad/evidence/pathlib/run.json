@@ -1,0 +1,314 @@
+{
+  "family": "pathlib",
+  "family_denominator": 1369,
+  "leaf": "test.test_pathlib.test_join_posix",
+  "leaf_originals": 6,
+  "other_originals_not_run": 1363,
+  "gate": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/gate.json",
+  "stock": {
+    "argv": [
+      "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+      "-B",
+      "-m",
+      "unittest",
+      "-v",
+      "test.test_pathlib.test_join_posix"
+    ],
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "TMPDIR": "/workspace/scratch"
+    },
+    "cwd": "/workspace/scratch",
+    "exit_code": 0,
+    "timeout_seconds": 30,
+    "version": "3.14.5",
+    "full_version": "Python 3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+    "python_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "b5fb1505f85c525018f0d74a70beac793f683291a02b6b2dc8e9fec82b233c26",
+    "historical": false
+  },
+  "tiers": {
+    "O0": {
+      "build": {
+        "argv": [
+          "/workspace/imre/target/release/imre",
+          "build",
+          "/workspace/scratch/pathlib-8571-fixtures/Lib/test/test_pathlib/test_join_posix.py",
+          "--module-root",
+          "/workspace/scratch/pathlib-8571-fixtures/Lib",
+          "--no-cache",
+          "--quiet",
+          "--opt-level",
+          "0",
+          "--runtime",
+          "/workspace/imre/target/release/libimre_runtime.a",
+          "--clang",
+          "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+          "-o",
+          "/workspace/scratch/pathlib-8571-O0.exe"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/pathlib-8571-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1"
+        },
+        "cwd": "/workspace/scratch",
+        "timeout_seconds": 180,
+        "exit_code": 0,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "image_exists": true,
+      "image_sha256": "b9038dcce0740c8205b1afe9d2bfa0987aa387f3e36ae8c52b875ed943c7be60",
+      "baseline": {
+        "argv": [
+          "strace",
+          "-f",
+          "-qq",
+          "-e",
+          "trace=execve,execveat,openat",
+          "-o",
+          "/workspace/imre-pathlib-8571-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/O0.baseline.trace",
+          "/workspace/scratch/pathlib-8571-O0.exe",
+          "-v"
+        ],
+        "cwd": "/workspace/scratch",
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/pathlib-8571-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "IMREFLAGS": "--opt-level 0",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1"
+        },
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 30,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "3d4ba91effc6b8357dc97cecbbb68c8cd736eac919f7e432b03d5182fe045669",
+        "trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/O0.baseline.trace",
+        "trace_sha256": "378eb6fade70155ac4546dbcad5baf1b3492b5e0bd6202d823ec8ab4599519eb",
+        "exec_calls": 1,
+        "initial_image_exec_only": true,
+        "libpython_access": false,
+        "test_source_access": false
+      },
+      "readelf": {
+        "argv": [
+          "readelf",
+          "-d",
+          "/workspace/scratch/pathlib-8571-O0.exe"
+        ],
+        "cwd": "/workspace/scratch",
+        "environment": {},
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 30,
+        "stdout_sha256": "e5fccc176b8a503b2eed3d8f23b9ae572d6b73bcfa65ee9f3af32e68f46f86d9",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "libpython_needed": false,
+      "python_symbols": {
+        "argv": [
+          "nm",
+          "-a",
+          "--defined-only",
+          "/workspace/scratch/pathlib-8571-O0.exe"
+        ],
+        "filter": "\\b(?:Py_Initialize|Py_Finalize|PyEval_|PyRun_|_PyRuntime|PyGILState_)",
+        "exit_code": 0,
+        "matching_symbols": 0,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "withdrawn": {
+        "argv": [
+          "strace",
+          "-f",
+          "-qq",
+          "-e",
+          "trace=execve,execveat,openat",
+          "-o",
+          "/workspace/imre-pathlib-8571-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/O0.withdrawn.trace",
+          "/workspace/scratch/pathlib-8571-O0.exe",
+          "-v"
+        ],
+        "cwd": "/workspace/scratch",
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/pathlib-8571-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "IMREFLAGS": "--opt-level 0",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1"
+        },
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 30,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "95fe137938803a17fe232b43808fb7adb8f13837581bf35858b92828f3fac1d7",
+        "trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/O0.withdrawn.trace",
+        "trace_sha256": "a0bd9bb65f114bbebafb7c14298d89ba83372816718f575cf3c4f81f33ec18d6",
+        "exec_calls": 1,
+        "initial_image_exec_only": true,
+        "libpython_access": false,
+        "test_source_access": false
+      },
+      "controls_passed": true
+    },
+    "O3": {
+      "build": {
+        "argv": [
+          "/workspace/imre/target/release/imre",
+          "build",
+          "/workspace/scratch/pathlib-8571-fixtures/Lib/test/test_pathlib/test_join_posix.py",
+          "--module-root",
+          "/workspace/scratch/pathlib-8571-fixtures/Lib",
+          "--no-cache",
+          "--quiet",
+          "--opt-level",
+          "3",
+          "--runtime",
+          "/workspace/imre/target/release/libimre_runtime.a",
+          "--clang",
+          "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+          "-o",
+          "/workspace/scratch/pathlib-8571-O3.exe"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/pathlib-8571-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1"
+        },
+        "cwd": "/workspace/scratch",
+        "timeout_seconds": 180,
+        "exit_code": 0,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "image_exists": true,
+      "image_sha256": "de4ed8277de9d9f3a62b1046c0faf94d3fa2513ef8265ac9412045052d3cd73f",
+      "baseline": {
+        "argv": [
+          "strace",
+          "-f",
+          "-qq",
+          "-e",
+          "trace=execve,execveat,openat",
+          "-o",
+          "/workspace/imre-pathlib-8571-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/O3.baseline.trace",
+          "/workspace/scratch/pathlib-8571-O3.exe",
+          "-v"
+        ],
+        "cwd": "/workspace/scratch",
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/pathlib-8571-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "IMREFLAGS": "--opt-level 3",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1"
+        },
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 30,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "00612338cc0d2531acb2f4058426f43e9a8d45039645464f9292db47c4f833a7",
+        "trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/O3.baseline.trace",
+        "trace_sha256": "d6c51696100a38183c52041e031340ede24cd3ba3337de8b4b034b6c7ede61d5",
+        "exec_calls": 1,
+        "initial_image_exec_only": true,
+        "libpython_access": false,
+        "test_source_access": false
+      },
+      "readelf": {
+        "argv": [
+          "readelf",
+          "-d",
+          "/workspace/scratch/pathlib-8571-O3.exe"
+        ],
+        "cwd": "/workspace/scratch",
+        "environment": {},
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 30,
+        "stdout_sha256": "5f8cfc25f5831fcaada50261dadb0392dbd30ab94fca23e197b2a1d2c8ab0453",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "libpython_needed": false,
+      "python_symbols": {
+        "argv": [
+          "nm",
+          "-a",
+          "--defined-only",
+          "/workspace/scratch/pathlib-8571-O3.exe"
+        ],
+        "filter": "\\b(?:Py_Initialize|Py_Finalize|PyEval_|PyRun_|_PyRuntime|PyGILState_)",
+        "exit_code": 0,
+        "matching_symbols": 0,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "withdrawn": {
+        "argv": [
+          "strace",
+          "-f",
+          "-qq",
+          "-e",
+          "trace=execve,execveat,openat",
+          "-o",
+          "/workspace/imre-pathlib-8571-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/O3.withdrawn.trace",
+          "/workspace/scratch/pathlib-8571-O3.exe",
+          "-v"
+        ],
+        "cwd": "/workspace/scratch",
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/pathlib-8571-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "IMREFLAGS": "--opt-level 3",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1"
+        },
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 30,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "3d4ba91effc6b8357dc97cecbbb68c8cd736eac919f7e432b03d5182fe045669",
+        "trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/O3.withdrawn.trace",
+        "trace_sha256": "343ce3f8fc9e64fe32bcc54eb36cd3d14d818b127e453c4635535445a95181c6",
+        "exec_calls": 1,
+        "initial_image_exec_only": true,
+        "libpython_access": false,
+        "test_source_access": false
+      },
+      "controls_passed": true
+    }
+  },
+  "withdrawal": {
+    "method": "rename complete staged Lib/test tree, including all test sources and bytecode, away from the exact original paths; run saved images; restore tree",
+    "test_root_absent": true,
+    "sources_before": {
+      "files": 1128,
+      "sha256": "29a74c6d8ce325878a27b2b9fb1e485f4de29c497261835c0dba6e07e05202f9"
+    },
+    "leaf_sha256_before": "999694e58f17faa73ce7edba33d8e54e09b952f48b05d8364a4ad41a8e1f120e",
+    "withdrawn_root": "/workspace/scratch/pathlib-8571-withdrawn-test",
+    "sources_after": {
+      "files": 1128,
+      "sha256": "29a74c6d8ce325878a27b2b9fb1e485f4de29c497261835c0dba6e07e05202f9"
+    },
+    "leaf_sha256_after": "999694e58f17faa73ce7edba33d8e54e09b952f48b05d8364a4ad41a8e1f120e",
+    "restored_by_hash": true
+  }
+}

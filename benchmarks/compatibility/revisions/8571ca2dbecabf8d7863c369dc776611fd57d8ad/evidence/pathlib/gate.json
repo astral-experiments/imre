@@ -1,0 +1,82 @@
+{
+  "family": "pathlib",
+  "family_denominator": 1369,
+  "leaf": "test.test_pathlib.test_join_posix",
+  "leaf_originals": 6,
+  "imre_revision": "8571ca2dbecabf8d7863c369dc776611fd57d8ad",
+  "build_worktree_head": "8571ca2dbecabf8d7863c369dc776611fd57d8ad",
+  "build_worktree_clean": true,
+  "build_command": [
+    "cargo",
+    "build",
+    "--offline",
+    "--release",
+    "--locked",
+    "-p",
+    "imre-compiler",
+    "-p",
+    "imre-runtime",
+    "--target-dir",
+    "/workspace/imre/target"
+  ],
+  "build_environment": {
+    "CARGO_HOME": "/workspace/.toolchains/cargo",
+    "RUSTUP_HOME": "/workspace/.toolchains/rustup",
+    "PATH_prefix": "/workspace/.toolchains/cargo/bin"
+  },
+  "build_log_sha256": "f5f3fab0411d5c2a581ac266ef82b170c09f62e8371279fb639bbab9b28b8d3c",
+  "imre_sha256": "cede56ffc2497950f43b7a4aff1c170dbab2f13aa6a75d33e09dd5dd27a7a5e6",
+  "runtime_sha256": "885133ce1695a4a49db6c813228a5b9c6ecbb37c22a3394cb2fae2eb6e32324b",
+  "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "cpython_archive_sha256": "0d838be32b52da92a4293ecd99bc91f7be8b4acc573423665bd1a1428be46e47",
+  "platform": {
+    "os": "linux",
+    "arch": "x86_64",
+    "release": "6.18.57"
+  },
+  "control": {
+    "argv": [
+      "/workspace/imre/target/release/imre",
+      "build",
+      "/workspace/scratch/pathlib-8571-fixtures/Lib/test/test_pathlib/test_join_posix.py",
+      "--module-root",
+      "/workspace/scratch/pathlib-8571-fixtures/Lib",
+      "--no-cache",
+      "--quiet",
+      "--opt-level",
+      "0",
+      "--runtime",
+      "/workspace/imre/target/release/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "-o",
+      "/workspace/scratch/pathlib-8571-gate.exe"
+    ],
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/pathlib-8571-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "TMPDIR": "/workspace/scratch",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1"
+    },
+    "cwd": "/workspace/scratch",
+    "timeout_seconds": 120,
+    "elapsed_seconds": 1.243,
+    "exit_code": 1,
+    "timed_out": false,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "1e977adb8c5b856a532d7d79d803e9b074e8064b40977341012f7a734f62a7ef",
+    "image_exists": false,
+    "image_sha256": null,
+    "expected_int_got_bool": true,
+    "passed": true,
+    "launcher": "/workspace/scratch/pathlib-8571-fixtures/Lib/test/test_pathlib/test_join_posix.py",
+    "launcher_negative_sha256": "5aea61a666bfcb3bcd29409a0de2740ad7095c993c7c8af3ea2cc2980f878758",
+    "positive_launcher_sha256": "999694e58f17faa73ce7edba33d8e54e09b952f48b05d8364a4ad41a8e1f120e",
+    "restored_launcher_sha256": "999694e58f17faa73ce7edba33d8e54e09b952f48b05d8364a4ad41a8e1f120e",
+    "control_module": "/workspace/scratch/pathlib-8571-fixtures/Lib/imre_architecture_control.py",
+    "control_module_sha256": "14841721c7b84f57d26a6a38a53827c683daf10930b9f297cfc15335bd1257b5",
+    "transformation": "prepend import imre_architecture_control followed by newline to the exact positive launcher at the same path"
+  }
+}

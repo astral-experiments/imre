@@ -1,0 +1,11 @@
+test_div (test.test_pathlib.test_join_posix.LexicalPosixPathJoinTest.test_div) ... ok
+test_join (test.test_pathlib.test_join_posix.LexicalPosixPathJoinTest.test_join) ... ok
+test_div (test.test_pathlib.test_join_posix.PosixPathJoinTest.test_div) ... ok
+test_join (test.test_pathlib.test_join_posix.PosixPathJoinTest.test_join) ... ok
+test_div (test.test_pathlib.test_join_posix.PurePosixPathJoinTest.test_div) ... ok
+test_join (test.test_pathlib.test_join_posix.PurePosixPathJoinTest.test_join) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.005s
+
+OK
