@@ -1024,6 +1024,11 @@ struct SourceInfo<'a> {
     text: Cow<'a, str>,
 }
 
+#[cfg(test)]
+thread_local! {
+    static EVAL_PREPARATIONS: std::cell::RefCell<Option<(String, Vec<i32>)>> = const { std::cell::RefCell::new(None) };
+}
+
 /// One checked literal expression, prepared with its source unit's Python optimization.
 pub(crate) struct PreparedEval {
     text: String,
@@ -1032,6 +1037,14 @@ pub(crate) struct PreparedEval {
 
 impl PreparedEval {
     pub(crate) fn new(text: &str, optimization: i32) -> Result<Self, String> {
+        #[cfg(test)]
+        EVAL_PREPARATIONS.with_borrow_mut(|tracked| {
+            if let Some((target, modes)) = tracked
+                && target == text
+            {
+                modes.push(optimization);
+            }
+        });
         crate::analysis::check_source_complexity(text).map_err(str::to_owned)?;
         let parsed = ruff_python_parser::parse_expression(text)
             .map_err(|error| format!("SyntaxError: {error}"))?;
@@ -1863,6 +1876,45 @@ mod tests {
     use super::*;
     use crate::frontend::{FrameArguments, NamedBody};
     use crate::llvm::registered::permanent;
+
+    #[test]
+    fn selected_eval_uses_one_entry_from_the_optimized_source_unit() {
+        let directory = tempfile::tempdir().unwrap();
+        let entry = directory.path().join("main.py");
+        let text = "__debug__";
+        std::fs::write(
+            &entry,
+            format!("builtin_eval = eval\neval = builtin_eval\nprint(eval({text:?}))\n"),
+        )
+        .unwrap();
+        let options = crate::CompileOptions {
+            script_startup: Some((
+                crate::CommandFlags {
+                    optimize: 1,
+                    ..Default::default()
+                },
+                "imre".into(),
+            )),
+            ..Default::default()
+        };
+        EVAL_PREPARATIONS.with_borrow_mut(|tracked| *tracked = Some((text.to_owned(), Vec::new())));
+        let result = crate::compile_file(&entry, None, &options);
+        let modes = EVAL_PREPARATIONS.with_borrow_mut(|tracked| tracked.take().unwrap().1);
+        result.unwrap();
+        assert_eq!(
+            modes,
+            [1],
+            "checking and emission must share the unit's one optimized entry"
+        );
+
+        let large = vec!["1"; 129].join("+");
+        std::fs::write(&entry, format!("import sys\nbuiltin_eval = eval\ndef custom(text): return text\nif len(sys.argv) > 1:\n    eval = builtin_eval\nelse:\n    eval = custom\nprint(eval({large:?}))\n")).unwrap();
+        let error = crate::check_file(&entry, None).unwrap_err();
+        assert!(
+            error.contains("main.py:8:12") && error.contains("builtins.eval entry"),
+            "{error}"
+        );
+    }
 
     #[test]
     fn ordinary_doctest_suites_place_owned_inputs_and_keep_the_fixed_runner() {
