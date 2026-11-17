@@ -1019,7 +1019,7 @@ impl<'a> Escape<'a, '_> {
         {
             self.first = Some(if let Some((_, Some(range))) = selected {
                 self.required(requirement.source, range,
-                    "monkeypatching a shipped method used for source execution is unsupported; call a local function or wrapper instead".into())
+                    "a shipped method was replaced before this call, and Imre cannot prove which implementation the callable invokes; call a local function or wrapper instead".into())
             } else {
                 requirement
             });
