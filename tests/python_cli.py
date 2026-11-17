@@ -3634,6 +3634,7 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         symbolic_defaults = Path(__file__).with_name("fixtures") / "inspect_symbolic_defaults.py"
         compare("-IB", symbolic_defaults)
         compare("-IB", "-O", symbolic_defaults)
+        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_eval_name.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_inspect_signature.py")
         (root / "weather_report.py").write_text("def report(temp):\n    return f'{temp} C'\n")
         compare("-Bm", "inspect", "weather_report:report")
