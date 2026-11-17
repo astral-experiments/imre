@@ -1,0 +1,115 @@
+{
+  "build": {
+    "argv": [
+      "/workspace/scratch/practical-native-target/release/imre",
+      "build",
+      "/workspace/scratch/practical-native-99964/prospective-ty-readme-O3-5rbbejzf/scripts/transform_readme.py",
+      "--module-root",
+      "/workspace/scratch/practical-native-99964/prospective-ty-readme-O3-5rbbejzf",
+      "--no-cache",
+      "--opt-level",
+      "3",
+      "--runtime",
+      "/workspace/scratch/practical-native-target/release/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "-o",
+      "/workspace/scratch/practical-native-99964/ty-readme-O3.exe"
+    ],
+    "elapsed_seconds": 75.47,
+    "exit_code": 0,
+    "image_exists": true,
+    "image_sha256": "8d8b5e8b616916242d9fa91398caede67550d9e7de16f6b919fc51a90d1f823e",
+    "stderr_sha256": "232bae9223ab0ce5c0d669aa14c1e5f487743ea6ae41d92f40cac54db12e8deb",
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "timed_out": false
+  },
+  "case": "ty-readme",
+  "paired": false,
+  "preimage_exact": true,
+  "reference_sha256": "764cd766a9ddca783630cc146f8fc9ed47ed3158eab4b8336fbb179631a1e6eb",
+  "run": {
+    "argv": [
+      "/usr/bin/strace",
+      "-f",
+      "-qq",
+      "-s",
+      "512",
+      "-e",
+      "trace=execve,execveat,open,openat,openat2,creat,io_uring_setup,clone,clone3,fork,vfork,rename,renameat,renameat2,newfstatat,wait4,exit_group",
+      "-o",
+      "/workspace/scratch/practical-native-99964/ty-readme-O3.trace",
+      "/workspace/scratch/practical-native-99964/supervisor",
+      "/workspace/scratch/practical-native-99964/prospective-ty-readme-O3-5rbbejzf/scripts/transform_readme.py",
+      "/workspace/scratch/practical-native-99964/ty-readme-O3.source",
+      "-",
+      "-",
+      "/workspace/scratch/practical-native-99964/ty-readme-O3.exe",
+      "scripts/transform_readme.py"
+    ],
+    "bytecode_present_before": false,
+    "comparison_dimensions": {
+      "cargo_journal": true,
+      "http_requests": true,
+      "mutations": true,
+      "status": true,
+      "stderr": true,
+      "stdout": true
+    },
+    "comparisons": {
+      "effects": true,
+      "exit_code": true,
+      "stderr": true,
+      "stdout": true
+    },
+    "environment": {
+      "HOME": "/workspace/scratch/practical-native-99964/prospective-ty-readme-O3-5rbbejzf/home",
+      "LANG": "C.UTF-8",
+      "LC_ALL": "C.UTF-8",
+      "PATH": "/usr/bin",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONHASHSEED": "0",
+      "PYTHONNOUSERSITE": "1",
+      "TZ": "UTC"
+    },
+    "exit_code": 0,
+    "native_image_no_linked_libpython": true,
+    "process_count": 0,
+    "provenance_findings": {
+      "native_workload_source_or_archive_open_attempts": [],
+      "other_python_workload_execution": false,
+      "publisher_fixture_exception": false
+    },
+    "registry_count": 0,
+    "roles": {
+      "$CORPUS": "/workspace/scratch/practical-native-99964/external-qm7lzwwp",
+      "$PYTHON": "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+      "$WORK": "/workspace/scratch/practical-native-99964/prospective-ty-readme-O3-5rbbejzf"
+    },
+    "sanctioned_fixture_children_recorded": false,
+    "source_restored_sha256": "d6a13d50218b55e3b73587974e8357b9bc68b7c364d8bb10d04708fec5e2d64f",
+    "successful_execs": [
+      "19144 execve(\"/workspace/scratch/practical-native-99964/supervisor\", [\"/workspace/scratch/practical-native-99964/supervisor\", \"/workspace/scratch/practical-native-99964/prospective-ty-readme-O3-5rbbejzf/scripts/transform_readme.py\", \"/workspace/scratch/practical-native-99964/ty-readme-O3.source\", \"-\", \"-\", \"/workspace/scratch/practical-native-99964/ty-readme-O3.exe\", \"scripts/transform_readme.py\"], 0x7ffcbd5f9c90 /* 8 vars */) = 0",
+      "19145 execve(\"/workspace/scratch/practical-native-99964/ty-readme-O3.exe\", [\"scripts/transform_readme.py\"], 0x7ffd6994e908 /* 8 vars */) = 0"
+    ],
+    "timed_out": false,
+    "trace_gzip_sha256": "4068d693b866d46d6758c5f0e335870d7af105cf0d9495d39b74dd025c3c6b9a",
+    "trace_sha256": "cab4df50383e62e62a881b151b6fcbcf29daad1b9388fbfaf046752dadd82f2f",
+    "umask": "0077",
+    "workload_argv": [
+      "scripts/transform_readme.py"
+    ],
+    "zip_restored_sha256": null
+  },
+  "source": {
+    "bytes": 2641,
+    "commit": "d4e4bf90906c7677049bc3a29d1735de7d22052d",
+    "git_blob": "4b20727cd3b38ef011b9f779a706d977089c487a",
+    "path": "scripts/transform_readme.py",
+    "repo": "https://github.com/astral-sh/ty",
+    "sha256": "d6a13d50218b55e3b73587974e8357b9bc68b7c364d8bb10d04708fec5e2d64f",
+    "vendored": "sources/ty/scripts/transform_readme.py"
+  },
+  "status": "observed_exact",
+  "tier": "O3"
+}

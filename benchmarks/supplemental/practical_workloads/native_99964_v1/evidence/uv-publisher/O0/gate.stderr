@@ -1,0 +1,2 @@
+ Compiling /workspace/scratch/practical-native-99964/prospective-uv-publisher-O0-zll6tmo7/scripts/publish-crates.py (-O0)
+/workspace/scratch/practical-native-99964/prospective-uv-publisher-O0-zll6tmo7/architecture_control.py:1:15: Imre: expected int, got bool; annotations are enforced contracts

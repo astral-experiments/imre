@@ -1,0 +1,2 @@
+20952 openat2(AT_FDCWD, "/workspace/scratch/practical-native-99964/prospective-uv-publisher-O0-zll6tmo7/scripts/publish-crates.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+20952 openat2(AT_FDCWD, "/workspace/scratch/practical-native-99964/prospective-uv-publisher-O0-zll6tmo7/architecture_control.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3

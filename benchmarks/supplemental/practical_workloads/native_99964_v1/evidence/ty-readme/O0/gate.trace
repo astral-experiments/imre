@@ -1,0 +1,2 @@
+18462 openat2(AT_FDCWD, "/workspace/scratch/practical-native-99964/prospective-ty-readme-O0-c0m5owyn/scripts/transform_readme.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+18462 openat2(AT_FDCWD, "/workspace/scratch/practical-native-99964/prospective-ty-readme-O0-c0m5owyn/architecture_control.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3

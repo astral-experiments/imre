@@ -1,0 +1,3 @@
+Skipping already@1.0: already exists on crates.io
+Publishing workspace crate versions that do not exist on crates.io:
+  fresh@2.0

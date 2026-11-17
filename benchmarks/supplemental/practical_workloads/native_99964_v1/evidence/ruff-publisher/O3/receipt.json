@@ -1,0 +1,133 @@
+{
+  "build": {
+    "argv": [
+      "/workspace/scratch/practical-native-target/release/imre",
+      "build",
+      "/workspace/scratch/practical-native-99964/prospective-ruff-publisher-O3-k6kqw651/scripts/publish-crates.py",
+      "--module-root",
+      "/workspace/scratch/practical-native-99964/prospective-ruff-publisher-O3-k6kqw651",
+      "--no-cache",
+      "--opt-level",
+      "3",
+      "--runtime",
+      "/workspace/scratch/practical-native-target/release/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "-o",
+      "/workspace/scratch/practical-native-99964/ruff-publisher-O3.exe"
+    ],
+    "elapsed_seconds": 88.68,
+    "exit_code": 0,
+    "image_exists": true,
+    "image_sha256": "1180b4f98a01dba13c182bc7ae93e9bf1557cd5faed4955a6380e2881c661442",
+    "stderr_sha256": "629294fef243846df1d711ec37869218ad2f1a2f6787770f7d93755b9998cb29",
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "timed_out": false
+  },
+  "case": "ruff-publisher",
+  "paired": false,
+  "preimage_exact": true,
+  "reference_sha256": "3b29cdc856e403bad24155317bfa34b681f5cee70023485e903ae320f7647c00",
+  "run": {
+    "argv": [
+      "/usr/bin/strace",
+      "-f",
+      "-qq",
+      "-s",
+      "512",
+      "-e",
+      "trace=execve,execveat,open,openat,openat2,creat,io_uring_setup,clone,clone3,fork,vfork,rename,renameat,renameat2,newfstatat,wait4,exit_group",
+      "-o",
+      "/workspace/scratch/practical-native-99964/ruff-publisher-O3.trace",
+      "/workspace/scratch/practical-native-99964/supervisor",
+      "/workspace/scratch/practical-native-99964/prospective-ruff-publisher-O3-k6kqw651/scripts/publish-crates.py",
+      "/workspace/scratch/practical-native-99964/ruff-publisher-O3.source",
+      "-",
+      "-",
+      "/workspace/scratch/practical-native-99964/ruff-publisher-O3.exe",
+      "scripts/publish-crates.py",
+      "--api-url",
+      "http://127.0.0.1:33681/api/v1",
+      "--cargo",
+      "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+      "/workspace/scratch/practical-native-99964/external-5ug5jp7_/fixtures/cargo_stub.py",
+      "--no-verify"
+    ],
+    "bytecode_present_before": false,
+    "comparison_dimensions": {
+      "cargo_journal": true,
+      "http_requests": true,
+      "mutations": true,
+      "status": true,
+      "stderr": true,
+      "stdout": true
+    },
+    "comparisons": {
+      "effects": true,
+      "exit_code": true,
+      "stderr": true,
+      "stdout": true
+    },
+    "environment": {
+      "CARGO_LOG": "/workspace/scratch/practical-native-99964/prospective-ruff-publisher-O3-k6kqw651/cargo.log",
+      "HOME": "/workspace/scratch/practical-native-99964/prospective-ruff-publisher-O3-k6kqw651/home",
+      "LANG": "C.UTF-8",
+      "LC_ALL": "C.UTF-8",
+      "NO_PROXY": "127.0.0.1",
+      "PATH": "/usr/bin",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONHASHSEED": "0",
+      "PYTHONNOUSERSITE": "1",
+      "TZ": "UTC"
+    },
+    "exit_code": 0,
+    "native_image_no_linked_libpython": true,
+    "process_count": 2,
+    "provenance_findings": {
+      "native_workload_source_or_archive_open_attempts": [],
+      "other_python_workload_execution": false,
+      "publisher_fixture_exception": true
+    },
+    "registry_count": 2,
+    "roles": {
+      "$CORPUS": "/workspace/scratch/practical-native-99964/external-5ug5jp7_",
+      "$PYTHON": "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+      "$REGISTRY_AUTHORITY": "127.0.0.1:33681",
+      "$REGISTRY_ORIGIN": "http://127.0.0.1:33681",
+      "$WORK": "/workspace/scratch/practical-native-99964/prospective-ruff-publisher-O3-k6kqw651"
+    },
+    "sanctioned_fixture_children_recorded": true,
+    "source_restored_sha256": "c6f13456d53d1dd1cc155d72d9e63cd999e361e1c983d366e477c8432693a021",
+    "successful_execs": [
+      "20943 execve(\"/workspace/scratch/practical-native-99964/supervisor\", [\"/workspace/scratch/practical-native-99964/supervisor\", \"/workspace/scratch/practical-native-99964/prospective-ruff-publisher-O3-k6kqw651/scripts/publish-crates.py\", \"/workspace/scratch/practical-native-99964/ruff-publisher-O3.source\", \"-\", \"-\", \"/workspace/scratch/practical-native-99964/ruff-publisher-O3.exe\", \"scripts/publish-crates.py\", \"--api-url\", \"http://127.0.0.1:33681/api/v1\", \"--cargo\", \"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"/workspace/scratch/practical-native-99964/external-5ug5jp7_/fixtures/cargo_stub.py\", \"--no-verify\"], 0x7ffee49add20 /* 10 vars */) = 0",
+      "20944 execve(\"/workspace/scratch/practical-native-99964/ruff-publisher-O3.exe\", [\"scripts/publish-crates.py\", \"--api-url\", \"http://127.0.0.1:33681/api/v1\", \"--cargo\", \"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"/workspace/scratch/practical-native-99964/external-5ug5jp7_/fixtures/cargo_stub.py\", \"--no-verify\"], 0x7ffff7cc9d08 /* 10 vars */) = 0",
+      "20945 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"/workspace/scratch/practical-native-99964/external-5ug5jp7_/fixtures/cargo_stub.py\", \"metadata\", \"--format-version\", \"1\", \"--no-deps\"], 0x7ffebcfe1928 /* 10 vars */) = 0",
+      "20948 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"/workspace/scratch/practical-native-99964/external-5ug5jp7_/fixtures/cargo_stub.py\", \"publish\", \"--workspace\", \"--exclude\", \"already\", \"--no-verify\"], 0x7ffebcfe1928 /* 10 vars */) = 0"
+    ],
+    "timed_out": false,
+    "trace_gzip_sha256": "9ae1a27e26bba3cf107892bc32848316c3033048f062c19cfade79cb6d5cde86",
+    "trace_sha256": "f5634eda4dfa76eb419b8718e1e9dfeefdae4530192f4503aaf087b86ffb8a1d",
+    "umask": "0077",
+    "workload_argv": [
+      "scripts/publish-crates.py",
+      "--api-url",
+      "http://127.0.0.1:33681/api/v1",
+      "--cargo",
+      "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+      "/workspace/scratch/practical-native-99964/external-5ug5jp7_/fixtures/cargo_stub.py",
+      "--no-verify"
+    ],
+    "zip_restored_sha256": null
+  },
+  "source": {
+    "bytes": 6891,
+    "commit": "65aee8892ce379af4ae9c8b5f6e0ab37b25d5ec9",
+    "git_blob": "0ad38297e973be20e7b22a6c70332047ae522629",
+    "path": "scripts/publish-crates.py",
+    "repo": "https://github.com/astral-sh/ruff",
+    "sha256": "c6f13456d53d1dd1cc155d72d9e63cd999e361e1c983d366e477c8432693a021",
+    "vendored": "sources/ruff/scripts/publish-crates.py"
+  },
+  "status": "observed_exact",
+  "tier": "O3"
+}

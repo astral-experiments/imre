@@ -1,0 +1,4 @@
+19149 openat2(AT_FDCWD, "/workspace/scratch/practical-native-99964/prospective-uv-rich-O0-9hm0ejkl/scripts/uv-run-remote-script-test.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+19149 openat2(AT_FDCWD, "/workspace/scratch/practical-native-99964/prospective-uv-rich-O0-9hm0ejkl/architecture_control.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 4
+19149 openat2(AT_FDCWD, "/workspace/scratch/practical-native-99964/prospective-uv-rich-O0-9hm0ejkl/scripts/uv-run-remote-script-test.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+19149 openat2(AT_FDCWD, "/workspace/scratch/practical-native-99964/prospective-uv-rich-O0-9hm0ejkl/architecture_control.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 4

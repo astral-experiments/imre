@@ -1,0 +1,125 @@
+{
+  "build": {
+    "argv": [
+      "/workspace/scratch/practical-native-target/release/imre",
+      "build",
+      "/workspace/scratch/practical-native-99964/prospective-uv-rich-O3-o43zt2hc/scripts/uv-run-remote-script-test.py",
+      "--module-root",
+      "/workspace/scratch/practical-native-99964/prospective-uv-rich-O3-o43zt2hc",
+      "--no-cache",
+      "--opt-level",
+      "3",
+      "--runtime",
+      "/workspace/scratch/practical-native-target/release/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "--extension-path",
+      "/workspace/scratch/practical-native-99964/external-kr4dtma5/fixtures/rich-imports.zip",
+      "-o",
+      "/workspace/scratch/practical-native-99964/uv-rich-O3.exe"
+    ],
+    "elapsed_seconds": 80.4,
+    "exit_code": 0,
+    "image_exists": true,
+    "image_sha256": "657a192b7eea2663990551cfa641c4d199883a998a34155f349ba84bb81cc0f2",
+    "stderr_sha256": "91751bdca0bdc3d6633080b43fbbcd1b7e5af86f5932cfaf46af2458f1bf6445",
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "timed_out": false
+  },
+  "case": "uv-rich",
+  "paired": false,
+  "preimage_exact": true,
+  "reference_sha256": "50ce73e5ea8bad9e7342140a6d62add108be2132565a493ca237921543e20dd6",
+  "run": {
+    "argv": [
+      "/usr/bin/strace",
+      "-f",
+      "-qq",
+      "-s",
+      "512",
+      "-e",
+      "trace=execve,execveat,open,openat,openat2,creat,io_uring_setup,clone,clone3,fork,vfork,rename,renameat,renameat2,newfstatat,wait4,exit_group",
+      "-o",
+      "/workspace/scratch/practical-native-99964/uv-rich-O3.trace",
+      "/workspace/scratch/practical-native-99964/supervisor",
+      "/workspace/scratch/practical-native-99964/prospective-uv-rich-O3-o43zt2hc/scripts/uv-run-remote-script-test.py",
+      "/workspace/scratch/practical-native-99964/uv-rich-O3.source",
+      "/workspace/scratch/practical-native-99964/external-kr4dtma5/fixtures/rich-imports.zip",
+      "/workspace/scratch/practical-native-99964/uv-rich-O3.zip",
+      "/workspace/scratch/practical-native-99964/uv-rich-O3.exe",
+      "scripts/uv-run-remote-script-test.py",
+      "Ruff"
+    ],
+    "bytecode_present_before": false,
+    "comparison_dimensions": {
+      "cargo_journal": true,
+      "http_requests": true,
+      "mutations": true,
+      "status": false,
+      "stderr": false,
+      "stdout": false
+    },
+    "comparisons": {
+      "effects": true,
+      "exit_code": false,
+      "stderr": false,
+      "stdout": false
+    },
+    "environment": {
+      "COLUMNS": "80",
+      "HOME": "/workspace/scratch/practical-native-99964/prospective-uv-rich-O3-o43zt2hc/home",
+      "LANG": "C.UTF-8",
+      "LC_ALL": "C.UTF-8",
+      "NO_COLOR": "1",
+      "PATH": "/usr/bin",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONHASHSEED": "0",
+      "PYTHONNOUSERSITE": "1",
+      "PYTHONPATH": "/workspace/scratch/practical-native-99964/external-kr4dtma5/fixtures/rich-imports.zip",
+      "TERM": "dumb",
+      "TZ": "UTC"
+    },
+    "exit_code": 1,
+    "native_image_no_linked_libpython": true,
+    "process_count": 0,
+    "provenance_findings": {
+      "native_workload_source_or_archive_open_attempts": [
+        "19892 openat(AT_FDCWD, \"/workspace/scratch/practical-native-99964/prospective-uv-rich-O3-o43zt2hc/scripts/uv-run-remote-script-test.py\", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)"
+      ],
+      "other_python_workload_execution": false,
+      "publisher_fixture_exception": false
+    },
+    "registry_count": 0,
+    "roles": {
+      "$CORPUS": "/workspace/scratch/practical-native-99964/external-kr4dtma5",
+      "$PYTHON": "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+      "$WORK": "/workspace/scratch/practical-native-99964/prospective-uv-rich-O3-o43zt2hc"
+    },
+    "sanctioned_fixture_children_recorded": false,
+    "source_restored_sha256": "a479935e4c75c1b31dcd4805b50464ffa8a37e7240acb7c6457a2e4033ae21b0",
+    "successful_execs": [
+      "19891 execve(\"/workspace/scratch/practical-native-99964/supervisor\", [\"/workspace/scratch/practical-native-99964/supervisor\", \"/workspace/scratch/practical-native-99964/prospective-uv-rich-O3-o43zt2hc/scripts/uv-run-remote-script-test.py\", \"/workspace/scratch/practical-native-99964/uv-rich-O3.source\", \"/workspace/scratch/practical-native-99964/external-kr4dtma5/fixtures/rich-imports.zip\", \"/workspace/scratch/practical-native-99964/uv-rich-O3.zip\", \"/workspace/scratch/practical-native-99964/uv-rich-O3.exe\", \"scripts/uv-run-remote-script-test.py\", \"Ruff\"], 0x7ffd034ee2a8 /* 12 vars */) = 0",
+      "19892 execve(\"/workspace/scratch/practical-native-99964/uv-rich-O3.exe\", [\"scripts/uv-run-remote-script-test.py\", \"Ruff\"], 0x7ffea70b8890 /* 12 vars */) = 0"
+    ],
+    "timed_out": false,
+    "trace_gzip_sha256": "d2937d5cc11285123f4414d36c62771408138b0b94df36aa539ea3bf6b840a31",
+    "trace_sha256": "59917cfaad70b7c30f48fc04ee30eb1d5a9861a4a0714ab3c2634b7c75090bd9",
+    "umask": "0077",
+    "workload_argv": [
+      "scripts/uv-run-remote-script-test.py",
+      "Ruff"
+    ],
+    "zip_restored_sha256": "74efeda34e44bb6995d92a7c914014ed3f9a168797b491ecc2d6be6de3fab3fe"
+  },
+  "source": {
+    "bytes": 297,
+    "commit": "24688aaca1e7fd104437a0909d5db3afdc7dcdb0",
+    "git_blob": "e21e3413afc5fc41942e29ccf7f717af3614ac12",
+    "path": "scripts/uv-run-remote-script-test.py",
+    "repo": "https://github.com/astral-sh/uv",
+    "sha256": "a479935e4c75c1b31dcd4805b50464ffa8a37e7240acb7c6457a2e4033ae21b0",
+    "vendored": "sources/uv/scripts/uv-run-remote-script-test.py"
+  },
+  "status": "observed_mismatch",
+  "tier": "O3"
+}

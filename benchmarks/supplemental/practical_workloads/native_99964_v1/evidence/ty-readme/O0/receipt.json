@@ -1,0 +1,171 @@
+{
+  "build": {
+    "argv": [
+      "/workspace/scratch/practical-native-target/release/imre",
+      "build",
+      "/workspace/scratch/practical-native-99964/prospective-ty-readme-O0-c0m5owyn/scripts/transform_readme.py",
+      "--module-root",
+      "/workspace/scratch/practical-native-99964/prospective-ty-readme-O0-c0m5owyn",
+      "--no-cache",
+      "--opt-level",
+      "0",
+      "--runtime",
+      "/workspace/scratch/practical-native-target/release/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "-o",
+      "/workspace/scratch/practical-native-99964/ty-readme-O0.exe"
+    ],
+    "elapsed_seconds": 18.17,
+    "exit_code": 0,
+    "image_exists": true,
+    "image_sha256": "7e19745f23ffbc107da71e314c550d12be7c8223558618907a1c4d1b4a413064",
+    "stderr_sha256": "4ce31fdb232fb966c94ae3e8e3d93d26aa9a7011d2c53c6492d463e06ed0a0e7",
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "timed_out": false
+  },
+  "case": "ty-readme",
+  "gate": {
+    "argv": [
+      "/usr/bin/strace",
+      "-f",
+      "-qq",
+      "-s",
+      "256",
+      "-e",
+      "trace=openat,openat2",
+      "-P",
+      "/workspace/scratch/practical-native-99964/prospective-ty-readme-O0-c0m5owyn/scripts/transform_readme.py",
+      "-P",
+      "/workspace/scratch/practical-native-99964/prospective-ty-readme-O0-c0m5owyn/architecture_control.py",
+      "-o",
+      "/workspace/scratch/practical-native-99964/evidence/ty-readme/O0/gate.trace",
+      "/workspace/scratch/practical-native-target/release/imre",
+      "build",
+      "/workspace/scratch/practical-native-99964/prospective-ty-readme-O0-c0m5owyn/scripts/transform_readme.py",
+      "--module-root",
+      "/workspace/scratch/practical-native-99964/prospective-ty-readme-O0-c0m5owyn",
+      "--no-cache",
+      "--opt-level",
+      "0",
+      "--runtime",
+      "/workspace/scratch/practical-native-target/release/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "-o",
+      "/workspace/scratch/practical-native-99964/ty-readme-control.exe"
+    ],
+    "build_argv": [
+      "/workspace/scratch/practical-native-target/release/imre",
+      "build",
+      "/workspace/scratch/practical-native-99964/prospective-ty-readme-O0-c0m5owyn/scripts/transform_readme.py",
+      "--module-root",
+      "/workspace/scratch/practical-native-99964/prospective-ty-readme-O0-c0m5owyn",
+      "--no-cache",
+      "--opt-level",
+      "0",
+      "--runtime",
+      "/workspace/scratch/practical-native-target/release/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "-o",
+      "/workspace/scratch/practical-native-99964/ty-readme-control.exe"
+    ],
+    "exit_code": 1,
+    "expected_int_got_bool": true,
+    "image_exists": false,
+    "injected_sha256": "0e8a8581ff73a770f8b0012d2c3fc9f80a10844a28c143a2498fc125e91126fd",
+    "module_sha256": "14841721c7b84f57d26a6a38a53827c683daf10930b9f297cfc15335bd1257b5",
+    "passed": true,
+    "positive_sha256": "d6a13d50218b55e3b73587974e8357b9bc68b7c364d8bb10d04708fec5e2d64f",
+    "timed_out": false,
+    "trace_sha256": "0983714e1082073700ed80eb932b1ff89c716f59a4bc5b0a9369fd9d67a466b5"
+  },
+  "paired": false,
+  "preimage_exact": true,
+  "reference_sha256": "764cd766a9ddca783630cc146f8fc9ed47ed3158eab4b8336fbb179631a1e6eb",
+  "run": {
+    "argv": [
+      "/usr/bin/strace",
+      "-f",
+      "-qq",
+      "-s",
+      "512",
+      "-e",
+      "trace=execve,execveat,open,openat,openat2,creat,io_uring_setup,clone,clone3,fork,vfork,rename,renameat,renameat2,newfstatat,wait4,exit_group",
+      "-o",
+      "/workspace/scratch/practical-native-99964/ty-readme-O0.trace",
+      "/workspace/scratch/practical-native-99964/supervisor",
+      "/workspace/scratch/practical-native-99964/prospective-ty-readme-O0-c0m5owyn/scripts/transform_readme.py",
+      "/workspace/scratch/practical-native-99964/ty-readme-O0.source",
+      "-",
+      "-",
+      "/workspace/scratch/practical-native-99964/ty-readme-O0.exe",
+      "scripts/transform_readme.py"
+    ],
+    "bytecode_present_before": false,
+    "comparison_dimensions": {
+      "cargo_journal": true,
+      "http_requests": true,
+      "mutations": true,
+      "status": true,
+      "stderr": true,
+      "stdout": true
+    },
+    "comparisons": {
+      "effects": true,
+      "exit_code": true,
+      "stderr": true,
+      "stdout": true
+    },
+    "environment": {
+      "HOME": "/workspace/scratch/practical-native-99964/prospective-ty-readme-O0-c0m5owyn/home",
+      "LANG": "C.UTF-8",
+      "LC_ALL": "C.UTF-8",
+      "PATH": "/usr/bin",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONHASHSEED": "0",
+      "PYTHONNOUSERSITE": "1",
+      "TZ": "UTC"
+    },
+    "exit_code": 0,
+    "native_image_no_linked_libpython": true,
+    "process_count": 0,
+    "provenance_findings": {
+      "native_workload_source_or_archive_open_attempts": [],
+      "other_python_workload_execution": false,
+      "publisher_fixture_exception": false
+    },
+    "registry_count": 0,
+    "roles": {
+      "$CORPUS": "/workspace/scratch/practical-native-99964/external-zk87fovf",
+      "$PYTHON": "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+      "$WORK": "/workspace/scratch/practical-native-99964/prospective-ty-readme-O0-c0m5owyn"
+    },
+    "sanctioned_fixture_children_recorded": false,
+    "source_restored_sha256": "d6a13d50218b55e3b73587974e8357b9bc68b7c364d8bb10d04708fec5e2d64f",
+    "successful_execs": [
+      "18797 execve(\"/workspace/scratch/practical-native-99964/supervisor\", [\"/workspace/scratch/practical-native-99964/supervisor\", \"/workspace/scratch/practical-native-99964/prospective-ty-readme-O0-c0m5owyn/scripts/transform_readme.py\", \"/workspace/scratch/practical-native-99964/ty-readme-O0.source\", \"-\", \"-\", \"/workspace/scratch/practical-native-99964/ty-readme-O0.exe\", \"scripts/transform_readme.py\"], 0x7fff4416fd90 /* 8 vars */) = 0",
+      "18798 execve(\"/workspace/scratch/practical-native-99964/ty-readme-O0.exe\", [\"scripts/transform_readme.py\"], 0x7ffe4fdf9a58 /* 8 vars */) = 0"
+    ],
+    "timed_out": false,
+    "trace_gzip_sha256": "518910f909f28dd69343066a74a10e5212bb8499e7dd776cb76416d2b9a7ff62",
+    "trace_sha256": "f9578e9c1baf68575c43eda1fdfb883cad7f4e5488e23ab8715e657b16bbedfd",
+    "umask": "0077",
+    "workload_argv": [
+      "scripts/transform_readme.py"
+    ],
+    "zip_restored_sha256": null
+  },
+  "source": {
+    "bytes": 2641,
+    "commit": "d4e4bf90906c7677049bc3a29d1735de7d22052d",
+    "git_blob": "4b20727cd3b38ef011b9f779a706d977089c487a",
+    "path": "scripts/transform_readme.py",
+    "repo": "https://github.com/astral-sh/ty",
+    "sha256": "d6a13d50218b55e3b73587974e8357b9bc68b7c364d8bb10d04708fec5e2d64f",
+    "vendored": "sources/ty/scripts/transform_readme.py"
+  },
+  "status": "observed_exact",
+  "tier": "O0"
+}

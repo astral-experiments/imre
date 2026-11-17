@@ -1,0 +1,54 @@
+{
+  "cargo_build": {
+    "argv": [
+      "cargo",
+      "build",
+      "--offline",
+      "--release",
+      "--locked",
+      "-p",
+      "imre-compiler",
+      "-p",
+      "imre-runtime",
+      "--target-dir",
+      "/workspace/scratch/practical-native-target"
+    ],
+    "cwd": "/workspace/imre-practical-native",
+    "environment": {
+      "CARGO_HOME": "/workspace/.toolchains/cargo",
+      "PATH_prefix": "/workspace/.toolchains/cargo/bin",
+      "RUSTUP_HOME": "/workspace/.toolchains/rustup"
+    },
+    "exit_code": 0,
+    "log_sha256": "9550850f77e78b0010b8ba4105da5c6a7b1a9732a2628fc1cf31b2bf6a98b1f3",
+    "source_clean_before_build": true,
+    "source_head": "99964c6734dbe008d69d5016eb60d25abd31ab0d",
+    "source_tree": "0d1c8c1cdc79be4c465c607d78345afe0f8d96a3"
+  },
+  "cases": {},
+  "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+  "compiler": "/workspace/scratch/practical-native-target/release/imre",
+  "compiler_sha256": "0d67c2cc7974cb3838224f2dea5963ea88b127f395bf8641030efba9b4079072",
+  "pin": "99964c6734dbe008d69d5016eb60d25abd31ab0d",
+  "python_fixture_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+  "runtime": "/workspace/scratch/practical-native-target/release/libimre_runtime.a",
+  "runtime_sha256": "83d23593bf7b800435fee1b24a6114bb6dace93688d41205b19719ef3a9938dd",
+  "stock_validation": "python3 -B stock_v1/validate.py: validated 4 supplemental stock references, 49 Rich source members; no workload executed",
+  "stub_sha256": "4a57e30e3cfc44ad1836a66760a844ceb628c68bf52031c2fac6f89e9356e85e",
+  "supervisor_build": {
+    "argv": [
+      "/usr/bin/cc",
+      "-O2",
+      "-Wall",
+      "-Wextra",
+      "-o",
+      "/workspace/scratch/practical-native-99964/supervisor",
+      "/workspace/scratch/practical-native-99964/supervisor.c"
+    ],
+    "binary_sha256": "36cce31bde9b0e1e7847d20d4a0821b2b509dca186d0b7c0231bb3e5fb14c88a",
+    "source_sha256": "26625b22872021736e0014cc2b3135dda70b5bf372563311a76e6102f1b654b3"
+  },
+  "supervisor_sha256": "36cce31bde9b0e1e7847d20d4a0821b2b509dca186d0b7c0231bb3e5fb14c88a",
+  "supervisor_source_sha256": "26625b22872021736e0014cc2b3135dda70b5bf372563311a76e6102f1b654b3",
+  "tree": "0d1c8c1cdc79be4c465c607d78345afe0f8d96a3"
+}

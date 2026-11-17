@@ -1,0 +1,2 @@
+ Compiling /workspace/scratch/practical-native-99964/prospective-ty-readme-O0-c0m5owyn/scripts/transform_readme.py (-O0)
+/workspace/scratch/practical-native-99964/prospective-ty-readme-O0-c0m5owyn/architecture_control.py:1:15: Imre: expected int, got bool; annotations are enforced contracts

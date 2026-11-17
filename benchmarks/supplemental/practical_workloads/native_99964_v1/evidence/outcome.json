@@ -1,0 +1,131 @@
+{
+  "credit_status": "withheld: uv-rich source-withdrawal replay fails at both tiers",
+  "credited_pairs": 0,
+  "immutable_stock_commit": "99964c6734dbe008d69d5016eb60d25abd31ab0d",
+  "native_revision": "99964c6734dbe008d69d5016eb60d25abd31ab0d",
+  "raw_exact_tier_observations": 6,
+  "results": {
+    "ruff-publisher": {
+      "O0": {
+        "comparison_dimensions": {
+          "cargo_journal": true,
+          "http_requests": true,
+          "mutations": true,
+          "status": true,
+          "stderr": true,
+          "stdout": true
+        },
+        "earned_credit": 0,
+        "gate_passed": true,
+        "provenance_open_attempts": 0,
+        "status": "observed_exact"
+      },
+      "O3": {
+        "comparison_dimensions": {
+          "cargo_journal": true,
+          "http_requests": true,
+          "mutations": true,
+          "status": true,
+          "stderr": true,
+          "stdout": true
+        },
+        "earned_credit": 0,
+        "gate_passed": null,
+        "provenance_open_attempts": 0,
+        "status": "observed_exact"
+      }
+    },
+    "ty-readme": {
+      "O0": {
+        "comparison_dimensions": {
+          "cargo_journal": true,
+          "http_requests": true,
+          "mutations": true,
+          "status": true,
+          "stderr": true,
+          "stdout": true
+        },
+        "earned_credit": 0,
+        "gate_passed": true,
+        "provenance_open_attempts": 0,
+        "status": "observed_exact"
+      },
+      "O3": {
+        "comparison_dimensions": {
+          "cargo_journal": true,
+          "http_requests": true,
+          "mutations": true,
+          "status": true,
+          "stderr": true,
+          "stdout": true
+        },
+        "earned_credit": 0,
+        "gate_passed": null,
+        "provenance_open_attempts": 0,
+        "status": "observed_exact"
+      }
+    },
+    "uv-publisher": {
+      "O0": {
+        "comparison_dimensions": {
+          "cargo_journal": true,
+          "http_requests": true,
+          "mutations": true,
+          "status": true,
+          "stderr": true,
+          "stdout": true
+        },
+        "earned_credit": 0,
+        "gate_passed": true,
+        "provenance_open_attempts": 0,
+        "status": "observed_exact"
+      },
+      "O3": {
+        "comparison_dimensions": {
+          "cargo_journal": true,
+          "http_requests": true,
+          "mutations": true,
+          "status": true,
+          "stderr": true,
+          "stdout": true
+        },
+        "earned_credit": 0,
+        "gate_passed": null,
+        "provenance_open_attempts": 0,
+        "status": "observed_exact"
+      }
+    },
+    "uv-rich": {
+      "O0": {
+        "comparison_dimensions": {
+          "cargo_journal": true,
+          "http_requests": true,
+          "mutations": true,
+          "status": false,
+          "stderr": false,
+          "stdout": false
+        },
+        "earned_credit": 0,
+        "gate_passed": true,
+        "provenance_open_attempts": 1,
+        "status": "observed_mismatch"
+      },
+      "O3": {
+        "comparison_dimensions": {
+          "cargo_journal": true,
+          "http_requests": true,
+          "mutations": true,
+          "status": false,
+          "stderr": false,
+          "stdout": false
+        },
+        "earned_credit": 0,
+        "gate_passed": null,
+        "provenance_open_attempts": 1,
+        "status": "observed_mismatch"
+      }
+    }
+  },
+  "scope": "prospective supplemental; independent of historical84",
+  "tier_observations": 8
+}
