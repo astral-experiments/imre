@@ -533,7 +533,11 @@ pub(crate) trait PreparedSuiteEmitter<'a, 'p>:
     fn class_namespace(&mut self, site: TextSize) -> CompiledClassNamespace<'p>;
     fn callable_at(&mut self, site: CallableSite, scoped: bool) -> CompiledDefinition<'p>;
     fn annotation_string(&mut self, child: usize) -> String;
-    fn exec_literal_at(&mut self, site: TextRange) -> Option<sites::CompiledExec>;
+    fn exec_literal_at(
+        &mut self,
+        site: TextRange,
+        expression: Option<&str>,
+    ) -> Option<sites::CompiledExec>;
 }
 
 /// Evaluate the selected input at its use, placing definitions in the lexical owner.
@@ -1594,8 +1598,12 @@ impl<'f> Frame<'f, '_, '_> {
         CheckedValue::handle(handle)
     }
 
-    pub(super) fn exec_literal_at(&mut self, site: TextRange) -> Option<sites::CompiledExec> {
-        self.code.exec_literal_at(site)
+    pub(super) fn exec_literal_at(
+        &mut self,
+        site: TextRange,
+        expression: Option<&str>,
+    ) -> Option<sites::CompiledExec> {
+        self.code.exec_literal_at(site, expression)
     }
 
     pub(crate) fn own_word(&mut self, word: &str) -> usize {

@@ -40,7 +40,11 @@ impl<'a, 'p> PreparedSuiteEmitter<'a, 'p> for TestFrame<'_, 'a, 'p> {
     fn annotation_string(&mut self, _: usize) -> String {
         unreachable!("isolated writer tests have no decoded annotation")
     }
-    fn exec_literal_at(&mut self, _: TextRange) -> Option<super::sites::CompiledExec> {
+    fn exec_literal_at(
+        &mut self,
+        _: TextRange,
+        _: Option<&str>,
+    ) -> Option<super::sites::CompiledExec> {
         None
     }
 }

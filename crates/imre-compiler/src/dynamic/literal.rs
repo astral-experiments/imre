@@ -27,6 +27,12 @@ pub(crate) struct LiteralCandidate {
     pub(crate) file: Option<PathBuf>,
 }
 
+/// The selected source is either a prepared suite or a checked literal expression.
+pub(super) enum LiteralBody<'a> {
+    Suite(&'a PreparedLiteral),
+    Expression(&'a str),
+}
+
 pub(super) struct PreparedLiteral {
     pub(super) body: PreparedBody<'static>,
     /// Original operand bytes when source decoding or normalization changed the checked text.
@@ -42,6 +48,19 @@ pub(crate) struct LiteralSites {
 }
 
 impl LiteralSites {
+    /// Select a suite or a checked expression at the registered call range.
+    pub(super) fn plan<'a>(
+        &'a self,
+        site: TextRange,
+        expression: Option<&'a str>,
+    ) -> Option<Result<Vec<LiteralBody<'a>>, (TextSize, &'a str)>> {
+        match self.bodies(site) {
+            Some(Ok(bodies)) => Some(Ok(bodies.iter().map(LiteralBody::Suite).collect())),
+            Some(Err(reason)) => Some(Err(reason)),
+            None => expression.map(|text| Ok(vec![LiteralBody::Expression(text)])),
+        }
+    }
+
     fn insert(&mut self, site: LiteralSite, body: Result<PreparedLiteral, String>) {
         match body {
             Ok(mut body) => {

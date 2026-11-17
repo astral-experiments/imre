@@ -553,6 +553,10 @@ pub(in crate::frontend) fn callable_target(call: &ast::ExprCall) -> ir::Register
     ir::RegisteredCallTarget::Callable {
         end: call.func.end(),
         suspended_name: call.func.is_name_expr().then(|| call.func.range()),
+        direct_eval: call
+            .func
+            .as_name_expr()
+            .is_some_and(|name| name.id == "eval"),
     }
 }
 
