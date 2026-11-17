@@ -866,16 +866,9 @@ impl Checker<'_> {
             }
             _ => None,
         };
-        // A native callable owns one stable callable as its context. A declared
-        // aggregate of callables needs Python storage, so select closure cells before
-        // lowering the helper instead of speculating on a native bound context.
-        let python_storage = capture.is_some()
-            && self
-                .functions
-                .values()
-                .any(|signature| callables::invalid_aggregate(signature.returns, self.types));
+        // A native callable owns its stable captured callable. A registered enclosing
+        // frame instead uses the original Python closure cell.
         let bound_capture = capture.is_some()
-            && !python_storage
             && !self.graph.registered_startup
             && self.registered_local_start.is_none()
             && self.unrepresented.borrow().is_none();

@@ -5833,14 +5833,20 @@ impl<'a> Checker<'a> {
                         "tuple literal has the wrong number of fields",
                     ));
                 }
-                self.contextual_display(
+                let value = self.contextual_display(
                     expression,
                     concrete,
                     &tuple.elts,
                     fields.into_iter(),
                     declaration,
                     ExprKind::Tuple,
-                )?
+                )?;
+                if self.registered_local_start.is_none()
+                    && callables::invalid_aggregate(value.ty, self.types)
+                {
+                    self.require_registered_operation(tuple)?;
+                }
+                value
             }
             ast::Expr::BinOp(binary)
                 if binary.op == ast::Operator::Add && self.types.element(concrete).is_some() =>
@@ -11049,6 +11055,11 @@ impl<'a> Checker<'a> {
                 let ty = self
                     .types
                     .tuple(values.iter().map(|value| value.ty).collect());
+                if self.registered_local_start.is_none()
+                    && callables::invalid_aggregate(ty, self.types)
+                {
+                    self.require_registered_operation(tuple)?;
+                }
                 (ty, ExprKind::Tuple(values))
             }
             ast::Expr::UnaryOp(unary) => {
