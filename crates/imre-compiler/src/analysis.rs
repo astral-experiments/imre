@@ -1575,7 +1575,9 @@ impl Session {
         let mut selected_providers = HashMap::new();
         for (id, source) in sources.clone() {
             if source.has_open_execution && source.is_original_sdk_source() {
-                selected_providers.entry(source.name).or_insert(self.files[id]);
+                selected_providers
+                    .entry(source.name)
+                    .or_insert(self.files[id]);
             }
         }
         let selected_provider = |owner: &str| selected_providers.get(owner).copied();
@@ -1644,6 +1646,16 @@ impl Session {
         }
         File::sync_path(&mut self.db, origin);
         Ok(())
+    }
+
+    /// Exclude imports that the existing type checker proves unreachable in a selected provider.
+    pub(crate) fn registered_unreachable(&self, file: File, range: TextRange) -> bool {
+        ty_python_semantic::types::ide_support::unreachable_ranges(
+            &self.db,
+            self.db.program_file(file),
+        )
+        .iter()
+        .any(|dead| dead.range.contains_range(range))
     }
 
     pub(crate) fn selected_file(

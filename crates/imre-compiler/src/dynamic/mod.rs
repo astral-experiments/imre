@@ -170,6 +170,10 @@ impl ModuleSyntaxError {
 #[derive(Default)]
 struct Imports {
     names: Vec<(u32, String)>,
+    import_sites: Vec<(usize, TextRange)>,
+    provider_imports: Vec<(String, TextRange)>,
+    provider_arguments: Vec<(usize, TextRange)>,
+    unresolved_provider_imports: Vec<TextRange>,
     module_flags: u32,
     explicit_roots: Vec<PathBuf>,
     runtime_imports: bool,
@@ -513,6 +517,7 @@ impl<'a> Visitor<'a> for GetterHeader<'_> {
 
 impl<'a> Visitor<'a> for Imports {
     fn visit_stmt(&mut self, s: &'a Stmt) {
+        let first_name = self.names.len();
         if let Stmt::With(statement) = s
             && !statement.is_async
         {
@@ -657,6 +662,10 @@ impl<'a> Visitor<'a> for Imports {
             }
             _ => {}
         }
+        if matches!(s, Stmt::Import(_) | Stmt::ImportFrom(_)) {
+            self.import_sites
+                .extend((first_name..self.names.len()).map(|index| (index, s.range())));
+        }
         visitor::walk_stmt(self, s);
     }
     fn visit_expr(&mut self, e: &'a Expr) {
@@ -672,6 +681,22 @@ impl<'a> Visitor<'a> for Imports {
         {
             self.site_directories.push((module, directory));
             self.runtime_imports = true;
+        }
+        if let Expr::Call(call) = e
+            && let Expr::Attribute(function) = &*call.func
+            && function.attr.as_str() == "import_module"
+            && matches!(&*function.value, Expr::Name(name) if self.importlib_names.contains(name.id.as_str()))
+        {
+            match call.arguments.find_argument_value("name", 0) {
+                Some(Expr::StringLiteral(name)) if !name.value.to_str().starts_with('.') => {
+                    self.provider_imports
+                        .push((name.value.to_string(), call.range()));
+                }
+                Some(argument) if let Some(index) = self.argument_index(argument) => {
+                    self.provider_arguments.push((index, call.range()));
+                }
+                _ => self.unresolved_provider_imports.push(call.range()),
+            }
         }
         if let Expr::Call(call) = e
             && let Expr::Attribute(function) = &*call.func
@@ -739,6 +764,8 @@ impl<'a> Visitor<'a> for Imports {
             && let Some(Expr::StringLiteral(name)) = call.arguments.find_argument_value("name", 0)
         {
             self.uses_import_builtin = true;
+            self.provider_imports
+                .push((name.value.to_string(), call.range()));
             self.add(0, "importlib");
             if matches!(
                 name.value.to_str().split('.').next(),
@@ -755,6 +782,7 @@ impl<'a> Visitor<'a> for Imports {
             if name.id == "__import__" {
                 self.uses_import_builtin = true;
                 self.computed_import = true;
+                self.unresolved_provider_imports.push(name.range());
                 self.add(0, "importlib");
             }
             if name.id == "exec" {
@@ -1614,6 +1642,12 @@ pub(crate) fn compile(
     }
     // Discover each search directory once even when it appears twice in sys.path.
     let mut ordered: IndexSet<_> = initial.iter().chain(&explicit_roots).collect();
+    // Probe this slot only for a named provider or its selected closure. Admit it
+    // to the ordered semantic roots only after the collector selects a member.
+    let named_archive = options
+        .installed_stdlib_archive
+        .as_ref()
+        .filter(|_| module_entry.is_some() && checked_graph.is_none());
     let first_implicit = ordered.len();
     ordered.extend(&installed_roots);
     let mut roots: Vec<_> = ordered.into_iter().cloned().collect();
@@ -1653,6 +1687,7 @@ pub(crate) fn compile(
     let mut archive_modules = (!archives.is_empty()).then(|| {
         roots
             .iter()
+            .filter(|root| named_archive != Some(*root))
             .filter_map(|root| archives.get(root))
             .flat_map(|archive| archive.modules())
             .collect::<std::collections::BTreeSet<_>>()
@@ -1770,6 +1805,7 @@ pub(crate) fn compile(
     }
     let mut sdk_work = VecDeque::new();
     let mut following_sdk = false;
+    let mut checked_providers = HashSet::new();
     let mut work = VecDeque::new();
     let mut uses_import_builtin = false;
     let mut uses_exec = false;
@@ -1826,12 +1862,16 @@ pub(crate) fn compile(
                     for name in names {
                         hints.add(0, &name);
                     }
-                    let queue = if selected {
-                        &mut selected_work
+                    if checked_providers.contains(&unit) {
+                        sdk_work.push_back(((sources[unit].0.clone(), package, hints), true));
                     } else {
-                        &mut work
-                    };
-                    queue.push_back(((sources[unit].0.clone(), package, hints), origin));
+                        let queue = if selected {
+                            &mut selected_work
+                        } else {
+                            &mut work
+                        };
+                        queue.push_back(((sources[unit].0.clone(), package, hints), origin));
+                    }
                 }
                 if !selected_work.is_empty() || !work.is_empty() || literals.forest.has_pending() {
                     continue;
@@ -1839,22 +1879,32 @@ pub(crate) fn compile(
             }
             named_registrations = Some(selected_sources.len());
         }
+        let checking_provider;
         let (item, selected) = if let Some(next) = selected_work.pop_front() {
+            following_sdk = false;
+            checking_provider = false;
             (next, true)
         } else if let Some(next) = work.pop_front() {
+            following_sdk = false;
+            checking_provider = false;
             (next, false)
         } else if let Some(next) = getters.pop_front() {
+            following_sdk = false;
+            checking_provider = false;
             // Keep project shadows for a bundled module's lazy attributes. The
             // ordinary graph has already checked any modules the user imported.
             through_getter = true;
             ((next, ImportOrigin::Provider), false)
-        } else if let Some(next) = sdk_work.pop_front() {
+        } else if let Some((next, checked)) = sdk_work.pop_front() {
             // Finish the ordinary file graph first. Linking an SDK dependency does
             // not by itself make the application's optional frozen shadows reachable.
             following_sdk = true;
+            checking_provider = checked;
             through_getter = false;
             ((next, ImportOrigin::Provider), true)
         } else if let Some((next, lazy)) = bundled_imports.pop_front() {
+            following_sdk = false;
+            checking_provider = false;
             // The program can reach these providers through a ZIP or an extended package
             // path. Their hints must not force unrequested application files to compile.
             through_getter = lazy;
@@ -1886,6 +1936,7 @@ pub(crate) fn compile(
                 .extend(modules.into_iter().map(|name| (0, name)));
             through_getter = false;
             following_sdk = false;
+            checking_provider = false;
             bundled_only = false;
             (
                 (
@@ -1896,6 +1947,7 @@ pub(crate) fn compile(
             )
         } else {
             through_getter = false;
+            checking_provider = false;
             // Collect late imports and their bundled dependencies after the explicit
             // file graph, without parsing unrelated modules in project directories.
             let mut imports = Imports::default();
@@ -1942,7 +1994,73 @@ pub(crate) fn compile(
                 false,
             )
         };
-        let ((owner, package, imports), origin) = item;
+        let ((owner, package, mut imports), origin) = item;
+        if checking_provider {
+            if (!imports.import_sites.is_empty()
+                || !imports.provider_imports.is_empty()
+                || !imports.provider_arguments.is_empty()
+                || !imports.unresolved_provider_imports.is_empty()
+                || !imports.literal_calls.is_empty())
+                && let Some(&(unit, _, _)) = selected_sources
+                    .iter()
+                    .find(|(id, _, _)| sources[*id].0 == owner)
+            {
+                let (_, path, source) = &sources[unit];
+                let session =
+                    crate::analysis::Session::registered_syntax(&mut syntax, &root, &roots)?;
+                session.seed(path, source)?;
+                let (file, _, _) = session.selected_file(path)?;
+                if imports
+                    .unresolved_provider_imports
+                    .iter()
+                    .chain(
+                        imports
+                            .literal_calls
+                            .iter()
+                            .map(|candidate| &candidate.call),
+                    )
+                    .any(|&range| !session.registered_unreachable(file, range))
+                {
+                    return Err(format!(
+                        "selected Python provider {owner:?} has an import or execution operand outside the checked finite closure; unsupported"
+                    ));
+                }
+                for (index, range) in std::mem::take(&mut imports.provider_arguments) {
+                    if session.registered_unreachable(file, range) {
+                        continue;
+                    }
+                    if let Some(name) = options
+                        .launcher_arguments
+                        .get(index)
+                        .and_then(Option::as_deref)
+                    {
+                        imports.add(0, name);
+                    } else {
+                        return Err(format!(
+                            "selected Python provider {owner:?} has an unresolved import argument; unsupported"
+                        ));
+                    }
+                }
+                let dead: HashSet<_> = imports
+                    .import_sites
+                    .iter()
+                    .filter_map(|&(index, range)| {
+                        session.registered_unreachable(file, range).then_some(index)
+                    })
+                    .collect();
+                imports.names = imports
+                    .names
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(i, name)| (!dead.contains(&i)).then_some(name))
+                    .collect();
+                for (name, range) in std::mem::take(&mut imports.provider_imports) {
+                    if !session.registered_unreachable(file, range) {
+                        imports.add(0, &name);
+                    }
+                }
+            }
+        }
         if origin == ImportOrigin::Startup {
             for path in &imports.explicit_roots {
                 let path = cwd.join(path);
@@ -2073,7 +2191,6 @@ pub(crate) fn compile(
             } else {
                 &name
             };
-            let select_member = selected && startup.is_none() && !frozen && literal;
             let mut prefix = String::new();
             let mut project_parent = false;
             let mut on_sdk_path = true;
@@ -2086,6 +2203,17 @@ pub(crate) fn compile(
                     prefix.push('.');
                 }
                 prefix.push_str(part);
+                let named_path = module_entry.is_some_and(|entry| {
+                    prefix == entry
+                        || entry
+                            .strip_prefix(&prefix)
+                            .is_some_and(|tail| tail.starts_with('.'))
+                        || prefix.strip_suffix(".__main__") == Some(entry)
+                });
+                let select_member = selected
+                    && (startup.is_none() || named_path || checking_provider)
+                    && !frozen
+                    && literal;
                 if prefix == "_imp" && file_graph {
                     imp_in_file_graph = true;
                 }
@@ -2129,7 +2257,22 @@ pub(crate) fn compile(
                 {
                     bundled = Some((member, crate::zip_entry::installed_source(member)?));
                 }
-                let installed = if bundled.is_some() {
+                let bundled_present = bundled.is_some();
+                let probe_archive = named_archive.filter(|archive| {
+                    !roots.contains(archive) && (named_path || checking_provider) && select_member
+                });
+                if let Some(path) = probe_archive
+                    && !archives.contains_key(path)
+                {
+                    archives.insert(
+                        path.clone(),
+                        crate::zip_entry::ZipSources::open(path, &mut inputs, &mut filesystem)?,
+                    );
+                }
+                let installed = if bundled_present
+                    || probe_archive.is_some()
+                    || named_archive.is_some_and(|path| roots.contains(path))
+                {
                     None
                 } else {
                     selected_member.or_else(|| crate::zip_entry::packaged_member(&prefix))
@@ -2238,15 +2381,21 @@ pub(crate) fn compile(
                             work.push_back((next, origin));
                         }
                     };
-                    enqueue(imports, false);
-                    if !getter.names.is_empty() || getter.uses_exec {
-                        enqueue(getter, true);
+                    let winner = select_member && on_sdk_path && !project_parent && !builtin;
+                    if winner && (named_path || checking_provider) {
+                        bundled_winner =
+                            Some((sources.len(), checked, Some((package, imports, getter))));
+                    } else {
+                        enqueue(imports, false);
+                        if !getter.names.is_empty() || getter.uses_exec {
+                            enqueue(getter, true);
+                        }
+                        if winner {
+                            bundled_winner = Some((sources.len(), checked, None));
+                        }
                     }
                     if on_sdk_path && let Some(name) = options.include_modules.get(&prefix) {
                         bundled_includes.insert(name, frozen);
-                    }
-                    if select_member && on_sdk_path && !project_parent && !builtin {
-                        bundled_winner = Some((sources.len(), checked));
                     }
                     sources.push((prefix.clone(), path, source.into()));
                 }
@@ -2261,9 +2410,22 @@ pub(crate) fn compile(
                 } else {
                     &roots
                 };
-                for (index, root) in search_roots
+                let candidate_slot = if origin == ImportOrigin::Startup {
+                    search_roots.len()
+                } else {
+                    first_implicit.min(search_roots.len())
+                };
+                let mut admit_archive = false;
+                for (index, root) in search_roots[..candidate_slot]
                     .iter()
                     .enumerate()
+                    .chain(probe_archive.into_iter().map(|path| (usize::MAX, path)))
+                    .chain(
+                        search_roots[candidate_slot..]
+                            .iter()
+                            .enumerate()
+                            .map(|(i, path)| (i + candidate_slot, path)),
+                    )
                     .filter(|(_, root)| !bundled_only || Some(*root) == installed_root)
                 {
                     if implicit_dirs.contains(root) && before_site.contains(&prefix) {
@@ -2271,8 +2433,12 @@ pub(crate) fn compile(
                     }
                     let parent = prefix.rsplit_once('.').map(|(parent, _)| parent);
                     let selected_parent = parent.and_then(|name| entry_sources.get(name));
-                    let on_package_path = selected_parent
-                        .is_none_or(|(selected, package)| *package && selected == root);
+                    let on_package_path = selected_parent.is_none_or(|(selected, package)| {
+                        *package
+                            && (selected == root
+                                || selected == Path::new(bundled_root)
+                                    && named_archive == Some(root))
+                    });
                     let winner = on_package_path
                         && !entry_sources.contains_key(&prefix)
                         && (origin != ImportOrigin::Startup
@@ -2295,19 +2461,36 @@ pub(crate) fn compile(
                         }
                     }
                     if let Some(archive) = archives.get_mut(root) {
+                        if named_archive == Some(root) && (bundled_present || builtin) {
+                            continue;
+                        }
                         if !new_module && wheel_origins.is_some() {
                             continue;
                         }
                         if let Some(package) = archive.package(&prefix) {
-                            if let Some(member) = archive.module(&prefix)
-                                && let Ok((mut imports, scanned)) = scan_imports_for_preparation(
+                            let finite =
+                                winner && select_member && (named_path || checking_provider);
+                            let member = archive.module(&prefix);
+                            if finite && member.is_none() {
+                                return Err(format!(
+                                    "selected archive provider {prefix:?} has no decodable Python body; unsupported"
+                                ));
+                            }
+                            if let Some(member) = member {
+                                let scanned_result = scan_imports_for_preparation(
                                     &member.source,
                                     SourceKind::DecodedFile,
                                     |_| None,
                                     None,
                                     None,
-                                )
-                            {
+                                );
+                                let (mut imports, scanned) = match scanned_result {
+                                    Ok(result) => result,
+                                    Err(error) if finite => {
+                                        return Err(format!("{}: {error}", member.path.display()));
+                                    }
+                                    Err(_) => continue,
+                                };
                                 if let Some(module) = scanned.and_then(ScannedModule::from_input) {
                                     scanned_modules.insert(sources.len(), module);
                                 }
@@ -2321,6 +2504,13 @@ pub(crate) fn compile(
                                     .archive_paths
                                     .insert(member.path.clone(), archive.archive_path().to_owned());
                                 if let Some(error) = imports.invalid_executable {
+                                    if finite {
+                                        return Err(format!(
+                                            "{}: {}",
+                                            member.path.display(),
+                                            error.message
+                                        ));
+                                    }
                                     module_errors.insert(member.path.clone(), error);
                                 } else {
                                     if winner && named_registrations.is_none() {
@@ -2332,12 +2522,23 @@ pub(crate) fn compile(
                                             child_origin,
                                         );
                                     }
-                                    let queue = if selected_child {
-                                        &mut selected_work
+                                    let checked = winner
+                                        && select_member
+                                        && (named_path || checking_provider)
+                                        && registrations.python_providers.contains(&sources.len());
+                                    if checked {
+                                        checked_providers.insert(sources.len());
+                                        sdk_work
+                                            .push_back(((prefix.clone(), package, imports), true));
                                     } else {
-                                        &mut work
-                                    };
-                                    child_origin.enqueue(queue, (prefix.clone(), package, imports));
+                                        let queue = if selected_child {
+                                            &mut selected_work
+                                        } else {
+                                            &mut work
+                                        };
+                                        child_origin
+                                            .enqueue(queue, (prefix.clone(), package, imports));
+                                    }
                                     if winner {
                                         let program = initial[..path0_len].contains(root);
                                         let checked = graph_file.and_then(|(graph, id)| {
@@ -2361,6 +2562,7 @@ pub(crate) fn compile(
                             }
                             if winner {
                                 entry_sources.insert(prefix.clone(), (root.clone(), package));
+                                admit_archive |= probe_archive == Some(root);
                             }
                         }
                         continue;
@@ -2683,12 +2885,39 @@ pub(crate) fn compile(
                         sources.push(registration);
                     }
                 }
+                if admit_archive && let Some(path) = probe_archive {
+                    roots.insert(first_implicit, path.clone());
+                    for (_, startup, index) in &mut file_origins {
+                        if !*startup && *index >= first_implicit {
+                            *index += 1;
+                        }
+                    }
+                }
                 // Physical search roots have now had their chance to supply this import.
-                if let Some((unit, checked)) = bundled_winner
-                    && !entry_sources.contains_key(&prefix)
-                {
-                    registrations.python_providers.insert(unit);
-                    selected_sources.push((unit, false, checked));
+                if let Some((unit, checked, pending)) = bundled_winner {
+                    let winner = !entry_sources.contains_key(&prefix);
+                    if winner {
+                        registrations.python_providers.insert(unit);
+                        selected_sources.push((unit, false, checked));
+                    }
+                    if let Some((package, imports, getter)) = pending {
+                        if winner {
+                            entry_sources.insert(prefix.clone(), (bundled_root.into(), package));
+                            let checked = named_path || checking_provider;
+                            if checked {
+                                checked_providers.insert(unit);
+                            }
+                            sdk_work.push_back(((prefix.clone(), package, imports), checked));
+                        } else {
+                            work.push_back((
+                                (prefix.clone(), package, imports),
+                                ImportOrigin::Provider,
+                            ));
+                        }
+                        if !getter.names.is_empty() || getter.uses_exec {
+                            getters.push_back((prefix.clone(), package, getter));
+                        }
+                    }
                 }
                 if let Some(member) = installed {
                     // Removing an earlier path can expose this SDK member to its ordinary ZIP loader.
@@ -2759,7 +2988,11 @@ pub(crate) fn compile(
                     registrations.python_providers.insert(sources.len());
                     if let Some(digest) = digest {
                         registrations.archive_members.insert(path.clone(), digest);
-                        if let Some(root) = &options.installed_stdlib_archive {
+                        if let Some(root) = options
+                            .installed_stdlib_archive
+                            .as_ref()
+                            .or(options.stdlib_fallback.as_ref())
+                        {
                             registrations
                                 .archive_paths
                                 .insert(path.clone(), root.clone());
@@ -2771,7 +3004,11 @@ pub(crate) fn compile(
                     if let Some(error) = imports.invalid_executable {
                         module_errors.insert(path.clone(), error);
                     } else if winner {
-                        sdk_work.push_back((prefix.clone(), package, imports));
+                        let checked = select_member && (named_path || checking_provider);
+                        if checked {
+                            checked_providers.insert(sources.len());
+                        }
+                        sdk_work.push_back(((prefix.clone(), package, imports), checked));
                         selected_sources.push((sources.len(), false, None));
                     } else {
                         bundled_imports.push_back(((prefix.clone(), package, imports), false));
@@ -2957,11 +3194,12 @@ pub(crate) fn compile(
         .enumerate()
         .map(|(index, (id, program, module))| {
             let application = !registrations.python_providers.contains(&id);
+            let checked_provider = checked_providers.contains(&id);
             // Emit the selected application's signature. Preserve the existing checker
             // scope: owning a declaration does not prove that a call will reach it.
             let mut registration = RegisteredSource::new(
                 &sources[id],
-                (program || owned_sources.contains(&id)) && application,
+                (program || owned_sources.contains(&id)) && application || checked_provider,
                 module,
             );
             let checked = registrations.checked_units.get(&id);
@@ -2988,7 +3226,7 @@ pub(crate) fn compile(
                 optimization: python_optimization,
             });
             registration.unit = output.is_some().then_some(id);
-            registration.declares_signatures = application;
+            registration.declares_signatures = application || checked_provider;
             if application && let Some(graph) = checked_graph {
                 registration.guarded_stub = graph.session.guarded_stub(
                     registration.path,
@@ -3113,6 +3351,14 @@ pub(crate) fn compile(
     };
     let mut layouts = Vec::new();
     // Resolve the registered SDK files after the physical search roots in both checkers.
+    if let Some(archive) = &options.stdlib_fallback
+        && checked_providers
+            .iter()
+            .any(|&id| sources[id].1.starts_with(archive))
+        && !roots.contains(archive)
+    {
+        roots.push(archive.clone());
+    }
     roots.push(bundled_root.into());
     // The semantic filesystem interns paths without parent components. Use the selected
     // disk root and keep its module-relative name, including symlinks within a package.

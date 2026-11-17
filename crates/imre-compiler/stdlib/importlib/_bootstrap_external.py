@@ -962,7 +962,7 @@ class FileFinder:
 
 """Combine registered native modules with the filesystem entry that contains them."""
 from _imre_importlib import (
-    _installed_source_members, _installed_stdlib, registered_path, registered_path_spec,
+    _installed_stdlib, registered_path, registered_path_spec,
 )
 
 
@@ -977,16 +977,14 @@ def _installed_source_spec(fullname, registry_path, target):
     parts = fullname.split('.')
     if not all(part.isidentifier() for part in parts):
         return None
-    member = '/'.join(parts)
-    if (member + '.py' not in _installed_source_members
-            and member + '/__init__.py' not in _installed_source_members):
-        return None
     parent = parts[:-1]
     if registry_path != _path_join('<imre stdlib>', *parent):
         return None
-    if _installed_stdlib is not None and _path_isfile(_installed_stdlib):
+    if _installed_stdlib is not None:
+        from _imre_zipimport import linked_archive
         entry = _path_join(_installed_stdlib, *parent)
-        return _registered_path_finder.find_spec(fullname, [entry], target)
+        if linked_archive(entry) is not None:
+            return _registered_path_finder.find_spec(fullname, [entry], target)
     return None
 
 
