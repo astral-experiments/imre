@@ -1217,7 +1217,7 @@ def check_select_result_allocation(imre, root, run):
     subprocess.run(["cc", "-c", fixtures / "refuse_select_result.c", "-o", wrapper], check=True)
     flags = "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_scoped_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_scoped_call_at,--wrap=imre_dyn_positional_call_at,--wrap=imre_dyn_keyword_call_at,--wrap=imre_dyn_lit,--wrap=imre_dyn_linked_string,--wrap=malloc,--wrap=realloc,--wrap=calloc",
     ])
     source = fixtures / "boxed_select_result_allocation.py"
     for optimization in (0, 3):
@@ -1270,7 +1270,7 @@ def check_select_input_root_allocation(imre, root, run):
     subprocess.run(["cc", "-c", fixtures / "refuse_select_input_roots.c", "-o", wrapper], check=True)
     flags = "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_scoped_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_scoped_call_at,--wrap=imre_dyn_positional_call_at,--wrap=imre_dyn_keyword_call_at,--wrap=imre_dyn_lit,--wrap=imre_dyn_linked_string,--wrap=malloc,--wrap=realloc,--wrap=calloc",
     ])
     source = fixtures / "boxed_select_input_root_allocation.py"
     for optimization in (0, 3):
@@ -1375,21 +1375,23 @@ def check_weak_proxy_root_allocation(imre, root, run):
     subprocess.run(["cc", "-c", fixtures / "refuse_weak_proxy_root.c", "-o", wrapper], check=True)
     flags = "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_get_int_item,--wrap=imre_dyn_lit,--wrap=imre_dyn_linked_string,--wrap=malloc,--wrap=realloc,--wrap=calloc",
     ])
     source = root / "weak_proxy_subscripts.py"
-    # A single expression keeps the reads' temporary handles in the same frame.
-    reads = ", ".join(["values[index]"] * 512)
     fixture = (fixtures / "boxed_weak_proxy_root_allocation.py").read_text()
-    source.write_text(f"{fixture}\ncheck(lambda values, index: ({reads}))\n")
-    reference = run(sys.executable, "-B", source)
-    assert reference.returncode == 0, reference
-    for ordinal in (0, 1):
-        result = run(imre, "-B", source, extra={"IMRE_ENCODED_FLAGS": flags, "PROXY_ROOT_REFUSE_NTH": str(ordinal)})
-        expected = reference.stdout if not ordinal else reference.stdout.replace(b"kind ok\n", b"kind MemoryError\n", 1)
-        assert result.returncode == 0 and result.stdout == expected, (ordinal, result, reference)
-        refused = any(line.startswith(b"weak_proxy_root_allocation ") and line.endswith(b" 1") for line in result.stderr.splitlines())
-        assert refused == bool(ordinal), (ordinal, result)
+    # Keep the large-expression stress case, then target a root-vector growth in
+    # a smaller expression whose operands have not already reserved that space.
+    for count, ordinals in ((512, (0,)), (4, (0, 1))):
+        reads = ", ".join(["values[index]"] * count)
+        source.write_text(f"{fixture}\ncheck(lambda values, index: ({reads}))\n")
+        reference = run(sys.executable, "-B", source)
+        assert reference.returncode == 0, reference
+        for ordinal in ordinals:
+            result = run(imre, "-B", source, extra={"IMRE_ENCODED_FLAGS": flags, "PROXY_ROOT_REFUSE_NTH": str(ordinal)})
+            expected = reference.stdout if not ordinal else reference.stdout.replace(b"kind ok\n", b"kind MemoryError\n", 1)
+            assert result.returncode == 0 and result.stdout == expected, (count, ordinal, result, reference)
+            refused = any(line.startswith(b"weak_proxy_root_allocation ") and line.endswith(b" 1") for line in result.stderr.splitlines())
+            assert refused == bool(ordinal), (count, ordinal, result)
 
 
 def call_allocation_flags(root):

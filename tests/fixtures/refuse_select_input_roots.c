@@ -9,8 +9,6 @@ static size_t selected_size;
 extern void *__real_malloc(size_t);
 extern void *__real_calloc(size_t, size_t);
 extern void *__real_realloc(void *, size_t);
-extern uint64_t __real_imre_dyn_lit(void *, int, const unsigned char *, size_t);
-extern uint64_t __real_imre_dyn_scoped_call_at(void *, uint64_t, uint64_t, uint64_t, size_t, const uint32_t (*)[4], uint64_t);
 
 static int reject(size_t size) {
     if (!active || refused || size != selected_size || ++matches != nth) return 0;
@@ -30,22 +28,12 @@ void *__wrap_calloc(size_t count, size_t size) {
 void *__wrap_realloc(void *pointer, size_t size) {
     return reject(size) ? NULL : __real_realloc(pointer, size);
 }
-uint64_t __wrap_imre_dyn_lit(void *ctx, int kind, const unsigned char *data, size_t length) {
-    uint64_t result = __real_imre_dyn_lit(ctx, kind, data, length);
-    static const char marker[] = "arm select root refusal";
-    if (kind == 1 && length == sizeof(marker) - 1 && !memcmp(data, marker, length)) armed = 1;
-    return result;
-}
-uint64_t __wrap_imre_dyn_scoped_call_at(void *ctx, uint64_t callable, uint64_t args,
-                               uint64_t kwargs, size_t mark, const uint32_t (*span)[4], uint64_t scope) {
-    if (!armed) return __real_imre_dyn_scoped_call_at(ctx, callable, args, kwargs, mark, span, scope);
-    armed = 0;
+static void begin_probe(void) {
     const char *setting = getenv("SELECT_ROOT_REFUSE_NTH");
     nth = setting ? (unsigned)strtoul(setting, NULL, 10) : 0;
     setting = getenv("SELECT_ROOT_REFUSE_BYTES");
     selected_size = setting ? strtoul(setting, NULL, 10) : 8192;
     active = nth != 0;
-    uint64_t result = __real_imre_dyn_scoped_call_at(ctx, callable, args, kwargs, mark, span, scope);
-    active = 0;
-    return result;
 }
+#define REFUSAL_MARKER "arm select root refusal"
+#include "refuse_marked_scope.h"
