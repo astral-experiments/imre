@@ -21,7 +21,7 @@ REJECT = {
         "def identity(value: int) -> int: return value\n"
         "class Derived(ThreadingTCPServer): pass\n"
         "identity('wrong')\n",
-        "invalid-argument-type",
+        "runtime_server_keeps_argument_checks.py:4:10: Imre: expected int, got str",
     ),
     "runtime_server_value_keeps_argument_checks": (
         "from socketserver import ThreadingTCPServer\n"

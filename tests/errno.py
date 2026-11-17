@@ -117,7 +117,7 @@ def main():
                 assert expected.returncode == actual.returncode == 1 and expected.stdout == actual.stdout == b""
                 message = expected.stderr.splitlines()[-1:]
                 assert message == [b"ImportError: cannot import" + (b". Did you mean: 'EDOM'?" if mode == "optional-hint" else b"")]
-                assert actual.stderr.splitlines() == message, (expected.stderr, actual.stderr)
+                assert actual.stderr == expected.stderr, (expected.stderr, actual.stderr)
             for case in missing:
                 command = [args.compiler.resolve(), "build", root / (case + ".py"), "--module-root", root,
                            "--runtime", args.runtime.resolve(), "--clang", args.clang,
