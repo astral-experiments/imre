@@ -5600,6 +5600,9 @@ for name in ("md4", "ripemd160"):
                 compare("-IB", "-c", imports)
             else:
                 compare("-IB", "-c", imports + "arithmetic.current()")
+            if fixture == "boxed_annotationlib_refs.py":
+                result = run(imre, "-IB", "-c", imports + "arithmetic.unsupported()")
+                assert result.returncode == 0 and not result.stderr, result
             if fixture == "boxed_logging_fileconfig.py":
                 child = run(imre, "-IB", "-c", imports + "arithmetic.dynamic()")
                 assert child.returncode == 0, child.stderr

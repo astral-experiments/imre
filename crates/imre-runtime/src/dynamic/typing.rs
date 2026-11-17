@@ -2602,7 +2602,7 @@ pub(super) fn call(
                 ctx.heap.linked_sources.get(text),
                 Some(super::LinkedSource::Expression(_))
             ) {
-                return Ok(NONE);
+                return Ok(*text);
             }
             ctx.check_annotation(*text, true)?;
             Ok(NONE)

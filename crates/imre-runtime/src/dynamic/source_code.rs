@@ -822,6 +822,11 @@ pub(super) fn original_points(
     Ok(Some(points))
 }
 
+/// Apply eval's preprocessing without changing compile or AST source positions.
+fn eval_source_text(source: &str) -> &str {
+    source.trim_start_matches([' ', '\t'])
+}
+
 /// Normalize physical line endings before parsing and measuring offsets.
 fn normalized_source(source: &str) -> Cow<'_, str> {
     if source.contains('\r') {
@@ -915,11 +920,22 @@ impl IndentationDiagnostic {
         source: &str,
         file_input: bool,
         first_statement_end: Option<ruff_text_size::TextSize>,
+        expression_input: bool,
     ) -> Option<Self> {
         use ast::token::TokenKind::{Dedent, Indent};
         let mut depth = 0usize;
         for token in parsed.tokens() {
             match token.kind() {
+                Indent if expression_input && depth == 0 => {
+                    if parsed
+                        .errors()
+                        .first()
+                        .is_some_and(|e| e.location.start() < token.start())
+                    {
+                        return None;
+                    }
+                    return Some(Self::unexpected(source, token.end().to_usize()));
+                }
                 Indent if depth == MAX_INDENT_LEVELS => {
                     if first_statement_end.is_some_and(|end| token.start() >= end)
                         || parsed
@@ -952,7 +968,37 @@ impl IndentationDiagnostic {
                 _ => {}
             }
         }
+        if expression_input
+            && parsed.errors().is_empty()
+            && let Some(token) = parsed.tokens().iter().last()
+            && token.kind() == ast::token::TokenKind::Newline
+            && token.end().to_usize() < source.len()
+            && source[token.end().to_usize()..]
+                .bytes()
+                .all(|b| matches!(b, b' ' | b'\t' | b'\x0c'))
+        {
+            return Some(Self::unexpected(source, source.len()));
+        }
         None
+    }
+
+    /// Locate an unexpected top-level indentation prefix in an expression input.
+    fn unexpected(source: &str, end: usize) -> Self {
+        let start = source[..end].rfind('\n').map_or(0, |i| i + 1);
+        let row = 1 + source[..start].bytes().filter(|&b| b == b'\n').count() as i64;
+        let text = source[start..]
+            .split_inclusive('\n')
+            .next()
+            .unwrap_or_default()
+            .to_owned();
+        Self {
+            kind: "IndentationError",
+            message: "unexpected indent",
+            column: source[start..end].chars().count() as i64,
+            end_column: -1,
+            row,
+            text,
+        }
     }
 
     pub(super) fn raise<T>(self, ctx: &mut Context, filename: Id) -> Result<T> {
@@ -1966,6 +2012,10 @@ impl Context {
                 )?);
             }
         };
+        if let Some(issue) = IndentationDiagnostic::find(&parsed, &source, false, None, true) {
+            let filename = self.text("<string>");
+            return issue.raise(self, filename);
+        }
         if check_scope && let Err(error) = forward_refs::validate(&parsed) {
             return Err(match error {
                 forward_refs::Error::Syntax(message) => Error::new("SyntaxError", message),
@@ -2289,7 +2339,7 @@ impl Context {
             );
         }
         let source = if strip_indent {
-            source.trim_start_matches([' ', '\t'])
+            eval_source_text(&source)
         } else {
             &source
         };
@@ -2306,7 +2356,8 @@ impl Context {
             (true, ast::Mod::Module(module)) => module.body.first().map(Ranged::end),
             _ => None,
         };
-        if let Some(limit) = IndentationDiagnostic::find(&parsed, source, exec, first_statement_end)
+        if let Some(limit) =
+            IndentationDiagnostic::find(&parsed, source, exec, first_statement_end, mode == "eval")
         {
             return limit.raise(self, filename_id);
         }
@@ -2846,30 +2897,70 @@ impl Context {
         }
     }
 
-    /// Evaluate one forward-reference expression in its defining Python namespaces.
+    /// Evaluate a linked annotation expression, or resolve its normalized bare name.
     pub(super) fn eval_type_expression(&mut self, text: Id, globals: Id, locals: Id) -> Result<Id> {
+        let (globals, locals) = self.source_namespaces(
+            self.heap.current_scope(),
+            (globals != NONE).then_some(globals),
+            (locals != NONE).then_some(locals),
+        )?;
+        // ForwardRef validation returns no checked body for valid unlinked source.
+        if text == NONE {
+            self.checked_source_namespaces(globals, locals, None, "eval")?;
+            return Err(Self::missing_body_error("<module>", "<string>", 1));
+        }
         if let Some(entry) = self.linked_expression(text) {
             let filename = self.text("<string>");
             let code = self.native_module_code(entry, filename, None);
-            return self.eval_namespace_code(code, globals, locals);
+            return self.eval_namespace_code(code, globals, locals.unwrap_or(globals));
         }
-        let source = self.str_value(text)?;
+        let (checked_locals, builtins) =
+            self.checked_source_namespaces(globals, locals, None, "eval")?;
+        let source = eval_source_text(self.str_value(text)?);
         if crate::objects::python_isidentifier(source)
             && !ruff_python_stdlib::keyword::is_keyword(source)
         {
-            // ForwardRef.evaluate looks up the original string for a bare identifier.
-            // The parser applies NFKC to ident.id, as required for compound expressions.
-            for mapping in [locals, globals, self.default_source_builtins()?] {
-                if self.contains(text, mapping)? {
-                    return self.get_item(mapping, text);
+            let normalized = crate::objects::normalize_unicode("NFKC", source)?;
+            let name = copy_label(normalized.as_deref().unwrap_or(source))?;
+            if let Some(locals) = checked_locals {
+                match self.load_exec_name(locals, &name) {
+                    Err(error) if self.is_builtin_error(&error, "KeyError") => {}
+                    value => return value,
                 }
             }
-            return Err(Self::undefined_source_name(self.str_value(text)?, text));
+            return self.source_global(
+                ExecGlobals {
+                    dict: globals,
+                    builtins,
+                },
+                &name,
+            );
         }
         let filename = self.text("<string>");
-        let code =
-            self.compile_source_with_flags(text, filename, "eval", self.inherited_compile_flags())?;
-        self.eval_namespace_code(code, globals, locals)
+        self.prepare_source_program(text, filename, "eval", true, self.inherited_compile_flags())?;
+        Err(Error::new(
+            "NotImplementedError",
+            "annotation source expression has no checked AOT body; declare the annotation in source or avoid eval_str",
+        ))
+    }
+
+    /// Resolve explicit namespaces or the active Python frame as eval and exec do.
+    fn source_namespaces(
+        &mut self,
+        scope: Id,
+        globals: Option<Id>,
+        locals: Option<Id>,
+    ) -> Result<(Id, Option<Id>)> {
+        let locals = match locals {
+            Some(locals) => Some(locals),
+            None if globals.is_none() => Some(self.frame_locals(scope)?),
+            None => None,
+        };
+        let globals = match globals {
+            Some(globals) => globals,
+            None => self.module_globals(scope)?,
+        };
+        Ok((globals, locals))
     }
 
     /// Prepare eval or exec with explicit namespaces or the active Python frame.
@@ -2900,16 +2991,11 @@ impl Context {
                 builtins::bind_method_arguments(name, args, kwargs, ["", "globals", "locals"], 3)?;
             (globals, locals, None)
         };
-        let globals = globals.filter(|&g| g != NONE);
-        let locals = match locals.filter(|&l| l != NONE) {
-            Some(locals) => Some(locals),
-            None if globals.is_none() => Some(self.frame_locals(scope)?),
-            None => None,
-        };
-        let globals = match globals {
-            Some(globals) => globals,
-            None => self.module_globals(scope)?,
-        };
+        let (globals, locals) = self.source_namespaces(
+            scope,
+            globals.filter(|&g| g != NONE),
+            locals.filter(|&l| l != NONE),
+        )?;
         self.prepare_namespace_code(source, globals, locals, None, name, closure)
     }
 
@@ -3064,15 +3150,14 @@ impl Context {
         Ok(builtins)
     }
 
-    pub(super) fn prepare_namespace_code(
+    /// Validate and prepare the common globals, locals, and builtins namespace.
+    fn checked_source_namespaces(
         &mut self,
-        source: Id,
         globals: Id,
         locals: Option<Id>,
         function: Option<Id>,
         mode: &str,
-        closure: Option<Id>,
-    ) -> Result<calls::RegisteredCall> {
+    ) -> Result<(Option<Id>, Id)> {
         if self.dict_storage(globals).is_none() {
             let ty = self.type_name(globals);
             return Err(Error::new(
@@ -3108,6 +3193,19 @@ impl Context {
             ));
         }
         let builtins = self.namespace_builtins(globals, function)?;
+        Ok((locals, builtins))
+    }
+
+    pub(super) fn prepare_namespace_code(
+        &mut self,
+        source: Id,
+        globals: Id,
+        locals: Option<Id>,
+        function: Option<Id>,
+        mode: &str,
+        closure: Option<Id>,
+    ) -> Result<calls::RegisteredCall> {
+        let (locals, builtins) = self.checked_source_namespaces(globals, locals, function, mode)?;
         let code_id = match self.heap.get(self.scalar_value(source)) {
             Value::Code(code) if mode == "eval" && !code.definition.freevars().is_empty() => {
                 return Err(Error::new(

@@ -96,6 +96,13 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
             }
             Entry::Registered(_) => false,
         };
+        // Exact tuple displays cannot override tuple's boolean comparison result.
+        let tuple_truth = truth
+            && matches!(self.0, Entry::Registered(_))
+            && matches!(ops, [CmpOp::Eq | CmpOp::NotEq])
+            && values
+                .iter()
+                .all(|value| matches!(&value.without_location().kind, ExprKind::Tuple(_)));
         let integer_pair = Compare::integer_pair(values);
         let root = if matches!(self.0, Entry::Registered(_))
             && (ops.len() > 1
@@ -163,7 +170,14 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
                     self.release_comparison(&right);
                 }
                 let tested_handle = truth && handle.is_some();
-                let value = self.comparison_result(op, value, truth);
+                let value = if tuple_truth && let Some(id) = handle {
+                    CheckedValue::condition(
+                        self.python()
+                            .value(&format!("icmp eq i64 {id}, {}", permanent::TRUE)),
+                    )
+                } else {
+                    self.comparison_result(op, value, truth)
+                };
                 if tested_handle && let Some((mark, _)) = &root {
                     // A branch keeps the truth bit. Release the rich result before the next operand.
                     self.python().discard_truth(mark);
