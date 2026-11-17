@@ -1572,14 +1572,13 @@ impl Session {
         if let Some(report) = report {
             return Err(report.to_string());
         }
-        let selected_provider = |owner: &str| {
-            sources.clone().find_map(|(id, source)| {
-                (source.name == owner
-                    && source.has_open_execution
-                    && source.is_original_sdk_source())
-                .then_some(self.files[id])
-            })
-        };
+        let mut selected_providers = HashMap::new();
+        for (id, source) in sources.clone() {
+            if source.has_open_execution && source.is_original_sdk_source() {
+                selected_providers.entry(source.name).or_insert(self.files[id]);
+            }
+        }
+        let selected_provider = |owner: &str| selected_providers.get(owner).copied();
         let ordinary = self.check_execution_with_imports(
             sources
                 .clone()
