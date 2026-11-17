@@ -1036,6 +1036,7 @@ pub(crate) struct PreparedEval {
 }
 
 impl PreparedEval {
+    /// Parse and check one expression using the optimization of its owning source unit.
     pub(crate) fn new(text: &str, optimization: i32) -> Result<Self, String> {
         #[cfg(test)]
         EVAL_PREPARATIONS.with_borrow_mut(|tracked| {
@@ -1914,6 +1915,25 @@ mod tests {
             error.contains("main.py:8:12") && error.contains("builtins.eval entry"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn mixed_eval_exec_union_rejects_in_either_branch_order() {
+        let directory = tempfile::tempdir().unwrap();
+        let entry = directory.path().join("main.py");
+        for (first, second) in [
+            ("builtin_eval", "builtin_exec"),
+            ("builtin_exec", "builtin_eval"),
+        ] {
+            std::fs::write(&entry, format!("import sys\nbuiltin_eval = eval\nbuiltin_exec = exec\nif len(sys.argv) > 1:\n    eval = {first}\nelse:\n    eval = {second}\neval(\"print(42)\")\n")).unwrap();
+            let error = crate::check_file(&entry, None).unwrap_err();
+            assert!(
+                error.contains("main.py:8:1")
+                    && error.contains("both builtins.eval and builtins.exec")
+                    && error.contains("separate the branches"),
+                "{error}"
+            );
+        }
     }
 
     #[test]

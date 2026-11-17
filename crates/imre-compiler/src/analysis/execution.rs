@@ -71,7 +71,8 @@ impl ExecutionIntrinsic {
         }
     }
 
-    /// Whether a single callable can choose both execution modes at runtime.
+    /// Detect a callable that can select both builtin execution modes. A single
+    /// literal site cannot own both an expression entry and a suite entry.
     fn mixed_modes(model: &SemanticModel<'_>, expression: &Expr) -> bool {
         let Some(Type::Union(union)) = expression.inferred_type(model) else {
             return false;

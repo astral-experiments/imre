@@ -61,6 +61,7 @@ pub(crate) struct LiteralUnit<'a> {
 }
 
 impl LiteralUnit<'_> {
+    /// Prepare a selected eval expression once without displacing a suite or refusal.
     pub(crate) fn prepare_eval(self, site: TextRange, text: &str) -> Result<(), String> {
         let mut units = self.sites.borrow_mut();
         let sites = &mut units.entry(self.unit).or_default().sites;
@@ -323,5 +324,45 @@ impl LiteralForest {
             self.table(node.parent).insert(node.site, module);
         }
         self.roots
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eval_preserves_an_existing_suite_or_refusal() {
+        let units = std::cell::RefCell::new(BTreeMap::new());
+        let site = TextRange::new(0.into(), 1.into());
+        let unit = LiteralUnit {
+            sites: &units,
+            unit: 0,
+            optimization: 0,
+        };
+        units
+            .borrow_mut()
+            .entry(0)
+            .or_default()
+            .sites
+            .insert(site, Ok(LiteralEntry::Suites(Vec::new())));
+        assert!(unit.prepare_eval(site, "1").is_err());
+        assert!(matches!(
+            units.borrow()[&0].sites.get(&site),
+            Some(Ok(LiteralEntry::Suites(_)))
+        ));
+        units
+            .borrow_mut()
+            .get_mut(&0)
+            .unwrap()
+            .sites
+            .insert(site, Err((0.into(), "original refusal".into())));
+        assert_eq!(
+            unit.prepare_eval(site, "1").unwrap_err(),
+            "original refusal"
+        );
+        assert!(
+            matches!(units.borrow()[&0].sites.get(&site), Some(Err((_, reason))) if reason == "original refusal")
+        );
     }
 }
