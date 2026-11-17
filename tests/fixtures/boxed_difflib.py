@@ -22,6 +22,7 @@ def current():
     check_live_matcher_state()
     check_gc_chain_source()
     check_constructor_dispatch()
+    check_unicode_index_order_and_popularity()
 
 
 def check_live_matcher_state():
@@ -143,3 +144,14 @@ def check_constructor_dispatch():
     finally:
         SequenceMatcher.set_seqs = original
     assert seen == [(None, None, None, False, "a", "b")]
+
+
+def check_unicode_index_order_and_popularity():
+    text = "雪" * 4 + "Ω" * 192 + "é🧪éx"
+    matcher = SequenceMatcher(None, "", text)
+    assert list(matcher.b2j.items()) == [("é", [196, 198]), ("🧪", [197]), ("x", [199])]
+    assert matcher.bjunk == set()
+    assert matcher.bpopular == {"雪", "Ω"}
+    matcher = SequenceMatcher(None, "", text, autojunk=False)
+    assert list(matcher.b2j) == ["雪", "Ω", "é", "🧪", "x"]
+    assert matcher.b2j["雪"] == [0, 1, 2, 3]

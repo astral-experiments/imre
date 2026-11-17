@@ -79,12 +79,9 @@ pub(super) fn attempt(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     if isjunk != NONE || !matches!(ctx.heap.get(a), Value::Str(_)) {
         return Ok(None);
     }
-    let Value::Str(text) = ctx.heap.get(b) else {
+    let Some(encoding) = super::chain_encoding(ctx, b) else {
         return Ok(None);
     };
-    if !text.is_ascii() {
-        return Ok(None);
-    }
     let Value::Bool(use_autojunk) = ctx.heap.get(autojunk) else {
         return Ok(None);
     };
@@ -113,6 +110,6 @@ pub(super) fn attempt(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     ] {
         ctx.heap.store_instance_field(receiver, name, value);
     }
-    super::build_chain_ascii(ctx, receiver, b, use_autojunk)?;
+    super::build_chain(ctx, receiver, b, use_autojunk, encoding)?;
     Ok(Some(NONE))
 }

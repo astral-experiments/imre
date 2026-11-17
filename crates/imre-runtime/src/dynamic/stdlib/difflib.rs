@@ -5,6 +5,7 @@ use super::super::{
     value::{self, Code, Id, NONE, Result, Value},
 };
 
+mod chain_unicode;
 mod constructor;
 mod matcher;
 
@@ -148,7 +149,39 @@ fn trusted_method(ctx: &Context, class: Id, root: Id, name: &str, body: DifflibB
     *scope == root && ctx.code_object(*code).definition.provider_body() == body as u8
 }
 
-/// Build the public b2j dictionary and junk/popular sets from flat ASCII character positions.
+#[derive(Clone, Copy)]
+enum ChainEncoding {
+    Ascii,
+    Unicode,
+}
+
+fn chain_encoding(ctx: &Context, b: Id) -> Option<ChainEncoding> {
+    let Value::Str(text) = ctx.heap.get(b) else {
+        return None;
+    };
+    if text.is_ascii() {
+        Some(ChainEncoding::Ascii)
+    } else if chain_unicode::can_pack(text) {
+        Some(ChainEncoding::Unicode)
+    } else {
+        None
+    }
+}
+
+fn build_chain(
+    ctx: &mut Context,
+    receiver: Id,
+    b: Id,
+    autojunk: bool,
+    encoding: ChainEncoding,
+) -> Result<()> {
+    match encoding {
+        ChainEncoding::Ascii => build_chain_ascii(ctx, receiver, b, autojunk),
+        ChainEncoding::Unicode => chain_unicode::build(ctx, receiver, b, autojunk),
+    }
+}
+
+/// Build public character positions from a flat ASCII or packed Unicode index.
 fn chain_b(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     let Some(receiver) = receiver(ctx, scope) else {
         return Ok(None);
@@ -162,9 +195,9 @@ fn chain_b(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     let Some(b) = ctx.plain_instance_field(receiver, "b") else {
         return Ok(None);
     };
-    if !matches!(ctx.heap.get(b), Value::Str(text) if text.is_ascii()) {
+    let Some(encoding) = chain_encoding(ctx, b) else {
         return Ok(None);
-    }
+    };
     let Some(autojunk) = ctx.plain_instance_field(receiver, "autojunk") else {
         return Ok(None);
     };
@@ -186,7 +219,7 @@ fn chain_b(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     {
         return Ok(None);
     }
-    build_chain_ascii(ctx, receiver, b, autojunk)?;
+    build_chain(ctx, receiver, b, autojunk, encoding)?;
     Ok(Some(NONE))
 }
 
