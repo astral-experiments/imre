@@ -1,0 +1,473 @@
+{
+  "tier": "O3",
+  "cwd": "/workspace/scratch/stdlib-work/glob",
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+    "IMREFLAGS": "--opt-level 3",
+    "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+  },
+  "build_timeout_seconds": 300,
+  "test_timeout_seconds": 8,
+  "build": {
+    "argv": [
+      "/workspace/imre/target/release/imre",
+      "build",
+      "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_glob.py",
+      "--module-root",
+      "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "--no-cache",
+      "--opt-level",
+      "3",
+      "--runtime",
+      "/workspace/imre/target/release/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "-o",
+      "/workspace/scratch/stdlib-work/glob.individual.O3.exe"
+    ],
+    "exit_code": 0,
+    "timed_out": false,
+    "elapsed_seconds": 64.956,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "6a1268a20c05a7f6fae6baa6c56e5509ba600c2530f7298928b2c06653aa2c18",
+    "stdout_bytes": 0,
+    "stderr_bytes": 193
+  },
+  "tests": [
+    {
+      "argv": [
+        "/workspace/scratch/stdlib-work/glob.individual.O3.exe",
+        "-v",
+        "GlobTests.test_escape"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.34,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "5793e98b99d578e4b932402c0336b9affffe6283a25df3c07ac1efc83c7f4270",
+      "stdout_bytes": 0,
+      "stderr_bytes": 149,
+      "id": "test.test_glob.GlobTests.test_escape",
+      "occurrence": 1,
+      "outcome": "pass",
+      "evidence_line": 2
+    },
+    {
+      "argv": [
+        "/workspace/scratch/stdlib-work/glob.individual.O3.exe",
+        "-v",
+        "GlobTests.test_escape_windows"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.336,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "c67234b9df4885fefd23ce0017c718cdac989913cd69f1de69f7ea4ee9e74eec",
+      "stdout_bytes": 0,
+      "stderr_bytes": 204,
+      "id": "test.test_glob.GlobTests.test_escape_windows",
+      "occurrence": 1,
+      "outcome": "skip",
+      "evidence_line": 9
+    },
+    {
+      "argv": [
+        "/workspace/scratch/stdlib-work/glob.individual.O3.exe",
+        "-v",
+        "GlobTests.test_glob0"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.339,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "1a8d40d666824f8147946ffe62f1e7563d1e315807daa59a275250cabfe487a1",
+      "stdout_bytes": 0,
+      "stderr_bytes": 147,
+      "id": "test.test_glob.GlobTests.test_glob0",
+      "occurrence": 1,
+      "outcome": "pass",
+      "evidence_line": 16
+    },
+    {
+      "argv": [
+        "/workspace/scratch/stdlib-work/glob.individual.O3.exe",
+        "-v",
+        "GlobTests.test_glob1"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.42,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "f8516e09cc3aafe43b8572582802d76d24c5920c663e844de7331c97ea50dbcc",
+      "stdout_bytes": 0,
+      "stderr_bytes": 147,
+      "id": "test.test_glob.GlobTests.test_glob1",
+      "occurrence": 1,
+      "outcome": "pass",
+      "evidence_line": 23
+    },
+    {
+      "argv": [
+        "/workspace/scratch/stdlib-work/glob.individual.O3.exe",
+        "-v",
+        "GlobTests.test_glob_broken_symlinks"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.354,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "2e5a9d8710e10429830b2c9a196eec8de80f561865a84c78f951b924c020b7f6",
+      "stdout_bytes": 0,
+      "stderr_bytes": 177,
+      "id": "test.test_glob.GlobTests.test_glob_broken_symlinks",
+      "occurrence": 1,
+      "outcome": "pass",
+      "evidence_line": 30
+    },
+    {
+      "argv": [
+        "/workspace/scratch/stdlib-work/glob.individual.O3.exe",
+        "-v",
+        "GlobTests.test_glob_bytes_directory_with_trailing_slash"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.342,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "52311830919991c83c2874474fd73a4d8a64e3ae88760f48b53ea1aabb2bdfc7",
+      "stdout_bytes": 0,
+      "stderr_bytes": 217,
+      "id": "test.test_glob.GlobTests.test_glob_bytes_directory_with_trailing_slash",
+      "occurrence": 1,
+      "outcome": "pass",
+      "evidence_line": 37
+    },
+    {
+      "argv": [
+        "/workspace/scratch/stdlib-work/glob.individual.O3.exe",
+        "-v",
+        "GlobTests.test_glob_directory_names"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.411,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e20c681c8f259dd6e337b45fb676488e2b3afe47f0cdd52d7175fd423df1b6ca",
+      "stdout_bytes": 0,
+      "stderr_bytes": 177,
+      "id": "test.test_glob.GlobTests.test_glob_directory_names",
+      "occurrence": 1,
+      "outcome": "pass",
+      "evidence_line": 44
+    },
+    {
+      "argv": [
+        "/workspace/scratch/stdlib-work/glob.individual.O3.exe",
+        "-v",
+        "GlobTests.test_glob_directory_with_trailing_slash"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.336,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e071ac5c5af7c439c113574381b5801b829c14f72af9a31adae283fcdb3c73c3",
+      "stdout_bytes": 0,
+      "stderr_bytes": 205,
+      "id": "test.test_glob.GlobTests.test_glob_directory_with_trailing_slash",
+      "occurrence": 1,
+      "outcome": "pass",
+      "evidence_line": 51
+    },
+    {
+      "argv": [
+        "/workspace/scratch/stdlib-work/glob.individual.O3.exe",
+        "-v",
+        "GlobTests.test_glob_empty_pattern"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.411,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "428aa27dcee2e7235a7d6e0bf340d5074e0888d3276651f83f93491d8e8b7b17",
+      "stdout_bytes": 0,
+      "stderr_bytes": 173,
+      "id": "test.test_glob.GlobTests.test_glob_empty_pattern",
+      "occurrence": 1,
+      "outcome": "pass",
+      "evidence_line": 58
+    },
+    {
+      "argv": [
+        "/workspace/scratch/stdlib-work/glob.individual.O3.exe",
+        "-v",
+        "GlobTests.test_glob_literal"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.36,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "1d896b3471f9eee9e9b84c505f334ec602abdcd88b6eadc7a8e45baf1f4c4fad",
+      "stdout_bytes": 0,
+      "stderr_bytes": 161,
+      "id": "test.test_glob.GlobTests.test_glob_literal",
+      "occurrence": 1,
+      "outcome": "pass",
+      "evidence_line": 65
+    },
+    {
+      "argv": [
+        "/workspace/scratch/stdlib-work/glob.individual.O3.exe",
+        "-v",
+        "GlobTests.test_glob_magic_in_drive"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.327,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "57daa3336d7b0379158764302857dfd8a52356ef02a3a4b19d1b3c0e4c2071a9",
+      "stdout_bytes": 0,
+      "stderr_bytes": 214,
+      "id": "test.test_glob.GlobTests.test_glob_magic_in_drive",
+      "occurrence": 1,
+      "outcome": "skip",
+      "evidence_line": 72
+    },
+    {
+      "argv": [
+        "/workspace/scratch/stdlib-work/glob.individual.O3.exe",
+        "-v",
+        "GlobTests.test_glob_many_open_files"
+      ],
+      "exit_code": -9,
+      "timed_out": true,
+      "elapsed_seconds": 8.013,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "31a4e77633e9de0c66696ba77473fad0cedd559c2b2eced48628f0ab7102027a",
+      "stdout_bytes": 0,
+      "stderr_bytes": 77,
+      "id": "test.test_glob.GlobTests.test_glob_many_open_files",
+      "occurrence": 1,
+      "outcome": "not_run"
+    },
+    {
+      "argv": [
+        "/workspace/scratch/stdlib-work/glob.individual.O3.exe",
+        "-v",
+        "GlobTests.test_glob_named_pipe"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.672,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "dbdacc0ae1f04e11cf77cc83b1a0912a30eff1c3c1bd5940379fdd945e1e49fe",
+      "stdout_bytes": 0,
+      "stderr_bytes": 167,
+      "id": "test.test_glob.GlobTests.test_glob_named_pipe",
+      "occurrence": 1,
+      "outcome": "pass",
+      "evidence_line": 81
+    },
+    {
+      "argv": [
+        "/workspace/scratch/stdlib-work/glob.individual.O3.exe",
+        "-v",
+        "GlobTests.test_glob_nested_directory"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.706,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "61f2dcffeae4d5098680cfafa2915980aecbd3d284ad29f7f4b514346b0237a0",
+      "stdout_bytes": 0,
+      "stderr_bytes": 179,
+      "id": "test.test_glob.GlobTests.test_glob_nested_directory",
+      "occurrence": 1,
+      "outcome": "pass",
+      "evidence_line": 88
+    },
+    {
+      "argv": [
+        "/workspace/scratch/stdlib-work/glob.individual.O3.exe",
+        "-v",
+        "GlobTests.test_glob_non_directory"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.735,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "6c6ebccfb840f64cd16565f8c592e97fbcb11f8316ae70d416d62bc4535147e5",
+      "stdout_bytes": 0,
+      "stderr_bytes": 173,
+      "id": "test.test_glob.GlobTests.test_glob_non_directory",
+      "occurrence": 1,
+      "outcome": "pass",
+      "evidence_line": 95
+    },
+    {
+      "argv": [
+        "/workspace/scratch/stdlib-work/glob.individual.O3.exe",
+        "-v",
+        "GlobTests.test_glob_one_directory"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.839,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "7908f87defd2f9016438a7aeb1376d4bde04888307fe7e55868dbf5470ed7885",
+      "stdout_bytes": 0,
+      "stderr_bytes": 173,
+      "id": "test.test_glob.GlobTests.test_glob_one_directory",
+      "occurrence": 1,
+      "outcome": "pass",
+      "evidence_line": 102
+    },
+    {
+      "argv": [
+        "/workspace/scratch/stdlib-work/glob.individual.O3.exe",
+        "-v",
+        "GlobTests.test_glob_symlinks"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.729,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "d69e42590f62a4820f78841a231afa529a425b07304a126972bd6b50b6da9a24",
+      "stdout_bytes": 0,
+      "stderr_bytes": 163,
+      "id": "test.test_glob.GlobTests.test_glob_symlinks",
+      "occurrence": 1,
+      "outcome": "pass",
+      "evidence_line": 109
+    },
+    {
+      "argv": [
+        "/workspace/scratch/stdlib-work/glob.individual.O3.exe",
+        "-v",
+        "GlobTests.test_hidden_glob"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.719,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "4f45c9f26c900818927ef73129e714593a05505bef64e6c8cc57f57fd48dfc60",
+      "stdout_bytes": 0,
+      "stderr_bytes": 159,
+      "id": "test.test_glob.GlobTests.test_hidden_glob",
+      "occurrence": 1,
+      "outcome": "pass",
+      "evidence_line": 116
+    },
+    {
+      "argv": [
+        "/workspace/scratch/stdlib-work/glob.individual.O3.exe",
+        "-v",
+        "GlobTests.test_recursive_glob"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 3.102,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "8c64149fe68a0833304d40c550bb46822f91387364948ccb8833a372e160ac50",
+      "stdout_bytes": 0,
+      "stderr_bytes": 165,
+      "id": "test.test_glob.GlobTests.test_recursive_glob",
+      "occurrence": 1,
+      "outcome": "pass",
+      "evidence_line": 123
+    },
+    {
+      "argv": [
+        "/workspace/scratch/stdlib-work/glob.individual.O3.exe",
+        "-v",
+        "GlobTests.test_translate"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.674,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "4641e39a4a0847b077f8c9d8cb8556d4263dabae97855b4d895c76179431bcc0",
+      "stdout_bytes": 0,
+      "stderr_bytes": 155,
+      "id": "test.test_glob.GlobTests.test_translate",
+      "occurrence": 1,
+      "outcome": "pass",
+      "evidence_line": 130
+    },
+    {
+      "argv": [
+        "/workspace/scratch/stdlib-work/glob.individual.O3.exe",
+        "-v",
+        "GlobTests.test_translate_include_hidden"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.627,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "cb752751b975187df3c21310bdb9bbb7beb15b47a6ecb361282061b9a5e9df9e",
+      "stdout_bytes": 0,
+      "stderr_bytes": 185,
+      "id": "test.test_glob.GlobTests.test_translate_include_hidden",
+      "occurrence": 1,
+      "outcome": "pass",
+      "evidence_line": 137
+    },
+    {
+      "argv": [
+        "/workspace/scratch/stdlib-work/glob.individual.O3.exe",
+        "-v",
+        "GlobTests.test_translate_matching"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.653,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "2685900d3545cef2da81b36d606fb1374fd6da10683687a0f61bf57844c2f87a",
+      "stdout_bytes": 0,
+      "stderr_bytes": 173,
+      "id": "test.test_glob.GlobTests.test_translate_matching",
+      "occurrence": 1,
+      "outcome": "pass",
+      "evidence_line": 144
+    },
+    {
+      "argv": [
+        "/workspace/scratch/stdlib-work/glob.individual.O3.exe",
+        "-v",
+        "GlobTests.test_translate_recursive"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.632,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "5a41d81588fe2dc3d11d638848ddd6ebfa0d5bd7f2086671effcd7dbe7f0ac8d",
+      "stdout_bytes": 0,
+      "stderr_bytes": 175,
+      "id": "test.test_glob.GlobTests.test_translate_recursive",
+      "occurrence": 1,
+      "outcome": "pass",
+      "evidence_line": 151
+    },
+    {
+      "argv": [
+        "/workspace/scratch/stdlib-work/glob.individual.O3.exe",
+        "-v",
+        "GlobTests.test_translate_seps"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.633,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "49f175ae5687fdca49a6772d7db22649c1713b2790458de1900f9159bb55dd45",
+      "stdout_bytes": 0,
+      "stderr_bytes": 165,
+      "id": "test.test_glob.GlobTests.test_translate_seps",
+      "occurrence": 1,
+      "outcome": "pass",
+      "evidence_line": 158
+    }
+  ]
+}

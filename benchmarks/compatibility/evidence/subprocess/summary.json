@@ -1,0 +1,26 @@
+{
+  "family": "subprocess",
+  "frozen_raw_originals": 353,
+  "stock_inventory": 353,
+  "repeated_occurrences": 0,
+  "tiers": {
+    "stock": {
+      "skip": 43,
+      "pass": 308,
+      "error": 2
+    },
+    "O0": {
+      "not_run": 353
+    },
+    "O3": {
+      "not_run": 353
+    }
+  },
+  "paired": 0,
+  "blockers": [
+    "Stock POSIXProcessTestCase.test_group and test_user errored through real subtests with EINVAL for IDs outside the environment namespace; the reporter aggregates the actual subtest errors to their original IDs.",
+    "Finite runner O0/O3 stopped at runpy.py:88 before collection. Direct O0/O3 builds rejected TestCase.assertIn overloads before execution."
+  ],
+  "provenance": "provenance.json",
+  "inventory": "inventory.jsonl"
+}

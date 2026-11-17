@@ -1,0 +1,68 @@
+{
+  "argv": [
+    "/workspace/scratch/stdlib-work/genericpath.O0.exe",
+    "-v"
+  ],
+  "build_argv": [
+    "/workspace/imre/target/release/imre",
+    "build",
+    "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_genericpath.py",
+    "--module-root",
+    "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+    "--no-cache",
+    "--opt-level",
+    "0",
+    "--runtime",
+    "/workspace/imre/target/release/libimre_runtime.a",
+    "--clang",
+    "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+    "-o",
+    "/workspace/scratch/stdlib-work/genericpath.O0.exe"
+  ],
+  "cwd": "/workspace/scratch/stdlib-work/genericpath",
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+    "IMREFLAGS": "--opt-level 0",
+    "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+  },
+  "build_timeout_seconds": 90,
+  "timeout_seconds": 30,
+  "build": {
+    "exit_code": 0,
+    "timed_out": false,
+    "elapsed_seconds": 33.383
+  },
+  "exit_code": 0,
+  "timed_out": false,
+  "elapsed_seconds": 0.621,
+  "streams": {
+    "build.stdout": {
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "public_bytes": 0,
+      "compacted": false
+    },
+    "build.stderr": {
+      "raw_sha256": "99c352ed9828218d05ccb7151a55de84d6769ee8fb0511c2df350f7c914a1bb6",
+      "raw_bytes": 196,
+      "public_bytes": 196,
+      "compacted": false
+    },
+    "stdout": {
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "public_bytes": 0,
+      "compacted": false
+    },
+    "stderr": {
+      "raw_sha256": "0f3c2c058714d38231fde36923d6f0db2e4b7a2c5a74c3933f6b8fa9196b5433",
+      "raw_bytes": 1805,
+      "public_bytes": 1805,
+      "compacted": false
+    }
+  }
+}

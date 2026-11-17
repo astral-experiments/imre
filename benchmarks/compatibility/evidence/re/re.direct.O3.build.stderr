@@ -1,0 +1,23 @@
+ Compiling /workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_re.py (-O3)
+error[invalid-argument-type]: Argument to bound method `TestCase.assertLess` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_re.py:2488:44
+     |
+2486 |         # Without optimization it takes 1 second on my computer.
+2487 |         # With optimization -- 0.0003 seconds.
+2488 |         self.assertLess(stopwatch.seconds, 0.1)
+     |                                            ^^^ Expected `int`, found `float*`
+2489 |
+2490 |     def test_possessive_quantifiers(self):
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:266:9
+    |
+264 |             raise self.failureException(self._formatMessage(msg, repr(expr) + " is not false"))
+265 |
+266 |     def assertLess(self, a: int, b: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^               ------ Parameter declared here
+267 |         if not a < b:
+268 |             self.fail(self._formatMessage(msg, f"{a!r} not less than {b!r}"))
+    |
+
+

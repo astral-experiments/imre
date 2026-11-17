@@ -1,0 +1,163 @@
+=== test.test_glob.GlobTests.test_escape ===
+test_escape (__main__.GlobTests.test_escape) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.011s
+
+OK
+=== test.test_glob.GlobTests.test_escape_windows ===
+test_escape_windows (__main__.GlobTests.test_escape_windows) ... skipped 'Win32 specific test'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+OK (skipped=1)
+=== test.test_glob.GlobTests.test_glob0 ===
+test_glob0 (__main__.GlobTests.test_glob0) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.016s
+
+OK
+=== test.test_glob.GlobTests.test_glob1 ===
+test_glob1 (__main__.GlobTests.test_glob1) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.017s
+
+OK
+=== test.test_glob.GlobTests.test_glob_broken_symlinks ===
+test_glob_broken_symlinks (__main__.GlobTests.test_glob_broken_symlinks) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.031s
+
+OK
+=== test.test_glob.GlobTests.test_glob_bytes_directory_with_trailing_slash ===
+test_glob_bytes_directory_with_trailing_slash (__main__.GlobTests.test_glob_bytes_directory_with_trailing_slash) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.014s
+
+OK
+=== test.test_glob.GlobTests.test_glob_directory_names ===
+test_glob_directory_names (__main__.GlobTests.test_glob_directory_names) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.088s
+
+OK
+=== test.test_glob.GlobTests.test_glob_directory_with_trailing_slash ===
+test_glob_directory_with_trailing_slash (__main__.GlobTests.test_glob_directory_with_trailing_slash) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.014s
+
+OK
+=== test.test_glob.GlobTests.test_glob_empty_pattern ===
+test_glob_empty_pattern (__main__.GlobTests.test_glob_empty_pattern) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.012s
+
+OK
+=== test.test_glob.GlobTests.test_glob_literal ===
+test_glob_literal (__main__.GlobTests.test_glob_literal) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.034s
+
+OK
+=== test.test_glob.GlobTests.test_glob_magic_in_drive ===
+test_glob_magic_in_drive (__main__.GlobTests.test_glob_magic_in_drive) ... skipped 'Win32 specific test'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+OK (skipped=1)
+=== test.test_glob.GlobTests.test_glob_many_open_files ===
+test_glob_many_open_files (__main__.GlobTests.test_glob_many_open_files) ... 
+=== test.test_glob.GlobTests.test_glob_named_pipe ===
+test_glob_named_pipe (__main__.GlobTests.test_glob_named_pipe) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.086s
+
+OK
+=== test.test_glob.GlobTests.test_glob_nested_directory ===
+test_glob_nested_directory (__main__.GlobTests.test_glob_nested_directory) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.046s
+
+OK
+=== test.test_glob.GlobTests.test_glob_non_directory ===
+test_glob_non_directory (__main__.GlobTests.test_glob_non_directory) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.120s
+
+OK
+=== test.test_glob.GlobTests.test_glob_one_directory ===
+test_glob_one_directory (__main__.GlobTests.test_glob_one_directory) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.146s
+
+OK
+=== test.test_glob.GlobTests.test_glob_symlinks ===
+test_glob_symlinks (__main__.GlobTests.test_glob_symlinks) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.108s
+
+OK
+=== test.test_glob.GlobTests.test_hidden_glob ===
+test_hidden_glob (__main__.GlobTests.test_hidden_glob) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.097s
+
+OK
+=== test.test_glob.GlobTests.test_recursive_glob ===
+test_recursive_glob (__main__.GlobTests.test_recursive_glob) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 2.484s
+
+OK
+=== test.test_glob.GlobTests.test_translate ===
+test_translate (__main__.GlobTests.test_translate) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.020s
+
+OK
+=== test.test_glob.GlobTests.test_translate_include_hidden ===
+test_translate_include_hidden (__main__.GlobTests.test_translate_include_hidden) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.019s
+
+OK
+=== test.test_glob.GlobTests.test_translate_matching ===
+test_translate_matching (__main__.GlobTests.test_translate_matching) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.021s
+
+OK
+=== test.test_glob.GlobTests.test_translate_recursive ===
+test_translate_recursive (__main__.GlobTests.test_translate_recursive) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.042s
+
+OK
+=== test.test_glob.GlobTests.test_translate_seps ===
+test_translate_seps (__main__.GlobTests.test_translate_seps) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.017s
+
+OK

@@ -1,0 +1,34 @@
+{
+  "argv": [
+    "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "-B",
+    "/workspace/imre-stdlib-data/benchmarks/compatibility/evidence/logging/stock_reporter.py",
+    "test.test_logging"
+  ],
+  "cwd": "/workspace/scratch/stdlib-work/logging",
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "TMPDIR": "/workspace/scratch/stdlib-work/tmp"
+  },
+  "timeout_seconds": 180,
+  "timed_out": false,
+  "exit_code": 0,
+  "elapsed_seconds": 34.724,
+  "streams": {
+    "stdout": {
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "public_bytes": 0,
+      "compacted": false
+    },
+    "stderr": {
+      "raw_sha256": "0c94ac8f8ee6448b8904daf35899498682fc68aef01bc93f2398119c0bbffe15",
+      "raw_bytes": 25536,
+      "public_bytes": 25536,
+      "compacted": false
+    }
+  }
+}
