@@ -94,7 +94,10 @@ impl Checker<'_> {
         if let Some(ty) = self.graph.session.scalar_type(self.module, insertion.value) {
             return Some(ty);
         }
-        if !set || self.graph.layout_hint.get() == crate::modules::LayoutHint::Disabled {
+        if !set
+            || self.returns == Type::PythonObject
+            || self.graph.layout_hint.get() == crate::modules::LayoutHint::Disabled
+        {
             return None;
         }
         let for_loop = insertion.for_loop?;
@@ -131,12 +134,131 @@ impl Checker<'_> {
                 }
             }
         }
-        // Later uses may need heterogeneous storage. A failed native attempt
-        // must recover the ordinary diagnostics and object fallback for set().
-        self.graph
-            .layout_hint
-            .set(crate::modules::LayoutHint::Applied);
-        Some(element)
+        self.local_set_uses(name, element, for_loop, item.id.as_str(), later)
+            .then_some(element)
+    }
+
+    /// Keep an iteration-derived set layout only while its checked uses prove
+    /// that the set stays local and every insertion fits the selected storage.
+    /// Unknown or indirect uses take ordinary storage before allocation.
+    fn local_set_uses(
+        &self,
+        name: &str,
+        element: Type,
+        loop_: &ast::StmtFor,
+        item: &str,
+        later: &[ast::Stmt],
+    ) -> bool {
+        struct Uses<'c, 'g, 'a> {
+            checker: &'c Checker<'g>,
+            name: &'c str,
+            element: Type,
+            loop_: &'a ast::StmtFor,
+            item: &'c str,
+            inside: bool,
+            safe: bool,
+        }
+        impl Uses<'_, '_, '_> {
+            fn owner(&self, value: &ast::Expr) -> bool {
+                value.as_name_expr().is_some_and(|n| n.id == self.name)
+            }
+            fn fits(&self, value: &ast::Expr) -> bool {
+                self.inside && value.as_name_expr().is_some_and(|n| n.id == self.item)
+                    || self
+                        .checker
+                        .graph
+                        .session
+                        .scalar_type(self.checker.module, value)
+                        == Some(self.element)
+            }
+        }
+        impl<'a> Visitor<'a> for Uses<'_, '_, 'a> {
+            fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+                if matches!(
+                    stmt,
+                    ast::Stmt::FunctionDef(_)
+                        | ast::Stmt::ClassDef(_)
+                        | ast::Stmt::Global(_)
+                        | ast::Stmt::Nonlocal(_)
+                ) {
+                    self.safe = false;
+                } else if let ast::Stmt::For(current) = stmt
+                    && std::ptr::eq(current, self.loop_)
+                {
+                    self.visit_expr(&current.iter);
+                    self.inside = true;
+                    self.visit_body(&current.body);
+                    self.inside = false;
+                    self.visit_body(&current.orelse);
+                } else if self.safe {
+                    walk_stmt(self, stmt);
+                }
+            }
+            fn visit_expr(&mut self, expr: &'a ast::Expr) {
+                if !self.safe {
+                    return;
+                }
+                match expr {
+                    ast::Expr::Lambda(_)
+                    | ast::Expr::Generator(_)
+                    | ast::Expr::ListComp(_)
+                    | ast::Expr::SetComp(_)
+                    | ast::Expr::DictComp(_) => self.safe = false,
+                    ast::Expr::Name(n)
+                        if n.id == self.name
+                            || matches!(n.id.as_str(), "locals" | "vars" | "eval" | "exec") =>
+                    {
+                        self.safe = false
+                    }
+                    ast::Expr::Attribute(a)
+                        if matches!(a.attr.as_str(), "_getframe" | "currentframe" | "f_locals") =>
+                    {
+                        self.safe = false
+                    }
+                    ast::Expr::Call(c)
+                        if matches!(&*c.func, ast::Expr::Attribute(a) if self.owner(&a.value) && matches!(a.attr.as_str(), "add" | "discard"))
+                            && c.arguments.keywords.is_empty()
+                            && c.arguments.args.len() == 1
+                            && self.fits(&c.arguments.args[0]) =>
+                    {
+                        self.visit_expr(&c.arguments.args[0])
+                    }
+                    ast::Expr::Call(c)
+                        if c.arguments.args.first().is_some_and(|a| self.owner(a))
+                            && ["len", "sorted", "list", "tuple"]
+                                .iter()
+                                .any(|b| self.checker.unshadowed_builtin(&c.func, b)) =>
+                    {
+                        for arg in &c.arguments.args[1..] {
+                            self.visit_expr(arg);
+                        }
+                        for kw in &c.arguments.keywords {
+                            self.visit_expr(&kw.value);
+                        }
+                    }
+                    ast::Expr::Compare(c)
+                        if c.ops.len() == 1
+                            && matches!(c.ops[0], ast::CmpOp::In | ast::CmpOp::NotIn)
+                            && self.owner(&c.operands[1])
+                            && self.fits(&c.operands[0]) =>
+                    {
+                        self.visit_expr(&c.operands[0])
+                    }
+                    _ => ruff_python_ast::visitor::walk_expr(self, expr),
+                }
+            }
+        }
+        let mut uses = Uses {
+            checker: self,
+            name,
+            element,
+            loop_,
+            item,
+            inside: false,
+            safe: true,
+        };
+        uses.visit_body(later);
+        uses.safe
     }
 
     /// A later direct call can supply the same Callable context as an inline lambda.
@@ -357,6 +479,8 @@ struct Pending {
     returns: Option<Type>,
     /// Storage requested by a checked consumer of this unannotated return.
     return_context: Option<Type>,
+    return_context_consumers: Vec<(usize, usize)>,
+    return_context_refused: bool,
     discovery: ReturnDiscovery,
 }
 
@@ -459,6 +583,8 @@ impl Inference {
             document_return: None,
             returns,
             return_context: None,
+            return_context_consumers: Vec::new(),
+            return_context_refused: false,
             discovery: if returns.is_some() {
                 ReturnDiscovery::Declared
             } else {
@@ -782,18 +908,66 @@ impl Inference {
         }
     }
 
+    pub(super) fn inferred_return(&self, id: usize) -> bool {
+        self.pending
+            .borrow()
+            .get(id)
+            .is_some_and(|p| !matches!(p.discovery, ReturnDiscovery::Declared))
+    }
+
     /// A checked call argument can request storage from an unannotated producer.
     /// Publishing the request once makes unsuccessful or recursive demands converge.
-    fn demand_list_return(&self, id: usize, actual: Type, expected: Type) {
+    pub(super) fn demand_list_return(
+        &self,
+        id: usize,
+        actual: Type,
+        expected: Type,
+        consumer: Option<(usize, usize)>,
+    ) {
         let mut pending = self.pending.borrow_mut();
         let producer = &mut pending[id];
-        if matches!(producer.discovery, ReturnDiscovery::Declared)
-            || producer.returns != Some(actual)
-            || producer.return_context == Some(expected)
+        if matches!(producer.discovery, ReturnDiscovery::Declared) {
+            return;
+        }
+        if producer.return_context_refused {
+            if consumer.is_none() && producer.returns != Some(Type::PythonObject) {
+                producer.returns = Some(Type::PythonObject);
+                producer.discovery = ReturnDiscovery::Independent;
+                drop(pending);
+                self.layout_changed();
+            }
+            return;
+        }
+        if let Some(consumer) = consumer
+            && !producer.return_context_consumers.contains(&consumer)
         {
+            producer.return_context_consumers.push(consumer);
+        }
+        if producer.returns != Some(actual) || producer.return_context == Some(expected) {
             return;
         }
         producer.return_context = Some(expected);
+        drop(pending);
+        self.layout_changed();
+    }
+
+    /// A shared native return ABI cannot satisfy incompatible checked consumers.
+    /// Release its context and place the inferred consumers requesting it. If
+    /// the write is through an alias, the producer itself needs ordinary storage.
+    fn refuse_list_return(&self, id: usize) {
+        let mut pending = self.pending.borrow_mut();
+        if pending[id].return_context_refused {
+            return;
+        }
+        pending[id].return_context_refused = true;
+        pending[id].return_context = None;
+        if pending[id].return_context_consumers.is_empty() {
+            pending[id].returns = Some(Type::PythonObject);
+            pending[id].discovery = ReturnDiscovery::Independent;
+        }
+        for (consumer, index) in std::mem::take(&mut pending[id].return_context_consumers) {
+            pending[consumer].params[index] = Some(Type::PythonObject);
+        }
         drop(pending);
         self.layout_changed();
     }
@@ -2197,7 +2371,11 @@ impl Checker<'_> {
             && let Some(Binding::Definition(definition)) = self.resolve(&call.func)
             && let Some(producer) = self.functions.get(&definition)
         {
-            inference.demand_list_return(producer.id, actual, expected);
+            if inference.pending.borrow()[producer.id].return_context_refused {
+                inference.widen_parameter(consumer, index, Type::PythonObject);
+                return Type::PythonObject;
+            }
+            inference.demand_list_return(producer.id, actual, expected, Some((consumer, index)));
         }
         expected
     }
@@ -2219,6 +2397,7 @@ impl Checker<'_> {
             && let Some(producer) = self.functions.get(&definition)
             && inference.pending.borrow()[producer.id].return_context == Some(actual)
         {
+            inference.refuse_list_return(producer.id);
             true
         } else {
             false

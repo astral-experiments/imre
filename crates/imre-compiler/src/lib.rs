@@ -2108,6 +2108,7 @@ print("result", call(b=2, a=1))
         let mut incremental = super::IncrementalCompiler::default();
         for usage in [
             "values = gather('ab')\nvalues.append(1)\nprint(len(values))\n",
+            "values = gather('ab')\nother = values\nother.append(1)\nprint(other is values, values)\n",
             "def integer(n: int) -> int:\n    return n\nprint(gather('a'), integer('x'))\n",
             "def wrong() -> int:\n    return 'x'\nprint(gather('a'), wrong())\n",
         ] {
@@ -2264,12 +2265,11 @@ print("result", call(b=2, a=1))
 
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("main.py");
-        for (tail, hint_applied, live_write) in [
-            ("    values.add(1)\n    return len(values)", false, true),
-            ("    values.add('z')\n    return len(values)", true, true),
+        for (tail, native) in [
+            ("    values.add(1)\n    return len(values)", false),
+            ("    values.add('z')\n    return len(values)", true),
             (
                 "    else:\n        return len(values)\n    values.add(1)",
-                true,
                 false,
             ),
         ] {
@@ -2293,11 +2293,8 @@ print("result", call(b=2, a=1))
                         }
                         let result = super::checked_lower_with(graph, None, call_error)?;
                         if passes == 1 && !disable_hint {
-                            assert_eq!(
-                                graph.layout_hint.get() == LayoutHint::Applied,
-                                hint_applied
-                            );
-                            if hint_applied && live_write {
+                            assert!(graph.layout_hint.get() != LayoutHint::Applied);
+                            if native {
                                 assert!(matches!(result, super::CheckedProgram::Native(_)));
                             }
                         }
@@ -2305,10 +2302,40 @@ print("result", call(b=2, a=1))
                     },
                 )
                 .unwrap();
-                if disable_hint || live_write {
-                    assert_eq!(passes, 1, "{tail}, disable_hint={disable_hint}");
-                }
+                assert_eq!(passes, 1, "{tail}, disable_hint={disable_hint}");
             }
+        }
+    }
+
+    #[test]
+    fn iteration_set_storage_is_chosen_before_allocation() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("main.py");
+        for tail in [
+            "    other = values\n    other.add(1)\n    return len(values)",
+            "    if flag:\n        values.add(1)\n    return len(values)",
+            "    return values",
+        ] {
+            let source = format!(
+                "def collect(text, flag):\n    values = set()\n    for char in text:\n        values.add(char)\n{tail}\nresult = collect('a', True)\nprint(result)\n"
+            );
+            std::fs::write(&path, source).unwrap();
+            let mut passes = 0;
+            super::object_fallback(
+                None,
+                super::ProgramEntry::File(&path, None),
+                &CompileOptions::default(),
+                Default::default(),
+                None,
+                |graph, cache, call_error| {
+                    passes += 1;
+                    let result = super::checked_lower_with(graph, cache, call_error)?;
+                    assert!(graph.layout_hint.get() != super::modules::LayoutHint::Applied);
+                    Ok(result)
+                },
+            )
+            .unwrap();
+            assert_eq!(passes, 1, "{tail}");
         }
     }
 
@@ -2397,20 +2424,20 @@ print("result", call(b=2, a=1))
         for usage in [
             "print(inspect(gather('a')), update(gather('b')))\n",
             "print(update(gather('b')), inspect(gather('a')))\n",
+            "values = gather('b')\nvalues.append(1)\nprint(inspect(gather('a')), len(values))\n",
+            "print(inspect(gather('a')))\nvalues = gather('b')\nvalues.append(1)\nprint(len(values))\n",
         ] {
             super::check(&format!("{prefix}{usage}")).unwrap();
         }
     }
 
     #[test]
-    fn set_layout_retry_uses_the_resolved_source() {
+    fn independent_layout_retry_uses_the_resolved_source() {
         use super::modules::LayoutHint;
 
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("main.py");
-        let source = format!(
-            "from typing import Callable\n{INFERRED_SET_GATHER}def escape(value: int) -> Callable[[], int]:\n    return lambda: value\nprint(gather('a'), escape(1)())\n"
-        );
+        let source = "from typing import Callable\ndef increment(value: int) -> int: return value + 1\ndef wrap(fn: Callable[[int], int]) -> Callable[[int], int]:\n    def inner(value: int) -> int: return fn(value)\n    return inner\ndef escape(value: int) -> Callable[[], int]:\n    return lambda: value\nprint(wrap(increment)(4), escape(1)())\n".to_owned();
         std::fs::write(&path, &source).unwrap();
         let options = CompileOptions::default();
         let expected = super::check_file(&path, None);

@@ -6225,6 +6225,14 @@ impl<'a> Checker<'a> {
         match &value.kind {
             ExprKind::Local(slot) => self.assigned.value_source(*slot),
             ExprKind::Builtin(Builtin::StaticFunction(id), _) => Some(ValueSource::Function(*id)),
+            ExprKind::Call(id, _)
+                if self.types.element(value.ty).is_some()
+                    && self
+                        .inference
+                        .is_some_and(|inference| inference.inferred_return(*id)) =>
+            {
+                Some(ValueSource::InferredListReturn(*id))
+            }
             ExprKind::Bind(_, inner) | ExprKind::Present(inner) | ExprKind::Unwrap(inner) => {
                 self.value_source(inner)
             }
@@ -6260,6 +6268,7 @@ impl<'a> Checker<'a> {
             | ValueSource::PythonCall
             | ValueSource::LiteralStrings(_)
             | ValueSource::InferredList(_)
+            | ValueSource::InferredListReturn(_)
             | ValueSource::InferredListParameter { .. }
             | ValueSource::Function(_)
             | ValueSource::ReboundMethod => None,
@@ -15817,6 +15826,20 @@ impl<'a> Checker<'a> {
                             },
                             declaration,
                         )?
+                    } else if let Some(ValueSource::InferredListReturn(function)) = self.value_source(&receiver)
+                        && let Some(inference) = self.inference
+                        && element != Type::ObjectValue
+                        && self.graph.session.unreachable_range(self.module, call.range())
+                            != Some(ty_python_semantic::types::ide_support::UnreachableKind::Unconditional)
+                    {
+                        let value = self.expr_expected_if(arg, element, |checker, actual| {
+                            actual != element && checker.object_value_supported(element)
+                                && checker.object_value_supported(actual)
+                        })?;
+                        if value.ty != element {
+                            inference.demand_list_return(function, receiver.ty, self.types.list(Type::ObjectValue), None);
+                        }
+                        coerce_item(self, value, element, arg)?
                     } else if let Some(ValueSource::InferredListParameter { function, index }) =
                         self.value_source(&receiver)
                         && let Some(inference) = self.inference
@@ -16895,9 +16918,11 @@ impl<'a> Checker<'a> {
                 || (name == "memoryview"
                     && args.len() == 1
                     && matches!(args[0].ty, Type::Bytes | Type::ByteArray))
-                || args
-                    .iter()
-                    .any(|value| self.types.stores_python_object(value.ty)))
+                || args.iter().any(|value| {
+                    self.types.stores_python_object(value.ty)
+                        || name == "print"
+                            && self.types.element(value.ty) == Some(Type::ObjectValue)
+                }))
         {
             if self.placing_module_call(call) {
                 // The argument operations are already in the checked tail. Insert the callee
