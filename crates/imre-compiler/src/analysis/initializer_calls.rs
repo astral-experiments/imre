@@ -1006,7 +1006,10 @@ impl Session {
             }
             parameter.to_string()
         } else {
-            expected.display(db, &env).to_string()
+            Self::scalar_layout(db, &env, expected, ScalarMatch::Exact).map_or_else(
+                || expected.display(db, &env).to_string(),
+                |layout| layout.to_string(),
+            )
         };
         let actual = layout.map_or_else(|| actual.display(db, &env).to_string(), |t| t.to_string());
         let text = ruff_db::source::source_text(db, model.file());
