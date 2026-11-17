@@ -13,6 +13,18 @@ struct Insertion<'a> {
     for_loop: Option<&'a ast::StmtFor>,
 }
 
+fn insertion_operand<'a>(stmt: &'a ast::Stmt, name: &str, method: &str) -> Option<&'a ast::Expr> {
+    let call = stmt.as_expr_stmt()?.value.as_call_expr()?;
+    let attr = call.func.as_attribute_expr()?;
+    let [value] = call.arguments.args.as_ref() else {
+        return None;
+    };
+    (attr.attr.as_str() == method
+        && attr.value.as_name_expr()?.id.as_str() == name
+        && call.arguments.keywords.is_empty())
+    .then_some(value)
+}
+
 /// A direct element insertion in this lexical scope can supply a container layout hint.
 /// The ordinary checker still checks its operand and every other use of the list.
 fn first_insertion<'ast>(
@@ -41,14 +53,7 @@ fn first_insertion<'ast>(
                 self.visit_body(&loop_.orelse);
                 return;
             }
-            if let ast::Stmt::Expr(stmt) = stmt
-                && let ast::Expr::Call(call) = &*stmt.value
-                && let ast::Expr::Attribute(method) = &*call.func
-                && method.attr.as_str() == self.method
-                && matches!(&*method.value, ast::Expr::Name(name) if name.id == self.name)
-                && let [value] = call.arguments.args.as_ref()
-                && call.arguments.keywords.is_empty()
-            {
+            if let Some(value) = insertion_operand(stmt, self.name, self.method) {
                 self.insertion = Some(Insertion {
                     value,
                     for_loop: self.for_loop,
@@ -100,12 +105,31 @@ impl Checker<'_> {
             Type::Bytes | Type::ByteArray => Type::Int,
             _ => return None,
         };
+        let assigned = narrowing::assigned_names(later);
         if for_loop.is_async
             || insertion.value.as_name_expr()?.id != item.id
             || narrowing::assigned_names(&for_loop.body).contains(item.id.as_str())
-            || narrowing::assigned_names(later).contains(source.id.as_str())
+            || assigned.contains(source.id.as_str())
         {
             return None;
+        }
+        // Only follow consecutive direct writes to the original set. A call,
+        // alias, exit or another suite ends the straight-line evidence.
+        let mut suite = later.iter().filter(|stmt| !stmt.is_pass_stmt());
+        if for_loop.orelse.is_empty()
+            && !assigned.contains(name)
+            && matches!(suite.next(), Some(ast::Stmt::For(stmt)) if std::ptr::eq(stmt, for_loop))
+        {
+            for stmt in suite {
+                let Some(value) = insertion_operand(stmt, name, "add")
+                    .and_then(|value| calls::scalar_literal(value, self.source).ok())
+                else {
+                    break;
+                };
+                if value.ty != element {
+                    return None;
+                }
+            }
         }
         // Later uses may need heterogeneous storage. A failed native attempt
         // must recover the ordinary diagnostics and object fallback for set().
