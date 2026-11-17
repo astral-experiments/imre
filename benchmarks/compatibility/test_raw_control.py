@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+import re
 import tempfile
 import unittest
 from collections import Counter
@@ -9,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import scorecard
+import raw_control
 
 PIN = '8571ca2dbecabf8d7863c369dc776611fd57d8ad'
 SNAPSHOT = scorecard.HERE / 'revisions' / PIN
@@ -39,6 +41,15 @@ class RawControlTests(unittest.TestCase):
         child=[r for r in rows if r['family']=='base64' and '.TestMain.' in r['id']]
         self.assertEqual(len(child),5)
         self.assertTrue(all(r['runs']['stock']['outcome']=='pass' and all(r['runs'][t]['outcome']=='not_run' for t in ('O0','O3')) and r['omission_reason'] is None and not r['paired'] for r in child))
+
+    def test_gate_accepts_strace_pid_padding(self):
+        entry = self.entries['csv']; binding = json.loads((scorecard.ROOT / entry['sources']['binding']).read_text())
+        cohort = binding['cohorts']['finite-native']; art = cohort['artifacts']
+        gate = json.loads((scorecard.ROOT / art['gate']).read_text())
+        trace = (scorecard.ROOT / art['gate_trace']).read_text()
+        padded = re.sub(r'^(\d+) ', r'\1  ', trace, flags=re.M)
+        raw_control.trace_gate(padded, gate['command'], cohort['probe'], gate['first_party_module'],
+                               (scorecard.ROOT / art['gate_stderr']).read_text(), scorecard.require)
 
     def test_rehashed_raw_openat2_witness_is_rejected(self):
         entry=self.entries['csv']; binding=json.loads((scorecard.ROOT/entry['sources']['binding']).read_text())
