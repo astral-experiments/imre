@@ -2858,15 +2858,19 @@ impl Context {
             (globals != NONE).then_some(globals),
             (locals != NONE).then_some(locals),
         )?;
-        let (checked_locals, builtins) =
-            self.checked_source_namespaces(globals, locals, None, "eval")?;
+        // ForwardRef can supply passive compile metadata. It has no executable body.
+        if matches!(self.heap.get(text), Value::Code(code) if matches!(code.body, Body::Parsed { .. }))
+        {
+            return self.eval_namespace_code(text, globals, locals.unwrap_or(globals));
+        }
         if let Some(entry) = self.linked_expression(text) {
             let filename = self.text("<string>");
             let code = self.native_module_code(entry, filename, None);
             return self.eval_namespace_code(code, globals, locals.unwrap_or(globals));
         }
-        let source =
-            eval_source_text(self.str_value(text)?).trim_matches([' ', '\t', '\n', '\r', '\x0c']);
+        let (checked_locals, builtins) =
+            self.checked_source_namespaces(globals, locals, None, "eval")?;
+        let source = eval_source_text(self.str_value(text)?);
         if crate::objects::python_isidentifier(source)
             && !ruff_python_stdlib::keyword::is_keyword(source)
         {

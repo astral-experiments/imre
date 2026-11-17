@@ -229,11 +229,11 @@ def current():
     assert module.get_annotations(manual, globals=namespace, eval_str=True) == {"value": 23}
     assert "__builtins__" in namespace
 
-    def grouped(a: "(int)", b: "(((int)))", c: "int # declared"):
+    def grouped(a: "(int)", b: "(((int)))", c: "int # declared", d: "int ", e: "\nint"):
         pass
 
-    assert module.get_annotations(grouped, eval_str=True) == {"a": int, "b": int, "c": int}
-    for spelling in (" int", "\tint", "int ", "\nint"):
+    assert module.get_annotations(grouped, eval_str=True) == {"a": int, "b": int, "c": int, "d": int, "e": int}
+    for spelling in (" int", "\tint"):
         manual.__annotations__ = {"value": spelling}
         namespace = {}
         assert module.get_annotations(manual, globals=namespace, eval_str=True) == {"value": int}
