@@ -1,0 +1,26 @@
+IMRE_UNITTEST {"event": "collection", "count": 8}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_float.TestCFloat.test_allow_nan"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_float.TestCFloat.test_floats"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_float.TestCFloat.test_ints"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_float.TestCFloat.test_out_of_range"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_float.TestPyFloat.test_allow_nan"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_float.TestPyFloat.test_floats"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_float.TestPyFloat.test_ints"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_float.TestPyFloat.test_out_of_range"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_float.TestCFloat.test_allow_nan"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_float.TestCFloat.test_allow_nan", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_float.TestCFloat.test_floats"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_float.TestCFloat.test_floats", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_float.TestCFloat.test_ints"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_float.TestCFloat.test_ints", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_float.TestCFloat.test_out_of_range"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_float.TestCFloat.test_out_of_range", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_float.TestPyFloat.test_allow_nan"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_float.TestPyFloat.test_allow_nan", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_float.TestPyFloat.test_floats"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_float.TestPyFloat.test_floats", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_float.TestPyFloat.test_ints"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_float.TestPyFloat.test_ints", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_float.TestPyFloat.test_out_of_range"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_float.TestPyFloat.test_out_of_range", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "summary", "run": 8, "successful": true}
