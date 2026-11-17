@@ -1628,6 +1628,7 @@ pub(crate) enum ObjectCall {
     ExecText,
     SocketSendfile,
     FormatField,
+    PkgutilGetData,
 }
 
 /// Python descriptor operation on a named attribute in the live frame.

@@ -2526,7 +2526,13 @@ fn registered_entry(
             .classified(Kind::ScopedObject));
         }
     }
-    if graph.registered_startup {
+    if graph.registered_startup
+        || graph.runtime_initializer.is_none()
+            && matches!(
+                operations.first_object,
+                Some((ir::ObjectCall::PkgutilGetData, _, _))
+            )
+    {
         return Ok(Some(crate::CheckedProgram::Registered(None)));
     }
     let reason = graph
@@ -2539,6 +2545,7 @@ fn registered_entry(
                 ir::ObjectCall::ExecText => ("exec", Kind::ScopedObject),
                 ir::ObjectCall::FormatField => ("this f-string field", Kind::Ordinary),
                 ir::ObjectCall::SocketSendfile => ("socket.sendfile", Kind::Object),
+                ir::ObjectCall::PkgutilGetData => ("pkgutil.get_data", Kind::ScopedObject),
             };
             let source = &graph.modules[id];
             Some(
@@ -13914,28 +13921,53 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::CachedProperty)) => {
                 return Err(self.object_runtime_export("functools.cached_property", call));
             }
-            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name @ "pkgutil.get_data"))) => {
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport("pkgutil.get_data"))) => {
                 let params = [
                     parameter("package", Type::Str, None),
                     parameter("resource", Type::Str, None),
                 ];
                 let args = self.arguments(call, &params, None)?;
-                let result = self.types.optional(Type::Bytes);
-                let failure = self.scoped_builtin_error(name, call);
-                if !self.missing_operation(&failure) {
-                    return Err(failure);
+                let value = Expr {
+                    ty: self.types.optional(Type::Bytes),
+                    kind: ExprKind::Builtin(
+                        Builtin::ObjectCall(
+                            ir::ObjectCall::PkgutilGetData,
+                            self.module,
+                            call.range(),
+                        ),
+                        args.values,
+                    ),
+                };
+                if self.namespace.is_none() {
+                    let target = if let Some(field) = call.func.as_attribute_expr()
+                        && let Some(module) = field.value.as_name_expr()
+                        && !self.names.contains_key(module.id.as_str())
+                        && !ruff_python_stdlib::identifiers::is_mangled_private(module.id.as_str())
+                    {
+                        self.graph.modules[self.module]
+                            .registered_values()
+                            .operands(self.source, self.graph.python_optimization())
+                            .imported_call(
+                                module,
+                                call,
+                                self.graph.session.operand_types(self.module),
+                            )
+                    } else {
+                        self.placed_call_name(call).map(|name| {
+                            FixedAttribute::bound_call(
+                                call,
+                                registered::values::located_name(name),
+                                None,
+                            )
+                        })
+                    };
+                    if let (Some(target), Some(sites)) = (target, &mut self.fixed_sites)
+                        && let Some(written) = value.named_call_arguments()
+                        && sites.has_written_arguments(call, written)
+                    {
+                        sites.written_call(call, &value, || Some(target));
+                    }
                 }
-                if self.inference.is_none()
-                    && self.registered.is_none()
-                    && (self.module_scope || self.fixed_sites.is_none())
-                {
-                    return Ok(Expr {
-                        ty: result,
-                        kind: ExprKind::Builtin(Builtin::UnrepresentedCall, vec![]),
-                    });
-                }
-                let mut value = self.call_import_with_operands(call, args.values)?;
-                value.ty = result;
                 return Ok(value);
             }
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
