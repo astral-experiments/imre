@@ -12,6 +12,8 @@ BASE64 = FULL / "base64"
 BASE64_REVISION = "8571ca2dbecabf8d7863c369dc776611fd57d8ad"
 BASE64_STAGE = HERE / "revisions" / BASE64_REVISION
 BASE64_POLICY = BASE64_STAGE / "omissions/base64"
+HASHLIB = FULL / "hashlib"
+HASHLIB_POLICY = BASE64_STAGE / "omissions/hashlib"
 
 
 def require(condition, message):
@@ -134,9 +136,33 @@ def validate_base64():
     return len(rows)
 
 
+def validate_hashlib():
+    rows = read_policy(HASHLIB_POLICY)
+    key = ("test.test_hashlib.HashLibTestCase.test_disallow_instantiation", 1)
+    require(len(rows) == 1 and (rows[0]["full_id"], int(rows[0]["occurrence"])) == key and all(rows[0].values()), "hashlib policy must cover exactly the CPython-only original")
+    inventory = json.loads((HASHLIB / "reference-linux.json").read_text())
+    receipts = {(r["id"], r["occurrence"]): r for r in map(json.loads, (BASE64_STAGE / "stdlib/hashlib.jsonl").read_text().splitlines())}
+    row, receipt = rows[0], receipts[key]
+    path = "Lib/test/test_hashlib.py"
+    data, sha256, blob = pinned_source(HASHLIB, path, inventory["cpython_commit"])
+    cls = next(n for n in ast.parse(data).body if isinstance(n, ast.ClassDef) and n.name == "HashLibTestCase")
+    node = next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == "test_disallow_instantiation")
+    check_identity(row, key, receipt, inventory, node, path, sha256, blob)
+    require(len(node.decorator_list) == 1 and ast.unparse(node.decorator_list[0]) == "support.cpython_only"
+            and row["class_or_method_decorator_lines"] == f"{node.decorator_list[0].lineno}-{node.decorator_list[0].end_lineno} support.cpython_only", "hashlib CPython-only decorator differs")
+    require(receipt["runs"]["stock"]["outcome"] == "pass" and all(receipt["runs"][t]["outcome"] == "skip" for t in ("O0", "O3"))
+            and receipt["omission_reason"] is None, "hashlib raw pass/skip outcomes changed")
+    witness_key = ("test.test_hashlib.HashLibTestCase.test_hash_disallow_instantiation", 1)
+    witness = receipts[witness_key]
+    require(row["separately_covered_witness_keys"] == witness_key[0] + "#1" and witness["source"] == receipt["source"]
+            and witness["paired"] is True and all(witness["runs"][t]["outcome"] == "pass" for t in ("stock", "O0", "O3")),
+            "hashlib adjacent internal-type witness is not the exact paired original")
+    return len(rows)
+
+
 def validate():
-    return validate_argparse() + validate_base64()
+    return validate_argparse() + validate_base64() + validate_hashlib()
 
 
 if __name__ == "__main__":
-    print(f"validated {validate()} accepted omissions (6 argparse, 5 base64); raw denominators retained")
+    print(f"validated {validate()} accepted omissions (6 argparse, 5 base64, 1 hashlib); raw denominators retained")
