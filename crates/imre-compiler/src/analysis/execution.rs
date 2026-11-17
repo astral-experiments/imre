@@ -71,6 +71,23 @@ impl ExecutionIntrinsic {
         }
     }
 
+    /// Whether a single callable can choose both execution modes at runtime.
+    fn mixed_modes(model: &SemanticModel<'_>, expression: &Expr) -> bool {
+        let Some(Type::Union(union)) = expression.inferred_type(model) else {
+            return false;
+        };
+        let mut exec = false;
+        let mut eval = false;
+        for ty in union.elements(model.db()) {
+            match Self::from_type(model, *ty) {
+                Some(Self::Exec) => exec = true,
+                Some(Self::Eval) => eval = true,
+                None => {}
+            }
+        }
+        exec && eval
+    }
+
     pub(super) fn escape_message(self) -> String {
         format!(
             "this argument may select builtins.{} and the consumer can execute unlinked source. Pass a named Python function, or select one from a table of functions.",
@@ -841,6 +858,14 @@ impl<'a> Escape<'a, '_> {
             self.visit_expr(operand);
         }
         if self.first.is_some() {
+            return;
+        }
+        if source_callable.is_some() && ExecutionIntrinsic::mixed_modes(self.model, &call.func) {
+            self.first = Some(self.required(
+                SourceCallable::SelectedBuiltin,
+                call.func.range(),
+                "this callable may select both builtins.eval and builtins.exec, which require different compiled source entries; call eval or exec directly, or separate the branches".to_owned(),
+            ));
             return;
         }
         if source_callable == Some(SourceCallable::Builtin(ExecutionIntrinsic::Eval))

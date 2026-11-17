@@ -64,11 +64,16 @@ impl LiteralUnit<'_> {
     pub(crate) fn prepare_eval(self, site: TextRange, text: &str) -> Result<(), String> {
         let mut units = self.sites.borrow_mut();
         let sites = &mut units.entry(self.unit).or_default().sites;
-        if let Some(Ok(LiteralEntry::Expression(entry))) = sites.get(&site) {
-            return if entry.text() == text {
-                Ok(())
-            } else {
-                Err("literal source changed during checking".into())
+        if let Some(existing) = sites.get(&site) {
+            return match existing {
+                Ok(LiteralEntry::Expression(entry)) if entry.text() == text => Ok(()),
+                Ok(LiteralEntry::Expression(_)) => {
+                    Err("literal source changed during checking".into())
+                }
+                Ok(LiteralEntry::Suites(_)) => {
+                    Err("this site already owns a compiled source suite".into())
+                }
+                Err((_, reason)) => Err(reason.clone()),
             };
         }
         let entry = PreparedEval::new(text, self.optimization)?;
