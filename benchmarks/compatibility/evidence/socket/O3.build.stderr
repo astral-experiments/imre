@@ -1,0 +1,321 @@
+ Compiling /workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_socket.py (-O3)
+error[no-matching-overload]: No overload of bound method `TestCase.assertIn` matches arguments
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_socket.py:1538:9
+     |
+1536 |             # Probably name lookup wasn't set up right; skip this test
+1537 |             self.skipTest('name lookup failure')
+1538 |         self.assertIn(name[0], ("0.0.0.0", my_ip_addr), '%s invalid' % name[0])
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1539 |         self.assertEqual(name[1], port)
+     |
+info: First overload defined here
+   --> <imre stdlib>/unittest/__init__.py:465:9
+    |
+464 |       if TYPE_CHECKING:
+465 | /         @overload
+466 | |         def assertIn(self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None: ...
+    | |_________________________________________________________________________________________________________________________^ First overload defined here
+467 |           @overload
+468 |           def assertIn(self, member: int, container: list[int], msg: str | None = None) -> None: ...
+    |
+info: Possible overloads for bound method `assertIn`:
+info:   (self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None
+info:   (self, member: int, container: list[int], msg: str | None = None) -> None
+info:   (self, member: object, container: Mapping[int, str], msg: str | None = None) -> None
+info: Overload implementation defined here
+   --> <imre stdlib>/unittest/__init__.py:471:13
+    |
+469 |         @overload
+470 |         def assertIn(self, member: object, container: typing.Mapping[int, str], msg: str | None = None) -> None: ...
+471 |         def assertIn(self, member: object, container: object, msg: str | None = None) -> None: ...
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+472 |     else:
+473 |         def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None:
+    |
+
+
+error[no-matching-overload]: No overload of bound method `TestCase.assertIn` matches arguments
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_socket.py:1571:13
+     |
+1569 |         except OSError as err:
+1570 |             # Winsock apparently raises ENOTSOCK
+1571 |             self.assertIn(err.errno, (errno.EBADF, errno.ENOTSOCK))
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1572 |         else:
+1573 |             self.fail("close() should raise EBADF/ENOTSOCK")
+     |
+info: First overload defined here
+   --> <imre stdlib>/unittest/__init__.py:465:9
+    |
+464 |       if TYPE_CHECKING:
+465 | /         @overload
+466 | |         def assertIn(self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None: ...
+    | |_________________________________________________________________________________________________________________________^ First overload defined here
+467 |           @overload
+468 |           def assertIn(self, member: int, container: list[int], msg: str | None = None) -> None: ...
+    |
+info: Possible overloads for bound method `assertIn`:
+info:   (self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None
+info:   (self, member: int, container: list[int], msg: str | None = None) -> None
+info:   (self, member: object, container: Mapping[int, str], msg: str | None = None) -> None
+info: Overload implementation defined here
+   --> <imre stdlib>/unittest/__init__.py:471:13
+    |
+469 |         @overload
+470 |         def assertIn(self, member: object, container: typing.Mapping[int, str], msg: str | None = None) -> None: ...
+471 |         def assertIn(self, member: object, container: object, msg: str | None = None) -> None: ...
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+472 |     else:
+473 |         def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None:
+    |
+
+
+error[no-matching-overload]: No overload of bound method `TestCase.assertIn` matches arguments
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_socket.py:1581:17
+     |
+1579 |               self.assertEqual(sock.family, socket.AF_INET)
+1580 |               if hasattr(socket, 'SOCK_CLOEXEC'):
+1581 | /                 self.assertIn(sock.type,
+1582 | |                               (socket.SOCK_STREAM | socket.SOCK_CLOEXEC,
+1583 | |                                socket.SOCK_STREAM))
+     | |___________________________________________________^
+1584 |               else:
+1585 |                   self.assertEqual(sock.type, socket.SOCK_STREAM)
+     |
+info: First overload defined here
+   --> <imre stdlib>/unittest/__init__.py:465:9
+    |
+464 |       if TYPE_CHECKING:
+465 | /         @overload
+466 | |         def assertIn(self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None: ...
+    | |_________________________________________________________________________________________________________________________^ First overload defined here
+467 |           @overload
+468 |           def assertIn(self, member: int, container: list[int], msg: str | None = None) -> None: ...
+    |
+info: Possible overloads for bound method `assertIn`:
+info:   (self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None
+info:   (self, member: int, container: list[int], msg: str | None = None) -> None
+info:   (self, member: object, container: Mapping[int, str], msg: str | None = None) -> None
+info: Overload implementation defined here
+   --> <imre stdlib>/unittest/__init__.py:471:13
+    |
+469 |         @overload
+470 |         def assertIn(self, member: object, container: typing.Mapping[int, str], msg: str | None = None) -> None: ...
+471 |         def assertIn(self, member: object, container: object, msg: str | None = None) -> None: ...
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+472 |     else:
+473 |         def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None:
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertHasAttr` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_socket.py:1610:28
+     |
+1608 |     @unittest.skipUnless(os.name == "nt", "Windows specific")
+1609 |     def test_sock_ioctl(self):
+1610 |         self.assertHasAttr(socket.socket, 'ioctl')
+     |                            ^^^^^^^^^^^^^ Expected `ModuleType`, found `<class 'socket'>`
+1611 |         self.assertHasAttr(socket, 'SIO_RCVALL')
+1612 |         self.assertHasAttr(socket, 'RCVALL_ON')
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:460:9
+    |
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+459 |
+460 |     def assertHasAttr(self, obj: ModuleType, name: str, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^       --------------- Parameter declared here
+461 |         if not hasattr(obj, name):
+462 |             self.fail(self._formatMessage(msg, "module " + repr(obj.__name__) + " has no attribute " + repr(name)))
+    |
+
+
+error[no-matching-overload]: No overload of bound method `TestCase.assertIn` matches arguments
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_socket.py:2132:9
+     |
+2130 |         with self.assertRaises(OSError) as cm:
+2131 |             socket.socket(fileno=os_helper.make_bad_fd())
+2132 |         self.assertIn(cm.exception.errno, (errno.EBADF, WSAENOTSOCK))
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2133 |
+2134 |         with self.assertRaises(OSError) as cm:
+     |
+info: First overload defined here
+   --> <imre stdlib>/unittest/__init__.py:465:9
+    |
+464 |       if TYPE_CHECKING:
+465 | /         @overload
+466 | |         def assertIn(self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None: ...
+    | |_________________________________________________________________________________________________________________________^ First overload defined here
+467 |           @overload
+468 |           def assertIn(self, member: int, container: list[int], msg: str | None = None) -> None: ...
+    |
+info: Possible overloads for bound method `assertIn`:
+info:   (self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None
+info:   (self, member: int, container: list[int], msg: str | None = None) -> None
+info:   (self, member: object, container: Mapping[int, str], msg: str | None = None) -> None
+info: Overload implementation defined here
+   --> <imre stdlib>/unittest/__init__.py:471:13
+    |
+469 |         @overload
+470 |         def assertIn(self, member: object, container: typing.Mapping[int, str], msg: str | None = None) -> None: ...
+471 |         def assertIn(self, member: object, container: object, msg: str | None = None) -> None: ...
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+472 |     else:
+473 |         def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None:
+    |
+
+
+error[no-matching-overload]: No overload of bound method `TestCase.assertIn` matches arguments
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_socket.py:2139:9
+     |
+2137 |                 socket.SOCK_STREAM,
+2138 |                 fileno=os_helper.make_bad_fd())
+2139 |         self.assertIn(cm.exception.errno, (errno.EBADF, WSAENOTSOCK))
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2140 |
+2141 |     def test_socket_fileno_requires_socket_fd(self):
+     |
+info: First overload defined here
+   --> <imre stdlib>/unittest/__init__.py:465:9
+    |
+464 |       if TYPE_CHECKING:
+465 | /         @overload
+466 | |         def assertIn(self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None: ...
+    | |_________________________________________________________________________________________________________________________^ First overload defined here
+467 |           @overload
+468 |           def assertIn(self, member: int, container: list[int], msg: str | None = None) -> None: ...
+    |
+info: Possible overloads for bound method `assertIn`:
+info:   (self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None
+info:   (self, member: int, container: list[int], msg: str | None = None) -> None
+info:   (self, member: object, container: Mapping[int, str], msg: str | None = None) -> None
+info: Overload implementation defined here
+   --> <imre stdlib>/unittest/__init__.py:471:13
+    |
+469 |         @overload
+470 |         def assertIn(self, member: object, container: typing.Mapping[int, str], msg: str | None = None) -> None: ...
+471 |         def assertIn(self, member: object, container: object, msg: str | None = None) -> None: ...
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+472 |     else:
+473 |         def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None:
+    |
+
+
+error[no-matching-overload]: No overload of bound method `TestCase.assertIn` matches arguments
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_socket.py:2560:9
+     |
+2558 |     def testSelect(self):
+2559 |         r, w, x = select.select([self.serv], [], [], 3.0)
+2560 |         self.assertIn(self.serv, r)
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2561 |         data, addr = self.serv.recvfrom(self.bufsize)
+2562 |         self.assertEqual(self.data, data)
+     |
+info: First overload defined here
+   --> <imre stdlib>/unittest/__init__.py:465:9
+    |
+464 |       if TYPE_CHECKING:
+465 | /         @overload
+466 | |         def assertIn(self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None: ...
+    | |_________________________________________________________________________________________________________________________^ First overload defined here
+467 |           @overload
+468 |           def assertIn(self, member: int, container: list[int], msg: str | None = None) -> None: ...
+    |
+info: Possible overloads for bound method `assertIn`:
+info:   (self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None
+info:   (self, member: int, container: list[int], msg: str | None = None) -> None
+info:   (self, member: object, container: Mapping[int, str], msg: str | None = None) -> None
+info: Overload implementation defined here
+   --> <imre stdlib>/unittest/__init__.py:471:13
+    |
+469 |         @overload
+470 |         def assertIn(self, member: object, container: typing.Mapping[int, str], msg: str | None = None) -> None: ...
+471 |         def assertIn(self, member: object, container: object, msg: str | None = None) -> None: ...
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+472 |     else:
+473 |         def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None:
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertLess` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_socket.py:5420:25
+     |
+5418 |             conn, addr = self.serv.accept()
+5419 |         dt = time.monotonic() - start_time
+5420 |         self.assertLess(dt, 1.0)
+     |                         ^^ Expected `int`, found `float`
+5421 |
+5422 |         self.event.set()
+     |
+info: element `float*` of union `int | float*` is not assignable to `int`
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:266:9
+    |
+264 |             raise self.failureException(self._formatMessage(msg, repr(expr) + " is not false"))
+265 |
+266 |     def assertLess(self, a: int, b: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^       ------ Parameter declared here
+267 |         if not a < b:
+268 |             self.fail(self._formatMessage(msg, f"{a!r} not less than {b!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertLess` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_socket.py:5420:29
+     |
+5418 |             conn, addr = self.serv.accept()
+5419 |         dt = time.monotonic() - start_time
+5420 |         self.assertLess(dt, 1.0)
+     |                             ^^^ Expected `int`, found `float*`
+5421 |
+5422 |         self.event.set()
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:266:9
+    |
+264 |             raise self.failureException(self._formatMessage(msg, repr(expr) + " is not false"))
+265 |
+266 |     def assertLess(self, a: int, b: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^               ------ Parameter declared here
+267 |         if not a < b:
+268 |             self.fail(self._formatMessage(msg, f"{a!r} not less than {b!r}"))
+    |
+
+
+error[no-matching-overload]: No overload of bound method `TestCase.assertIn` matches arguments
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_socket.py:6235:9
+     |
+6233 |     def testUnbound(self):
+6234 |         # Issue #30205 (note getsockname() can return None on OS X)
+6235 |         self.assertIn(self.sock.getsockname(), ('', None))
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+6236 |
+6237 |     def testStrAddr(self):
+     |
+info: First overload defined here
+   --> <imre stdlib>/unittest/__init__.py:465:9
+    |
+464 |       if TYPE_CHECKING:
+465 | /         @overload
+466 | |         def assertIn(self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None: ...
+    | |_________________________________________________________________________________________________________________________^ First overload defined here
+467 |           @overload
+468 |           def assertIn(self, member: int, container: list[int], msg: str | None = None) -> None: ...
+    |
+info: Possible overloads for bound method `assertIn`:
+info:   (self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None
+info:   (self, member: int, container: list[int], msg: str | None = None) -> None
+info:   (self, member: object, container: Mapping[int, str], msg: str | None = None) -> None
+info: Overload implementation defined here
+   --> <imre stdlib>/unittest/__init__.py:471:13
+    |
+469 |         @overload
+470 |         def assertIn(self, member: object, container: typing.Mapping[int, str], msg: str | None = None) -> None: ...
+471 |         def assertIn(self, member: object, container: object, msg: str | None = None) -> None: ...
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+472 |     else:
+473 |         def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None:
+    |
+
+

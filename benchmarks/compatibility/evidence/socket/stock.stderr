@@ -1,0 +1,751 @@
+testBluetoothConstants (__main__.BasicBluetoothTest.testBluetoothConstants) ... skipped 'Bluetooth sockets required for this test.'
+testBCMConstants (__main__.BasicCANTest.testBCMConstants) ... skipped 'SocketCan required for this test.'
+testBindAny (__main__.BasicCANTest.testBindAny) ... skipped 'SocketCan required for this test.'
+testCreateBCMSocket (__main__.BasicCANTest.testCreateBCMSocket) ... skipped 'SocketCan required for this test.'
+testCreateSocket (__main__.BasicCANTest.testCreateSocket) ... skipped 'SocketCan required for this test.'
+testCrucialConstants (__main__.BasicCANTest.testCrucialConstants) ... skipped 'SocketCan required for this test.'
+testFilter (__main__.BasicCANTest.testFilter) ... skipped 'SocketCan required for this test.'
+testLoopback (__main__.BasicCANTest.testLoopback) ... skipped 'SocketCan required for this test.'
+testTooLongInterfaceName (__main__.BasicCANTest.testTooLongInterfaceName) ... skipped 'SocketCan required for this test.'
+testCreateHyperVSocketAddrNotTupleFailure (__main__.BasicHyperVTest.testCreateHyperVSocketAddrNotTupleFailure) ... skipped 'Hyper-V sockets required for this test.'
+testCreateHyperVSocketAddrNotTupleOf2StrsFailure (__main__.BasicHyperVTest.testCreateHyperVSocketAddrNotTupleOf2StrsFailure) ... skipped 'Hyper-V sockets required for this test.'
+testCreateHyperVSocketAddrNotTupleOfStrsFailure (__main__.BasicHyperVTest.testCreateHyperVSocketAddrNotTupleOfStrsFailure) ... skipped 'Hyper-V sockets required for this test.'
+testCreateHyperVSocketAddrServiceIdNotValidUUIDFailure (__main__.BasicHyperVTest.testCreateHyperVSocketAddrServiceIdNotValidUUIDFailure) ... skipped 'Hyper-V sockets required for this test.'
+testCreateHyperVSocketAddrVmIdNotValidUUIDFailure (__main__.BasicHyperVTest.testCreateHyperVSocketAddrVmIdNotValidUUIDFailure) ... skipped 'Hyper-V sockets required for this test.'
+testCreateHyperVSocketWithUnknownProtoFailure (__main__.BasicHyperVTest.testCreateHyperVSocketWithUnknownProtoFailure) ... skipped 'Hyper-V sockets required for this test.'
+testHyperVConstants (__main__.BasicHyperVTest.testHyperVConstants) ... skipped 'Hyper-V sockets required for this test.'
+testAutoBindSock (__main__.BasicQIPCRTRTest.testAutoBindSock) ... skipped 'QIPCRTR sockets required for this test.'
+testBindSock (__main__.BasicQIPCRTRTest.testBindSock) ... skipped 'QIPCRTR sockets required for this test.'
+testCreateSocket (__main__.BasicQIPCRTRTest.testCreateSocket) ... skipped 'QIPCRTR sockets required for this test.'
+testCrucialConstants (__main__.BasicQIPCRTRTest.testCrucialConstants) ... skipped 'QIPCRTR sockets required for this test.'
+testInvalidBindSock (__main__.BasicQIPCRTRTest.testInvalidBindSock) ... skipped 'QIPCRTR sockets required for this test.'
+testUnbound (__main__.BasicQIPCRTRTest.testUnbound) ... skipped 'QIPCRTR sockets required for this test.'
+testCreateSocket (__main__.BasicRDSTest.testCreateSocket) ... skipped 'RDS sockets required for this test.'
+testCrucialConstants (__main__.BasicRDSTest.testCrucialConstants) ... skipped 'RDS sockets required for this test.'
+testSocketBufferSize (__main__.BasicRDSTest.testSocketBufferSize) ... skipped 'RDS sockets required for this test.'
+testDefaults (__main__.BasicSocketPairTest.testDefaults) ... ok
+testRecv (__main__.BasicSocketPairTest.testRecv) ... ok
+testSend (__main__.BasicSocketPairTest.testSend) ... ok
+testDetach (__main__.BasicTCPTest.testDetach) ... ok
+testDup (__main__.BasicTCPTest.testDup) ... ok
+testFromFd (__main__.BasicTCPTest.testFromFd) ... ok
+testOverFlowRecv (__main__.BasicTCPTest.testOverFlowRecv) ... ok
+testOverFlowRecvFrom (__main__.BasicTCPTest.testOverFlowRecvFrom) ... ok
+testRecv (__main__.BasicTCPTest.testRecv) ... ok
+testRecvFrom (__main__.BasicTCPTest.testRecvFrom) ... ok
+testSendAll (__main__.BasicTCPTest.testSendAll) ... ok
+testShutdown (__main__.BasicTCPTest.testShutdown) ... ok
+testShutdown_overflow (__main__.BasicTCPTest.testShutdown_overflow) ... skipped 'requires _testcapi'
+testDetach (__main__.BasicTCPTest2.testDetach) ... ok
+testDup (__main__.BasicTCPTest2.testDup) ... ok
+testFromFd (__main__.BasicTCPTest2.testFromFd) ... ok
+testOverFlowRecv (__main__.BasicTCPTest2.testOverFlowRecv) ... ok
+testOverFlowRecvFrom (__main__.BasicTCPTest2.testOverFlowRecvFrom) ... ok
+testRecv (__main__.BasicTCPTest2.testRecv) ... ok
+testRecvFrom (__main__.BasicTCPTest2.testRecvFrom) ... ok
+testSendAll (__main__.BasicTCPTest2.testSendAll) ... ok
+testShutdown (__main__.BasicTCPTest2.testShutdown) ... ok
+testShutdown_overflow (__main__.BasicTCPTest2.testShutdown_overflow) ... skipped 'requires _testcapi'
+testRecvFrom (__main__.BasicUDPLITETest.testRecvFrom) ... ok
+testRecvFromNegative (__main__.BasicUDPLITETest.testRecvFromNegative) ... ok
+testSendtoAndRecv (__main__.BasicUDPLITETest.testSendtoAndRecv) ... ok
+testRecvFrom (__main__.BasicUDPTest.testRecvFrom) ... ok
+testRecvFromNegative (__main__.BasicUDPTest.testRecvFromNegative) ... ok
+testSendtoAndRecv (__main__.BasicUDPTest.testSendtoAndRecv) ... ok
+testCreateSocket (__main__.BasicVSOCKTest.testCreateSocket) ... skipped 'VSOCK sockets required for this test.'
+testCrucialConstants (__main__.BasicVSOCKTest.testCrucialConstants) ... skipped 'VSOCK sockets required for this test.'
+testSocketBufferSize (__main__.BasicVSOCKTest.testSocketBufferSize) ... skipped 'VSOCK sockets required for this test.'
+testVSOCKConstants (__main__.BasicVSOCKTest.testVSOCKConstants) ... skipped 'VSOCK sockets required for this test.'
+testBadHciAddr (__main__.BluetoothTest.testBadHciAddr) ... skipped 'Bluetooth sockets required for this test.'
+testBadL2capAddr (__main__.BluetoothTest.testBadL2capAddr) ... skipped 'Bluetooth sockets required for this test.'
+testBadRfcommAddr (__main__.BluetoothTest.testBadRfcommAddr) ... skipped 'Bluetooth sockets required for this test.'
+testBadScoAddr (__main__.BluetoothTest.testBadScoAddr) ... skipped 'Bluetooth sockets required for this test.'
+testBindBrEdrL2capSocket (__main__.BluetoothTest.testBindBrEdrL2capSocket) ... skipped 'Bluetooth sockets required for this test.'
+testBindHciSocket (__main__.BluetoothTest.testBindHciSocket) ... skipped 'Bluetooth sockets required for this test.'
+testBindLeAttL2capSocket (__main__.BluetoothTest.testBindLeAttL2capSocket) ... skipped 'Bluetooth sockets required for this test.'
+testBindLePsmL2capSocket (__main__.BluetoothTest.testBindLePsmL2capSocket) ... skipped 'Bluetooth sockets required for this test.'
+testBindRfcommSocket (__main__.BluetoothTest.testBindRfcommSocket) ... skipped 'Bluetooth sockets required for this test.'
+testBindScoSocket (__main__.BluetoothTest.testBindScoSocket) ... skipped 'Bluetooth sockets required for this test.'
+testCreateHciSocket (__main__.BluetoothTest.testCreateHciSocket) ... skipped 'Bluetooth sockets required for this test.'
+testCreateL2capSocket (__main__.BluetoothTest.testCreateL2capSocket) ... skipped 'Bluetooth sockets required for this test.'
+testCreateRfcommSocket (__main__.BluetoothTest.testCreateRfcommSocket) ... skipped 'Bluetooth sockets required for this test.'
+testCreateScoSocket (__main__.BluetoothTest.testCreateScoSocket) ... skipped 'Bluetooth sockets required for this test.'
+testRecvFromIntoArray (__main__.BufferIOTest.testRecvFromIntoArray) ... ok
+testRecvFromIntoBytearray (__main__.BufferIOTest.testRecvFromIntoBytearray) ... ok
+testRecvFromIntoEmptyBuffer (__main__.BufferIOTest.testRecvFromIntoEmptyBuffer) ... ok
+testRecvFromIntoMemoryview (__main__.BufferIOTest.testRecvFromIntoMemoryview) ... ok
+testRecvFromIntoSmallBuffer (__main__.BufferIOTest.testRecvFromIntoSmallBuffer) ... ok
+testRecvIntoArray (__main__.BufferIOTest.testRecvIntoArray) ... ok
+testRecvIntoBytearray (__main__.BufferIOTest.testRecvIntoBytearray) ... ok
+testRecvIntoMemoryview (__main__.BufferIOTest.testRecvIntoMemoryview) ... ok
+testBCM (__main__.CANTest.testBCM) ... skipped 'SocketCan required for this test.'
+testSendFrame (__main__.CANTest.testSendFrame) ... skipped 'SocketCan required for this test.'
+testSendMaxFrame (__main__.CANTest.testSendMaxFrame) ... skipped 'SocketCan required for this test.'
+testSendMultiFrames (__main__.CANTest.testSendMultiFrames) ... skipped 'SocketCan required for this test.'
+testCMSG_LEN (__main__.CmsgMacroTests.testCMSG_LEN) ... ok
+testCMSG_SPACE (__main__.CmsgMacroTests.testCMSG_SPACE) ... ok
+testCreateConnectionBase (__main__.ContextManagersTest.testCreateConnectionBase) ... ok
+testCreateConnectionClose (__main__.ContextManagersTest.testCreateConnectionClose) ... ok
+test_dual_stack_client_v4 (__main__.CreateServerFunctionalTest.test_dual_stack_client_v4) ... ok
+test_dual_stack_client_v6 (__main__.CreateServerFunctionalTest.test_dual_stack_client_v6) ... ok
+test_tcp4 (__main__.CreateServerFunctionalTest.test_tcp4) ... ok
+test_tcp6 (__main__.CreateServerFunctionalTest.test_tcp6) ... ok
+test_address (__main__.CreateServerTest.test_address) ... ok
+test_dualstack_ipv6_family (__main__.CreateServerTest.test_dualstack_ipv6_family) ... ok
+test_family_and_type (__main__.CreateServerTest.test_family_and_type) ... ok
+test_ipv6_only_default (__main__.CreateServerTest.test_ipv6_only_default) ... ok
+test_reuse_port (__main__.CreateServerTest.test_reuse_port) ... ok
+testAttributes (__main__.FileObjectClassTestCase.testAttributes) ... ok
+testCloseAfterMakefile (__main__.FileObjectClassTestCase.testCloseAfterMakefile) ... ok
+testClosedAttr (__main__.FileObjectClassTestCase.testClosedAttr) ... ok
+testFullRead (__main__.FileObjectClassTestCase.testFullRead) ... ok
+testMakefileAfterMakefileClose (__main__.FileObjectClassTestCase.testMakefileAfterMakefileClose) ... ok
+testReadAfterTimeout (__main__.FileObjectClassTestCase.testReadAfterTimeout) ... ok
+testReadline (__main__.FileObjectClassTestCase.testReadline) ... ok
+testRealClose (__main__.FileObjectClassTestCase.testRealClose) ... ok
+testSmallRead (__main__.FileObjectClassTestCase.testSmallRead) ... ok
+testUnbufferedRead (__main__.FileObjectClassTestCase.testUnbufferedRead) ... ok
+test_close_detach_race (__main__.FreeThreadingTests.test_close_detach_race) ... ok
+test3542SocketOptions (__main__.GeneralModuleTests.test3542SocketOptions) ... skipped 'macOS specific test'
+testCloseException (__main__.GeneralModuleTests.testCloseException) ... ok
+testCrucialConstants (__main__.GeneralModuleTests.testCrucialConstants) ... ok
+testCrucialIpProtoConstants (__main__.GeneralModuleTests.testCrucialIpProtoConstants) ... ok
+testDefaultTimeout (__main__.GeneralModuleTests.testDefaultTimeout) ... ok
+testGetServBy (__main__.GeneralModuleTests.testGetServBy) ... ok
+testGetSockOpt (__main__.GeneralModuleTests.testGetSockOpt) ... ok
+testGetaddrinfo (__main__.GeneralModuleTests.testGetaddrinfo) ... ok
+testHostnameRes (__main__.GeneralModuleTests.testHostnameRes) ... ok
+testIPv4_inet_aton_fourbytes (__main__.GeneralModuleTests.testIPv4_inet_aton_fourbytes) ... ok
+testIPv4toString (__main__.GeneralModuleTests.testIPv4toString) ... ok
+testIPv6toString (__main__.GeneralModuleTests.testIPv6toString) ... ok
+testInterfaceNameIndex (__main__.GeneralModuleTests.testInterfaceNameIndex) ... ok
+testInterpreterCrash (__main__.GeneralModuleTests.testInterpreterCrash) ... ok
+testInvalidInterfaceIndexToName (__main__.GeneralModuleTests.testInvalidInterfaceIndexToName) ... ok
+testInvalidInterfaceNameToIndex (__main__.GeneralModuleTests.testInvalidInterfaceNameToIndex) ... ok
+testNewAttributes (__main__.GeneralModuleTests.testNewAttributes) ... ok
+testNtoH (__main__.GeneralModuleTests.testNtoH) ... ok
+testNtoHErrors (__main__.GeneralModuleTests.testNtoHErrors) ... ok
+testRefCountGetNameInfo (__main__.GeneralModuleTests.testRefCountGetNameInfo) ... ok
+testSendAfterClose (__main__.GeneralModuleTests.testSendAfterClose) ... ok
+testSendtoErrors (__main__.GeneralModuleTests.testSendtoErrors) ... ok
+testSetSockOpt (__main__.GeneralModuleTests.testSetSockOpt) ... ok
+testSockName (__main__.GeneralModuleTests.testSockName) ... ok
+testSocketError (__main__.GeneralModuleTests.testSocketError) ... ok
+testStringToIPv4 (__main__.GeneralModuleTests.testStringToIPv4) ... ok
+testStringToIPv6 (__main__.GeneralModuleTests.testStringToIPv6) ... ok
+testWindowsSpecificConstants (__main__.GeneralModuleTests.testWindowsSpecificConstants) ... skipped 'Windows specific'
+test_SocketType_is_socketobject (__main__.GeneralModuleTests.test_SocketType_is_socketobject) ... ok
+test__sendfile_use_sendfile (__main__.GeneralModuleTests.test__sendfile_use_sendfile) ... ok
+test_addressfamily_enum (__main__.GeneralModuleTests.test_addressfamily_enum) ... ok
+test_addressinfo_enum (__main__.GeneralModuleTests.test_addressinfo_enum) ... ok
+test_csocket_repr (__main__.GeneralModuleTests.test_csocket_repr) ... ok
+test_dealloc_warn (__main__.GeneralModuleTests.test_dealloc_warn) ... ok
+test_flowinfo (__main__.GeneralModuleTests.test_flowinfo) ... ok
+test_getaddrinfo_int_port_overflow (__main__.GeneralModuleTests.test_getaddrinfo_int_port_overflow) ... skipped 'requires _testcapi'
+test_getaddrinfo_ipv6_basic (__main__.GeneralModuleTests.test_getaddrinfo_ipv6_basic) ... ok
+test_getaddrinfo_ipv6_scopeid_numeric (__main__.GeneralModuleTests.test_getaddrinfo_ipv6_scopeid_numeric) ... skipped 'Numeric scope id does not work or undocumented'
+test_getaddrinfo_ipv6_scopeid_symbolic (__main__.GeneralModuleTests.test_getaddrinfo_ipv6_scopeid_symbolic) ... ok
+test_getfqdn_filter_localhost (__main__.GeneralModuleTests.test_getfqdn_filter_localhost) ... ok
+test_getnameinfo (__main__.GeneralModuleTests.test_getnameinfo) ... ok
+test_getnameinfo_ipv6_scopeid_numeric (__main__.GeneralModuleTests.test_getnameinfo_ipv6_scopeid_numeric) ... skipped 'Numeric scope id does not work or undocumented'
+test_getnameinfo_ipv6_scopeid_symbolic (__main__.GeneralModuleTests.test_getnameinfo_ipv6_scopeid_symbolic) ... ok
+test_getsockaddrarg (__main__.GeneralModuleTests.test_getsockaddrarg) ... ok
+test_host_resolution (__main__.GeneralModuleTests.test_host_resolution) ... ok
+test_host_resolution_bad_address (__main__.GeneralModuleTests.test_host_resolution_bad_address) ... ok
+test_idna (__main__.GeneralModuleTests.test_idna) ... skipped "Resource 'python.org' is not available"
+test_listen_backlog (__main__.GeneralModuleTests.test_listen_backlog) ... ok
+test_listen_backlog_overflow (__main__.GeneralModuleTests.test_listen_backlog_overflow) ... skipped 'requires _testcapi'
+test_makefile_invalid_mode (__main__.GeneralModuleTests.test_makefile_invalid_mode) ... ok
+test_makefile_mode (__main__.GeneralModuleTests.test_makefile_mode) ... ok
+test_msgflag_enum (__main__.GeneralModuleTests.test_msgflag_enum) ... ok
+test_name_closed_socketio (__main__.GeneralModuleTests.test_name_closed_socketio) ... ok
+test_pickle (__main__.GeneralModuleTests.test_pickle) ... ok
+test_repr (__main__.GeneralModuleTests.test_repr) ... ok
+test_sendall_interrupted (__main__.GeneralModuleTests.test_sendall_interrupted) ... ok
+test_sendall_interrupted_with_timeout (__main__.GeneralModuleTests.test_sendall_interrupted_with_timeout) ... ok
+test_sendmsg_reentrant_ancillary_mutation (__main__.GeneralModuleTests.test_sendmsg_reentrant_ancillary_mutation) ... ok
+test_sethostname (__main__.GeneralModuleTests.test_sethostname) ... skipped 'test should be run as root'
+test_sio_loopback_fast_path (__main__.GeneralModuleTests.test_sio_loopback_fast_path) ... skipped 'Windows specific'
+test_sock_ioctl (__main__.GeneralModuleTests.test_sock_ioctl) ... skipped 'Windows specific'
+test_socket_close (__main__.GeneralModuleTests.test_socket_close) ... ok
+test_socket_consistent_sock_type (__main__.GeneralModuleTests.test_socket_consistent_sock_type) ... ok
+test_socket_fileno (__main__.GeneralModuleTests.test_socket_fileno) ... ok
+test_socket_fileno_rejects_float (__main__.GeneralModuleTests.test_socket_fileno_rejects_float) ... ok
+test_socket_fileno_rejects_invalid_socket (__main__.GeneralModuleTests.test_socket_fileno_rejects_invalid_socket) ... ok
+test_socket_fileno_rejects_negative (__main__.GeneralModuleTests.test_socket_fileno_rejects_negative) ... ok
+test_socket_fileno_rejects_other_types (__main__.GeneralModuleTests.test_socket_fileno_rejects_other_types) ... ok
+test_socket_fileno_requires_socket_fd (__main__.GeneralModuleTests.test_socket_fileno_requires_socket_fd) ... ok
+test_socket_fileno_requires_valid_fd (__main__.GeneralModuleTests.test_socket_fileno_requires_valid_fd) ... ok
+test_socket_methods (__main__.GeneralModuleTests.test_socket_methods) ... ok
+test_socket_type (__main__.GeneralModuleTests.test_socket_type) ... ok
+test_socketkind_enum (__main__.GeneralModuleTests.test_socketkind_enum) ... ok
+test_str_for_enums (__main__.GeneralModuleTests.test_str_for_enums) ... ok
+test_unknown_socket_family_repr (__main__.GeneralModuleTests.test_unknown_socket_family_repr) ... ok
+test_unusable_closed_socketio (__main__.GeneralModuleTests.test_unusable_closed_socketio) ... ok
+test_weakref (__main__.GeneralModuleTests.test_weakref) ... ok
+testBind (__main__.ISOTPTest.testBind) ... skipped 'CAN ISOTP required for this test.'
+testCreateISOTPSocket (__main__.ISOTPTest.testCreateISOTPSocket) ... skipped 'CAN ISOTP required for this test.'
+testCreateSocket (__main__.ISOTPTest.testCreateSocket) ... skipped 'CAN ISOTP required for this test.'
+testCrucialConstants (__main__.ISOTPTest.testCrucialConstants) ... skipped 'CAN ISOTP required for this test.'
+testTooLongInterfaceName (__main__.ISOTPTest.testTooLongInterfaceName) ... skipped 'CAN ISOTP required for this test.'
+test_SOCK_CLOEXEC (__main__.InheritanceTest.test_SOCK_CLOEXEC) ... ok
+test_default_inheritable (__main__.InheritanceTest.test_default_inheritable) ... ok
+test_dup (__main__.InheritanceTest.test_dup) ... ok
+test_get_inheritable_cloexec (__main__.InheritanceTest.test_get_inheritable_cloexec) ... ok
+test_set_inheritable (__main__.InheritanceTest.test_set_inheritable) ... ok
+test_set_inheritable_cloexec (__main__.InheritanceTest.test_set_inheritable_cloexec) ... ok
+test_socketpair (__main__.InheritanceTest.test_socketpair) ... ok
+testInterruptedRecvIntoTimeout (__main__.InterruptedRecvTimeoutTest.testInterruptedRecvIntoTimeout) ... ok
+testInterruptedRecvTimeout (__main__.InterruptedRecvTimeoutTest.testInterruptedRecvTimeout) ... ok
+testInterruptedRecvfromIntoTimeout (__main__.InterruptedRecvTimeoutTest.testInterruptedRecvfromIntoTimeout) ... ok
+testInterruptedRecvfromTimeout (__main__.InterruptedRecvTimeoutTest.testInterruptedRecvfromTimeout) ... ok
+testInterruptedRecvmsgIntoTimeout (__main__.InterruptedRecvTimeoutTest.testInterruptedRecvmsgIntoTimeout) ... ok
+testInterruptedRecvmsgTimeout (__main__.InterruptedRecvTimeoutTest.testInterruptedRecvmsgTimeout) ... ok
+testInterruptedSendTimeout (__main__.InterruptedSendTimeoutTest.testInterruptedSendTimeout) ... ok
+testInterruptedSendmsgTimeout (__main__.InterruptedSendTimeoutTest.testInterruptedSendmsgTimeout) ... ok
+testInterruptedSendtoTimeout (__main__.InterruptedSendTimeoutTest.testInterruptedSendtoTimeout) ... ok
+testBind (__main__.J1939Test.testBind) ... skipped 'CAN J1939 required for this test.'
+testCreateJ1939Socket (__main__.J1939Test.testCreateJ1939Socket) ... skipped 'CAN J1939 required for this test.'
+testJ1939Constants (__main__.J1939Test.testJ1939Constants) ... skipped 'CAN J1939 required for this test.'
+testAttributes (__main__.LineBufferedFileObjectClassTestCase.testAttributes) ... ok
+testCloseAfterMakefile (__main__.LineBufferedFileObjectClassTestCase.testCloseAfterMakefile) ... ok
+testClosedAttr (__main__.LineBufferedFileObjectClassTestCase.testClosedAttr) ... ok
+testFullRead (__main__.LineBufferedFileObjectClassTestCase.testFullRead) ... ok
+testMakefileAfterMakefileClose (__main__.LineBufferedFileObjectClassTestCase.testMakefileAfterMakefileClose) ... ok
+testReadAfterTimeout (__main__.LineBufferedFileObjectClassTestCase.testReadAfterTimeout) ... ok
+testReadline (__main__.LineBufferedFileObjectClassTestCase.testReadline) ... ok
+testRealClose (__main__.LineBufferedFileObjectClassTestCase.testRealClose) ... ok
+testSmallRead (__main__.LineBufferedFileObjectClassTestCase.testSmallRead) ... ok
+testUnbufferedRead (__main__.LineBufferedFileObjectClassTestCase.testUnbufferedRead) ... ok
+test_aead_aes_gcm (__main__.LinuxKernelCryptoAPI.test_aead_aes_gcm) ... skipped 'AF_ALG required'
+test_aes_cbc (__main__.LinuxKernelCryptoAPI.test_aes_cbc) ... skipped 'AF_ALG required'
+test_drbg_pr_sha256 (__main__.LinuxKernelCryptoAPI.test_drbg_pr_sha256) ... skipped 'AF_ALG required'
+test_hmac_sha1 (__main__.LinuxKernelCryptoAPI.test_hmac_sha1) ... skipped 'AF_ALG required'
+test_length_restriction (__main__.LinuxKernelCryptoAPI.test_length_restriction) ... skipped 'AF_ALG required'
+test_sendmsg_afalg_args (__main__.LinuxKernelCryptoAPI.test_sendmsg_afalg_args) ... skipped 'AF_ALG required'
+test_sha256 (__main__.LinuxKernelCryptoAPI.test_sha256) ... skipped 'AF_ALG required'
+testFamily (__main__.NetworkConnectionAttributesTest.testFamily) ... ok
+testSourceAddress (__main__.NetworkConnectionAttributesTest.testSourceAddress) ... ok
+testTimeoutDefault (__main__.NetworkConnectionAttributesTest.testTimeoutDefault) ... ok
+testTimeoutNone (__main__.NetworkConnectionAttributesTest.testTimeoutNone) ... ok
+testTimeoutValueNamed (__main__.NetworkConnectionAttributesTest.testTimeoutValueNamed) ... ok
+testTimeoutValueNonamed (__main__.NetworkConnectionAttributesTest.testTimeoutValueNonamed) ... ok
+testInsideTimeout (__main__.NetworkConnectionBehaviourTest.testInsideTimeout) ... ok
+testOutsideTimeout (__main__.NetworkConnectionBehaviourTest.testOutsideTimeout) ... ok
+test_connect (__main__.NetworkConnectionNoServer.test_connect) ... ok
+test_create_connection (__main__.NetworkConnectionNoServer.test_create_connection) ... ok
+test_create_connection_all_errors (__main__.NetworkConnectionNoServer.test_create_connection_all_errors) ... ok
+test_create_connection_timeout (__main__.NetworkConnectionNoServer.test_create_connection_timeout) ... ok
+testAccept (__main__.NonBlockingTCPTests.testAccept) ... ok
+testInheritFlagsBlocking (__main__.NonBlockingTCPTests.testInheritFlagsBlocking) ... ok
+testInheritFlagsTimeout (__main__.NonBlockingTCPTests.testInheritFlagsTimeout) ... ok
+testInitNonBlocking (__main__.NonBlockingTCPTests.testInitNonBlocking) ... ok
+testLargeTimeout (__main__.NonBlockingTCPTests.testLargeTimeout) ... ok
+testRecv (__main__.NonBlockingTCPTests.testRecv) ... ok
+testSetBlocking (__main__.NonBlockingTCPTests.testSetBlocking) ... ok
+testSetBlocking_overflow (__main__.NonBlockingTCPTests.testSetBlocking_overflow) ... skipped 'requires _testcapi'
+test_SOCK_NONBLOCK (__main__.NonblockConstantTest.test_SOCK_NONBLOCK) ... ok
+test_injected_authentication_failure (__main__.PurePythonSocketPairTest.test_injected_authentication_failure) ... ok
+test_ipv4 (__main__.PurePythonSocketPairTest.test_ipv4) ... ok
+test_ipv6 (__main__.PurePythonSocketPairTest.test_ipv6) ... ok
+test_recv (__main__.PurePythonSocketPairTest.test_recv) ... ok
+test_send (__main__.PurePythonSocketPairTest.test_send) ... ok
+testPeek (__main__.RDSTest.testPeek) ... skipped 'RDS sockets required for this test.'
+testSelect (__main__.RDSTest.testSelect) ... skipped 'RDS sockets required for this test.'
+testSendAndRecv (__main__.RDSTest.testSendAndRecv) ... skipped 'RDS sockets required for this test.'
+testSendAndRecvMsg (__main__.RDSTest.testSendAndRecvMsg) ... skipped 'RDS sockets required for this test.'
+testSendAndRecvMulti (__main__.RDSTest.testSendAndRecvMulti) ... skipped 'RDS sockets required for this test.'
+testCmsgTruncNoBufSize (__main__.RecvmsgIntoRFC3542AncillaryUDP6Test.testCmsgTruncNoBufSize) ... ok
+testOddCmsgSize (__main__.RecvmsgIntoRFC3542AncillaryUDP6Test.testOddCmsgSize) ... ok
+testRecvHopLimit (__main__.RecvmsgIntoRFC3542AncillaryUDP6Test.testRecvHopLimit) ... ok
+testRecvHopLimitCMSG_SPACE (__main__.RecvmsgIntoRFC3542AncillaryUDP6Test.testRecvHopLimitCMSG_SPACE) ... ok
+testRecvTrafficClassAndHopLimit (__main__.RecvmsgIntoRFC3542AncillaryUDP6Test.testRecvTrafficClassAndHopLimit) ... ok
+testRecvTrafficClassAndHopLimitCMSG_SPACE (__main__.RecvmsgIntoRFC3542AncillaryUDP6Test.testRecvTrafficClassAndHopLimitCMSG_SPACE) ... ok
+testSecondCmsgTrunc0 (__main__.RecvmsgIntoRFC3542AncillaryUDP6Test.testSecondCmsgTrunc0) ... ok
+testSecondCmsgTrunc1 (__main__.RecvmsgIntoRFC3542AncillaryUDP6Test.testSecondCmsgTrunc1) ... ok
+testSecondCmsgTrunc2Int (__main__.RecvmsgIntoRFC3542AncillaryUDP6Test.testSecondCmsgTrunc2Int) ... ok
+testSecondCmsgTruncInData (__main__.RecvmsgIntoRFC3542AncillaryUDP6Test.testSecondCmsgTruncInData) ... ok
+testSecondCmsgTruncLen0Minus1 (__main__.RecvmsgIntoRFC3542AncillaryUDP6Test.testSecondCmsgTruncLen0Minus1) ... ok
+testSetHopLimit (__main__.RecvmsgIntoRFC3542AncillaryUDP6Test.testSetHopLimit) ... ok
+testSetTrafficClassAndHopLimit (__main__.RecvmsgIntoRFC3542AncillaryUDP6Test.testSetTrafficClassAndHopLimit) ... ok
+testSingleCmsgTrunc0 (__main__.RecvmsgIntoRFC3542AncillaryUDP6Test.testSingleCmsgTrunc0) ... ok
+testSingleCmsgTrunc1 (__main__.RecvmsgIntoRFC3542AncillaryUDP6Test.testSingleCmsgTrunc1) ... ok
+testSingleCmsgTrunc2Int (__main__.RecvmsgIntoRFC3542AncillaryUDP6Test.testSingleCmsgTrunc2Int) ... ok
+testSingleCmsgTruncInData (__main__.RecvmsgIntoRFC3542AncillaryUDP6Test.testSingleCmsgTruncInData) ... ok
+testSingleCmsgTruncLen0Minus1 (__main__.RecvmsgIntoRFC3542AncillaryUDP6Test.testSingleCmsgTruncLen0Minus1) ... ok
+testCmsgTruncNoBufSize (__main__.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testCmsgTruncNoBufSize) ... ok
+testOddCmsgSize (__main__.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testOddCmsgSize) ... ok
+testRecvHopLimit (__main__.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testRecvHopLimit) ... ok
+testRecvHopLimitCMSG_SPACE (__main__.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testRecvHopLimitCMSG_SPACE) ... ok
+testRecvTrafficClassAndHopLimit (__main__.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testRecvTrafficClassAndHopLimit) ... ok
+testRecvTrafficClassAndHopLimitCMSG_SPACE (__main__.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testRecvTrafficClassAndHopLimitCMSG_SPACE) ... ok
+testSecondCmsgTrunc0 (__main__.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testSecondCmsgTrunc0) ... ok
+testSecondCmsgTrunc1 (__main__.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testSecondCmsgTrunc1) ... ok
+testSecondCmsgTrunc2Int (__main__.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testSecondCmsgTrunc2Int) ... ok
+testSecondCmsgTruncInData (__main__.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testSecondCmsgTruncInData) ... ok
+testSecondCmsgTruncLen0Minus1 (__main__.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testSecondCmsgTruncLen0Minus1) ... ok
+testSetHopLimit (__main__.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testSetHopLimit) ... ok
+testSetTrafficClassAndHopLimit (__main__.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testSetTrafficClassAndHopLimit) ... ok
+testSingleCmsgTrunc0 (__main__.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testSingleCmsgTrunc0) ... ok
+testSingleCmsgTrunc1 (__main__.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testSingleCmsgTrunc1) ... ok
+testSingleCmsgTrunc2Int (__main__.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testSingleCmsgTrunc2Int) ... ok
+testSingleCmsgTruncInData (__main__.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testSingleCmsgTruncInData) ... ok
+testSingleCmsgTruncLen0Minus1 (__main__.RecvmsgIntoRFC3542AncillaryUDPLITE6Test.testSingleCmsgTruncLen0Minus1) ... ok
+testCmsgTrunc0 (__main__.RecvmsgIntoSCMRightsStreamTest.testCmsgTrunc0) ... ok
+testCmsgTrunc1 (__main__.RecvmsgIntoSCMRightsStreamTest.testCmsgTrunc1) ... ok
+testCmsgTrunc2Int (__main__.RecvmsgIntoSCMRightsStreamTest.testCmsgTrunc2Int) ... ok
+testCmsgTruncLen0 (__main__.RecvmsgIntoSCMRightsStreamTest.testCmsgTruncLen0) ... ok
+testCmsgTruncLen0Minus1 (__main__.RecvmsgIntoSCMRightsStreamTest.testCmsgTruncLen0Minus1) ... ok
+testCmsgTruncLen0Plus1 (__main__.RecvmsgIntoSCMRightsStreamTest.testCmsgTruncLen0Plus1) ... ok
+testCmsgTruncLen1 (__main__.RecvmsgIntoSCMRightsStreamTest.testCmsgTruncLen1) ... ok
+testCmsgTruncLen2Minus1 (__main__.RecvmsgIntoSCMRightsStreamTest.testCmsgTruncLen2Minus1) ... ok
+testCmsgTruncNoBufSize (__main__.RecvmsgIntoSCMRightsStreamTest.testCmsgTruncNoBufSize) ... ok
+testFDPassCMSG_LEN (__main__.RecvmsgIntoSCMRightsStreamTest.testFDPassCMSG_LEN) ... ok
+testFDPassCMSG_SPACE (__main__.RecvmsgIntoSCMRightsStreamTest.testFDPassCMSG_SPACE) ... ok
+testFDPassEmpty (__main__.RecvmsgIntoSCMRightsStreamTest.testFDPassEmpty) ... ok
+testFDPassPartialInt (__main__.RecvmsgIntoSCMRightsStreamTest.testFDPassPartialInt) ... ok
+testFDPassPartialIntInMiddle (__main__.RecvmsgIntoSCMRightsStreamTest.testFDPassPartialIntInMiddle) ... ok
+testFDPassSeparate (__main__.RecvmsgIntoSCMRightsStreamTest.testFDPassSeparate) ... ok
+testFDPassSeparateMinSpace (__main__.RecvmsgIntoSCMRightsStreamTest.testFDPassSeparateMinSpace) ... ok
+testFDPassSimple (__main__.RecvmsgIntoSCMRightsStreamTest.testFDPassSimple) ... ok
+testMultipleFDPass (__main__.RecvmsgIntoSCMRightsStreamTest.testMultipleFDPass) ... ok
+testRecvmsg (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsg) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgAfterClose (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgAfterClose) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgEOF (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgEOF) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgExplicitDefaults (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgExplicitDefaults) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgFromSendmsg (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgFromSendmsg) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgIntoArray (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgIntoArray) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgIntoBadArgs (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgIntoBadArgs) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgIntoGenerator (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgIntoGenerator) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgIntoScatter (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgIntoScatter) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgLongAncillaryBuf (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgLongAncillaryBuf) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgOverflow (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgOverflow) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgPeek (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgPeek) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgShortAncillaryBuf (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgShortAncillaryBuf) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgShorter (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgShorter) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgTimeout (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgTimeout) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgTrunc (__main__.RecvmsgIntoSCTPStreamTest.testRecvmsgTrunc) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsg (__main__.RecvmsgIntoTCPTest.testRecvmsg) ... ok
+testRecvmsgAfterClose (__main__.RecvmsgIntoTCPTest.testRecvmsgAfterClose) ... ok
+testRecvmsgEOF (__main__.RecvmsgIntoTCPTest.testRecvmsgEOF) ... ok
+testRecvmsgExplicitDefaults (__main__.RecvmsgIntoTCPTest.testRecvmsgExplicitDefaults) ... ok
+testRecvmsgFromSendmsg (__main__.RecvmsgIntoTCPTest.testRecvmsgFromSendmsg) ... ok
+testRecvmsgIntoArray (__main__.RecvmsgIntoTCPTest.testRecvmsgIntoArray) ... ok
+testRecvmsgIntoBadArgs (__main__.RecvmsgIntoTCPTest.testRecvmsgIntoBadArgs) ... ok
+testRecvmsgIntoGenerator (__main__.RecvmsgIntoTCPTest.testRecvmsgIntoGenerator) ... ok
+testRecvmsgIntoScatter (__main__.RecvmsgIntoTCPTest.testRecvmsgIntoScatter) ... ok
+testRecvmsgLongAncillaryBuf (__main__.RecvmsgIntoTCPTest.testRecvmsgLongAncillaryBuf) ... ok
+testRecvmsgOverflow (__main__.RecvmsgIntoTCPTest.testRecvmsgOverflow) ... ok
+testRecvmsgPeek (__main__.RecvmsgIntoTCPTest.testRecvmsgPeek) ... ok
+testRecvmsgShortAncillaryBuf (__main__.RecvmsgIntoTCPTest.testRecvmsgShortAncillaryBuf) ... ok
+testRecvmsgShorter (__main__.RecvmsgIntoTCPTest.testRecvmsgShorter) ... ok
+testRecvmsgTimeout (__main__.RecvmsgIntoTCPTest.testRecvmsgTimeout) ... ok
+testRecvmsgTrunc (__main__.RecvmsgIntoTCPTest.testRecvmsgTrunc) ... ok
+testRecvmsg (__main__.RecvmsgIntoUDP6Test.testRecvmsg) ... ok
+testRecvmsgAfterClose (__main__.RecvmsgIntoUDP6Test.testRecvmsgAfterClose) ... ok
+testRecvmsgExplicitDefaults (__main__.RecvmsgIntoUDP6Test.testRecvmsgExplicitDefaults) ... ok
+testRecvmsgFromSendmsg (__main__.RecvmsgIntoUDP6Test.testRecvmsgFromSendmsg) ... ok
+testRecvmsgIntoArray (__main__.RecvmsgIntoUDP6Test.testRecvmsgIntoArray) ... ok
+testRecvmsgIntoBadArgs (__main__.RecvmsgIntoUDP6Test.testRecvmsgIntoBadArgs) ... ok
+testRecvmsgIntoGenerator (__main__.RecvmsgIntoUDP6Test.testRecvmsgIntoGenerator) ... ok
+testRecvmsgIntoScatter (__main__.RecvmsgIntoUDP6Test.testRecvmsgIntoScatter) ... ok
+testRecvmsgLongAncillaryBuf (__main__.RecvmsgIntoUDP6Test.testRecvmsgLongAncillaryBuf) ... ok
+testRecvmsgPeek (__main__.RecvmsgIntoUDP6Test.testRecvmsgPeek) ... ok
+testRecvmsgShortAncillaryBuf (__main__.RecvmsgIntoUDP6Test.testRecvmsgShortAncillaryBuf) ... ok
+testRecvmsgShorter (__main__.RecvmsgIntoUDP6Test.testRecvmsgShorter) ... ok
+testRecvmsgTimeout (__main__.RecvmsgIntoUDP6Test.testRecvmsgTimeout) ... ok
+testRecvmsgTrunc (__main__.RecvmsgIntoUDP6Test.testRecvmsgTrunc) ... ok
+testRecvmsg (__main__.RecvmsgIntoUDPLITE6Test.testRecvmsg) ... ok
+testRecvmsgAfterClose (__main__.RecvmsgIntoUDPLITE6Test.testRecvmsgAfterClose) ... ok
+testRecvmsgExplicitDefaults (__main__.RecvmsgIntoUDPLITE6Test.testRecvmsgExplicitDefaults) ... ok
+testRecvmsgFromSendmsg (__main__.RecvmsgIntoUDPLITE6Test.testRecvmsgFromSendmsg) ... ok
+testRecvmsgIntoArray (__main__.RecvmsgIntoUDPLITE6Test.testRecvmsgIntoArray) ... ok
+testRecvmsgIntoBadArgs (__main__.RecvmsgIntoUDPLITE6Test.testRecvmsgIntoBadArgs) ... ok
+testRecvmsgIntoGenerator (__main__.RecvmsgIntoUDPLITE6Test.testRecvmsgIntoGenerator) ... ok
+testRecvmsgIntoScatter (__main__.RecvmsgIntoUDPLITE6Test.testRecvmsgIntoScatter) ... ok
+testRecvmsgLongAncillaryBuf (__main__.RecvmsgIntoUDPLITE6Test.testRecvmsgLongAncillaryBuf) ... ok
+testRecvmsgPeek (__main__.RecvmsgIntoUDPLITE6Test.testRecvmsgPeek) ... ok
+testRecvmsgShortAncillaryBuf (__main__.RecvmsgIntoUDPLITE6Test.testRecvmsgShortAncillaryBuf) ... ok
+testRecvmsgShorter (__main__.RecvmsgIntoUDPLITE6Test.testRecvmsgShorter) ... ok
+testRecvmsgTimeout (__main__.RecvmsgIntoUDPLITE6Test.testRecvmsgTimeout) ... ok
+testRecvmsgTrunc (__main__.RecvmsgIntoUDPLITE6Test.testRecvmsgTrunc) ... ok
+testRecvmsg (__main__.RecvmsgIntoUDPLITETest.testRecvmsg) ... ok
+testRecvmsgAfterClose (__main__.RecvmsgIntoUDPLITETest.testRecvmsgAfterClose) ... ok
+testRecvmsgExplicitDefaults (__main__.RecvmsgIntoUDPLITETest.testRecvmsgExplicitDefaults) ... ok
+testRecvmsgFromSendmsg (__main__.RecvmsgIntoUDPLITETest.testRecvmsgFromSendmsg) ... ok
+testRecvmsgIntoArray (__main__.RecvmsgIntoUDPLITETest.testRecvmsgIntoArray) ... ok
+testRecvmsgIntoBadArgs (__main__.RecvmsgIntoUDPLITETest.testRecvmsgIntoBadArgs) ... ok
+testRecvmsgIntoGenerator (__main__.RecvmsgIntoUDPLITETest.testRecvmsgIntoGenerator) ... ok
+testRecvmsgIntoScatter (__main__.RecvmsgIntoUDPLITETest.testRecvmsgIntoScatter) ... ok
+testRecvmsgLongAncillaryBuf (__main__.RecvmsgIntoUDPLITETest.testRecvmsgLongAncillaryBuf) ... ok
+testRecvmsgPeek (__main__.RecvmsgIntoUDPLITETest.testRecvmsgPeek) ... ok
+testRecvmsgShortAncillaryBuf (__main__.RecvmsgIntoUDPLITETest.testRecvmsgShortAncillaryBuf) ... ok
+testRecvmsgShorter (__main__.RecvmsgIntoUDPLITETest.testRecvmsgShorter) ... ok
+testRecvmsgTimeout (__main__.RecvmsgIntoUDPLITETest.testRecvmsgTimeout) ... ok
+testRecvmsgTrunc (__main__.RecvmsgIntoUDPLITETest.testRecvmsgTrunc) ... ok
+testRecvmsg (__main__.RecvmsgIntoUDPTest.testRecvmsg) ... ok
+testRecvmsgAfterClose (__main__.RecvmsgIntoUDPTest.testRecvmsgAfterClose) ... ok
+testRecvmsgExplicitDefaults (__main__.RecvmsgIntoUDPTest.testRecvmsgExplicitDefaults) ... ok
+testRecvmsgFromSendmsg (__main__.RecvmsgIntoUDPTest.testRecvmsgFromSendmsg) ... ok
+testRecvmsgIntoArray (__main__.RecvmsgIntoUDPTest.testRecvmsgIntoArray) ... ok
+testRecvmsgIntoBadArgs (__main__.RecvmsgIntoUDPTest.testRecvmsgIntoBadArgs) ... ok
+testRecvmsgIntoGenerator (__main__.RecvmsgIntoUDPTest.testRecvmsgIntoGenerator) ... ok
+testRecvmsgIntoScatter (__main__.RecvmsgIntoUDPTest.testRecvmsgIntoScatter) ... ok
+testRecvmsgLongAncillaryBuf (__main__.RecvmsgIntoUDPTest.testRecvmsgLongAncillaryBuf) ... ok
+testRecvmsgPeek (__main__.RecvmsgIntoUDPTest.testRecvmsgPeek) ... ok
+testRecvmsgShortAncillaryBuf (__main__.RecvmsgIntoUDPTest.testRecvmsgShortAncillaryBuf) ... ok
+testRecvmsgShorter (__main__.RecvmsgIntoUDPTest.testRecvmsgShorter) ... ok
+testRecvmsgTimeout (__main__.RecvmsgIntoUDPTest.testRecvmsgTimeout) ... ok
+testRecvmsgTrunc (__main__.RecvmsgIntoUDPTest.testRecvmsgTrunc) ... ok
+testRecvmsg (__main__.RecvmsgIntoUnixStreamTest.testRecvmsg) ... ok
+testRecvmsgAfterClose (__main__.RecvmsgIntoUnixStreamTest.testRecvmsgAfterClose) ... ok
+testRecvmsgEOF (__main__.RecvmsgIntoUnixStreamTest.testRecvmsgEOF) ... ok
+testRecvmsgExplicitDefaults (__main__.RecvmsgIntoUnixStreamTest.testRecvmsgExplicitDefaults) ... ok
+testRecvmsgFromSendmsg (__main__.RecvmsgIntoUnixStreamTest.testRecvmsgFromSendmsg) ... ok
+testRecvmsgIntoArray (__main__.RecvmsgIntoUnixStreamTest.testRecvmsgIntoArray) ... ok
+testRecvmsgIntoBadArgs (__main__.RecvmsgIntoUnixStreamTest.testRecvmsgIntoBadArgs) ... ok
+testRecvmsgIntoGenerator (__main__.RecvmsgIntoUnixStreamTest.testRecvmsgIntoGenerator) ... ok
+testRecvmsgIntoScatter (__main__.RecvmsgIntoUnixStreamTest.testRecvmsgIntoScatter) ... ok
+testRecvmsgLongAncillaryBuf (__main__.RecvmsgIntoUnixStreamTest.testRecvmsgLongAncillaryBuf) ... ok
+testRecvmsgOverflow (__main__.RecvmsgIntoUnixStreamTest.testRecvmsgOverflow) ... ok
+testRecvmsgPeek (__main__.RecvmsgIntoUnixStreamTest.testRecvmsgPeek) ... ok
+testRecvmsgShortAncillaryBuf (__main__.RecvmsgIntoUnixStreamTest.testRecvmsgShortAncillaryBuf) ... ok
+testRecvmsgShorter (__main__.RecvmsgIntoUnixStreamTest.testRecvmsgShorter) ... ok
+testRecvmsgTimeout (__main__.RecvmsgIntoUnixStreamTest.testRecvmsgTimeout) ... ok
+testRecvmsgTrunc (__main__.RecvmsgIntoUnixStreamTest.testRecvmsgTrunc) ... ok
+testCmsgTruncNoBufSize (__main__.RecvmsgRFC3542AncillaryUDP6Test.testCmsgTruncNoBufSize) ... ok
+testOddCmsgSize (__main__.RecvmsgRFC3542AncillaryUDP6Test.testOddCmsgSize) ... ok
+testRecvHopLimit (__main__.RecvmsgRFC3542AncillaryUDP6Test.testRecvHopLimit) ... ok
+testRecvHopLimitCMSG_SPACE (__main__.RecvmsgRFC3542AncillaryUDP6Test.testRecvHopLimitCMSG_SPACE) ... ok
+testRecvTrafficClassAndHopLimit (__main__.RecvmsgRFC3542AncillaryUDP6Test.testRecvTrafficClassAndHopLimit) ... ok
+testRecvTrafficClassAndHopLimitCMSG_SPACE (__main__.RecvmsgRFC3542AncillaryUDP6Test.testRecvTrafficClassAndHopLimitCMSG_SPACE) ... ok
+testSecondCmsgTrunc0 (__main__.RecvmsgRFC3542AncillaryUDP6Test.testSecondCmsgTrunc0) ... ok
+testSecondCmsgTrunc1 (__main__.RecvmsgRFC3542AncillaryUDP6Test.testSecondCmsgTrunc1) ... ok
+testSecondCmsgTrunc2Int (__main__.RecvmsgRFC3542AncillaryUDP6Test.testSecondCmsgTrunc2Int) ... ok
+testSecondCmsgTruncInData (__main__.RecvmsgRFC3542AncillaryUDP6Test.testSecondCmsgTruncInData) ... ok
+testSecondCmsgTruncLen0Minus1 (__main__.RecvmsgRFC3542AncillaryUDP6Test.testSecondCmsgTruncLen0Minus1) ... ok
+testSetHopLimit (__main__.RecvmsgRFC3542AncillaryUDP6Test.testSetHopLimit) ... ok
+testSetTrafficClassAndHopLimit (__main__.RecvmsgRFC3542AncillaryUDP6Test.testSetTrafficClassAndHopLimit) ... ok
+testSingleCmsgTrunc0 (__main__.RecvmsgRFC3542AncillaryUDP6Test.testSingleCmsgTrunc0) ... ok
+testSingleCmsgTrunc1 (__main__.RecvmsgRFC3542AncillaryUDP6Test.testSingleCmsgTrunc1) ... ok
+testSingleCmsgTrunc2Int (__main__.RecvmsgRFC3542AncillaryUDP6Test.testSingleCmsgTrunc2Int) ... ok
+testSingleCmsgTruncInData (__main__.RecvmsgRFC3542AncillaryUDP6Test.testSingleCmsgTruncInData) ... ok
+testSingleCmsgTruncLen0Minus1 (__main__.RecvmsgRFC3542AncillaryUDP6Test.testSingleCmsgTruncLen0Minus1) ... ok
+testCmsgTruncNoBufSize (__main__.RecvmsgRFC3542AncillaryUDPLITE6Test.testCmsgTruncNoBufSize) ... ok
+testOddCmsgSize (__main__.RecvmsgRFC3542AncillaryUDPLITE6Test.testOddCmsgSize) ... ok
+testRecvHopLimit (__main__.RecvmsgRFC3542AncillaryUDPLITE6Test.testRecvHopLimit) ... ok
+testRecvHopLimitCMSG_SPACE (__main__.RecvmsgRFC3542AncillaryUDPLITE6Test.testRecvHopLimitCMSG_SPACE) ... ok
+testRecvTrafficClassAndHopLimit (__main__.RecvmsgRFC3542AncillaryUDPLITE6Test.testRecvTrafficClassAndHopLimit) ... ok
+testRecvTrafficClassAndHopLimitCMSG_SPACE (__main__.RecvmsgRFC3542AncillaryUDPLITE6Test.testRecvTrafficClassAndHopLimitCMSG_SPACE) ... ok
+testSecondCmsgTrunc0 (__main__.RecvmsgRFC3542AncillaryUDPLITE6Test.testSecondCmsgTrunc0) ... ok
+testSecondCmsgTrunc1 (__main__.RecvmsgRFC3542AncillaryUDPLITE6Test.testSecondCmsgTrunc1) ... ok
+testSecondCmsgTrunc2Int (__main__.RecvmsgRFC3542AncillaryUDPLITE6Test.testSecondCmsgTrunc2Int) ... ok
+testSecondCmsgTruncInData (__main__.RecvmsgRFC3542AncillaryUDPLITE6Test.testSecondCmsgTruncInData) ... ok
+testSecondCmsgTruncLen0Minus1 (__main__.RecvmsgRFC3542AncillaryUDPLITE6Test.testSecondCmsgTruncLen0Minus1) ... ok
+testSetHopLimit (__main__.RecvmsgRFC3542AncillaryUDPLITE6Test.testSetHopLimit) ... ok
+testSetTrafficClassAndHopLimit (__main__.RecvmsgRFC3542AncillaryUDPLITE6Test.testSetTrafficClassAndHopLimit) ... ok
+testSingleCmsgTrunc0 (__main__.RecvmsgRFC3542AncillaryUDPLITE6Test.testSingleCmsgTrunc0) ... ok
+testSingleCmsgTrunc1 (__main__.RecvmsgRFC3542AncillaryUDPLITE6Test.testSingleCmsgTrunc1) ... ok
+testSingleCmsgTrunc2Int (__main__.RecvmsgRFC3542AncillaryUDPLITE6Test.testSingleCmsgTrunc2Int) ... ok
+testSingleCmsgTruncInData (__main__.RecvmsgRFC3542AncillaryUDPLITE6Test.testSingleCmsgTruncInData) ... ok
+testSingleCmsgTruncLen0Minus1 (__main__.RecvmsgRFC3542AncillaryUDPLITE6Test.testSingleCmsgTruncLen0Minus1) ... ok
+testCmsgTrunc0 (__main__.RecvmsgSCMRightsStreamTest.testCmsgTrunc0) ... ok
+testCmsgTrunc1 (__main__.RecvmsgSCMRightsStreamTest.testCmsgTrunc1) ... ok
+testCmsgTrunc2Int (__main__.RecvmsgSCMRightsStreamTest.testCmsgTrunc2Int) ... ok
+testCmsgTruncLen0 (__main__.RecvmsgSCMRightsStreamTest.testCmsgTruncLen0) ... ok
+testCmsgTruncLen0Minus1 (__main__.RecvmsgSCMRightsStreamTest.testCmsgTruncLen0Minus1) ... ok
+testCmsgTruncLen0Plus1 (__main__.RecvmsgSCMRightsStreamTest.testCmsgTruncLen0Plus1) ... ok
+testCmsgTruncLen1 (__main__.RecvmsgSCMRightsStreamTest.testCmsgTruncLen1) ... ok
+testCmsgTruncLen2Minus1 (__main__.RecvmsgSCMRightsStreamTest.testCmsgTruncLen2Minus1) ... ok
+testCmsgTruncNoBufSize (__main__.RecvmsgSCMRightsStreamTest.testCmsgTruncNoBufSize) ... ok
+testFDPassCMSG_LEN (__main__.RecvmsgSCMRightsStreamTest.testFDPassCMSG_LEN) ... ok
+testFDPassCMSG_SPACE (__main__.RecvmsgSCMRightsStreamTest.testFDPassCMSG_SPACE) ... ok
+testFDPassEmpty (__main__.RecvmsgSCMRightsStreamTest.testFDPassEmpty) ... ok
+testFDPassPartialInt (__main__.RecvmsgSCMRightsStreamTest.testFDPassPartialInt) ... ok
+testFDPassPartialIntInMiddle (__main__.RecvmsgSCMRightsStreamTest.testFDPassPartialIntInMiddle) ... ok
+testFDPassSeparate (__main__.RecvmsgSCMRightsStreamTest.testFDPassSeparate) ... ok
+testFDPassSeparateMinSpace (__main__.RecvmsgSCMRightsStreamTest.testFDPassSeparateMinSpace) ... ok
+testFDPassSimple (__main__.RecvmsgSCMRightsStreamTest.testFDPassSimple) ... ok
+testMultipleFDPass (__main__.RecvmsgSCMRightsStreamTest.testMultipleFDPass) ... ok
+testRecvmsg (__main__.RecvmsgSCTPStreamTest.testRecvmsg) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgAfterClose (__main__.RecvmsgSCTPStreamTest.testRecvmsgAfterClose) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgBadArgs (__main__.RecvmsgSCTPStreamTest.testRecvmsgBadArgs) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgEOF (__main__.RecvmsgSCTPStreamTest.testRecvmsgEOF) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgExplicitDefaults (__main__.RecvmsgSCTPStreamTest.testRecvmsgExplicitDefaults) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgFromSendmsg (__main__.RecvmsgSCTPStreamTest.testRecvmsgFromSendmsg) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgLongAncillaryBuf (__main__.RecvmsgSCTPStreamTest.testRecvmsgLongAncillaryBuf) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgOverflow (__main__.RecvmsgSCTPStreamTest.testRecvmsgOverflow) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgPeek (__main__.RecvmsgSCTPStreamTest.testRecvmsgPeek) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgShortAncillaryBuf (__main__.RecvmsgSCTPStreamTest.testRecvmsgShortAncillaryBuf) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgShorter (__main__.RecvmsgSCTPStreamTest.testRecvmsgShorter) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgTimeout (__main__.RecvmsgSCTPStreamTest.testRecvmsgTimeout) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsgTrunc (__main__.RecvmsgSCTPStreamTest.testRecvmsgTrunc) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testRecvmsg (__main__.RecvmsgTCPTest.testRecvmsg) ... ok
+testRecvmsgAfterClose (__main__.RecvmsgTCPTest.testRecvmsgAfterClose) ... ok
+testRecvmsgBadArgs (__main__.RecvmsgTCPTest.testRecvmsgBadArgs) ... ok
+testRecvmsgEOF (__main__.RecvmsgTCPTest.testRecvmsgEOF) ... ok
+testRecvmsgExplicitDefaults (__main__.RecvmsgTCPTest.testRecvmsgExplicitDefaults) ... ok
+testRecvmsgFromSendmsg (__main__.RecvmsgTCPTest.testRecvmsgFromSendmsg) ... ok
+testRecvmsgLongAncillaryBuf (__main__.RecvmsgTCPTest.testRecvmsgLongAncillaryBuf) ... ok
+testRecvmsgOverflow (__main__.RecvmsgTCPTest.testRecvmsgOverflow) ... ok
+testRecvmsgPeek (__main__.RecvmsgTCPTest.testRecvmsgPeek) ... ok
+testRecvmsgShortAncillaryBuf (__main__.RecvmsgTCPTest.testRecvmsgShortAncillaryBuf) ... ok
+testRecvmsgShorter (__main__.RecvmsgTCPTest.testRecvmsgShorter) ... ok
+testRecvmsgTimeout (__main__.RecvmsgTCPTest.testRecvmsgTimeout) ... ok
+testRecvmsgTrunc (__main__.RecvmsgTCPTest.testRecvmsgTrunc) ... ok
+testRecvmsg (__main__.RecvmsgUDP6Test.testRecvmsg) ... ok
+testRecvmsgAfterClose (__main__.RecvmsgUDP6Test.testRecvmsgAfterClose) ... ok
+testRecvmsgBadArgs (__main__.RecvmsgUDP6Test.testRecvmsgBadArgs) ... ok
+testRecvmsgExplicitDefaults (__main__.RecvmsgUDP6Test.testRecvmsgExplicitDefaults) ... ok
+testRecvmsgFromSendmsg (__main__.RecvmsgUDP6Test.testRecvmsgFromSendmsg) ... ok
+testRecvmsgLongAncillaryBuf (__main__.RecvmsgUDP6Test.testRecvmsgLongAncillaryBuf) ... ok
+testRecvmsgPeek (__main__.RecvmsgUDP6Test.testRecvmsgPeek) ... ok
+testRecvmsgShortAncillaryBuf (__main__.RecvmsgUDP6Test.testRecvmsgShortAncillaryBuf) ... ok
+testRecvmsgShorter (__main__.RecvmsgUDP6Test.testRecvmsgShorter) ... ok
+testRecvmsgTimeout (__main__.RecvmsgUDP6Test.testRecvmsgTimeout) ... ok
+testRecvmsgTrunc (__main__.RecvmsgUDP6Test.testRecvmsgTrunc) ... ok
+testRecvmsg (__main__.RecvmsgUDPLITE6Test.testRecvmsg) ... ok
+testRecvmsgAfterClose (__main__.RecvmsgUDPLITE6Test.testRecvmsgAfterClose) ... ok
+testRecvmsgBadArgs (__main__.RecvmsgUDPLITE6Test.testRecvmsgBadArgs) ... ok
+testRecvmsgExplicitDefaults (__main__.RecvmsgUDPLITE6Test.testRecvmsgExplicitDefaults) ... ok
+testRecvmsgFromSendmsg (__main__.RecvmsgUDPLITE6Test.testRecvmsgFromSendmsg) ... ok
+testRecvmsgLongAncillaryBuf (__main__.RecvmsgUDPLITE6Test.testRecvmsgLongAncillaryBuf) ... ok
+testRecvmsgPeek (__main__.RecvmsgUDPLITE6Test.testRecvmsgPeek) ... ok
+testRecvmsgShortAncillaryBuf (__main__.RecvmsgUDPLITE6Test.testRecvmsgShortAncillaryBuf) ... ok
+testRecvmsgShorter (__main__.RecvmsgUDPLITE6Test.testRecvmsgShorter) ... ok
+testRecvmsgTimeout (__main__.RecvmsgUDPLITE6Test.testRecvmsgTimeout) ... ok
+testRecvmsgTrunc (__main__.RecvmsgUDPLITE6Test.testRecvmsgTrunc) ... ok
+testRecvmsg (__main__.RecvmsgUDPLITETest.testRecvmsg) ... ok
+testRecvmsgAfterClose (__main__.RecvmsgUDPLITETest.testRecvmsgAfterClose) ... ok
+testRecvmsgBadArgs (__main__.RecvmsgUDPLITETest.testRecvmsgBadArgs) ... ok
+testRecvmsgExplicitDefaults (__main__.RecvmsgUDPLITETest.testRecvmsgExplicitDefaults) ... ok
+testRecvmsgFromSendmsg (__main__.RecvmsgUDPLITETest.testRecvmsgFromSendmsg) ... ok
+testRecvmsgLongAncillaryBuf (__main__.RecvmsgUDPLITETest.testRecvmsgLongAncillaryBuf) ... ok
+testRecvmsgPeek (__main__.RecvmsgUDPLITETest.testRecvmsgPeek) ... ok
+testRecvmsgShortAncillaryBuf (__main__.RecvmsgUDPLITETest.testRecvmsgShortAncillaryBuf) ... ok
+testRecvmsgShorter (__main__.RecvmsgUDPLITETest.testRecvmsgShorter) ... ok
+testRecvmsgTimeout (__main__.RecvmsgUDPLITETest.testRecvmsgTimeout) ... ok
+testRecvmsgTrunc (__main__.RecvmsgUDPLITETest.testRecvmsgTrunc) ... ok
+testRecvmsg (__main__.RecvmsgUDPTest.testRecvmsg) ... ok
+testRecvmsgAfterClose (__main__.RecvmsgUDPTest.testRecvmsgAfterClose) ... ok
+testRecvmsgBadArgs (__main__.RecvmsgUDPTest.testRecvmsgBadArgs) ... ok
+testRecvmsgExplicitDefaults (__main__.RecvmsgUDPTest.testRecvmsgExplicitDefaults) ... ok
+testRecvmsgFromSendmsg (__main__.RecvmsgUDPTest.testRecvmsgFromSendmsg) ... ok
+testRecvmsgLongAncillaryBuf (__main__.RecvmsgUDPTest.testRecvmsgLongAncillaryBuf) ... ok
+testRecvmsgPeek (__main__.RecvmsgUDPTest.testRecvmsgPeek) ... ok
+testRecvmsgShortAncillaryBuf (__main__.RecvmsgUDPTest.testRecvmsgShortAncillaryBuf) ... ok
+testRecvmsgShorter (__main__.RecvmsgUDPTest.testRecvmsgShorter) ... ok
+testRecvmsgTimeout (__main__.RecvmsgUDPTest.testRecvmsgTimeout) ... ok
+testRecvmsgTrunc (__main__.RecvmsgUDPTest.testRecvmsgTrunc) ... ok
+testRecvmsg (__main__.RecvmsgUnixStreamTest.testRecvmsg) ... ok
+testRecvmsgAfterClose (__main__.RecvmsgUnixStreamTest.testRecvmsgAfterClose) ... ok
+testRecvmsgBadArgs (__main__.RecvmsgUnixStreamTest.testRecvmsgBadArgs) ... ok
+testRecvmsgEOF (__main__.RecvmsgUnixStreamTest.testRecvmsgEOF) ... ok
+testRecvmsgExplicitDefaults (__main__.RecvmsgUnixStreamTest.testRecvmsgExplicitDefaults) ... ok
+testRecvmsgFromSendmsg (__main__.RecvmsgUnixStreamTest.testRecvmsgFromSendmsg) ... ok
+testRecvmsgLongAncillaryBuf (__main__.RecvmsgUnixStreamTest.testRecvmsgLongAncillaryBuf) ... ok
+testRecvmsgOverflow (__main__.RecvmsgUnixStreamTest.testRecvmsgOverflow) ... ok
+testRecvmsgPeek (__main__.RecvmsgUnixStreamTest.testRecvmsgPeek) ... ok
+testRecvmsgShortAncillaryBuf (__main__.RecvmsgUnixStreamTest.testRecvmsgShortAncillaryBuf) ... ok
+testRecvmsgShorter (__main__.RecvmsgUnixStreamTest.testRecvmsgShorter) ... ok
+testRecvmsgTimeout (__main__.RecvmsgUnixStreamTest.testRecvmsgTimeout) ... ok
+testRecvmsgTrunc (__main__.RecvmsgUnixStreamTest.testRecvmsgTrunc) ... ok
+testSendAndRecvFds (__main__.SendRecvFdsTests.testSendAndRecvFds) ... ok
+testCount (__main__.SendfileUsingSendTest.testCount) ... ok
+testCountSmall (__main__.SendfileUsingSendTest.testCountSmall) ... ok
+testCountWithOffset (__main__.SendfileUsingSendTest.testCountWithOffset) ... ok
+testEmptyFileSend (__main__.SendfileUsingSendTest.testEmptyFileSend) ... ok
+testNonBlocking (__main__.SendfileUsingSendTest.testNonBlocking) ... ok
+testNonRegularFile (__main__.SendfileUsingSendTest.testNonRegularFile) ... ok
+testOffset (__main__.SendfileUsingSendTest.testOffset) ... ok
+testRegularFile (__main__.SendfileUsingSendTest.testRegularFile) ... ok
+testWithTimeout (__main__.SendfileUsingSendTest.testWithTimeout) ... ok
+testWithTimeoutTriggeredSend (__main__.SendfileUsingSendTest.testWithTimeoutTriggeredSend) ... ok
+test_errors (__main__.SendfileUsingSendTest.test_errors) ... ok
+testCount (__main__.SendfileUsingSendfileTest.testCount) ... ok
+testCountSmall (__main__.SendfileUsingSendfileTest.testCountSmall) ... ok
+testCountWithOffset (__main__.SendfileUsingSendfileTest.testCountWithOffset) ... ok
+testEmptyFileSend (__main__.SendfileUsingSendfileTest.testEmptyFileSend) ... ok
+testNonBlocking (__main__.SendfileUsingSendfileTest.testNonBlocking) ... ok
+testNonRegularFile (__main__.SendfileUsingSendfileTest.testNonRegularFile) ... ok
+testOffset (__main__.SendfileUsingSendfileTest.testOffset) ... ok
+testRegularFile (__main__.SendfileUsingSendfileTest.testRegularFile) ... ok
+testWithTimeout (__main__.SendfileUsingSendfileTest.testWithTimeout) ... ok
+testWithTimeoutTriggeredSend (__main__.SendfileUsingSendfileTest.testWithTimeoutTriggeredSend) ... ok
+test_errors (__main__.SendfileUsingSendfileTest.test_errors) ... ok
+testSendmsg (__main__.SendmsgSCTPStreamTest.testSendmsg) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testSendmsgAfterClose (__main__.SendmsgSCTPStreamTest.testSendmsgAfterClose) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testSendmsgAncillaryGenerator (__main__.SendmsgSCTPStreamTest.testSendmsgAncillaryGenerator) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testSendmsgArray (__main__.SendmsgSCTPStreamTest.testSendmsgArray) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testSendmsgBadArgs (__main__.SendmsgSCTPStreamTest.testSendmsgBadArgs) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testSendmsgBadCmsg (__main__.SendmsgSCTPStreamTest.testSendmsgBadCmsg) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testSendmsgBadMultiCmsg (__main__.SendmsgSCTPStreamTest.testSendmsgBadMultiCmsg) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testSendmsgDataGenerator (__main__.SendmsgSCTPStreamTest.testSendmsgDataGenerator) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testSendmsgDontWait (__main__.SendmsgSCTPStreamTest.testSendmsgDontWait) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testSendmsgExcessCmsgReject (__main__.SendmsgSCTPStreamTest.testSendmsgExcessCmsgReject) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testSendmsgExplicitNoneAddr (__main__.SendmsgSCTPStreamTest.testSendmsgExplicitNoneAddr) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testSendmsgGather (__main__.SendmsgSCTPStreamTest.testSendmsgGather) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testSendmsgTimeout (__main__.SendmsgSCTPStreamTest.testSendmsgTimeout) ... skipped "can't create socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP): [Errno 93] Protocol not supported"
+testSendmsg (__main__.SendmsgTCPTest.testSendmsg) ... ok
+testSendmsgAfterClose (__main__.SendmsgTCPTest.testSendmsgAfterClose) ... ok
+testSendmsgAncillaryGenerator (__main__.SendmsgTCPTest.testSendmsgAncillaryGenerator) ... ok
+testSendmsgArray (__main__.SendmsgTCPTest.testSendmsgArray) ... ok
+testSendmsgBadArgs (__main__.SendmsgTCPTest.testSendmsgBadArgs) ... ok
+testSendmsgBadCmsg (__main__.SendmsgTCPTest.testSendmsgBadCmsg) ... ok
+testSendmsgBadMultiCmsg (__main__.SendmsgTCPTest.testSendmsgBadMultiCmsg) ... ok
+testSendmsgDataGenerator (__main__.SendmsgTCPTest.testSendmsgDataGenerator) ... ok
+testSendmsgDontWait (__main__.SendmsgTCPTest.testSendmsgDontWait) ... ok
+testSendmsgExcessCmsgReject (__main__.SendmsgTCPTest.testSendmsgExcessCmsgReject) ... ok
+testSendmsgExplicitNoneAddr (__main__.SendmsgTCPTest.testSendmsgExplicitNoneAddr) ... ok
+testSendmsgGather (__main__.SendmsgTCPTest.testSendmsgGather) ... ok
+testSendmsgTimeout (__main__.SendmsgTCPTest.testSendmsgTimeout) ... ok
+testSendmsg (__main__.SendmsgUDP6Test.testSendmsg) ... ok
+testSendmsgAfterClose (__main__.SendmsgUDP6Test.testSendmsgAfterClose) ... ok
+testSendmsgAncillaryGenerator (__main__.SendmsgUDP6Test.testSendmsgAncillaryGenerator) ... ok
+testSendmsgArray (__main__.SendmsgUDP6Test.testSendmsgArray) ... ok
+testSendmsgBadArgs (__main__.SendmsgUDP6Test.testSendmsgBadArgs) ... ok
+testSendmsgBadCmsg (__main__.SendmsgUDP6Test.testSendmsgBadCmsg) ... ok
+testSendmsgBadMultiCmsg (__main__.SendmsgUDP6Test.testSendmsgBadMultiCmsg) ... ok
+testSendmsgDataGenerator (__main__.SendmsgUDP6Test.testSendmsgDataGenerator) ... ok
+testSendmsgExcessCmsgReject (__main__.SendmsgUDP6Test.testSendmsgExcessCmsgReject) ... ok
+testSendmsgGather (__main__.SendmsgUDP6Test.testSendmsgGather) ... ok
+testSendmsgNoDestAddr (__main__.SendmsgUDP6Test.testSendmsgNoDestAddr) ... ok
+testSendmsg (__main__.SendmsgUDPLITE6Test.testSendmsg) ... ok
+testSendmsgAfterClose (__main__.SendmsgUDPLITE6Test.testSendmsgAfterClose) ... ok
+testSendmsgAncillaryGenerator (__main__.SendmsgUDPLITE6Test.testSendmsgAncillaryGenerator) ... ok
+testSendmsgArray (__main__.SendmsgUDPLITE6Test.testSendmsgArray) ... ok
+testSendmsgBadArgs (__main__.SendmsgUDPLITE6Test.testSendmsgBadArgs) ... ok
+testSendmsgBadCmsg (__main__.SendmsgUDPLITE6Test.testSendmsgBadCmsg) ... ok
+testSendmsgBadMultiCmsg (__main__.SendmsgUDPLITE6Test.testSendmsgBadMultiCmsg) ... ok
+testSendmsgDataGenerator (__main__.SendmsgUDPLITE6Test.testSendmsgDataGenerator) ... ok
+testSendmsgExcessCmsgReject (__main__.SendmsgUDPLITE6Test.testSendmsgExcessCmsgReject) ... ok
+testSendmsgGather (__main__.SendmsgUDPLITE6Test.testSendmsgGather) ... ok
+testSendmsgNoDestAddr (__main__.SendmsgUDPLITE6Test.testSendmsgNoDestAddr) ... ok
+testSendmsg (__main__.SendmsgUDPLITETest.testSendmsg) ... ok
+testSendmsgAfterClose (__main__.SendmsgUDPLITETest.testSendmsgAfterClose) ... ok
+testSendmsgAncillaryGenerator (__main__.SendmsgUDPLITETest.testSendmsgAncillaryGenerator) ... ok
+testSendmsgArray (__main__.SendmsgUDPLITETest.testSendmsgArray) ... ok
+testSendmsgBadArgs (__main__.SendmsgUDPLITETest.testSendmsgBadArgs) ... ok
+testSendmsgBadCmsg (__main__.SendmsgUDPLITETest.testSendmsgBadCmsg) ... ok
+testSendmsgBadMultiCmsg (__main__.SendmsgUDPLITETest.testSendmsgBadMultiCmsg) ... ok
+testSendmsgDataGenerator (__main__.SendmsgUDPLITETest.testSendmsgDataGenerator) ... ok
+testSendmsgExcessCmsgReject (__main__.SendmsgUDPLITETest.testSendmsgExcessCmsgReject) ... ok
+testSendmsgGather (__main__.SendmsgUDPLITETest.testSendmsgGather) ... ok
+testSendmsgNoDestAddr (__main__.SendmsgUDPLITETest.testSendmsgNoDestAddr) ... ok
+testSendmsg (__main__.SendmsgUDPTest.testSendmsg) ... ok
+testSendmsgAfterClose (__main__.SendmsgUDPTest.testSendmsgAfterClose) ... ok
+testSendmsgAncillaryGenerator (__main__.SendmsgUDPTest.testSendmsgAncillaryGenerator) ... ok
+testSendmsgArray (__main__.SendmsgUDPTest.testSendmsgArray) ... ok
+testSendmsgBadArgs (__main__.SendmsgUDPTest.testSendmsgBadArgs) ... ok
+testSendmsgBadCmsg (__main__.SendmsgUDPTest.testSendmsgBadCmsg) ... ok
+testSendmsgBadMultiCmsg (__main__.SendmsgUDPTest.testSendmsgBadMultiCmsg) ... ok
+testSendmsgDataGenerator (__main__.SendmsgUDPTest.testSendmsgDataGenerator) ... ok
+testSendmsgExcessCmsgReject (__main__.SendmsgUDPTest.testSendmsgExcessCmsgReject) ... ok
+testSendmsgGather (__main__.SendmsgUDPTest.testSendmsgGather) ... ok
+testSendmsgNoDestAddr (__main__.SendmsgUDPTest.testSendmsgNoDestAddr) ... ok
+testSendmsg (__main__.SendmsgUnixStreamTest.testSendmsg) ... ok
+testSendmsgAfterClose (__main__.SendmsgUnixStreamTest.testSendmsgAfterClose) ... ok
+testSendmsgAncillaryGenerator (__main__.SendmsgUnixStreamTest.testSendmsgAncillaryGenerator) ... ok
+testSendmsgArray (__main__.SendmsgUnixStreamTest.testSendmsgArray) ... ok
+testSendmsgBadArgs (__main__.SendmsgUnixStreamTest.testSendmsgBadArgs) ... ok
+testSendmsgBadCmsg (__main__.SendmsgUnixStreamTest.testSendmsgBadCmsg) ... ok
+testSendmsgBadMultiCmsg (__main__.SendmsgUnixStreamTest.testSendmsgBadMultiCmsg) ... ok
+testSendmsgDataGenerator (__main__.SendmsgUnixStreamTest.testSendmsgDataGenerator) ... ok
+testSendmsgDontWait (__main__.SendmsgUnixStreamTest.testSendmsgDontWait) ... ok
+testSendmsgExcessCmsgReject (__main__.SendmsgUnixStreamTest.testSendmsgExcessCmsgReject) ... ok
+testSendmsgExplicitNoneAddr (__main__.SendmsgUnixStreamTest.testSendmsgExplicitNoneAddr) ... ok
+testSendmsgGather (__main__.SendmsgUnixStreamTest.testSendmsgGather) ... ok
+testSendmsgTimeout (__main__.SendmsgUnixStreamTest.testSendmsgTimeout) ... ok
+testAttributes (__main__.SmallBufferedFileObjectClassTestCase.testAttributes) ... ok
+testCloseAfterMakefile (__main__.SmallBufferedFileObjectClassTestCase.testCloseAfterMakefile) ... ok
+testClosedAttr (__main__.SmallBufferedFileObjectClassTestCase.testClosedAttr) ... ok
+testFullRead (__main__.SmallBufferedFileObjectClassTestCase.testFullRead) ... ok
+testMakefileAfterMakefileClose (__main__.SmallBufferedFileObjectClassTestCase.testMakefileAfterMakefileClose) ... ok
+testReadAfterTimeout (__main__.SmallBufferedFileObjectClassTestCase.testReadAfterTimeout) ... ok
+testReadline (__main__.SmallBufferedFileObjectClassTestCase.testReadline) ... ok
+testRealClose (__main__.SmallBufferedFileObjectClassTestCase.testRealClose) ... ok
+testSmallRead (__main__.SmallBufferedFileObjectClassTestCase.testSmallRead) ... ok
+testUnbufferedRead (__main__.SmallBufferedFileObjectClassTestCase.testUnbufferedRead) ... ok
+testClose (__main__.TCPCloserTest.testClose) ... ok
+testInterruptedTimeout (__main__.TCPTimeoutTest.testInterruptedTimeout) ... ok
+testTCPTimeout (__main__.TCPTimeoutTest.testTCPTimeout) ... ok
+testTimeoutZero (__main__.TCPTimeoutTest.testTimeoutZero) ... ok
+testRDM (__main__.TIPCTest.testRDM) ... skipped "TIPC module is not loaded, please 'sudo modprobe tipc'"
+testStream (__main__.TIPCThreadableTest.testStream) ... skipped "TIPC module is not loaded, please 'sudo modprobe tipc'"
+testExceptionTree (__main__.TestExceptions.testExceptionTree) ... ok
+test_setblocking_invalidfd (__main__.TestExceptions.test_setblocking_invalidfd) ... ok
+test_lazy_import (__main__.TestLazyImport.test_lazy_import) ... ok
+testAutobind (__main__.TestLinuxAbstractNamespace.testAutobind) ... ok
+testBytearrayName (__main__.TestLinuxAbstractNamespace.testBytearrayName) ... ok
+testLinuxAbstractNamespace (__main__.TestLinuxAbstractNamespace.testLinuxAbstractNamespace) ... ok
+testMaxName (__main__.TestLinuxAbstractNamespace.testMaxName) ... ok
+testNameOverflow (__main__.TestLinuxAbstractNamespace.testNameOverflow) ... ok
+testStrName (__main__.TestLinuxAbstractNamespace.testStrName) ... ok
+test_new_tcp_flags (__main__.TestMSWindowsTCPFlags.test_new_tcp_flags) ... skipped 'requires Windows'
+test_tcp_keepalive (__main__.TestMacOSTCPFlags.test_tcp_keepalive) ... skipped 'macOS specific test'
+test_set_quickack (__main__.TestQuickackFlag.test_set_quickack) ... ok
+testShare (__main__.TestSocketSharing.testShare) ... skipped 'Windows specific'
+testShareLength (__main__.TestSocketSharing.testShareLength) ... skipped 'Windows specific'
+testShareLocal (__main__.TestSocketSharing.testShareLocal) ... skipped 'Windows specific'
+testTypes (__main__.TestSocketSharing.testTypes) ... skipped 'Windows specific'
+testBytesAddr (__main__.TestUnixDomain.testBytesAddr) ... ok
+testEmptyAddress (__main__.TestUnixDomain.testEmptyAddress) ... skipped 'Linux behavior is tested by TestLinuxAbstractNamespace'
+testStrAddr (__main__.TestUnixDomain.testStrAddr) ... ok
+testSurrogateescapeBind (__main__.TestUnixDomain.testSurrogateescapeBind) ... ok
+testUnbound (__main__.TestUnixDomain.testUnbound) ... ok
+testUnencodableAddr (__main__.TestUnixDomain.testUnencodableAddr) ... ok
+testStream (__main__.ThreadedVSOCKSocketStreamTest.testStream) ... skipped 'VSOCK sockets required for this test.'
+testTimeoutZero (__main__.UDPLITETimeoutTest.testTimeoutZero) ... ok
+testUDPLITETimeout (__main__.UDPLITETimeoutTest.testUDPLITETimeout) ... ok
+testTimeoutZero (__main__.UDPTimeoutTest.testTimeoutZero) ... ok
+testUDPTimeout (__main__.UDPTimeoutTest.testUDPTimeout) ... ok
+testAttributes (__main__.UnbufferedFileObjectClassTestCase.testAttributes) ... ok
+testCloseAfterMakefile (__main__.UnbufferedFileObjectClassTestCase.testCloseAfterMakefile) ... ok
+testClosedAttr (__main__.UnbufferedFileObjectClassTestCase.testClosedAttr) ... ok
+testFullRead (__main__.UnbufferedFileObjectClassTestCase.testFullRead) ... ok
+testMakefileAfterMakefileClose (__main__.UnbufferedFileObjectClassTestCase.testMakefileAfterMakefileClose) ... ok
+testMakefileClose (__main__.UnbufferedFileObjectClassTestCase.testMakefileClose) ... ok
+testMakefileCloseSocketDestroy (__main__.UnbufferedFileObjectClassTestCase.testMakefileCloseSocketDestroy) ... ok
+testReadAfterTimeout (__main__.UnbufferedFileObjectClassTestCase.testReadAfterTimeout) ... ok
+testReadline (__main__.UnbufferedFileObjectClassTestCase.testReadline) ... ok
+testRealClose (__main__.UnbufferedFileObjectClassTestCase.testRealClose) ... ok
+testSmallRead (__main__.UnbufferedFileObjectClassTestCase.testSmallRead) ... ok
+testSmallReadNonBlocking (__main__.UnbufferedFileObjectClassTestCase.testSmallReadNonBlocking) ... ok
+testUnbufferedRead (__main__.UnbufferedFileObjectClassTestCase.testUnbufferedRead) ... ok
+testUnbufferedReadline (__main__.UnbufferedFileObjectClassTestCase.testUnbufferedReadline) ... ok
+testWriteNonBlocking (__main__.UnbufferedFileObjectClassTestCase.testWriteNonBlocking) ... ok
+testAttributes (__main__.UnicodeReadFileObjectClassTestCase.testAttributes) ... ok
+testCloseAfterMakefile (__main__.UnicodeReadFileObjectClassTestCase.testCloseAfterMakefile) ... ok
+testClosedAttr (__main__.UnicodeReadFileObjectClassTestCase.testClosedAttr) ... ok
+testFullRead (__main__.UnicodeReadFileObjectClassTestCase.testFullRead) ... ok
+testMakefileAfterMakefileClose (__main__.UnicodeReadFileObjectClassTestCase.testMakefileAfterMakefileClose) ... ok
+testReadAfterTimeout (__main__.UnicodeReadFileObjectClassTestCase.testReadAfterTimeout) ... ok
+testReadline (__main__.UnicodeReadFileObjectClassTestCase.testReadline) ... ok
+testRealClose (__main__.UnicodeReadFileObjectClassTestCase.testRealClose) ... ok
+testSmallRead (__main__.UnicodeReadFileObjectClassTestCase.testSmallRead) ... ok
+testUnbufferedRead (__main__.UnicodeReadFileObjectClassTestCase.testUnbufferedRead) ... ok
+testAttributes (__main__.UnicodeReadWriteFileObjectClassTestCase.testAttributes) ... ok
+testCloseAfterMakefile (__main__.UnicodeReadWriteFileObjectClassTestCase.testCloseAfterMakefile) ... ok
+testClosedAttr (__main__.UnicodeReadWriteFileObjectClassTestCase.testClosedAttr) ... ok
+testFullRead (__main__.UnicodeReadWriteFileObjectClassTestCase.testFullRead) ... ok
+testMakefileAfterMakefileClose (__main__.UnicodeReadWriteFileObjectClassTestCase.testMakefileAfterMakefileClose) ... ok
+testReadAfterTimeout (__main__.UnicodeReadWriteFileObjectClassTestCase.testReadAfterTimeout) ... ok
+testReadline (__main__.UnicodeReadWriteFileObjectClassTestCase.testReadline) ... ok
+testRealClose (__main__.UnicodeReadWriteFileObjectClassTestCase.testRealClose) ... ok
+testSmallRead (__main__.UnicodeReadWriteFileObjectClassTestCase.testSmallRead) ... ok
+testUnbufferedRead (__main__.UnicodeReadWriteFileObjectClassTestCase.testUnbufferedRead) ... ok
+testAttributes (__main__.UnicodeWriteFileObjectClassTestCase.testAttributes) ... ok
+testCloseAfterMakefile (__main__.UnicodeWriteFileObjectClassTestCase.testCloseAfterMakefile) ... ok
+testClosedAttr (__main__.UnicodeWriteFileObjectClassTestCase.testClosedAttr) ... ok
+testFullRead (__main__.UnicodeWriteFileObjectClassTestCase.testFullRead) ... ok
+testMakefileAfterMakefileClose (__main__.UnicodeWriteFileObjectClassTestCase.testMakefileAfterMakefileClose) ... ok
+testReadAfterTimeout (__main__.UnicodeWriteFileObjectClassTestCase.testReadAfterTimeout) ... ok
+testReadline (__main__.UnicodeWriteFileObjectClassTestCase.testReadline) ... ok
+testRealClose (__main__.UnicodeWriteFileObjectClassTestCase.testRealClose) ... ok
+testSmallRead (__main__.UnicodeWriteFileObjectClassTestCase.testSmallRead) ... ok
+testUnbufferedRead (__main__.UnicodeWriteFileObjectClassTestCase.testUnbufferedRead) ... ok
+
+----------------------------------------------------------------------
+Ran 746 tests in 57.531s
+
+OK (skipped=132)

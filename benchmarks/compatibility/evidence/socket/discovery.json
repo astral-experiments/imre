@@ -1,0 +1,22 @@
+{
+  "argv": [
+    "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "-B",
+    "-c",
+    "import collections, importlib, json, unittest; m=importlib.import_module(\"test.test_socket\"); loader=unittest.TestLoader(); suite=loader.loadTestsFromModule(m); walk=lambda s: (case for item in s for case in (walk(item) if isinstance(item, unittest.TestSuite) else (item,))); ids=[x.id() for x in walk(suite)]; counts=collections.Counter(ids); assert not loader.errors, loader.errors; print(json.dumps({\"module\":m.__name__,\"count\":len(ids),\"unique\":len(counts),\"ids\":[{\"id\":i,\"occurrence\":sum(x==i for x in ids[:n+1])} for n,i in enumerate(ids)]},indent=2))"
+  ],
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1"
+  },
+  "exit_code": 0,
+  "stdout": "benchmarks/compatibility/evidence/socket/stock.inventory.json",
+  "reference": "benchmarks/cpython_stdlib/full/socket/reference-linux.json",
+  "comparison": {
+    "occurrences": 746,
+    "unique": 746,
+    "missing": 0,
+    "extra": 0,
+    "repeated_ids": 0
+  }
+}
