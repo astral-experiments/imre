@@ -3,7 +3,7 @@
 from collections import namedtuple
 from itertools import count
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING, Iterator, Iterator as _Iterator
 
 # Supplied by the checked import resolver.
 _filesystem_roots: tuple[str, ...]

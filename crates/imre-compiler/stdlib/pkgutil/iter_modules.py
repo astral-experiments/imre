@@ -1,6 +1,3 @@
-from typing import Iterator as _Iterator
-
-
 class FileFinder:
     path: str
 

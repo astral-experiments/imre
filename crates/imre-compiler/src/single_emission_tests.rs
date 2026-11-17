@@ -1126,3 +1126,91 @@ fn retained_generator_propagates_its_nested_definition_refusal() {
     let expected = ":7:19: cannot compile this comprehension ahead of time (through 7:61)";
     assert_source_refusal(&entry, &entry, expected, &[CompileOptions::default()]);
 }
+
+#[test]
+fn pkgutil_resource_selects_a_placed_initializer_and_keeps_checked_functions() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    std::fs::write(
+        project.path().join("scores.py"),
+        "def score(value: int) -> int:\n    return value\n",
+    )
+    .unwrap();
+    let mut control_frames = Vec::new();
+    for prefix in ["", "import pkgutil\n"] {
+        std::fs::write(&entry, format!("{prefix}import scores\nscores.score(41)\n")).unwrap();
+        let mut graph = modules::SourceGraph::load(&entry, None, &[]).unwrap();
+        let CheckedProgram::Native(program) = checked_lower_with(&mut graph, None, None).unwrap()
+        else {
+            panic!("an unused pkgutil import must not select registered startup");
+        };
+        let scores = graph
+            .modules
+            .iter()
+            .position(|module| module.name == "scores")
+            .unwrap();
+        control_frames.push(
+            program
+                .frame_sources
+                .iter()
+                .filter(|(slot, _, _)| program.ir.1[*slot] == scores)
+                .count(),
+        );
+        let (functions, initializers) = graph.take_registered_functions();
+        assert!(functions.is_empty() && initializers.is_empty());
+    }
+    assert_eq!(
+        control_frames[0], control_frames[1],
+        "unused import changed score frame retention"
+    );
+    for (import, call) in [
+        (
+            "import pkgutil",
+            "pkgutil.get_data('observedpkg', 'one.txt')",
+        ),
+        (
+            "from pkgutil import get_data as read",
+            "read(resource='one.txt', package='observedpkg')",
+        ),
+    ] {
+        let source = format!("{import}\nimport scores\ndata = {call}\nscores.score(41)\n");
+        std::fs::write(&entry, &source).unwrap();
+        let mut graph = modules::SourceGraph::load(&entry, None, &[]).unwrap();
+        assert!(matches!(
+            checked_lower_with(&mut graph, None, None).unwrap(),
+            CheckedProgram::Registered(None)
+        ));
+        let scores = graph
+            .modules
+            .iter()
+            .position(|module| module.name == "scores")
+            .unwrap();
+        let start = ruff_text_size::TextSize::try_from(
+            graph.modules[scores].source.find("def score").unwrap(),
+        )
+        .unwrap();
+        let (functions, initializers) = graph.take_registered_functions();
+        let initializer = initializers
+            .get(&graph.entry)
+            .expect("entry initializer was not placed");
+        let site = initializer
+            .fixed_sites
+            .iter()
+            .copied()
+            .find(|range| &source[*range] == call)
+            .expect("resource call site was not placed");
+        assert!(
+            initializer
+                .fixed_attribute(site)
+                .and_then(|attribute| attribute.call_binding())
+                .is_some(),
+            "resource call has no registered invocation binding"
+        );
+        let score = functions
+            .get(&scores)
+            .and_then(|items| items.get(&start))
+            .expect("checked score function was not retained");
+        assert_eq!(score.function.returns, ir::Type::Int);
+        assert!(!score.fixed_sites.is_empty());
+    }
+}

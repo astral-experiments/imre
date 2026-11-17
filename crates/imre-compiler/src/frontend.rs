@@ -816,8 +816,17 @@ fn lower_graph(
     let mut callable_definitions = Vec::new();
     // A source method needs its original binder and operand sites if its
     // callable layout requires a registered frame.
-    let can_transfer_frames = !classes.declarations.definitions.is_empty()
-        || !classes.declarations.registered_classes.is_empty();
+    let contributes_transfer = |module: ModuleId| !graph.modules[module].is_bundled("pkgutil");
+    let can_transfer_frames = classes
+        .declarations
+        .definitions
+        .iter()
+        .any(|class| contributes_transfer(class.definition.module))
+        || classes
+            .declarations
+            .registered_classes
+            .iter()
+            .any(|owner| contributes_transfer(owner.module));
     for (module_id, module) in graph.modules.iter().enumerate() {
         if !module.executable.is_empty() {
             inference.discover_list_elements(graph, module_id, None);
@@ -14901,7 +14910,7 @@ impl<'a> Checker<'a> {
                 sites.invoked(call, &placed);
                 return Ok(placed);
             }
-            self.record_named_call(call, &value);
+            self.record_positional_call(call, &value);
             return Ok(value);
         }
         if matches!(&*call.func, ast::Expr::Name(name) if self.names.contains_key(name.id.as_str()))

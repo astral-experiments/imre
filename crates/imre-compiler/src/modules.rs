@@ -5417,7 +5417,12 @@ impl<'a> Loader<'a> {
                     if resolve_binding(&self.modules, id, &guard.test)
                         == Some(Binding::Intrinsic(Intrinsic::TypeChecking))
                         && guard.elif_else_clauses.is_empty()
-                        && guard.body.iter().all(type_aliases::type_statement) =>
+                        && guard.body.iter().all(|statement| {
+                            type_aliases::type_statement(statement)
+                                || (self.modules[id].is_bundled("pkgutil")
+                                    && matches!(statement, ast::Stmt::FunctionDef(function)
+                                        if function.name.as_str() == "get_data"))
+                        }) =>
                 {
                     self.modules[id].type_guards.push(index);
                     for stmt in &guard.body {
