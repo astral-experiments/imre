@@ -180,8 +180,10 @@ struct Imports {
     literal_calls: Vec<TextRange>,
     has_open_exec: bool,
     computed_import: bool,
+    argument_imports: Vec<usize>,
     imports_logging: bool,
     sys_names: HashSet<String>,
+    importlib_names: HashSet<String>,
     operator_names: HashSet<String>,
     opcode_names: HashSet<String>,
     hashlib_names: HashSet<String>,
@@ -458,7 +460,10 @@ impl<'a> Visitor<'a> for Imports {
                             .is_none(),
                         "unittest" => self.unittest_names.insert(bound.to_string()),
                         "pkgutil" => self.pkgutil_names.insert(bound.to_string()),
-                        "importlib" => self.machinery_names.insert(format!("{bound}.machinery")),
+                        "importlib" => {
+                            self.importlib_names.insert(bound.to_string());
+                            self.machinery_names.insert(format!("{bound}.machinery"))
+                        }
                         "importlib.machinery" => self.machinery_names.insert(bound.to_string()),
                         _ => false,
                     };
@@ -551,6 +556,24 @@ impl<'a> Visitor<'a> for Imports {
         visitor::walk_stmt(self, s);
     }
     fn visit_expr(&mut self, e: &'a Expr) {
+        if let Expr::Call(call) = e
+            && let Expr::Attribute(function) = &*call.func
+            && function.attr.as_str() == "import_module"
+            && let Expr::Name(importlib) = &*function.value
+            && self.importlib_names.contains(importlib.id.as_str())
+            && let Some(Expr::Subscript(operand)) = call.arguments.find_argument_value("name", 0)
+            && let Expr::Attribute(argv) = &*operand.value
+            && argv.attr.as_str() == "argv"
+            && matches!(&*argv.value, Expr::Name(sys) if self.sys_names.contains(sys.id.as_str()))
+            && let Expr::NumberLiteral(literal) = &*operand.slice
+            && let ast::Number::Int(index) = &literal.value
+            && let Some(index) = index
+                .as_i64()
+                .and_then(|index| usize::try_from(index).ok())
+                .and_then(|index| index.checked_sub(1))
+        {
+            self.argument_imports.push(index);
+        }
         if let Expr::Call(call) = e
             && call
                 .func
@@ -1266,6 +1289,16 @@ pub(crate) fn compile(
     }
     for name in &options.include_modules {
         first.add(0, name);
+    }
+    for index in std::mem::take(&mut first.argument_imports) {
+        if let Some(name) = options
+            .launcher_arguments
+            .get(index)
+            .and_then(Option::as_deref)
+            && crate::modules::valid_module_operand(name)
+        {
+            first.add(0, name);
+        }
     }
     let registered_imports = typed_graph
         .filter(|_| object_imports && first.invalid_executable.is_none())
