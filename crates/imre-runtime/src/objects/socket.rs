@@ -1728,24 +1728,51 @@ pub extern "C" fn imre_socket_shutdown(s: &Object, how: usize) {
     finish(c_int(how).and_then(|n| shutdown(s, n)), ());
 }
 
-/// Issue connect once. Keep the kernel result separate from exceptions raised by signal handlers.
-pub(crate) fn connect<E>(
-    socket: &Object,
+/// Native connect operations, each of which can run without a Python context borrow.
+pub(crate) enum ConnectStep<'a> {
+    Start(&'a SocketAddress),
+    Poll(Option<Deadline>),
+    Result,
+}
+
+impl ConnectStep<'_> {
+    pub(crate) fn run(self, raw: RawFd) -> io::Result<()> {
+        match self {
+            Self::Start(addr) => {
+                let (ptr, len) = addr.raw_parts();
+                // SAFETY: addr owns the complete socket address through the syscall.
+                checked(unsafe { libc::connect(raw, ptr, len) }).map(|_| ())
+            }
+            Self::Poll(until) => poll_interruptible(raw, libc::POLLOUT, until),
+            Self::Result => connect_result(raw),
+        }
+    }
+}
+
+pub(crate) fn connect_state(socket: &Object) -> (RawFd, Option<Duration>) {
+    state(socket, |s| (s.transport_fd(), s.timeout()))
+}
+
+/// Keep kernel results separate from signal-handler exceptions and retain one deadline.
+pub(crate) fn connect_with<E>(
+    socket: impl Fn() -> (RawFd, Option<Duration>),
     addr: &SocketAddress,
     mut check_signals: impl FnMut() -> std::result::Result<(), E>,
+    mut call: impl FnMut(RawFd, ConnectStep<'_>) -> std::result::Result<io::Result<()>, E>,
 ) -> std::result::Result<io::Result<()>, E> {
-    let (ptr, len) = addr.raw_parts();
-    // SAFETY: addr owns the complete socket address through the syscall.
-    let Err(error) = checked(unsafe { libc::connect(fd(socket), ptr, len) }) else {
+    let Err(error) = call(socket().0, ConnectStep::Start(addr))? else {
         return Ok(Ok(()));
     };
     let interrupted = error.kind() == io::ErrorKind::Interrupted;
     if interrupted {
         check_signals()?;
     }
-    let until = deadline(socket);
+    let timeout = socket().1;
+    let until = timeout
+        .filter(|duration| !duration.is_zero())
+        .map(Deadline::after);
     let wait = if interrupted {
-        get_timeout(socket) != Some(Duration::ZERO)
+        timeout != Some(Duration::ZERO)
     } else {
         until.is_some() && error.raw_os_error() == Some(libc::EINPROGRESS)
     };
@@ -1753,14 +1780,13 @@ pub(crate) fn connect<E>(
         return Ok(Err(error));
     }
 
-    // Wait for the original attempt. A signal handler can close the socket.
     'wait: loop {
         if until.is_some_and(|end| end.remaining().is_zero()) {
             return Ok(Err(timed_out()));
         }
-        let raw = fd(socket);
+        let raw = socket().0;
         if raw >= 0
-            && let Err(error) = poll_interruptible(raw, libc::POLLOUT, until)
+            && let Err(error) = call(raw, ConnectStep::Poll(until))?
         {
             if error.kind() != io::ErrorKind::Interrupted {
                 return Ok(Err(error));
@@ -1769,7 +1795,7 @@ pub(crate) fn connect<E>(
             continue;
         }
         loop {
-            match connect_result(fd(socket)) {
+            match call(socket().0, ConnectStep::Result)? {
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => check_signals()?,
                 Err(error) if until.is_some() && error.kind() == io::ErrorKind::WouldBlock => {
                     continue 'wait;
@@ -1814,7 +1840,13 @@ pub unsafe extern "C" fn imre_socket_connect(s: &Object, pair: *const usize) {
 }
 
 pub(crate) fn connect_address(s: &Object, addr: &SocketAddress) -> Result<()> {
-    connect(s, addr, super::stdlib::check_interrupt)?.map_err(errno_error)
+    connect_with(
+        || connect_state(s),
+        addr,
+        super::stdlib::check_interrupt,
+        |raw, step| Ok(step.run(raw)),
+    )?
+    .map_err(errno_error)
 }
 
 // Caller supplies the generated tuple descriptor so repr, projection and release

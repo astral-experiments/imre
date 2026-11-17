@@ -186,6 +186,16 @@ pub(in crate::dynamic) fn prepare_descriptor(
             mode: RecvMode::From,
         }));
     }
+    if matches!(name, "connect" | "connect_ex") {
+        let peer = super::super::builtins::one_positional_arg(name, args, kwargs)?;
+        let addr = address(ctx, native::family(socket), peer, name)?;
+        super::audit::event(ctx, "socket.connect", &[receiver, peer])?;
+        return Ok(RegisteredCall::Connect(Connect {
+            receiver,
+            addr,
+            errno_result: name == "connect_ex",
+        }));
+    }
     let socket = socket.clone();
     call_method(ctx, name, receiver, socket, args, kwargs).map(RegisteredCall::Returned)
 }
@@ -243,6 +253,45 @@ unsafe fn registered_read<T: Send>(
         // SAFETY: the read uses the fd and its native operands while the caller is parked.
         |(), fd| unsafe { ParkedExecution::wait(context, || read(fd)) },
     )
+}
+
+/// The registered caller roots the socket; the address contains only owned native data.
+pub(in crate::dynamic) struct Connect {
+    receiver: Id,
+    addr: native::SocketAddress,
+    errno_result: bool,
+}
+
+impl Connect {
+    /// # Safety
+    /// The registered caller owns the context and roots the receiver through callbacks.
+    pub(in crate::dynamic) unsafe fn run(self, context: *mut Context) -> Result<Id> {
+        use crate::dynamic::value::ParkedExecution;
+
+        let result = native::connect_with(
+            // SAFETY: resolve the rooted receiver only while this execution is active.
+            || native::connect_state(registered_socket(unsafe { &*context }, self.receiver)),
+            &self.addr,
+            // SAFETY: each native step has returned before signal delivery.
+            || unsafe { Context::dispatch_pending_signals(context) },
+            // SAFETY: only the fd, owned native address/deadline, and native result cross the wait.
+            |raw, step| unsafe { ParkedExecution::wait(context, || step.run(raw)) },
+        )?;
+        if !self.errno_result {
+            result.map_err(crate::objects::errno_error)?;
+            return Ok(NONE);
+        }
+        let status = match result {
+            Ok(()) => 0,
+            Err(error) => match error.raw_os_error() {
+                Some(errno) => errno,
+                None if error.kind() == std::io::ErrorKind::TimedOut => libc::EWOULDBLOCK,
+                None => return Err(crate::objects::errno_error(error).into()),
+            },
+        };
+        // SAFETY: all native steps and signal callbacks have returned.
+        Ok(unsafe { &mut *context }.int(i64::from(status)))
+    }
 }
 
 enum RecvMode {
@@ -1904,25 +1953,6 @@ fn call_method(
             offset,
             count,
         );
-    }
-    if matches!(method, "connect" | "connect_ex") {
-        let peer = super::super::builtins::one_positional_arg(method, args, kwargs)?;
-        let addr = address(ctx, native::family(&s), peer, method)?;
-        super::audit::event(ctx, "socket.connect", &[receiver, peer])?;
-        let result = native::connect(&s, &addr, || ctx.dispatch_signals())?;
-        if method == "connect" {
-            result.map_err(crate::objects::errno_error)?;
-            return Ok(NONE);
-        }
-        let status = match result {
-            Ok(()) => 0,
-            Err(error) => match error.raw_os_error() {
-                Some(errno) => errno,
-                None if error.kind() == std::io::ErrorKind::TimedOut => libc::EWOULDBLOCK,
-                None => return Err(crate::objects::errno_error(error).into()),
-            },
-        };
-        return Ok(ctx.int(i64::from(status)));
     }
     if method == "getsockopt" {
         return getsockopt(ctx, &s, args, kwargs);
