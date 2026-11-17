@@ -591,6 +591,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
         M::Time => exports!(
             "time",
             "altzone",
+            "asctime",
             "ctime",
             "daylight",
             "get_clock_info",

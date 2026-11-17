@@ -35,6 +35,7 @@ pub(super) enum Initializer<'a> {
 
 pub(super) struct PreparedUnit<'a> {
     pub(super) module: &'a ModuleSource<'a>,
+    pub(super) prompt_owner: Option<&'a str>,
     pub(super) builtin: bool,
     pub(super) physical: Option<(&'a PhysicalFile, PhysicalModuleKind<'a>)>,
     pub(super) zip: Option<&'a [u8; 32]>,
@@ -256,6 +257,9 @@ pub(super) fn units<'a>(
             layouts.retain(|facts| !facts.is_empty());
             Ok(Some(PreparedUnit {
                 module: original,
+                prompt_owner: file
+                    .map(|file| file.module(registrations.modules).name.as_str())
+                    .or_else(|| module_id.map(|id| registrations.modules[id].name.as_str())),
                 builtin,
                 physical: physical.map(|file| {
                     let kind = checked

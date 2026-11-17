@@ -8,7 +8,7 @@ Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython
 
 **Native / upstream** counts unchanged test executions in the checked-in Linux suites: the body, assertions, operation and fixtures must all run on Imre at **both O0 and O3**. The denominator includes upstream skips, companion suites and repeated test IDs. A dash means there is no measurement; zero is a measured result. These are test counts, not percentages of an API.
 
-The last two columns show where CPython still helps at O3. **CPython fixture**: 508 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,477 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
+The last two columns show where CPython still helps at O3. **CPython fixture**: 519 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,477 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
 
 ## Modules with examples, accepted imports or suite results
 
@@ -40,7 +40,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `copyreg` | Yes | No API example recorded. | — | — | — |
 | `csv` | Yes | Read and write rows and dictionaries, register dialects, and detect delimiters and headers. [Evidence](../benchmarks/cpython_stdlib/full/csv/README.md) | [122 / 128](../benchmarks/cpython_stdlib/full/csv/) | 0 | 0 |
 | `dataclasses` | Yes | Construct fixed-field dataclasses with defaults and factories. [Evidence](../tests/fixtures/dataclasses/record_factories.py) | — | — | — |
-| `datetime` | Yes | Construct, combine and compare civil dates and times, add timedeltas, replace datetime fields and convert to a fixed timezone. [Evidence](../benchmarks/cpython_stdlib/full/datetime/README.md) | [0 / 1,098](../benchmarks/cpython_stdlib/full/datetime/) | 12 | 0 |
+| `datetime` | Yes | Construct, combine and compare civil dates and times, add timedeltas, replace datetime fields and convert to a fixed timezone. [Evidence](../benchmarks/cpython_stdlib/full/datetime/README.md) | [0 / 1,098](../benchmarks/cpython_stdlib/full/datetime/) | 14 | 0 |
 | `decimal` | Yes | Construct Decimal values from strings and integers, preserve their scale and sign, detect NaNs with `is_nan()`, and compare Decimal values for equality with other Decimals and integers under the default context. Boxed imports use CPython's decimal implementation for arithmetic, ordering and local contexts. [Boxed arithmetic](../tests/fixtures/boxed_decimal_arithmetic.py) [Evidence](../tests/fixtures/text/decimal_comparison.py) | — | — | — |
 | `difflib` | Yes | Checked `ndiff` on line sequences. Runtime-loaded `SequenceMatcher` and `get_close_matches`. [Evidence](../benchmarks/cpython_stdlib/full/difflib/README.md) | [— / 58 (0 assessed)](../benchmarks/cpython_stdlib/full/difflib/) | — | — |
 | `dis` | Yes | No API example recorded. | — | — | — |
@@ -71,7 +71,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `inspect` | Yes | `cleandoc(doc=text)` for strings. `getattr_static` for selected owners and literal attribute names. [Evidence](../benchmarks/cpython_stdlib/full/inspect/README.md) | [0 / 362](../benchmarks/cpython_stdlib/full/inspect/) | 1 | 1 |
 | `io` | Yes | In-memory `StringIO` and `BytesIO` streams. [Evidence](../benchmarks/cpython_stdlib/full/doctest/stringio/README.md) | — | — | — |
 | `ipaddress` | Yes | No API example recorded. | — | — | — |
-| `itertools` | Yes | Selected `chain`, `islice`, `repeat`, `tee` and `groupby` iterators. [Evidence](../benchmarks/cpython_stdlib/full/itertools/README.md) | [0 / 138](../benchmarks/cpython_stdlib/full/itertools/) | 52 | 1 |
+| `itertools` | Yes | Selected `chain`, `islice`, `repeat`, `tee` and `groupby` iterators. [Evidence](../benchmarks/cpython_stdlib/full/itertools/README.md) | [0 / 138](../benchmarks/cpython_stdlib/full/itertools/) | 60 | 1 |
 | `json` | Yes | Decode and encode supported JSON values via `loads`, `load`, `dumps` and `dump`. [Evidence](../benchmarks/cpython_stdlib/full/json/README.md) | [0 / 216](../benchmarks/cpython_stdlib/full/json/) | 38 | 45 |
 | `keyword` | Yes | Check hard and soft keywords with `iskeyword` and `issoftkeyword`. [Evidence](../benchmarks/cpython_stdlib/full/keyword/README.md) | [6 / 11](../benchmarks/cpython_stdlib/full/keyword/) | 3 | 0 |
 | `linecache` | Yes | Filesystem-backed `getline`, cache population and invalidation. [Evidence](../benchmarks/cpython_stdlib/full/linecache/README.md) | [0 / 29](../benchmarks/cpython_stdlib/full/linecache/) | 8 | 10 |
@@ -125,7 +125,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `termios` | Yes | No API example recorded. | — | — | — |
 | `textwrap` | Yes | Dedent, indent, wrapping and shortening, including selected `TextWrapper` options. [Evidence](../benchmarks/cpython_stdlib/full/textwrap/README.md) | [68 / 68](../benchmarks/cpython_stdlib/full/textwrap/) | 0 | 0 |
 | `threading` | Yes | No API example recorded. | — | — | — |
-| `time` | Yes | Read the clock, sleep, and convert a local `struct_time` to epoch seconds with `mktime`. [Evidence](../benchmarks/cpython_stdlib/full/time/README.md) | [0 / 63](../benchmarks/cpython_stdlib/full/time/) | 4 | 0 |
+| `time` | Yes | Read the clock, sleep, and convert a local `struct_time` to epoch seconds with `mktime`. [Evidence](../benchmarks/cpython_stdlib/full/time/README.md) | [0 / 63](../benchmarks/cpython_stdlib/full/time/) | 5 | 0 |
 | `token` | Yes | No API example recorded. | — | — | — |
 | `tokenize` | Yes | No API example recorded. | — | — | — |
 | `tomllib` | Yes | Parse nested TOML tables and arrays from a binary stream with `load` or from a string with `loads`. [Evidence](../tests/fixtures/paths/toml_document.py) | — | — | — |

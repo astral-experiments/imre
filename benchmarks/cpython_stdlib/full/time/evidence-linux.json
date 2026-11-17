@@ -8,8 +8,7 @@
   "denominator": 63,
   "distinct_ids": 63,
   "counts": {
-    "blocked": 1,
-    "native-body-host-fixture": 4,
+    "native-body-host-fixture": 5,
     "reference-only": 55,
     "reference-skip": 3
   },
@@ -44,7 +43,7 @@
     {"id": "test.test_time.TimeTestCase.test_clock_monotonic", "occurrence": 1, "opt_level": 0, "fixture_variant": "test.test_time.TimeTestCase", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_time.TimeTestCase.test_clock_realtime", "occurrence": 1, "opt_level": 0, "fixture_variant": "test.test_time.TimeTestCase", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_time.TimeTestCase.test_clock_settime", "occurrence": 1, "opt_level": 0, "fixture_variant": "test.test_time.TimeTestCase", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
-    {"id": "test.test_time.TimeTestCase.test_conversions", "occurrence": 1, "opt_level": 0, "fixture_variant": "test.test_time.TimeTestCase", "reference": "pass", "outcome": "blocked", "reason": "name is not a local value; globals and first-class functions are unsupported", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "evidence": {"stage": "compile", "source": "Lib/test/test_time.py:156", "method_sha256": "764fe0aefc198411262350beebbc02dd583431e8c4b239e71e88c0782feea461"}, "classification": "blocked"},
+    {"id": "test.test_time.TimeTestCase.test_conversions", "occurrence": 1, "opt_level": 0, "fixture_variant": "test.test_time.TimeTestCase", "reference": "pass", "roles": {"body": "imre", "assertions": "imre", "operation": "imre", "fixture": "mixed"}, "evidence": {"method_sha256": "764fe0aefc198411262350beebbc02dd583431e8c4b239e71e88c0782feea461", "setup_sha256": "bbac3f6faa752f547807359c096dcd87c01902459e9c854a28fa06d214356415", "operation": "The unchanged method and setUp call native time functions.", "fixture": "CPython runs suite discovery and outer hooks. The unchanged conversion assertions use native TestCase.assertEqual.", "negative_control": "An incorrect ctime result fails the unchanged method.", "host_fixture_hooks": ["setUp"]}, "outcome": "pass", "classification": "native-body-host-fixture"},
     {"id": "test.test_time.TimeTestCase.test_ctime", "occurrence": 1, "opt_level": 0, "fixture_variant": "test.test_time.TimeTestCase", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_time.TimeTestCase.test_ctime_without_arg", "occurrence": 1, "opt_level": 0, "fixture_variant": "test.test_time.TimeTestCase", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_time.TimeTestCase.test_data_attributes", "occurrence": 1, "opt_level": 0, "fixture_variant": "test.test_time.TimeTestCase", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
@@ -88,8 +87,7 @@
   "denominator": 63,
   "distinct_ids": 63,
   "counts": {
-    "blocked": 1,
-    "native-body-host-fixture": 4,
+    "native-body-host-fixture": 5,
     "reference-only": 55,
     "reference-skip": 3
   },
@@ -124,7 +122,7 @@
     {"id": "test.test_time.TimeTestCase.test_clock_monotonic", "occurrence": 1, "opt_level": 3, "fixture_variant": "test.test_time.TimeTestCase", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_time.TimeTestCase.test_clock_realtime", "occurrence": 1, "opt_level": 3, "fixture_variant": "test.test_time.TimeTestCase", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_time.TimeTestCase.test_clock_settime", "occurrence": 1, "opt_level": 3, "fixture_variant": "test.test_time.TimeTestCase", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
-    {"id": "test.test_time.TimeTestCase.test_conversions", "occurrence": 1, "opt_level": 3, "fixture_variant": "test.test_time.TimeTestCase", "reference": "pass", "outcome": "blocked", "reason": "name is not a local value; globals and first-class functions are unsupported", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "evidence": {"stage": "compile", "source": "Lib/test/test_time.py:156", "method_sha256": "764fe0aefc198411262350beebbc02dd583431e8c4b239e71e88c0782feea461"}, "classification": "blocked"},
+    {"id": "test.test_time.TimeTestCase.test_conversions", "occurrence": 1, "opt_level": 3, "fixture_variant": "test.test_time.TimeTestCase", "reference": "pass", "roles": {"body": "imre", "assertions": "imre", "operation": "imre", "fixture": "mixed"}, "evidence": {"method_sha256": "764fe0aefc198411262350beebbc02dd583431e8c4b239e71e88c0782feea461", "setup_sha256": "bbac3f6faa752f547807359c096dcd87c01902459e9c854a28fa06d214356415", "operation": "The unchanged method and setUp call native time functions.", "fixture": "CPython runs suite discovery and outer hooks. The unchanged conversion assertions use native TestCase.assertEqual.", "negative_control": "An incorrect ctime result fails the unchanged method.", "host_fixture_hooks": ["setUp"]}, "outcome": "pass", "classification": "native-body-host-fixture"},
     {"id": "test.test_time.TimeTestCase.test_ctime", "occurrence": 1, "opt_level": 3, "fixture_variant": "test.test_time.TimeTestCase", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_time.TimeTestCase.test_ctime_without_arg", "occurrence": 1, "opt_level": 3, "fixture_variant": "test.test_time.TimeTestCase", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},
     {"id": "test.test_time.TimeTestCase.test_data_attributes", "occurrence": 1, "opt_level": 3, "fixture_variant": "test.test_time.TimeTestCase", "reference": "pass", "outcome": "not-run", "roles": {"body": "unobserved", "assertions": "unobserved", "operation": "unobserved", "fixture": "unobserved"}, "classification": "reference-only"},

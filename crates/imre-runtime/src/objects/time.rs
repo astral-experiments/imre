@@ -529,7 +529,7 @@ impl LocalTime {
         })
     }
 
-    pub(crate) fn strftime(mut self, pattern: &[u32]) -> Result<Vec<u32>, Error> {
+    fn normalize(&mut self) -> Result<(), Error> {
         if self.tm.tm_mon == -1 {
             self.tm.tm_mon = 0;
         }
@@ -553,6 +553,27 @@ impl LocalTime {
             }
         }
         self.tm.tm_isdst = self.tm.tm_isdst.clamp(-1, 1);
+        Ok(())
+    }
+
+    /// Return validated Python calendar fields for the locale-independent asctime formatter.
+    pub(crate) fn asctime_fields(mut self) -> Result<[i64; 9], Error> {
+        self.normalize()?;
+        Ok([
+            i64::from(self.tm.tm_year) + 1900,
+            i64::from(self.tm.tm_mon) + 1,
+            i64::from(self.tm.tm_mday),
+            i64::from(self.tm.tm_hour),
+            i64::from(self.tm.tm_min),
+            i64::from(self.tm.tm_sec),
+            i64::from((self.tm.tm_wday + 6) % 7),
+            i64::from(self.tm.tm_yday) + 1,
+            i64::from(self.tm.tm_isdst),
+        ])
+    }
+
+    pub(crate) fn strftime(mut self, pattern: &[u32]) -> Result<Vec<u32>, Error> {
+        self.normalize()?;
         if !self.zone.is_empty() {
             self.tm.tm_zone = self.zone.as_mut_ptr().cast();
         }

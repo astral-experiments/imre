@@ -259,9 +259,22 @@ impl crate::ProgramOutput {
                     if let Some((whole, _)) = &mut other {
                         root.output.begin_placement(&mut whole.output, unit);
                     }
-                    let mut file = root
-                        .output
-                        .data(prompt.source.path.as_os_str().as_encoded_bytes());
+                    // The entry's source graph can name it after its file, while its
+                    // executable registration and DocTestSuite use __main__.
+                    let entry_filename = (name == "__main__")
+                        .then_some(prepared.prompt_owner)
+                        .flatten()
+                        .filter(|owner| *owner != name)
+                        .and_then(|owner| {
+                            let path = prompt.source.path.to_str()?;
+                            let member = path.strip_prefix(&format!("<doctest {owner}"))?;
+                            member.starts_with(['.', '[']).then(|| format!("<doctest {name}{member}"))
+                        });
+                    let filename = entry_filename.as_deref().map_or_else(
+                        || prompt.source.path.as_os_str().as_encoded_bytes(),
+                        str::as_bytes,
+                    );
+                    let mut file = root.output.data(filename);
                     let mut code = prompt.emit(&mut root.output, unit, &file)?;
                     let text = &prompt.source.text;
                     let flags = prompt.source.future_flags;

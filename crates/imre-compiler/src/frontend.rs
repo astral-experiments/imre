@@ -15691,6 +15691,7 @@ impl<'a> Checker<'a> {
                             vec![slot],
                         ));
                     }
+                    return Err(self.object_runtime_export("object.__repr__", call));
                 }
                 let kind = match receiver.kind {
                     ExprKind::Local(slot)
