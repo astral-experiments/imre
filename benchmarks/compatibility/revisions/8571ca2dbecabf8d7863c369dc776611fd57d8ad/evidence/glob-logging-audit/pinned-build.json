@@ -1,0 +1,52 @@
+{
+  "schema": "imre.compatibility.staged-audit-build.v1",
+  "source_revision": "8571ca2dbecabf8d7863c369dc776611fd57d8ad",
+  "source_checkout": "/workspace/scratch/imre-source-8571",
+  "source_checkout_clean": true,
+  "environment": {
+    "CARGO_HOME": "/workspace/.toolchains/cargo",
+    "RUSTUP_HOME": "/workspace/.toolchains/rustup",
+    "PATH_prefix": "/workspace/.toolchains/cargo/bin"
+  },
+  "rustc_version": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "cargo_version": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+  "clean_argv": [
+    "cargo",
+    "clean",
+    "-p",
+    "imre-compiler",
+    "-p",
+    "imre-runtime",
+    "--release",
+    "--target-dir",
+    "/workspace/scratch/imre-target-8571"
+  ],
+  "build_argv": [
+    "cargo",
+    "build",
+    "--offline",
+    "--release",
+    "--locked",
+    "-p",
+    "imre-compiler",
+    "-p",
+    "imre-runtime",
+    "--target-dir",
+    "/workspace/scratch/imre-target-8571"
+  ],
+  "exit_code": 0,
+  "build_raw_sha256": "ae794bad785cf9cf31467cf98d733418729af7dcb4be7014d67b4d71d4251d13",
+  "artifacts": {
+    "/workspace/scratch/imre-target-8571/release/imre": "97cbb30865ac752ddfa4e0430a4126e47ebb3efba894842c41a93fe60d641483",
+    "/workspace/scratch/imre-target-8571/release/libimre_runtime.a": "bf866ff965e659f21123e264fb1c898f1428e322d1f9dbcb62b937fd99c33e9f",
+    "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+  },
+  "imre_executed": false,
+  "target_seed_argv": [
+    "cp",
+    "-a",
+    "--reflink=auto",
+    "/workspace/imre/target",
+    "/workspace/scratch/imre-target-8571"
+  ]
+}

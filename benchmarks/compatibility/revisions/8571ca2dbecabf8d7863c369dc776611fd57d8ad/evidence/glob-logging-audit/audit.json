@@ -1,0 +1,413 @@
+{
+  "schema": "imre.compatibility.staged-audit.v1",
+  "imre_revision": "8571ca2dbecabf8d7863c369dc776611fd57d8ad",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "families": {
+    "glob": {
+      "frozen_originals": 24,
+      "staged_receipts": 24,
+      "missing_staged_ids": 0,
+      "stage_sha256": "61ec05c7664af546ab94a573a3ba97457b34e4a08f1f881761fad06788806a9c",
+      "source": {
+        "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "git_blob": "d0ed5129253cdfb625ae092bb0e89f1b4c96dda4",
+        "path": "Lib/test/test_glob.py",
+        "repo": "https://github.com/python/cpython",
+        "sha256": "b4adbfa93158f2949957bc6b9c7f16aca58e3fa9b35c863a6caf36f4114a279a"
+      },
+      "public_source_anchor": "https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_glob.py",
+      "candidate_intersections": [
+        {
+          "id": "test.test_glob.GlobTests.test_escape",
+          "occurrence": 1,
+          "outcomes": {
+            "stock": "pass",
+            "O0": "pass",
+            "O3": "pass"
+          },
+          "evidence": {
+            "stock": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/stock.stderr#L1",
+            "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O0.stderr#L2",
+            "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O3.stderr#L2"
+          }
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob0",
+          "occurrence": 1,
+          "outcomes": {
+            "stock": "pass",
+            "O0": "pass",
+            "O3": "pass"
+          },
+          "evidence": {
+            "stock": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/stock.stderr#L3",
+            "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O0.stderr#L16",
+            "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O3.stderr#L16"
+          }
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob1",
+          "occurrence": 1,
+          "outcomes": {
+            "stock": "pass",
+            "O0": "pass",
+            "O3": "pass"
+          },
+          "evidence": {
+            "stock": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/stock.stderr#L4",
+            "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O0.stderr#L23",
+            "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O3.stderr#L23"
+          }
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_broken_symlinks",
+          "occurrence": 1,
+          "outcomes": {
+            "stock": "pass",
+            "O0": "pass",
+            "O3": "pass"
+          },
+          "evidence": {
+            "stock": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/stock.stderr#L5",
+            "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O0.stderr#L30",
+            "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O3.stderr#L30"
+          }
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_bytes_directory_with_trailing_slash",
+          "occurrence": 1,
+          "outcomes": {
+            "stock": "pass",
+            "O0": "pass",
+            "O3": "pass"
+          },
+          "evidence": {
+            "stock": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/stock.stderr#L6",
+            "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O0.stderr#L37",
+            "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O3.stderr#L37"
+          }
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_directory_names",
+          "occurrence": 1,
+          "outcomes": {
+            "stock": "pass",
+            "O0": "pass",
+            "O3": "pass"
+          },
+          "evidence": {
+            "stock": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/stock.stderr#L7",
+            "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O0.stderr#L44",
+            "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O3.stderr#L44"
+          }
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_directory_with_trailing_slash",
+          "occurrence": 1,
+          "outcomes": {
+            "stock": "pass",
+            "O0": "pass",
+            "O3": "pass"
+          },
+          "evidence": {
+            "stock": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/stock.stderr#L8",
+            "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O0.stderr#L51",
+            "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O3.stderr#L51"
+          }
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_empty_pattern",
+          "occurrence": 1,
+          "outcomes": {
+            "stock": "pass",
+            "O0": "pass",
+            "O3": "pass"
+          },
+          "evidence": {
+            "stock": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/stock.stderr#L9",
+            "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O0.stderr#L58",
+            "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O3.stderr#L58"
+          }
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_literal",
+          "occurrence": 1,
+          "outcomes": {
+            "stock": "pass",
+            "O0": "pass",
+            "O3": "pass"
+          },
+          "evidence": {
+            "stock": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/stock.stderr#L10",
+            "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O0.stderr#L65",
+            "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O3.stderr#L65"
+          }
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_named_pipe",
+          "occurrence": 1,
+          "outcomes": {
+            "stock": "pass",
+            "O0": "pass",
+            "O3": "pass"
+          },
+          "evidence": {
+            "stock": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/stock.stderr#L13",
+            "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O0.stderr#L81",
+            "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O3.stderr#L81"
+          }
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_nested_directory",
+          "occurrence": 1,
+          "outcomes": {
+            "stock": "pass",
+            "O0": "pass",
+            "O3": "pass"
+          },
+          "evidence": {
+            "stock": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/stock.stderr#L14",
+            "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O0.stderr#L88",
+            "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O3.stderr#L88"
+          }
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_non_directory",
+          "occurrence": 1,
+          "outcomes": {
+            "stock": "pass",
+            "O0": "pass",
+            "O3": "pass"
+          },
+          "evidence": {
+            "stock": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/stock.stderr#L15",
+            "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O0.stderr#L95",
+            "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O3.stderr#L95"
+          }
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_one_directory",
+          "occurrence": 1,
+          "outcomes": {
+            "stock": "pass",
+            "O0": "pass",
+            "O3": "pass"
+          },
+          "evidence": {
+            "stock": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/stock.stderr#L16",
+            "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O0.stderr#L102",
+            "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O3.stderr#L102"
+          }
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_symlinks",
+          "occurrence": 1,
+          "outcomes": {
+            "stock": "pass",
+            "O0": "pass",
+            "O3": "pass"
+          },
+          "evidence": {
+            "stock": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/stock.stderr#L17",
+            "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O0.stderr#L109",
+            "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O3.stderr#L109"
+          }
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_hidden_glob",
+          "occurrence": 1,
+          "outcomes": {
+            "stock": "pass",
+            "O0": "pass",
+            "O3": "pass"
+          },
+          "evidence": {
+            "stock": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/stock.stderr#L18",
+            "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O0.stderr#L116",
+            "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O3.stderr#L116"
+          }
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_recursive_glob",
+          "occurrence": 1,
+          "outcomes": {
+            "stock": "pass",
+            "O0": "pass",
+            "O3": "pass"
+          },
+          "evidence": {
+            "stock": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/stock.stderr#L19",
+            "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O0.stderr#L123",
+            "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O3.stderr#L123"
+          }
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_translate",
+          "occurrence": 1,
+          "outcomes": {
+            "stock": "pass",
+            "O0": "pass",
+            "O3": "pass"
+          },
+          "evidence": {
+            "stock": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/stock.stderr#L20",
+            "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O0.stderr#L130",
+            "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O3.stderr#L130"
+          }
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_translate_include_hidden",
+          "occurrence": 1,
+          "outcomes": {
+            "stock": "pass",
+            "O0": "pass",
+            "O3": "pass"
+          },
+          "evidence": {
+            "stock": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/stock.stderr#L21",
+            "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O0.stderr#L137",
+            "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O3.stderr#L137"
+          }
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_translate_matching",
+          "occurrence": 1,
+          "outcomes": {
+            "stock": "pass",
+            "O0": "pass",
+            "O3": "pass"
+          },
+          "evidence": {
+            "stock": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/stock.stderr#L22",
+            "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O0.stderr#L144",
+            "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O3.stderr#L144"
+          }
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_translate_recursive",
+          "occurrence": 1,
+          "outcomes": {
+            "stock": "pass",
+            "O0": "pass",
+            "O3": "pass"
+          },
+          "evidence": {
+            "stock": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/stock.stderr#L23",
+            "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O0.stderr#L151",
+            "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O3.stderr#L151"
+          }
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_translate_seps",
+          "occurrence": 1,
+          "outcomes": {
+            "stock": "pass",
+            "O0": "pass",
+            "O3": "pass"
+          },
+          "evidence": {
+            "stock": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/stock.stderr#L24",
+            "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O0.stderr#L158",
+            "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O3.stderr#L158"
+          }
+        }
+      ],
+      "other_staged_outcomes": [
+        {
+          "id": "test.test_glob.GlobTests.test_escape_windows",
+          "occurrence": 1,
+          "outcomes": {
+            "stock": "skip",
+            "O0": "skip",
+            "O3": "skip"
+          },
+          "evidence": {
+            "stock": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/stock.stderr#L2",
+            "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O0.stderr#L9",
+            "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O3.stderr#L9"
+          }
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_magic_in_drive",
+          "occurrence": 1,
+          "outcomes": {
+            "stock": "skip",
+            "O0": "skip",
+            "O3": "skip"
+          },
+          "evidence": {
+            "stock": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/stock.stderr#L11",
+            "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O0.stderr#L72",
+            "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O3.stderr#L72"
+          }
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_many_open_files",
+          "occurrence": 1,
+          "outcomes": {
+            "stock": "pass",
+            "O0": "timeout",
+            "O3": "timeout"
+          },
+          "evidence": {
+            "stock": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/stock.stderr#L12",
+            "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O0.stderr",
+            "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/O3.stderr"
+          }
+        }
+      ],
+      "validated_receipts": 0,
+      "verified_pairs": 0
+    },
+    "logging": {
+      "frozen_originals": 272,
+      "staged_receipts": 2,
+      "missing_staged_ids": 270,
+      "stage_sha256": "4dded3145629d25c5e7c6a74e0f386c94408d3338dc851dbedd1c6df03c1a210",
+      "source": {
+        "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "git_blob": "c1dc06e02d965781df0498a444aa0a333bd28a85",
+        "path": "Lib/test/test_logging.py",
+        "repo": "https://github.com/python/cpython",
+        "sha256": "529fb98e8a0890d562d8d8903c09700635ad8f67cef4bad6f749f89d3442a563"
+      },
+      "public_source_anchor": "https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_logging.py",
+      "candidate_intersections": [
+        {
+          "id": "test.test_logging.BufferingFormatterTest.test_default",
+          "occurrence": 1,
+          "outcomes": {
+            "stock": "pass",
+            "O0": "pass",
+            "O3": "pass"
+          },
+          "evidence": {
+            "stock": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/leaf/stock.stderr#L1",
+            "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/leaf/O0.run.stderr#L1",
+            "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/leaf/O3.run.stderr#L1"
+          }
+        }
+      ],
+      "other_staged_outcomes": [
+        {
+          "id": "test.test_logging.BasicFilterTest.test_empty_filter",
+          "occurrence": 1,
+          "outcomes": {
+            "stock": "pass",
+            "O0": "not_run",
+            "O3": "not_run"
+          },
+          "evidence": {
+            "stock": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/stock.stderr#L1",
+            "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/O0.build.stderr",
+            "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/O3.build.stderr"
+          }
+        }
+      ],
+      "validated_receipts": 0,
+      "verified_pairs": 0
+    }
+  },
+  "fresh_stock_only_glob_passes": 21,
+  "strict_pairs_added": 0
+}
