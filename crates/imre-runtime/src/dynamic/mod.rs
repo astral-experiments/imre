@@ -101,6 +101,7 @@ enum LinkedSource {
     Loader(SourceModule),
     Doctest(Rc<DoctestSource>),
     Expression(Code),
+    EvalName(ruff_python_ast::name::Name, [u32; 4]),
 }
 
 /// How a registered module supplies its code object to importlib.

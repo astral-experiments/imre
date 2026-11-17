@@ -1658,7 +1658,7 @@ pub(super) fn finish(ctx: &mut Context, result: Result<Id>) -> Id {
     finish_at(ctx, result, None)
 }
 
-fn finish_at(ctx: &mut Context, result: Result<Id>, span: Option<&[u32; 4]>) -> Id {
+pub(super) fn finish_at(ctx: &mut Context, result: Result<Id>, span: Option<&[u32; 4]>) -> Id {
     let result = result.and_then(|id| {
         ctx.heap.reserve_temporaries(1)?;
         Ok(id)
