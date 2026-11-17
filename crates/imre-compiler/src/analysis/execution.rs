@@ -186,7 +186,7 @@ struct Escape<'a, 'db> {
     session: &'db Session,
     open_providers: &'a [File],
     selected_provider: &'a dyn Fn(&str) -> Option<File>,
-    selected_writes: HashMap<(ty_python_core::definition::Definition<'db>, &'a str), TextRange>,
+    selected_writes: HashMap<(ty_python_core::definition::Definition<'db>, &'a str), &'a Expr>,
     linked_exec: Option<&'a std::collections::HashSet<TextRange>>,
     literal_unit: Option<crate::dynamic::literal::LiteralUnit<'a>>,
     path: &'a Path,
@@ -228,7 +228,7 @@ impl<'ast, 'db> Escape<'ast, 'db> {
     /// Resolve an interface only for imported execution checking; it does not grant a linked entry.
     fn selected_execution_target(
         &self,
-        value: &Expr,
+        value: &'ast Expr,
     ) -> Option<(SourceFunction<'db>, Option<TextRange>)> {
         let db = self.model.db();
         let ty @ (Type::FunctionLiteral(_) | Type::BoundMethod(_)) =
@@ -261,11 +261,57 @@ impl<'ast, 'db> Escape<'ast, 'db> {
                     .try_definition(class.node(&parsed))?;
                 self.selected_writes
                     .get(&(owner, interface.name(db)?.as_str()))
-                    .copied()
+                    .filter(|write| !self.captured_before_selected_write(value, write, interface))
+                    .map(|write| write.range())
             }
             _ => None,
         };
         Some(((selected.file(db), function), replacement))
+    }
+
+    /// Prove a saved bound method was captured before the first write in the module's direct body.
+    fn captured_before_selected_write(
+        &self,
+        value: &'ast Expr,
+        write: &Expr,
+        interface: ty_python_core::definition::Definition<'db>,
+    ) -> bool {
+        let db = self.model.db();
+        let Some(capture) = self.assigned_value(value) else {
+            return false;
+        };
+        if std::ptr::eq(capture, value)
+            || !capture.is_attribute_expr()
+            || self.member_was_assigned(capture)
+            || !matches!(capture.inferred_type(self.model), Some(ty @ Type::BoundMethod(_))
+                if ty.definition(db, &self.model.program_environment()) == Some(TypeDefinition::Function(interface)))
+        {
+            return false;
+        }
+        let index = ty_python_core::semantic_index(db, self.model.program_file());
+        let Some(scope) = index.try_expression_scope_id(capture) else {
+            return false;
+        };
+        if !scope.is_global()
+            || index.try_expression_scope_id(write) != Some(scope)
+            || index.try_expression_scope_id(value) != Some(scope)
+        {
+            return false;
+        }
+        let body = self.parsed.suite().as_slice();
+        let assignment_at = |site: &Expr| {
+            body.get(body.partition_point(|stmt| stmt.end() <= site.start()))
+                .and_then(Stmt::as_assign_stmt)
+        };
+        let (Some(captured), Some(written)) = (assignment_at(capture), assignment_at(write)) else {
+            return false;
+        };
+        std::ptr::eq(captured.value.as_ref(), capture)
+            && written
+                .targets
+                .iter()
+                .any(|target| std::ptr::eq(target, write))
+            && captured.end() <= written.start()
     }
 
     /// Preserve the selected physical Python definition; a stub or unrelated shadow is not an executable provider.
@@ -861,8 +907,10 @@ impl<'a> Escape<'a, '_> {
                     .and_then(|ty| ty.definition(db, &self.model.program_environment()))
                 && owner.file(db).path(db).is_vendored_path()
             {
+                // Only a capture before the first observed write can still prove the original method.
                 self.selected_writes
-                    .insert((owner, attr.attr.as_str()), attr.range());
+                    .entry((owner, attr.attr.as_str()))
+                    .or_insert(expression);
             }
             if self.has_live_import(expression) {
                 if self.exposes_captured_namespace(expression) {
