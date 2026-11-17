@@ -112,7 +112,7 @@ with Rust-competitive performance.
 
 Revision `49f0dc2ef78b82692e333252faf71b4fc7730949` · CPython **3.14.5** · Linux x86-64. These are original-test receipts at this revision, not cumulative credits.
 
-Frozen 45-family cohort: **4,179 pinned receipts** of **16,225 raw upstream originals**, **0 verified paired passes**; **12,046 originals have no receipt**.
+Frozen 45-family cohort: **9,400 pinned receipts** of **16,225 raw upstream originals**, **24 verified paired passes**; **6,825 originals have no receipt**.
 
 Supplemental pilots, outside the frozen cohort: **3 receipts** of **3 originals**, **3 verified paired passes**.
 
@@ -123,9 +123,31 @@ Scripts: **0 of 84 original commands have receipts**, **0 verified paired passes
 | Family | Raw originals | Stock | O0 | O3 | Paired at pin | Historical mixed-revision credits |
 | --- | ---: | --- | --- | --- | --- | ---: |
 | `argparse` | 1,893 | 1,893 pass | not run | not run | 0 verified | 1,887 |
+| `configparser` | 344 | 339 pass, 5 skip | 339 pass, 5 skip | 339 pass, 5 skip | 0 verified | 339 |
+| `copy` | 81 | 81 pass | not run | not run | 0 verified | 81 |
+| `dataclasses` | 276 | 275 pass, 1 skip | not run | not run | 0 verified | 273 |
+| `datetime` | 1,098 | 1,045 pass, 53 skip | 19 pass, 24 skip, 1,055 not run | 21 pass, 24 skip, 1,053 not run | 0 verified | 1,029 |
+| `fnmatch` | 24 | 24 pass | 24 pass | 24 pass | 24 verified | 24 |
+| `fractions` | 50 | 50 pass | not run | not run | 0 verified | 50 |
+| `glob` | 24 | 22 pass, 2 skip | 21 pass, 2 skip, 1 not run | 21 pass, 2 skip, 1 not run | 0 verified | 22 |
 | `importlib` | 1,345 | 1,328 pass, 17 skip | not run | not run | 0 verified | 432 |
+| `inspect` | 362 | 355 pass, 7 skip | not run | not run | 0 verified | 264 |
+| `logging` | 272 | 269 pass, 3 skip | not run | not run | 0 verified | 220 |
+| `math` | 89 | 89 pass | not run | not run | 0 verified | 85 |
+| `os` | 579 | 474 pass, 2 error, 103 skip | 25 pass, 554 not run | 25 pass, 554 not run | 0 verified | 471 |
+| `re` | 165 | 164 pass, 1 skip | not run | not run | 0 verified | 146 |
+| `shutil` | 223 | 160 pass, 63 skip | not run | not run | 0 verified | 172 |
 | `socket` | 746 | 614 pass, 132 skip | not run | not run | 0 verified | 110 |
 | `ssl` | 195 | 180 pass, 15 skip | not run | not run | 0 verified | 66 |
+| `subprocess` | 353 | 308 pass, 2 error, 43 skip | not run | not run | 0 verified | 303 |
+| `textwrap` | 68 | 68 pass | 68 pass | 68 pass | 0 verified | 68 |
+| `tokenize` | 130 | 130 pass | 127 pass, 2 error, 1 not run | 127 pass, 2 error, 1 not run | 0 verified | 127 |
+| `tomllib` | 17 | 17 pass | 17 pass | 17 pass | 0 verified | 17 |
+| `types` | 141 | 128 pass, 1 skip, 12 not run | not run | not run | 0 verified; 12 unknown | 134 |
+| `urllib` | 178 | 174 pass, 2 error, 2 skip | 174 pass, 2 error, 2 skip | 174 pass, 2 error, 2 skip | 0 verified | 173 |
+| `uuid` | 120 | 103 pass, 17 skip | not run | not run | 0 verified | 48 |
+| `zipfile` | 383 | 376 pass, 2 skip, 5 not run | not run | not run | 0 verified; 5 unknown | 370 |
+| `zoneinfo` | 261 | 233 pass, 28 skip | not run | not run | 0 verified | 229 |
 
 #### Supplemental pilots
 
