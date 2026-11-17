@@ -2629,12 +2629,7 @@ fn bisect_ints<const LEFT: bool>(values: &[Int], needle: &Int) -> usize {
     low
 }
 
-fn list_bisect_bounds<const LEFT: bool>(
-    list: &List,
-    needle: &Int,
-    lo: &Int,
-    hi: &Int,
-) -> Result<usize> {
+fn bisect_indices(lo: &Int, hi: &Int) -> Result<(isize, isize)> {
     let lo = signed_index(lo).ok_or_else(|| {
         Error::new(
             Kind::OverflowError,
@@ -2650,38 +2645,56 @@ fn list_bisect_bounds<const LEFT: bool>(
     if lo < 0 {
         return Err(Error::new(Kind::ValueError, "lo must be non-negative"));
     }
+    Ok((lo, hi))
+}
+
+fn bisect_ints_bounds<const LEFT: bool>(
+    values: &[Int],
+    needle: &Int,
+    lo: isize,
+    hi: isize,
+    index_error: &'static str,
+) -> Result<usize> {
+    let hi = if hi == -1 { values.len() as isize } else { hi };
+    if lo >= hi {
+        return Ok(Int::from_usize(lo as usize).into_raw());
+    }
+    let mut low = lo as usize;
+    let mut high = hi as usize;
+    if high <= values.len() {
+        let index = low + bisect_ints::<LEFT>(&values[low..high], needle);
+        return Ok((index << 1) | 1);
+    }
+    while low < high {
+        let mid = low + (high - low) / 2;
+        let value = values
+            .get(mid)
+            .ok_or_else(|| Error::new(Kind::IndexError, index_error))?;
+        let comparison = value.cmp(needle);
+        if if LEFT {
+            comparison.is_lt()
+        } else {
+            !comparison.is_gt()
+        } {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    Ok(Int::from_usize(low).into_raw())
+}
+
+fn list_bisect_bounds<const LEFT: bool>(
+    list: &List,
+    needle: &Int,
+    lo: &Int,
+    hi: &Int,
+) -> Result<usize> {
+    let (lo, hi) = bisect_indices(lo, hi)?;
     // SAFETY: exact integer comparisons cannot reenter or mutate this rooted list.
     unsafe {
         list.0.with(|values| {
-            let hi = if hi == -1 { values.len() as isize } else { hi };
-            if lo >= hi {
-                return Ok(Int::from_usize(lo as usize).into_raw());
-            }
-            let mut low = lo as usize;
-            let mut high = hi as usize;
-            let before = |value: &Int| {
-                if LEFT {
-                    value.cmp(needle).is_lt()
-                } else {
-                    !value.cmp(needle).is_gt()
-                }
-            };
-            if high <= values.len() {
-                let index = low + bisect_ints::<LEFT>(&values[low..high], needle);
-                return Ok((index << 1) | 1);
-            }
-            while low < high {
-                let mid = low + (high - low) / 2;
-                let value = values
-                    .get(mid)
-                    .ok_or_else(|| Error::new(Kind::IndexError, "list index out of range"))?;
-                if before(value) {
-                    low = mid + 1;
-                } else {
-                    high = mid;
-                }
-            }
-            Ok(Int::from_usize(low).into_raw())
+            bisect_ints_bounds::<LEFT>(values, needle, lo, hi, "list index out of range")
         })
     }
 }

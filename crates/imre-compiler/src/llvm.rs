@@ -4804,20 +4804,22 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::BisectIntList { left } => self.call(
-                if *left {
-                    "imre_list_bisect_left"
-                } else {
-                    "imre_list_bisect_right"
+            Builtin::BisectIntSequence { left, tuple } => self.call(
+                match (*tuple, *left) {
+                    (false, true) => "imre_list_bisect_left",
+                    (false, false) => "imre_list_bisect_right",
+                    (true, true) => "imre_tuple_bisect_left",
+                    (true, false) => "imre_tuple_bisect_right",
                 },
                 Type::Int,
                 &[&args[0].value, &args[1].value],
             ),
-            Builtin::BisectIntListBounds { left } => self.call(
-                if *left {
-                    "imre_list_bisect_left_bounds"
-                } else {
-                    "imre_list_bisect_right_bounds"
+            Builtin::BisectIntSequenceBounds { left, tuple } => self.call(
+                match (*tuple, *left) {
+                    (false, true) => "imre_list_bisect_left_bounds",
+                    (false, false) => "imre_list_bisect_right_bounds",
+                    (true, true) => "imre_tuple_bisect_left_bounds",
+                    (true, false) => "imre_tuple_bisect_right_bounds",
                 },
                 Type::Int,
                 &[
@@ -11479,6 +11481,10 @@ declare i64 @imre_list_bisect_left(ptr, i64)
 declare i64 @imre_list_bisect_right(ptr, i64)
 declare i64 @imre_list_bisect_left_bounds(ptr, i64, i64, i64)
 declare i64 @imre_list_bisect_right_bounds(ptr, i64, i64, i64)
+declare i64 @imre_tuple_bisect_left(ptr, i64)
+declare i64 @imre_tuple_bisect_right(ptr, i64)
+declare i64 @imre_tuple_bisect_left_bounds(ptr, i64, i64, i64)
+declare i64 @imre_tuple_bisect_right_bounds(ptr, i64, i64, i64)
 declare ptr @imre_list_repeat(ptr, i64)
 declare ptr @imre_list_slice(ptr, i64, i64, i64)
 declare ptr @imre_seq_slice(ptr, i64, i64, i64)

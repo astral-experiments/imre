@@ -1731,6 +1731,18 @@ print("result", call(b=2, a=1))
     }
 
     #[test]
+    fn exact_integer_tuple_bisect_uses_flat_search() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, "from bisect import bisect_left, bisect_right\ndef search(a: tuple[int, ...], x: int) -> int:\n    return bisect_left(a, x) + bisect_right(key=None, x=x, a=a, lo=1, hi=None)\nprint(search((1, 2, 2), 2))\n").unwrap();
+        let ir = super::compile_file(&path, None, &CompileOptions::default())
+            .unwrap()
+            .llvm_ir;
+        assert!(ir.contains("call i64 @imre_tuple_bisect_left("));
+        assert!(ir.contains("call i64 @imre_tuple_bisect_right_bounds("));
+    }
+
+    #[test]
     fn registered_reduction_specializes_multiply_in_its_python_frame() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("paired.py");
