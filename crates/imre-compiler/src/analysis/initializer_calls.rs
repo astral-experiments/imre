@@ -146,6 +146,7 @@ struct InitializerStatement<'a, 'db> {
     imports: &'a [(TextRange, InitializerSource<'a>, Option<Definition<'db>>)],
     progress: &'a HashMap<usize, Option<TextSize>>,
     entered_function: &'a std::cell::Cell<Option<(usize, TextRange)>>,
+    allow_output: bool,
 }
 
 impl Session {
@@ -248,19 +249,47 @@ impl Session {
         selected_module: impl Fn(&str) -> Option<InitializerSource<'a>>,
         captures: Option<&mut super::execution::CapturedImports>,
     ) -> InitializerCheck {
+        self.initializer_calls(entry, runs_as_main, selected_module, captures, false)
+    }
+
+    /// Follow simple output only when selecting a static contract diagnostic. It may
+    /// have effects, so this pass must never provide captured import bindings.
+    pub(super) fn initializer_contract_after_output<'a>(
+        &self,
+        entry: (usize, &'a Path),
+        runs_as_main: bool,
+        selected_module: impl Fn(&str) -> Option<InitializerSource<'a>>,
+    ) -> InitializerCheck {
+        self.initializer_calls(entry, runs_as_main, selected_module, None, true)
+    }
+
+    fn initializer_calls<'a>(
+        &self,
+        entry: (usize, &'a Path),
+        runs_as_main: bool,
+        selected_module: impl Fn(&str) -> Option<InitializerSource<'a>>,
+        captures: Option<&mut super::execution::CapturedImports>,
+        allow_output: bool,
+    ) -> InitializerCheck {
         // These semantic queries establish a diagnostic. Only native lowering's
         // layout queries should retain a hint session for subsequent compilations.
         let hints = self.hint_reads.get();
         let read_import_binding = std::cell::Cell::new(false);
         let entered_function = std::cell::Cell::new(None);
-        let error = self.reached_initializer_error(entry, captures, &entered_function, |name| {
-            read_import_binding.set(true);
-            if name == "__main__" {
-                runs_as_main.then(|| InitializerSource::application(entry))
-            } else {
-                selected_module(name)
-            }
-        });
+        let error = self.reached_initializer_error(
+            entry,
+            captures,
+            &entered_function,
+            allow_output,
+            |name| {
+                read_import_binding.set(true);
+                if name == "__main__" {
+                    runs_as_main.then(|| InitializerSource::application(entry))
+                } else {
+                    selected_module(name)
+                }
+            },
+        );
         self.hint_reads.set(hints);
         InitializerCheck {
             error,
@@ -274,6 +303,7 @@ impl Session {
         entry: (usize, &'a Path),
         mut captures: Option<&mut super::execution::CapturedImports>,
         entered_function: &std::cell::Cell<Option<(usize, TextRange)>>,
+        allow_output: bool,
         selected_module: impl Fn(&str) -> Option<InitializerSource<'a>>,
     ) -> Option<Diagnostic> {
         // A suspended initializer exposes the declarations preceding its import.
@@ -400,6 +430,7 @@ impl Session {
                     imports: &imports,
                     progress: &progress,
                     entered_function,
+                    allow_output,
                 };
                 let call = match stmt {
                     Stmt::For(loop_) if !loop_.is_async => loop_.iter.as_call_expr(),
@@ -410,11 +441,39 @@ impl Session {
                     },
                 };
                 if let Some(call) = call {
-                    match self.initializer_call(&statement, call, stmt.is_for_stmt()) {
+                    match self.initializer_call(&statement, call, stmt.is_for_stmt(), false) {
                         Some(Err(error)) => return Some(error),
                         Some(Ok(_)) if stmt.is_expr_stmt() => continue,
                         _ => {}
                     }
+                }
+                if allow_output
+                    && let Stmt::Assign(assign) = stmt
+                    && assign.targets.iter().all(Expr::is_name_expr)
+                    && let Expr::Subscript(lookup) = assign.value.as_ref()
+                    && matches!(lookup.value.as_ref(), Expr::Dict(_) | Expr::Name(_))
+                    && let Some(input) = lookup.slice.as_call_expr()
+                    && input.arguments.is_empty()
+                    && input.func.inferred_type(&model).is_some_and(|ty| {
+                        super::select_stdlib_function(&model, ty, "builtins", |function| {
+                            (function.name.as_str() == "input").then_some(())
+                        })
+                        .is_some()
+                    })
+                {
+                    continue;
+                }
+                if allow_output
+                    && let Stmt::Assign(assign) = stmt
+                    && assign.targets.iter().all(Expr::is_name_expr)
+                    && let Expr::Dict(mapping) = assign.value.as_ref()
+                    && mapping.items.iter().all(|item| {
+                        item.key.as_ref().is_some_and(Expr::is_literal_expr)
+                            && item.value.is_name_expr()
+                            && self.reaching_binding(module, &item.value).is_some()
+                    })
+                {
+                    continue;
                 }
                 // Copying a function bound on this passive prefix does not invoke it.
                 // A builtin source callable has no declaration in this module.
@@ -524,6 +583,7 @@ impl Session {
         site: &InitializerStatement<'_, 'db>,
         call: &ExprCall,
         iterated: bool,
+        nested: bool,
     ) -> Option<Result<Type<'db>, Diagnostic>> {
         let (module, path) = site.source;
         let (parsed, model, stmt) = (site.parsed, site.model, site.stmt);
@@ -536,7 +596,7 @@ impl Session {
             _ => return None,
         };
         let binding = self.reaching_binding(module, name);
-        let loaded = attr.is_none()
+        let loaded = (attr.is_none() || site.allow_output)
             && (binding.is_some()
                 || name.as_name_expr().is_some_and(|n| {
                     (imre_ast::providers::BUILTIN_FUNCTIONS.contains(&n.id.as_str())
@@ -549,6 +609,13 @@ impl Session {
                 return None;
             }
             let value = argument.value();
+            if site.allow_output
+                && value.is_name_expr()
+                && self.reaching_binding(module, value).is_some()
+            {
+                actuals.push(value.inferred_type(model).unwrap_or_else(Type::unknown));
+                continue;
+            }
             if let Some(origin) =
                 super::execution::assigned_value(&self.db, file, parsed, value, Expr::is_name_expr)
                 && (origin.is_literal_expr() || crate::modules::inert_literal(value))
@@ -574,7 +641,10 @@ impl Session {
                         .iter()
                         .find(|arg| !arg.is_literal_expr())?
                         .as_call_expr()?;
-                    return self.initializer_call(site, nested, false)?.err().map(Err);
+                    return self
+                        .initializer_call(site, nested, false, true)?
+                        .err()
+                        .map(Err);
                 }
                 // Reading an attribute first evaluates its receiver. A failing call
                 // there precedes the descriptor; its result cannot stand for the attribute.
@@ -582,12 +652,20 @@ impl Session {
                 while let Expr::Attribute(attribute) = receiver {
                     receiver = &attribute.value;
                 }
-                match self.initializer_call(site, receiver.as_call_expr()?, false)? {
+                match self.initializer_call(site, receiver.as_call_expr()?, false, true)? {
                     Ok(actual) if value.is_call_expr() => actuals.push(actual),
                     Ok(_) => return None,
                     error @ Err(_) => return Some(error),
                 }
             }
+        }
+        if site.allow_output
+            && !iterated
+            && binding.is_none()
+            && attr.is_none()
+            && self.literal_print(model, call)
+        {
+            return Some(Ok(Type::none(&self.db, &model.program_environment())));
         }
         let mut binding = binding.filter(|binding| binding.file(&self.db) == file)?;
         if attr.is_none()
@@ -685,6 +763,18 @@ impl Session {
             self.unconditional_module_operand(module, site.guard_start, call.range())
         });
         let supplied = bound.supplied.iter().zip(actuals.iter().copied());
+        if site.allow_output && nested && owner == file && !function.is_async
+            && let Some((Stmt::Return(ret), prefix)) = after_docstring(&function.body).split_last()
+                && !prefix.is_empty()
+                && prefix.iter().all(|stmt| matches!(stmt, Stmt::Assign(assign)
+                    if assign.targets.iter().all(|target| matches!(target, Expr::Attribute(_) | Expr::Subscript(_)))
+                    && assign.value.is_name_expr()))
+                && let Some(value) = ret.value.as_deref()
+                && let Some(parameter) = self.parameter_read(owner, &owner_ast, value)
+                && let Some((_, actual)) = supplied.clone().find(|((p, _), _)| p.name().range() == parameter)
+        {
+            return Some(Ok(actual));
+        }
         // Fixed lowering already checks an incomplete call in operand order. Leave its
         // earlier diagnostics in place before reporting that call on a registered entry.
         let kind = if bound.missing.is_some() {
@@ -752,6 +842,15 @@ impl Session {
             }
             return Some(Ok(value));
         }
+        if site.allow_output
+            && owner == file
+            && !iterated
+            && !function.is_async
+            && function.returns.is_none()
+            && matches!(after_docstring(&function.body), [Stmt::Expr(expr)] if expr.value.as_call_expr().is_some_and(|call| self.literal_print(&owner_model, call)))
+        {
+            return Some(Ok(Type::none(&self.db, &owner_model.program_environment())));
+        }
         if !iterated && !function.is_async && !generator()? && *reached {
             site.entered_function
                 .set(Some((owner_module, function.range())));
@@ -790,6 +889,17 @@ impl Session {
             _ => return None,
         };
         Some(Err(error.classified(Kind::RegisteredInitializer)))
+    }
+
+    fn literal_print(&self, model: &SemanticModel<'_>, call: &ExprCall) -> bool {
+        call.arguments.keywords.is_empty()
+            && call.arguments.args.iter().all(Expr::is_literal_expr)
+            && call.func.inferred_type(model).is_some_and(|ty| {
+                super::select_stdlib_function(model, ty, "builtins", |function| {
+                    (function.name.as_str() == "print").then_some(())
+                })
+                .is_some()
+            })
     }
 
     /// Preserve explicitly written scalar arms when ty simplifies a subtype union
