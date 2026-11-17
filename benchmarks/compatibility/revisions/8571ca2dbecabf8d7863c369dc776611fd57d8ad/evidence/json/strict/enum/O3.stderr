@@ -1,0 +1,38 @@
+IMRE_UNITTEST {"event": "collection", "count": 12}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_enum.TestCEnum.test_dict_keys"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_enum.TestCEnum.test_dict_values"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_enum.TestCEnum.test_floats"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_enum.TestCEnum.test_ints"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_enum.TestCEnum.test_list"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_enum.TestCEnum.test_weird_floats"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_enum.TestPyEnum.test_dict_keys"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_enum.TestPyEnum.test_dict_values"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_enum.TestPyEnum.test_floats"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_enum.TestPyEnum.test_ints"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_enum.TestPyEnum.test_list"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_enum.TestPyEnum.test_weird_floats"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_enum.TestCEnum.test_dict_keys"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_enum.TestCEnum.test_dict_keys", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_enum.TestCEnum.test_dict_values"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_enum.TestCEnum.test_dict_values", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_enum.TestCEnum.test_floats"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_enum.TestCEnum.test_floats", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_enum.TestCEnum.test_ints"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_enum.TestCEnum.test_ints", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_enum.TestCEnum.test_list"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_enum.TestCEnum.test_list", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_enum.TestCEnum.test_weird_floats"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_enum.TestCEnum.test_weird_floats", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_enum.TestPyEnum.test_dict_keys"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_enum.TestPyEnum.test_dict_keys", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_enum.TestPyEnum.test_dict_values"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_enum.TestPyEnum.test_dict_values", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_enum.TestPyEnum.test_floats"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_enum.TestPyEnum.test_floats", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_enum.TestPyEnum.test_ints"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_enum.TestPyEnum.test_ints", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_enum.TestPyEnum.test_list"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_enum.TestPyEnum.test_list", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_enum.TestPyEnum.test_weird_floats"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_enum.TestPyEnum.test_weird_floats", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "summary", "run": 12, "successful": true}

@@ -1,0 +1,53 @@
+IMRE_UNITTEST {"event": "collection", "count": 17}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestCDump.test_dump"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestCDump.test_dump_skipkeys"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestCDump.test_dump_skipkeys_indent_empty"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestCDump.test_dumps"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestCDump.test_encode_evil_dict"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestCDump.test_encode_mutated"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestCDump.test_encode_truefalse"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestCDump.test_large_list"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestCDump.test_skipkeys_indent"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestPyDump.test_dump"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestPyDump.test_dump_skipkeys"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestPyDump.test_dump_skipkeys_indent_empty"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestPyDump.test_dumps"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestPyDump.test_encode_evil_dict"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestPyDump.test_encode_mutated"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestPyDump.test_encode_truefalse"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestPyDump.test_skipkeys_indent"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestCDump.test_dump"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestCDump.test_dump", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestCDump.test_dump_skipkeys"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestCDump.test_dump_skipkeys", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestCDump.test_dump_skipkeys_indent_empty"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestCDump.test_dump_skipkeys_indent_empty", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestCDump.test_dumps"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestCDump.test_dumps", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestCDump.test_encode_evil_dict"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestCDump.test_encode_evil_dict", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestCDump.test_encode_mutated"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestCDump.test_encode_mutated", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestCDump.test_encode_truefalse"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestCDump.test_encode_truefalse", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestCDump.test_large_list"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestCDump.test_large_list", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestCDump.test_skipkeys_indent"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestCDump.test_skipkeys_indent", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestPyDump.test_dump"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestPyDump.test_dump", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestPyDump.test_dump_skipkeys"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestPyDump.test_dump_skipkeys", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestPyDump.test_dump_skipkeys_indent_empty"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestPyDump.test_dump_skipkeys_indent_empty", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestPyDump.test_dumps"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestPyDump.test_dumps", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestPyDump.test_encode_evil_dict"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestPyDump.test_encode_evil_dict", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestPyDump.test_encode_mutated"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestPyDump.test_encode_mutated", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestPyDump.test_encode_truefalse"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestPyDump.test_encode_truefalse", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestPyDump.test_skipkeys_indent"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestPyDump.test_skipkeys_indent", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "summary", "run": 17, "successful": true}

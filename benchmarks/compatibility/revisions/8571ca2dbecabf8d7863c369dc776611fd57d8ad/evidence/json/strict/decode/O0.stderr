@@ -1,0 +1,92 @@
+IMRE_UNITTEST {"event": "collection", "count": 30}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_bytes"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_constant_invalid_case"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_decimal"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_decoder_optimizations"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_empty_objects"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_extra_data"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_float"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_invalid_escape"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_invalid_input_type"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_keys_reuse"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_limit_int"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_negative_index"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_nonascii_digits_rejected"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_parse_constant"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_string_with_utf8_bom"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_bytes"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_constant_invalid_case"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_decimal"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_decoder_optimizations"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_empty_objects"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_extra_data"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_float"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_invalid_escape"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_invalid_input_type"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_keys_reuse"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_limit_int"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_negative_index"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_nonascii_digits_rejected"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_parse_constant"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_string_with_utf8_bom"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_bytes"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_bytes", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_constant_invalid_case"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_constant_invalid_case", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_decimal"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_decimal", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_decoder_optimizations"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_decoder_optimizations", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_empty_objects"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_empty_objects", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_extra_data"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_extra_data", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_float"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_float", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_invalid_escape"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_invalid_escape", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_invalid_input_type"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_invalid_input_type", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_keys_reuse"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_keys_reuse", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_limit_int"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_limit_int", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_negative_index"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_negative_index", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_nonascii_digits_rejected"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_nonascii_digits_rejected", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_parse_constant"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_parse_constant", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_string_with_utf8_bom"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_string_with_utf8_bom", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_bytes"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_bytes", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_constant_invalid_case"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_constant_invalid_case", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_decimal"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_decimal", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_decoder_optimizations"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_decoder_optimizations", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_empty_objects"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_empty_objects", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_extra_data"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_extra_data", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_float"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_float", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_invalid_escape"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_invalid_escape", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_invalid_input_type"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_invalid_input_type", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_keys_reuse"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_keys_reuse", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_limit_int"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_limit_int", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_negative_index"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_negative_index", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_nonascii_digits_rejected"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_nonascii_digits_rejected", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_parse_constant"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_parse_constant", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_string_with_utf8_bom"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_string_with_utf8_bom", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "summary", "run": 30, "successful": true}
