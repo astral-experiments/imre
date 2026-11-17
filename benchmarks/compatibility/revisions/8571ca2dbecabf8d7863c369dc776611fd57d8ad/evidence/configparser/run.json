@@ -1,0 +1,165 @@
+{
+  "imre_revision": "8571ca2dbecabf8d7863c369dc776611fd57d8ad",
+  "raw_denominator": 344,
+  "launcher_control_passed": true,
+  "strict_controls_passed": true,
+  "runs": {
+    "O0": {
+      "build_argv": [
+        "/workspace/scratch/config-8571/sdk/imre",
+        "build",
+        "/workspace/scratch/config-8571/launcher.py",
+        "--module-root",
+        "/workspace/scratch/config-8571",
+        "--extension-path",
+        "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "--quiet",
+        "--no-cache",
+        "--opt-level",
+        "0",
+        "--runtime",
+        "/workspace/scratch/config-8571/sdk/libimre_runtime.a",
+        "--clang",
+        "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+        "-o",
+        "/workspace/scratch/config-8571/O0.exe",
+        "--include-module",
+        "test.test_configparser"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "TMPDIR": "/workspace/scratch/imre-tmp",
+        "IMRE_PYTHON": "/workspace/scratch/config-8571/sdk/imre",
+        "IMREFLAGS": "--opt-level 0"
+      },
+      "build_timeout_seconds": 360,
+      "build_exit_code": 0,
+      "build_timed_out": false,
+      "image": "/workspace/scratch/config-8571/O0.exe",
+      "image_exists": true,
+      "image_sha256": "c2e6ff5d9aa451767257b3e52fe339d890b4765b780fa8f74aee77e59ed948e1",
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-e",
+        "trace=execve,execveat,open,openat,openat2",
+        "-E",
+        "LD_PRELOAD=/workspace/scratch/config-8571/deny_child_exec.so",
+        "-o",
+        "/workspace/scratch/config-8571/O0.withdrawal.trace",
+        "/workspace/scratch/config-8571/O0.exe",
+        "-v",
+        "test.test_configparser"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "run_timeout_seconds": 240,
+      "trace_sha256": "b4ca194d0ec1e9b734f988bf6a0750551e2c4d7b775af1f4b7299c226f5aba44",
+      "trace_bytes": 21315,
+      "successful_execs": 1,
+      "child_exec_denied": true,
+      "libpython_open_lines": 0,
+      "raw_trace": "O0.raw.trace",
+      "no_libpython": true,
+      "source_absent_during_run": true,
+      "reported_totals": [
+        "344"
+      ],
+      "completed_originals": 344,
+      "comparisons": {
+        "completed": 344,
+        "same_outcome": 344,
+        "different": []
+      }
+    },
+    "O3": {
+      "build_argv": [
+        "/workspace/scratch/config-8571/sdk/imre",
+        "build",
+        "/workspace/scratch/config-8571/launcher.py",
+        "--module-root",
+        "/workspace/scratch/config-8571",
+        "--extension-path",
+        "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "--quiet",
+        "--no-cache",
+        "--opt-level",
+        "3",
+        "--runtime",
+        "/workspace/scratch/config-8571/sdk/libimre_runtime.a",
+        "--clang",
+        "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+        "-o",
+        "/workspace/scratch/config-8571/O3.exe",
+        "--include-module",
+        "test.test_configparser"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "TMPDIR": "/workspace/scratch/imre-tmp",
+        "IMRE_PYTHON": "/workspace/scratch/config-8571/sdk/imre",
+        "IMREFLAGS": "--opt-level 3"
+      },
+      "build_timeout_seconds": 360,
+      "build_exit_code": 0,
+      "build_timed_out": false,
+      "image": "/workspace/scratch/config-8571/O3.exe",
+      "image_exists": true,
+      "image_sha256": "2f848b0b464f42c6f31be33e9e452599414b6f93f1cb4dbee05e21f1d5274414",
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-e",
+        "trace=execve,execveat,open,openat,openat2",
+        "-E",
+        "LD_PRELOAD=/workspace/scratch/config-8571/deny_child_exec.so",
+        "-o",
+        "/workspace/scratch/config-8571/O3.withdrawal.trace",
+        "/workspace/scratch/config-8571/O3.exe",
+        "-v",
+        "test.test_configparser"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "run_timeout_seconds": 240,
+      "trace_sha256": "70a6c445e6e418f4b8177a2b0f015577168b885bb7cf12c65c7ad4a4f26abe57",
+      "trace_bytes": 21315,
+      "successful_execs": 1,
+      "child_exec_denied": true,
+      "libpython_open_lines": 0,
+      "raw_trace": "O3.raw.trace",
+      "no_libpython": true,
+      "source_absent_during_run": true,
+      "reported_totals": [
+        "344"
+      ],
+      "completed_originals": 344,
+      "comparisons": {
+        "completed": 344,
+        "same_outcome": 344,
+        "different": []
+      }
+    }
+  },
+  "comparisons": {
+    "O0": {
+      "completed": 344,
+      "same_outcome": 344,
+      "different": []
+    },
+    "O3": {
+      "completed": 344,
+      "same_outcome": 344,
+      "different": []
+    }
+  },
+  "normalization": "The .results file preserves one-line unittest output and joins a two-line description to its preceding exact ID. Raw stderr remains available; the receipt indexes both forms."
+}

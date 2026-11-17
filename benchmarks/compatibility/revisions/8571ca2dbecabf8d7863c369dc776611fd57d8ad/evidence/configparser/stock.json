@@ -1,0 +1,34 @@
+{
+  "argv": [
+    "/workspace/scratch/stdlib-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "-B",
+    "-m",
+    "unittest",
+    "-v",
+    "test.test_configparser"
+  ],
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1"
+  },
+  "exit_code": 0,
+  "version": "Python 3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+  "platform": {
+    "os": "linux",
+    "arch": "x86_64",
+    "release": "6.18.57"
+  },
+  "source": {
+    "repo": "https://github.com/python/cpython",
+    "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "path": "Lib/test/test_configparser.py",
+    "sha256": "6b82ad0b279850f3081c84c3fc459cb16afc8d11a4d14783c4f017e095974df4",
+    "git_blob": "8d8dd2a2bf27fbf358489850dcb22cbc7af46845"
+  },
+  "originals": 344,
+  "outcomes": {
+    "pass": 339,
+    "skip": 5
+  },
+  "normalization": "The .results file preserves one-line unittest output and joins a two-line description to its preceding exact ID. Raw stderr remains available; the receipt indexes both forms."
+}

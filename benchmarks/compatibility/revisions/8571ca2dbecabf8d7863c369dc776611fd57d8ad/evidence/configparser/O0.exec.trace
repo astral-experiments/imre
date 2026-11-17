@@ -1,0 +1,1 @@
+11630 execve("/workspace/scratch/config-8571/O0.exe", ["/workspace/scratch/config-8571/O"..., "-v", "test.test_configparser"], 0x5638a5c480f0 /* 80 vars */) = 0
