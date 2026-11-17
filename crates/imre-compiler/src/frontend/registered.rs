@@ -478,13 +478,6 @@ pub(super) fn retain_generator(
     )
 }
 
-/// Preserve unresolved generator bodies after inference releases its graph borrow.
-pub(super) fn retain_unresolved_generators(graph: &SourceGraph, checks: &SourceChecks) {
-    for &owner in &checks.unresolved {
-        let _ = retain_generator(graph, owner, checks);
-    }
-}
-
 pub(super) fn function_source(graph: &SourceGraph, id: ModuleId) -> RegisteredSource<'_> {
     let module = &graph.modules[id];
     RegisteredSource {
@@ -773,8 +766,6 @@ fn checked_definition(
 /// operations satisfy the first-party source contract. Cache the check per physical module.
 #[derive(Default)]
 pub(super) struct SourceChecks {
-    /// Named startup checks these unresolved definitions for a generator body.
-    pub(super) unresolved: Vec<DefinitionId>,
     session: std::cell::OnceCell<Option<crate::analysis::RegisteredBodyChecks>>,
     /// A provisional source frame must bind its live arguments after admission.
     pub(super) pending_arguments: bool,

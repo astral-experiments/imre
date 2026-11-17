@@ -672,7 +672,6 @@ fn fault_frame_statement(file: String, name: &str, line: u32) -> Statement {
 #[cfg(test)]
 pub(crate) fn lower(graph: &SourceGraph) -> StdResult<ir::Module, String> {
     lower_current(graph, None, None, false)
-        .0
         .map_err(|report| report.to_string())?
         .expect("a fixed set of methods cannot request another lowering")
         .into_native(graph)
@@ -695,7 +694,7 @@ pub(crate) fn lower_with_caller_cache(
     let mut key_reprs = HashSet::new();
     loop {
         let before = key_reprs.len();
-        let (lowered, checks) = lower_current(graph, cache.take(), Some(&mut key_reprs), true);
+        let lowered = lower_current(graph, cache.take(), Some(&mut key_reprs), true);
         if let Err(reason) = &lowered
             && let Kind::MissingFormatter(owner) = reason.kind
         {
@@ -704,7 +703,6 @@ pub(crate) fn lower_with_caller_cache(
         if let Some(lowered) = lowered.transpose()
             && key_reprs.len() == before
         {
-            registered::retain_unresolved_generators(graph, &checks);
             return lowered;
         }
         // Only the typed subscript knows the key's class. Include its missing
@@ -718,10 +716,7 @@ fn lower_current(
     cache: Option<&mut CallerCache>,
     key_reprs: Option<&mut HashSet<DefinitionId>>,
     pending_arguments: bool,
-) -> (
-    StdResult<Option<crate::CheckedProgram>, Diagnostic>,
-    registered::SourceChecks,
-) {
+) -> StdResult<Option<crate::CheckedProgram>, Diagnostic> {
     let mut inference = inference::Inference::default();
     // Provisional source frames still bind their live Python arguments after admission.
     inference.source_checks.pending_arguments =
@@ -729,12 +724,11 @@ fn lower_current(
     let mut layout_error = None;
     let result = lower_graph(graph, cache, key_reprs, &mut inference, &mut layout_error);
     let result = layout_error.map_or(result, Err);
-    let result = match (inference.source_class_return.into_inner(), result) {
+    match (inference.source_class_return.into_inner(), result) {
         (Some(_), Err(error)) if error.kind.is_exact_contract() => Err(error),
         (Some(guarded), _) => Err(guarded),
         (None, result) => result,
-    };
-    (result, inference.source_checks)
+    }
 }
 
 /// The file driver checks this graph again before it can place a registered body.
@@ -17145,8 +17139,29 @@ print(get_indent("  source"))
         let mut graph = SourceGraph::load(&entry, Some(directory.path()), &[]).unwrap();
         graph.registered_startup = true;
         graph.session.use_registered_body_rules();
-        let (_, checks) = super::lower_current(&graph, None, None, true);
-        super::registered::retain_unresolved_generators(&graph, &checks);
+        let _ = super::lower_current(&graph, None, None, true);
+    }
+
+    #[test]
+    fn named_startup_retains_only_unresolved_generators_after_a_source_error() {
+        use crate::modules::SourceGraph;
+        use ruff_text_size::TextSize;
+
+        let source = concat!(
+            "status: int = True\n",
+            "def stream(value):\n    yield value\n",
+            "def ordinary(value):\n    return value\n",
+        );
+        let mut graph = SourceGraph::single(source).unwrap();
+        graph.registered_startup = true;
+        graph.session.use_registered_body_rules();
+        let report = super::lower_with_caller_cache(&mut graph, None)
+            .err()
+            .expect("the declared int must reject bool");
+        assert!(report.to_string().contains("expected int, got bool"));
+        let start = |name: &str| TextSize::try_from(source.find(name).unwrap()).unwrap();
+        assert!(graph.has_registered_function(graph.entry, start("def stream")));
+        assert!(!graph.has_registered_function(graph.entry, start("def ordinary")));
     }
 
     #[test]
