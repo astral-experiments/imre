@@ -1,0 +1,228 @@
+test_module_all_attribute (test.test_shutil.PublicAPITests.test_module_all_attribute) ... ok
+test_make_archive (test.test_shutil.TestArchives.test_make_archive) ... ok
+test_make_archive_cwd (test.test_shutil.TestArchives.test_make_archive_cwd) ... ok
+test_make_archive_cwd_default (test.test_shutil.TestArchives.test_make_archive_cwd_default) ... ok
+test_make_archive_cwd_supports_root_dir (test.test_shutil.TestArchives.test_make_archive_cwd_supports_root_dir) ... ok
+test_make_archive_owner_group (test.test_shutil.TestArchives.test_make_archive_owner_group) ... ok
+test_make_tarfile (test.test_shutil.TestArchives.test_make_tarfile) ... ok
+test_make_tarfile_in_curdir (test.test_shutil.TestArchives.test_make_tarfile_in_curdir) ... ok
+test_make_tarfile_rootdir_nodir (test.test_shutil.TestArchives.test_make_tarfile_rootdir_nodir) ... ok
+test_make_tarfile_with_explicit_curdir (test.test_shutil.TestArchives.test_make_tarfile_with_explicit_curdir) ... ok
+test_make_tarfile_without_rootdir (test.test_shutil.TestArchives.test_make_tarfile_without_rootdir) ... ok
+test_make_zipfile (test.test_shutil.TestArchives.test_make_zipfile) ... ok
+test_make_zipfile_in_curdir (test.test_shutil.TestArchives.test_make_zipfile_in_curdir) ... ok
+test_make_zipfile_rootdir_nodir (test.test_shutil.TestArchives.test_make_zipfile_rootdir_nodir) ... ok
+test_make_zipfile_with_explicit_curdir (test.test_shutil.TestArchives.test_make_zipfile_with_explicit_curdir) ... ok
+test_make_zipfile_without_rootdir (test.test_shutil.TestArchives.test_make_zipfile_without_rootdir) ... ok
+test_register_archive_format (test.test_shutil.TestArchives.test_register_archive_format) ... ok
+test_tarfile_root_owner (test.test_shutil.TestArchives.test_tarfile_root_owner) ... ok
+test_tarfile_vs_tar (test.test_shutil.TestArchives.test_tarfile_vs_tar) ... ok
+test_unpack_archive_bztar (test.test_shutil.TestArchives.test_unpack_archive_bztar) ... ok
+test_unpack_archive_gztar (test.test_shutil.TestArchives.test_unpack_archive_gztar) ... ok
+test_unpack_archive_tar (test.test_shutil.TestArchives.test_unpack_archive_tar) ... ok
+test_unpack_archive_xztar (test.test_shutil.TestArchives.test_unpack_archive_xztar) ... ok
+test_unpack_archive_zip (test.test_shutil.TestArchives.test_unpack_archive_zip) ... ok
+test_unpack_archive_zip_badpaths (test.test_shutil.TestArchives.test_unpack_archive_zip_badpaths) ... ok
+test_unpack_archive_zstdtar (test.test_shutil.TestArchives.test_unpack_archive_zstdtar) ... ok
+test_unpack_registry (test.test_shutil.TestArchives.test_unpack_registry) ... ok
+test_unzip_zipfile (test.test_shutil.TestArchives.test_unzip_zipfile) ... ok
+test_zipfile_vs_zip (test.test_shutil.TestArchives.test_zipfile_vs_zip) ... ok
+test_copy (test.test_shutil.TestCopy.test_copy) ... ok
+test_copy2 (test.test_shutil.TestCopy.test_copy2) ... ok
+test_copy2_dir (test.test_shutil.TestCopy.test_copy2_dir) ... ok
+test_copy2_symlinks (test.test_shutil.TestCopy.test_copy2_symlinks) ... ok
+test_copy2_xattr (test.test_shutil.TestCopy.test_copy2_xattr) ... skipped 'no non-broken extended attribute support'
+test_copy_dir (test.test_shutil.TestCopy.test_copy_dir) ... ok
+test_copy_return_value (test.test_shutil.TestCopy.test_copy_return_value) ... ok
+test_copy_symlinks (test.test_shutil.TestCopy.test_copy_symlinks) ... ok
+test_copyfile_copy_dir (test.test_shutil.TestCopy.test_copyfile_copy_dir) ... ok
+test_copyfile_named_pipe (test.test_shutil.TestCopy.test_copyfile_named_pipe) ... ok
+test_copyfile_nonexistent_dir (test.test_shutil.TestCopy.test_copyfile_nonexistent_dir) ... ok
+test_copyfile_return_value (test.test_shutil.TestCopy.test_copyfile_return_value) ... ok
+test_copyfile_same_file (test.test_shutil.TestCopy.test_copyfile_same_file) ... ok
+test_copyfile_symlinks (test.test_shutil.TestCopy.test_copyfile_symlinks) ... ok
+test_copymode_follow_symlinks (test.test_shutil.TestCopy.test_copymode_follow_symlinks) ... ok
+test_copymode_symlink_to_symlink (test.test_shutil.TestCopy.test_copymode_symlink_to_symlink) ... skipped 'requires os.lchmod'
+test_copymode_symlink_to_symlink_wo_lchmod (test.test_shutil.TestCopy.test_copymode_symlink_to_symlink_wo_lchmod) ... ok
+test_copystat_handles_harmless_chflags_errors (test.test_shutil.TestCopy.test_copystat_handles_harmless_chflags_errors) ... skipped 'requires os.chflags, EOPNOTSUPP & ENOTSUP'
+test_copystat_symlinks (test.test_shutil.TestCopy.test_copystat_symlinks) ... ok
+test_copyxattr (test.test_shutil.TestCopy.test_copyxattr) ... skipped 'no non-broken extended attribute support'
+test_copyxattr_symlinks (test.test_shutil.TestCopy.test_copyxattr_symlinks) ... skipped 'no non-broken extended attribute support'
+test_dont_copy_file_onto_link_to_itself (test.test_shutil.TestCopy.test_dont_copy_file_onto_link_to_itself) ... ok
+test_dont_copy_file_onto_symlink_to_itself (test.test_shutil.TestCopy.test_dont_copy_file_onto_symlink_to_itself) ... ok
+test_w_dest_close_fails (test.test_shutil.TestCopyFile.test_w_dest_close_fails) ... ok
+test_w_dest_open_fails (test.test_shutil.TestCopyFile.test_w_dest_open_fails) ... ok
+test_w_source_close_fails (test.test_shutil.TestCopyFile.test_w_source_close_fails) ... ok
+test_w_source_open_fails (test.test_shutil.TestCopyFile.test_w_source_open_fails) ... ok
+test_content (test.test_shutil.TestCopyFileObj.test_content) ... ok
+test_file_not_closed (test.test_shutil.TestCopyFileObj.test_file_not_closed) ... ok
+test_file_offset (test.test_shutil.TestCopyFileObj.test_file_offset) ... ok
+test_win_impl (test.test_shutil.TestCopyFileObj.test_win_impl) ... skipped 'Windows only'
+test_copytree_arg_types_of_ignore (test.test_shutil.TestCopyTree.test_copytree_arg_types_of_ignore) ... ok
+test_copytree_custom_copy_function (test.test_shutil.TestCopyTree.test_copytree_custom_copy_function) ... ok
+test_copytree_dangling_symlinks (test.test_shutil.TestCopyTree.test_copytree_dangling_symlinks) ... ok
+test_copytree_dirs_exist_ok (test.test_shutil.TestCopyTree.test_copytree_dirs_exist_ok) ... ok
+test_copytree_named_pipe (test.test_shutil.TestCopyTree.test_copytree_named_pipe) ... ok
+test_copytree_retains_permissions (test.test_shutil.TestCopyTree.test_copytree_retains_permissions) ... ok
+test_copytree_return_value (test.test_shutil.TestCopyTree.test_copytree_return_value) ... ok
+test_copytree_simple (test.test_shutil.TestCopyTree.test_copytree_simple) ... ok
+test_copytree_special_func (test.test_shutil.TestCopyTree.test_copytree_special_func) ... ok
+test_copytree_subdirectory (test.test_shutil.TestCopyTree.test_copytree_subdirectory) ... ok
+test_copytree_symlink_dir (test.test_shutil.TestCopyTree.test_copytree_symlink_dir) ... ok
+test_copytree_symlinks (test.test_shutil.TestCopyTree.test_copytree_symlinks) ... ok
+test_copytree_winerror (test.test_shutil.TestCopyTree.test_copytree_winerror) ... ok
+test_copytree_with_exclude (test.test_shutil.TestCopyTree.test_copytree_with_exclude) ... ok
+test_bad_environ (test.test_shutil.TestGetTerminalSize.test_bad_environ) ... ok
+test_does_not_crash (test.test_shutil.TestGetTerminalSize.test_does_not_crash) ... ok
+test_fallback (test.test_shutil.TestGetTerminalSize.test_fallback) ... ok
+test_os_environ_first (test.test_shutil.TestGetTerminalSize.test_os_environ_first) ... ok
+test_stty_match (test.test_shutil.TestGetTerminalSize.test_stty_match) ... skipped 'not on tty'
+test_chown (test.test_shutil.TestMisc.test_chown) ... ok
+test_disk_usage (test.test_shutil.TestMisc.test_disk_usage) ... ok
+test_destinsrc_false_negative (test.test_shutil.TestMove.test_destinsrc_false_negative) ... ok
+test_destinsrc_false_positive (test.test_shutil.TestMove.test_destinsrc_false_positive) ... ok
+test_dont_move_dir_in_itself (test.test_shutil.TestMove.test_dont_move_dir_in_itself) ... ok
+test_existing_file_inside_dest_dir (test.test_shutil.TestMove.test_existing_file_inside_dest_dir) ... ok
+test_move_as_rename_return_value (test.test_shutil.TestMove.test_move_as_rename_return_value) ... ok
+test_move_dangling_symlink (test.test_shutil.TestMove.test_move_dangling_symlink) ... ok
+test_move_dir (test.test_shutil.TestMove.test_move_dir) ... ok
+test_move_dir_altsep_to_dir (test.test_shutil.TestMove.test_move_dir_altsep_to_dir) ... skipped 'requires os.path.altsep'
+test_move_dir_caseinsensitive (test.test_shutil.TestMove.test_move_dir_caseinsensitive) ... ok
+test_move_dir_other_fs (test.test_shutil.TestMove.test_move_dir_other_fs) ... ok
+test_move_dir_permission_denied (test.test_shutil.TestMove.test_move_dir_permission_denied) ... skipped 'requires CAP_DAC_OVERRIDE'
+test_move_dir_sep_to_dir (test.test_shutil.TestMove.test_move_dir_sep_to_dir) ... ok
+test_move_dir_special_function (test.test_shutil.TestMove.test_move_dir_special_function) ... ok
+test_move_dir_symlink (test.test_shutil.TestMove.test_move_dir_symlink) ... ok
+test_move_dir_to_dir (test.test_shutil.TestMove.test_move_dir_to_dir) ... ok
+test_move_dir_to_dir_other_fs (test.test_shutil.TestMove.test_move_dir_to_dir_other_fs) ... ok
+test_move_file (test.test_shutil.TestMove.test_move_file) ... ok
+test_move_file_other_fs (test.test_shutil.TestMove.test_move_file_other_fs) ... ok
+test_move_file_special_function (test.test_shutil.TestMove.test_move_file_special_function) ... ok
+test_move_file_symlink (test.test_shutil.TestMove.test_move_file_symlink) ... ok
+test_move_file_symlink_to_dir (test.test_shutil.TestMove.test_move_file_symlink_to_dir) ... ok
+test_move_file_to_dir (test.test_shutil.TestMove.test_move_file_to_dir) ... ok
+test_move_file_to_dir_other_fs (test.test_shutil.TestMove.test_move_file_to_dir_other_fs) ... ok
+test_move_file_to_dir_pathlike_dst (test.test_shutil.TestMove.test_move_file_to_dir_pathlike_dst) ... ok
+test_move_file_to_dir_pathlike_src (test.test_shutil.TestMove.test_move_file_to_dir_pathlike_src) ... ok
+test_move_return_value (test.test_shutil.TestMove.test_move_return_value) ... ok
+test_move_symlink_to_dir_into_dir (test.test_shutil.TestMove.test_move_symlink_to_dir_into_dir) ... ok
+test_move_symlink_to_dir_into_symlink_to_dir (test.test_shutil.TestMove.test_move_symlink_to_dir_into_symlink_to_dir) ... ok
+test_both_onerror_and_onexc (test.test_shutil.TestRmTree.test_both_onerror_and_onexc) ... ok
+test_on_error (test.test_shutil.TestRmTree.test_on_error) ... ok
+test_on_exc (test.test_shutil.TestRmTree.test_on_exc) ... ok
+test_rmtree_above_recursion_limit (test.test_shutil.TestRmTree.test_rmtree_above_recursion_limit) ... ok
+test_rmtree_deleted_race_condition (test.test_shutil.TestRmTree.test_rmtree_deleted_race_condition) ... ok
+test_rmtree_does_not_choke_on_failing_lstat (test.test_shutil.TestRmTree.test_rmtree_does_not_choke_on_failing_lstat) ... ok
+test_rmtree_dont_delete_file (test.test_shutil.TestRmTree.test_rmtree_dont_delete_file) ... ok
+test_rmtree_errors (test.test_shutil.TestRmTree.test_rmtree_errors) ... ok
+test_rmtree_errors_onerror (test.test_shutil.TestRmTree.test_rmtree_errors_onerror) ... ok
+test_rmtree_errors_onexc (test.test_shutil.TestRmTree.test_rmtree_errors_onexc) ... ok
+test_rmtree_fails_on_close (test.test_shutil.TestRmTree.test_rmtree_fails_on_close) ... ok
+test_rmtree_fails_on_junctions_onerror (test.test_shutil.TestRmTree.test_rmtree_fails_on_junctions_onerror) ... skipped 'only relevant on Windows'
+test_rmtree_fails_on_junctions_onexc (test.test_shutil.TestRmTree.test_rmtree_fails_on_junctions_onexc) ... skipped 'only relevant on Windows'
+test_rmtree_fails_on_symlink_onerror (test.test_shutil.TestRmTree.test_rmtree_fails_on_symlink_onerror) ... ok
+test_rmtree_fails_on_symlink_onexc (test.test_shutil.TestRmTree.test_rmtree_fails_on_symlink_onexc) ... ok
+test_rmtree_on_junction (test.test_shutil.TestRmTree.test_rmtree_on_junction) ... skipped 'only relevant on Windows'
+test_rmtree_on_named_pipe (test.test_shutil.TestRmTree.test_rmtree_on_named_pipe) ... ok
+test_rmtree_on_symlink (test.test_shutil.TestRmTree.test_rmtree_on_symlink) ... ok
+test_rmtree_uses_safe_fd_version_if_available (test.test_shutil.TestRmTree.test_rmtree_uses_safe_fd_version_if_available) ... ok
+test_rmtree_with_dir_fd (test.test_shutil.TestRmTree.test_rmtree_with_dir_fd) ... ok
+test_rmtree_with_dir_fd_unsupported (test.test_shutil.TestRmTree.test_rmtree_with_dir_fd_unsupported) ... skipped 'dir_fd is supported'
+test_rmtree_works_on_bytes (test.test_shutil.TestRmTree.test_rmtree_works_on_bytes) ... ok
+test_rmtree_works_on_junctions (test.test_shutil.TestRmTree.test_rmtree_works_on_junctions) ... skipped 'only relevant on Windows'
+test_rmtree_works_on_symlinks (test.test_shutil.TestRmTree.test_rmtree_works_on_symlinks) ... ok
+test_absolute_cmd (test.test_shutil.TestWhich.test_absolute_cmd) ... ok
+test_basic (test.test_shutil.TestWhich.test_basic) ... ok
+test_cwd_non_win32 (test.test_shutil.TestWhich.test_cwd_non_win32) ... ok
+test_cwd_win32 (test.test_shutil.TestWhich.test_cwd_win32) ... skipped 'test is for win32'
+test_cwd_win32_added_before_all_other_path (test.test_shutil.TestWhich.test_cwd_win32_added_before_all_other_path) ... skipped 'test is for win32'
+test_dir_order_with_pathext_extension (test.test_shutil.TestWhich.test_dir_order_with_pathext_extension) ... skipped 'test specific to Windows'
+test_dir_order_without_pathext_extension (test.test_shutil.TestWhich.test_dir_order_without_pathext_extension) ... skipped 'test specific to Windows'
+test_empty_path (test.test_shutil.TestWhich.test_empty_path) ... ok
+test_empty_path_no_PATH (test.test_shutil.TestWhich.test_empty_path_no_PATH) ... ok
+test_environ_path (test.test_shutil.TestWhich.test_environ_path) ... ok
+test_environ_path_cwd (test.test_shutil.TestWhich.test_environ_path_cwd) ... ok
+test_environ_path_empty (test.test_shutil.TestWhich.test_environ_path_empty) ... ok
+test_environ_path_missing (test.test_shutil.TestWhich.test_environ_path_missing) ... ok
+test_non_matching_mode (test.test_shutil.TestWhich.test_non_matching_mode) ... ok
+test_nonexistent_file (test.test_shutil.TestWhich.test_nonexistent_file) ... ok
+test_pathext (test.test_shutil.TestWhich.test_pathext) ... skipped 'test specific to Windows'
+test_pathext_applied_on_files_in_path (test.test_shutil.TestWhich.test_pathext_applied_on_files_in_path) ... skipped 'test specific to Windows'
+test_pathext_checking (test.test_shutil.TestWhich.test_pathext_checking) ... skipped 'pathext check is Windows-only'
+test_pathext_extension_ends_with_dot (test.test_shutil.TestWhich.test_pathext_extension_ends_with_dot) ... skipped 'test specific to Windows'
+test_pathext_with_empty_str (test.test_shutil.TestWhich.test_pathext_with_empty_str) ... skipped 'test specific to Windows'
+test_pathext_with_multidot_extension (test.test_shutil.TestWhich.test_pathext_with_multidot_extension) ... skipped 'test specific to Windows'
+test_pathext_with_null_extension (test.test_shutil.TestWhich.test_pathext_with_null_extension) ... skipped 'test specific to Windows'
+test_relative_cmd (test.test_shutil.TestWhich.test_relative_cmd) ... ok
+test_relative_path (test.test_shutil.TestWhich.test_relative_path) ... ok
+test_same_dir_with_pathext_extension (test.test_shutil.TestWhich.test_same_dir_with_pathext_extension) ... skipped 'test specific to Windows'
+test_same_dir_without_pathext_extension (test.test_shutil.TestWhich.test_same_dir_without_pathext_extension) ... skipped 'test specific to Windows'
+test_win_path_needs_curdir (test.test_shutil.TestWhich.test_win_path_needs_curdir) ... skipped 'test specific to Windows'
+test_absolute_cmd (test.test_shutil.TestWhichBytes.test_absolute_cmd) ... ok
+test_basic (test.test_shutil.TestWhichBytes.test_basic) ... ok
+test_cwd_non_win32 (test.test_shutil.TestWhichBytes.test_cwd_non_win32) ... ok
+test_cwd_win32 (test.test_shutil.TestWhichBytes.test_cwd_win32) ... skipped 'test is for win32'
+test_cwd_win32_added_before_all_other_path (test.test_shutil.TestWhichBytes.test_cwd_win32_added_before_all_other_path) ... skipped 'test is for win32'
+test_dir_order_with_pathext_extension (test.test_shutil.TestWhichBytes.test_dir_order_with_pathext_extension) ... skipped 'test specific to Windows'
+test_dir_order_without_pathext_extension (test.test_shutil.TestWhichBytes.test_dir_order_without_pathext_extension) ... skipped 'test specific to Windows'
+test_empty_path (test.test_shutil.TestWhichBytes.test_empty_path) ... ok
+test_empty_path_no_PATH (test.test_shutil.TestWhichBytes.test_empty_path_no_PATH) ... ok
+test_environ_path (test.test_shutil.TestWhichBytes.test_environ_path) ... ok
+test_environ_path_cwd (test.test_shutil.TestWhichBytes.test_environ_path_cwd) ... ok
+test_environ_path_empty (test.test_shutil.TestWhichBytes.test_environ_path_empty) ... ok
+test_environ_path_missing (test.test_shutil.TestWhichBytes.test_environ_path_missing) ... ok
+test_non_matching_mode (test.test_shutil.TestWhichBytes.test_non_matching_mode) ... ok
+test_nonexistent_file (test.test_shutil.TestWhichBytes.test_nonexistent_file) ... ok
+test_pathext (test.test_shutil.TestWhichBytes.test_pathext) ... skipped 'test specific to Windows'
+test_pathext_applied_on_files_in_path (test.test_shutil.TestWhichBytes.test_pathext_applied_on_files_in_path) ... skipped 'test specific to Windows'
+test_pathext_checking (test.test_shutil.TestWhichBytes.test_pathext_checking) ... skipped 'pathext check is Windows-only'
+test_pathext_extension_ends_with_dot (test.test_shutil.TestWhichBytes.test_pathext_extension_ends_with_dot) ... skipped 'test specific to Windows'
+test_pathext_with_empty_str (test.test_shutil.TestWhichBytes.test_pathext_with_empty_str) ... skipped 'test specific to Windows'
+test_pathext_with_multidot_extension (test.test_shutil.TestWhichBytes.test_pathext_with_multidot_extension) ... skipped 'test specific to Windows'
+test_pathext_with_null_extension (test.test_shutil.TestWhichBytes.test_pathext_with_null_extension) ... skipped 'test specific to Windows'
+test_relative_cmd (test.test_shutil.TestWhichBytes.test_relative_cmd) ... ok
+test_relative_path (test.test_shutil.TestWhichBytes.test_relative_path) ... ok
+test_same_dir_with_pathext_extension (test.test_shutil.TestWhichBytes.test_same_dir_with_pathext_extension) ... skipped 'test specific to Windows'
+test_same_dir_without_pathext_extension (test.test_shutil.TestWhichBytes.test_same_dir_without_pathext_extension) ... skipped 'test specific to Windows'
+test_win_path_needs_curdir (test.test_shutil.TestWhichBytes.test_win_path_needs_curdir) ... skipped 'test specific to Windows'
+test_big_chunk (test.test_shutil.TestZeroCopyCopyFileRange.test_big_chunk) ... skipped 'os.copy_file_range() not supported'
+test_blocksize_arg (test.test_shutil.TestZeroCopyCopyFileRange.test_blocksize_arg) ... skipped 'os.copy_file_range() not supported'
+test_cant_get_size (test.test_shutil.TestZeroCopyCopyFileRange.test_cant_get_size) ... skipped 'os.copy_file_range() not supported'
+test_empty_file (test.test_shutil.TestZeroCopyCopyFileRange.test_empty_file) ... skipped 'os.copy_file_range() not supported'
+test_exception_on_first_call (test.test_shutil.TestZeroCopyCopyFileRange.test_exception_on_first_call) ... skipped 'os.copy_file_range() not supported'
+test_exception_on_second_call (test.test_shutil.TestZeroCopyCopyFileRange.test_exception_on_second_call) ... skipped 'os.copy_file_range() not supported'
+test_filesystem_full (test.test_shutil.TestZeroCopyCopyFileRange.test_filesystem_full) ... skipped 'os.copy_file_range() not supported'
+test_non_existent_src (test.test_shutil.TestZeroCopyCopyFileRange.test_non_existent_src) ... skipped 'os.copy_file_range() not supported'
+test_non_regular_file_dst (test.test_shutil.TestZeroCopyCopyFileRange.test_non_regular_file_dst) ... skipped 'os.copy_file_range() not supported'
+test_non_regular_file_src (test.test_shutil.TestZeroCopyCopyFileRange.test_non_regular_file_src) ... skipped 'os.copy_file_range() not supported'
+test_regular_copy (test.test_shutil.TestZeroCopyCopyFileRange.test_regular_copy) ... skipped 'os.copy_file_range() not supported'
+test_same_file (test.test_shutil.TestZeroCopyCopyFileRange.test_same_file) ... skipped 'os.copy_file_range() not supported'
+test_small_chunks (test.test_shutil.TestZeroCopyCopyFileRange.test_small_chunks) ... skipped 'os.copy_file_range() not supported'
+test_unhandled_exception (test.test_shutil.TestZeroCopyCopyFileRange.test_unhandled_exception) ... skipped 'os.copy_file_range() not supported'
+test_empty_file (test.test_shutil.TestZeroCopyMACOS.test_empty_file) ... skipped 'macOS only'
+test_exception_on_first_call (test.test_shutil.TestZeroCopyMACOS.test_exception_on_first_call) ... skipped 'macOS only'
+test_filesystem_full (test.test_shutil.TestZeroCopyMACOS.test_filesystem_full) ... skipped 'macOS only'
+test_non_existent_src (test.test_shutil.TestZeroCopyMACOS.test_non_existent_src) ... skipped 'macOS only'
+test_regular_copy (test.test_shutil.TestZeroCopyMACOS.test_regular_copy) ... skipped 'macOS only'
+test_same_file (test.test_shutil.TestZeroCopyMACOS.test_same_file) ... skipped 'macOS only'
+test_unhandled_exception (test.test_shutil.TestZeroCopyMACOS.test_unhandled_exception) ... skipped 'macOS only'
+test_big_chunk (test.test_shutil.TestZeroCopySendfile.test_big_chunk) ... ok
+test_blocksize_arg (test.test_shutil.TestZeroCopySendfile.test_blocksize_arg) ... ok
+test_cant_get_size (test.test_shutil.TestZeroCopySendfile.test_cant_get_size) ... ok
+test_empty_file (test.test_shutil.TestZeroCopySendfile.test_empty_file) ... ok
+test_exception_on_first_call (test.test_shutil.TestZeroCopySendfile.test_exception_on_first_call) ... ok
+test_exception_on_second_call (test.test_shutil.TestZeroCopySendfile.test_exception_on_second_call) ... ok
+test_file2file_not_supported (test.test_shutil.TestZeroCopySendfile.test_file2file_not_supported) ... ok
+test_filesystem_full (test.test_shutil.TestZeroCopySendfile.test_filesystem_full) ... ok
+test_non_existent_src (test.test_shutil.TestZeroCopySendfile.test_non_existent_src) ... ok
+test_non_regular_file_dst (test.test_shutil.TestZeroCopySendfile.test_non_regular_file_dst) ... ok
+test_non_regular_file_src (test.test_shutil.TestZeroCopySendfile.test_non_regular_file_src) ... ok
+test_regular_copy (test.test_shutil.TestZeroCopySendfile.test_regular_copy) ... ok
+test_same_file (test.test_shutil.TestZeroCopySendfile.test_same_file) ... ok
+test_small_chunks (test.test_shutil.TestZeroCopySendfile.test_small_chunks) ... ok
+test_unhandled_exception (test.test_shutil.TestZeroCopySendfile.test_unhandled_exception) ... ok
+
+----------------------------------------------------------------------
+Ran 223 tests in 0.490s
+
+OK (skipped=63)

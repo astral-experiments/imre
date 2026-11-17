@@ -1,0 +1,267 @@
+ Compiling /workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_types.py (-O0)
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_types.py:718:29
+    |
+716 |     def test_or_types_operator(self):
+717 |         self.assertEqual(int | str, typing.Union[int, str])
+718 |         self.assertNotEqual(int | list, typing.Union[int, str])
+    |                             ^^^^^^^^^^ Expected `int`, found `<types.UnionType special-form 'int | list[Unknown]'>`
+719 |         self.assertEqual(str | int, typing.Union[int, str])
+720 |         self.assertEqual(int | None, typing.Union[int, None])
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^       ---------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_types.py:718:41
+    |
+716 |     def test_or_types_operator(self):
+717 |         self.assertEqual(int | str, typing.Union[int, str])
+718 |         self.assertNotEqual(int | list, typing.Union[int, str])
+    |                                         ^^^^^^^^^^^^^^^^^^^^^^ Expected `int`, found `<types.UnionType special-form 'int | str'>`
+719 |         self.assertEqual(str | int, typing.Union[int, str])
+720 |         self.assertEqual(int | None, typing.Union[int, None])
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_types.py:764:29
+    |
+762 |         self.assertEqual(x, int | str)
+763 |         self.assertEqual(x, str | int)
+764 |         self.assertNotEqual(x, {})  # should not raise exception
+    |                             ^ Expected `int`, found `<types.UnionType special-form 'int | str'>`
+765 |         with self.assertRaises(TypeError):
+766 |             x < x
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^       ---------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_types.py:764:32
+    |
+762 |         self.assertEqual(x, int | str)
+763 |         self.assertEqual(x, str | int)
+764 |         self.assertNotEqual(x, {})  # should not raise exception
+    |                                ^^ Expected `int`, found `dict[Unknown, Unknown]`
+765 |         with self.assertRaises(TypeError):
+766 |             x < x
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertDictEqual` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_types.py:1362:44
+     |
+1360 |             view |= [('r', 2), ('d', 2)]
+1361 |         other = {'c': 3, 'p': 0}
+1362 |         self.assertDictEqual(view | other, {'a': 0, 'b': 1, 'c': 3, 'p': 0})
+     |                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Expected `dict[str, str]`, found `dict[str, str | int]`
+1363 |         self.assertDictEqual(other | view, {'c': 2, 'p': 0, 'a': 0, 'b': 1})
+1364 |         self.assertEqual(view, {'a': 0, 'b': 1, 'c': 2})
+     |
+info: element `int` of union `str | int` is not assignable to `str`
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:420:9
+    |
+418 |             self._list_difference(left, right, left, right, msg)
+419 |
+420 |     def assertDictEqual(self, d1: dict[str, str], d2: dict[str, str], msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^^                           ------------------ Parameter declared here
+421 |         if d1 != d2:
+422 |             sides = _short_reprs(_mapping_text(d1, False), _mapping_text(d2, False))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertDictEqual` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_types.py:1363:44
+     |
+1361 |         other = {'c': 3, 'p': 0}
+1362 |         self.assertDictEqual(view | other, {'a': 0, 'b': 1, 'c': 3, 'p': 0})
+1363 |         self.assertDictEqual(other | view, {'c': 2, 'p': 0, 'a': 0, 'b': 1})
+     |                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Expected `dict[str, str]`, found `dict[str, str | int]`
+1364 |         self.assertEqual(view, {'a': 0, 'b': 1, 'c': 2})
+1365 |         self.assertDictEqual(mapping, {'a': 0, 'b': 1, 'c': 2})
+     |
+info: element `int` of union `str | int` is not assignable to `str`
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:420:9
+    |
+418 |             self._list_difference(left, right, left, right, msg)
+419 |
+420 |     def assertDictEqual(self, d1: dict[str, str], d2: dict[str, str], msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^^                           ------------------ Parameter declared here
+421 |         if d1 != d2:
+422 |             sides = _short_reprs(_mapping_text(d1, False), _mapping_text(d2, False))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertDictEqual` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_types.py:1365:30
+     |
+1363 |         self.assertDictEqual(other | view, {'c': 2, 'p': 0, 'a': 0, 'b': 1})
+1364 |         self.assertEqual(view, {'a': 0, 'b': 1, 'c': 2})
+1365 |         self.assertDictEqual(mapping, {'a': 0, 'b': 1, 'c': 2})
+     |                              ^^^^^^^ Expected `dict[str, str]`, found `dict[str, int]`
+1366 |         self.assertDictEqual(other, {'c': 3, 'p': 0})
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:420:9
+    |
+418 |             self._list_difference(left, right, left, right, msg)
+419 |
+420 |     def assertDictEqual(self, d1: dict[str, str], d2: dict[str, str], msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^^       ------------------ Parameter declared here
+421 |         if d1 != d2:
+422 |             sides = _short_reprs(_mapping_text(d1, False), _mapping_text(d2, False))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertDictEqual` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_types.py:1365:39
+     |
+1363 |         self.assertDictEqual(other | view, {'c': 2, 'p': 0, 'a': 0, 'b': 1})
+1364 |         self.assertEqual(view, {'a': 0, 'b': 1, 'c': 2})
+1365 |         self.assertDictEqual(mapping, {'a': 0, 'b': 1, 'c': 2})
+     |                                       ^^^^^^^^^^^^^^^^^^^^^^^^ Expected `dict[str, str]`, found `dict[str, str | int]`
+1366 |         self.assertDictEqual(other, {'c': 3, 'p': 0})
+     |
+info: element `int` of union `str | int` is not assignable to `str`
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:420:9
+    |
+418 |             self._list_difference(left, right, left, right, msg)
+419 |
+420 |     def assertDictEqual(self, d1: dict[str, str], d2: dict[str, str], msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^^                           ------------------ Parameter declared here
+421 |         if d1 != d2:
+422 |             sides = _short_reprs(_mapping_text(d1, False), _mapping_text(d2, False))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertDictEqual` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_types.py:1366:30
+     |
+1364 |         self.assertEqual(view, {'a': 0, 'b': 1, 'c': 2})
+1365 |         self.assertDictEqual(mapping, {'a': 0, 'b': 1, 'c': 2})
+1366 |         self.assertDictEqual(other, {'c': 3, 'p': 0})
+     |                              ^^^^^ Expected `dict[str, str]`, found `dict[str, int]`
+1367 |
+1368 |     def test_hash(self):
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:420:9
+    |
+418 |             self._list_difference(left, right, left, right, msg)
+419 |
+420 |     def assertDictEqual(self, d1: dict[str, str], d2: dict[str, str], msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^^       ------------------ Parameter declared here
+421 |         if d1 != d2:
+422 |             sides = _short_reprs(_mapping_text(d1, False), _mapping_text(d2, False))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertDictEqual` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_types.py:1366:37
+     |
+1364 |         self.assertEqual(view, {'a': 0, 'b': 1, 'c': 2})
+1365 |         self.assertDictEqual(mapping, {'a': 0, 'b': 1, 'c': 2})
+1366 |         self.assertDictEqual(other, {'c': 3, 'p': 0})
+     |                                     ^^^^^^^^^^^^^^^^ Expected `dict[str, str]`, found `dict[str, str | int]`
+1367 |
+1368 |     def test_hash(self):
+     |
+info: element `int` of union `str | int` is not assignable to `str`
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:420:9
+    |
+418 |             self._list_difference(left, right, left, right, msg)
+419 |
+420 |     def assertDictEqual(self, d1: dict[str, str], d2: dict[str, str], msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^^                           ------------------ Parameter declared here
+421 |         if d1 != d2:
+422 |             sides = _short_reprs(_mapping_text(d1, False), _mapping_text(d2, False))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_types.py:2010:29
+     |
+2008 |         self.assertEqual(types.SimpleNamespace(), types.SimpleNamespace())
+2009 |         self.assertEqual(ns1, ns2)
+2010 |         self.assertNotEqual(ns2, types.SimpleNamespace())
+     |                             ^^^ Expected `int`, found `SimpleNamespace`
+2011 |
+2012 |     def test_nested(self):
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^       ---------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_types.py:2010:34
+     |
+2008 |         self.assertEqual(types.SimpleNamespace(), types.SimpleNamespace())
+2009 |         self.assertEqual(ns1, ns2)
+2010 |         self.assertNotEqual(ns2, types.SimpleNamespace())
+     |                                  ^^^^^^^^^^^^^^^^^^^^^^^ Expected `int`, found `SimpleNamespace`
+2011 |
+2012 |     def test_nested(self):
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+

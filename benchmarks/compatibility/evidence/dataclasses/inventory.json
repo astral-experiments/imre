@@ -1,0 +1,12 @@
+{
+  "frozen_raw_originals": 276,
+  "stock_original_occurrences": 276,
+  "stock_unique_ids": 276,
+  "repeated_occurrences": 0,
+  "stock_outcomes": {
+    "pass": 275,
+    "skip": 1
+  },
+  "missing_from_frozen_denominator": 0,
+  "mismatch": false
+}

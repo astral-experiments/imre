@@ -1,0 +1,2 @@
+ Compiling /workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_copy.py (-O3)
+/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_copy.py:7:1: Imre: unsupported sealed standard-library export operator.le

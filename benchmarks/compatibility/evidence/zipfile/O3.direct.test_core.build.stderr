@@ -1,0 +1,44 @@
+error[invalid-argument-type]: Argument to bound method `TestCase.assertTrue` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_zipfile/test_core.py:1665:77
+     |
+1663 |                 correctfile = os.path.join(target, fpath)
+1664 |                 correctfile = os.path.normpath(correctfile)
+1665 |                 self.assertTrue(os.path.samefile(writtenfile, correctfile), (writtenfile, target))
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^ Expected `str | None`, found `tuple[Unknown, Unknown]`
+1666 |
+1667 |                 # make sure correct data is in correct file
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:258:9
+    |
+256 |         return _BoundRaises(self)
+257 |
+258 |     def assertTrue(self, expr: object, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^                     ---------------------- Parameter declared here
+259 |         if not expr:
+260 |             raise self.failureException(self._formatMessage(msg, repr(expr) + " is not true"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_zipfile/test_core.py:3464:42
+     |
+3462 |         rc, out, err = self.zipfilecmd_failure('-l', '')
+3463 |         self.assertEqual(out, b'')
+3464 |         self.assertNotEqual(err.strip(), b'')
+     |                                          ^^^ Expected `int`, found `Literal[b""]`
+3465 |
+3466 |     def test_test_command(self):
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
