@@ -1348,7 +1348,7 @@ def marked_call_refusal_flags(root):
     subprocess.run(["cc", "-c", fixture, "-o", wrapper], check=True)
     return "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_scoped_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_scoped_call_at,--wrap=imre_dyn_positional_call_at,--wrap=imre_dyn_keyword_call_at,--wrap=imre_dyn_lit,--wrap=imre_dyn_linked_string,--wrap=malloc,--wrap=realloc,--wrap=calloc",
     ])
 
 
