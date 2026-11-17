@@ -2248,7 +2248,10 @@ _loader = ACCEPTED["loader_source_to_code"]["main.py"].replace(
     "    print(code.co_filename, code.co_name)",
 )
 ACCEPTED["loader_source_to_code"] = {"main.py": _loader}
-NATIVE_REFUSALS = {"unregistered_source_loader": ACCEPTED.pop("unregistered_source_loader")}
+NATIVE_REFUSALS = {
+    "unregistered_source_loader": (ACCEPTED.pop("unregistered_source_loader"), "caf\u00e9\nTrue\n"),
+    "source_loader_compile_override": (ACCEPTED.pop("source_loader_compile_override"), ""),
+}
 FINITE_IMPORTS = {
     "reload_source_plugin": ("plugins.report",),
     "late_importlib_abc": ("installed_loader_plugin",),
@@ -2685,11 +2688,11 @@ def main() -> None:
                 assert result.stderr.splitlines()[-1] == exception, result
                 checks += 1
 
-        for name, files in NATIVE_REFUSALS.items():
+        for name, (files, reference_stdout) in NATIVE_REFUSALS.items():
             case = temporary / name
             write_files(case, files)
             baseline = run([args.python, "-E", "-m", "main"], case)
-            assert baseline.returncode == 0 and baseline.stdout == "caf\u00e9\nTrue\n", baseline
+            assert baseline.returncode == 0 and baseline.stdout == reference_stdout, baseline
             for level in args.opt_levels:
                 executable = temporary / f"refusal-{name}-{level}"
                 command = [compiler, "build", str(case / "main.py"), "-o", str(executable),
