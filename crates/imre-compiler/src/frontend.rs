@@ -704,7 +704,7 @@ pub(crate) fn lower_with_caller_cache(
         if let Some(lowered) = lowered.transpose()
             && key_reprs.len() == before
         {
-            registered::finish_source_checks(graph, checks);
+            registered::retain_unresolved_generators(graph, &checks);
             return lowered;
         }
         // Only the typed subscript knows the key's class. Include its missing
@@ -717,15 +717,15 @@ fn lower_current(
     graph: &SourceGraph,
     cache: Option<&mut CallerCache>,
     key_reprs: Option<&mut HashSet<DefinitionId>>,
-    defer_solved: bool,
+    pending_arguments: bool,
 ) -> (
     StdResult<Option<crate::CheckedProgram>, Diagnostic>,
     registered::SourceChecks,
 ) {
     let mut inference = inference::Inference::default();
-    // A solved placement can still be refused by the source contract after inference.
-    inference.source_checks.solved =
-        (defer_solved && !graph.session.uses_registered_body_rules()).then(Default::default);
+    // Provisional source frames still bind their live Python arguments after admission.
+    inference.source_checks.pending_arguments =
+        pending_arguments && !graph.session.uses_registered_body_rules();
     let mut layout_error = None;
     let result = lower_graph(graph, cache, key_reprs, &mut inference, &mut layout_error);
     let result = layout_error.map_or(result, Err);
@@ -1543,18 +1543,7 @@ fn lower_graph(
     let mut completed = FixedFunctions::default();
     let register = |completed: FixedFunctions, owners: &[ModuleId]| {
         completed.register(graph, owners, |module, range| {
-            let checks = &inference.source_checks;
-            if let Some(accepted) = registered::SourceChecks::cached(graph, module, range) {
-                return accepted;
-            }
-            if let Some(solved) = &checks.solved {
-                solved
-                    .borrow_mut()
-                    .insert((module, range), registered::SourceFrame::Fixed);
-                true
-            } else {
-                checks.accepts(graph, module, range)
-            }
+            inference.source_checks.accepts(graph, module, range)
         });
     };
     let place_completed = |completed: &mut FixedFunctions, owners: &[ModuleId]| {
@@ -17133,7 +17122,7 @@ print(get_indent("  source"))
         graph.registered_startup = true;
         graph.session.use_registered_body_rules();
         let (_, checks) = super::lower_current(&graph, None, None, true);
-        super::registered::finish_source_checks(&mut graph, checks);
+        super::registered::retain_unresolved_generators(&graph, &checks);
     }
 
     #[test]

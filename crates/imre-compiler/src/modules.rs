@@ -3460,29 +3460,6 @@ impl SourceGraph {
             .insert(start, operands.into());
     }
 
-    pub(crate) fn defer_registered_function(
-        &self,
-        module: ModuleId,
-        start: TextSize,
-        use_lexical_body: bool,
-    ) {
-        let mut functions = self.registered_functions.borrow_mut();
-        let entries = functions
-            .admitted
-            .get_mut(&module)
-            .expect("captured module");
-        let body = entries.remove(&start).expect("captured definition");
-        if entries.is_empty() {
-            functions.admitted.remove(&module);
-        }
-        // A fixed body carries its own placement proof. Its failed source check
-        // cannot authorize that placement at a later Python call.
-        if use_lexical_body && !matches!(body.inputs, crate::frontend::FrameInputs::Protocol { .. })
-        {
-            functions.lexical.push((module, start, body));
-        }
-    }
-
     pub(crate) fn has_registered_function(&self, module: ModuleId, start: TextSize) -> bool {
         self.registered_functions()
             .get(&module)
