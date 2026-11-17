@@ -355,6 +355,8 @@ struct Pending {
     document_parameters: Vec<usize>,
     document_return: Option<Type>,
     returns: Option<Type>,
+    /// Storage requested by a checked consumer of this unannotated return.
+    return_context: Option<Type>,
     discovery: ReturnDiscovery,
 }
 
@@ -456,6 +458,7 @@ impl Inference {
             document_parameters: Vec::new(),
             document_return: None,
             returns,
+            return_context: None,
             discovery: if returns.is_some() {
                 ReturnDiscovery::Declared
             } else {
@@ -762,6 +765,37 @@ impl Inference {
 
     pub(super) fn parameter(&self, id: usize, index: usize) -> Option<Type> {
         self.pending.borrow()[id].params[index]
+    }
+
+    pub(super) fn inferred_parameter(&self, id: usize, index: usize) -> bool {
+        self.pending.borrow()[id].inferred_params[index]
+    }
+
+    /// An incompatible write constrains the original incoming list, never a copy.
+    pub(super) fn demand_list_write(&self, id: usize, index: usize, prior: Type, types: &Types) {
+        let wide = types.list(Type::ObjectValue);
+        if self.inferred_parameter(id, index)
+            && self.parameter(id, index) == Some(prior)
+            && prior != wide
+        {
+            self.widen_parameter(id, index, wide);
+        }
+    }
+
+    /// A checked call argument can request storage from an unannotated producer.
+    /// Publishing the request once makes unsuccessful or recursive demands converge.
+    fn demand_list_return(&self, id: usize, actual: Type, expected: Type) {
+        let mut pending = self.pending.borrow_mut();
+        let producer = &mut pending[id];
+        if matches!(producer.discovery, ReturnDiscovery::Declared)
+            || producer.returns != Some(actual)
+            || producer.return_context == Some(expected)
+        {
+            return;
+        }
+        producer.return_context = Some(expected);
+        drop(pending);
+        self.layout_changed();
     }
 
     pub(super) fn learn_parameter(&self, id: usize, index: usize, ty: Type) -> Type {
@@ -1283,6 +1317,8 @@ impl Inference {
                 checker.inference = Some(self);
                 checker.discover_document_return = document_return;
                 checker.inferred_returns = discover_returns.then(Vec::new);
+                checker.inferred_return_context =
+                    self.pending.borrow()[signature.id].return_context;
                 let body_revision = self.revision.get();
                 // With only scalar inputs and local bindings, a checked return can keep
                 // its settled scalar, list or tuple layout across unrelated revisions.
@@ -2126,6 +2162,69 @@ impl Checker<'_> {
         self.terminating_call(value)
     }
 
+    /// Pass a storage requirement through an already checked direct argument.
+    /// The list itself is never coerced between mutable representations.
+    fn constrain_list_argument(
+        &self,
+        inference: &Inference,
+        consumer: usize,
+        index: usize,
+        site: &ast::Expr,
+        actual: Type,
+        expected: Type,
+    ) -> Type {
+        if !inference.inferred_parameter(consumer, index) {
+            return expected;
+        }
+        let wide = self.types.list(Type::ObjectValue);
+        if actual == wide
+            && expected != wide
+            && self
+                .types
+                .element(expected)
+                .is_some_and(|item| self.object_value_supported(item))
+        {
+            inference.widen_parameter(consumer, index, wide);
+            return wide;
+        }
+        if expected == wide
+            && actual != wide
+            && self
+                .types
+                .element(actual)
+                .is_some_and(|item| self.object_value_supported(item))
+            && let ast::Expr::Call(call) = site
+            && let Some(Binding::Definition(definition)) = self.resolve(&call.func)
+            && let Some(producer) = self.functions.get(&definition)
+        {
+            inference.demand_list_return(producer.id, actual, expected);
+        }
+        expected
+    }
+
+    /// One fixed producer ABI cannot satisfy a declared narrow consumer and a
+    /// separate consumer's wider mutable storage requirement. Retry placement.
+    fn conflicting_list_argument(
+        &self,
+        inference: &Inference,
+        site: &ast::Expr,
+        actual: Type,
+        expected: Type,
+    ) -> bool {
+        if actual == self.types.list(Type::ObjectValue)
+            && expected != actual
+            && self.types.element(expected).is_some()
+            && let ast::Expr::Call(call) = site
+            && let Some(Binding::Definition(definition)) = self.resolve(&call.func)
+            && let Some(producer) = self.functions.get(&definition)
+            && inference.pending.borrow()[producer.id].return_context == Some(actual)
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     pub(super) fn source_call(
         &mut self,
         call: &ast::ExprCall,
@@ -2335,6 +2434,19 @@ impl Checker<'_> {
                             ty,
                             supplied.ty,
                         );
+                        let ty = checker.constrain_list_argument(
+                            inference,
+                            signature.id,
+                            index,
+                            node,
+                            supplied.ty,
+                            ty,
+                        );
+                        if checker.conflicting_list_argument(inference, node, supplied.ty, ty) {
+                            return Err(checker.classified_error(
+                                Kind::ScopedObject, node, "the inferred list return requires distinct consumer storage",
+                            ));
+                        }
                         let optional = nullable(ty, supplied.ty).or_else(|| {
                             (supplied.ty == Type::None
                                 && ty != Type::None
@@ -2364,6 +2476,10 @@ impl Checker<'_> {
                             }
                             if let Some(layout) = nullable(ty, other) {
                                 return Some(layout);
+                            }
+                            if other == types.list(Type::ObjectValue) && types.element(ty).is_some()
+                            {
+                                return Some(other);
                             }
                             if types
                                 .payload(other)
@@ -2446,6 +2562,19 @@ impl Checker<'_> {
                                     expected,
                                     value.ty,
                                 );
+                                let expected = checker.constrain_list_argument(
+                                    inference,
+                                    signature.id,
+                                    index,
+                                    site,
+                                    value.ty,
+                                    expected,
+                                );
+                                if checker.conflicting_list_argument(inference, site, value.ty, expected) {
+                                    return Err(checker.classified_error(
+                                        Kind::ScopedObject, site, "the inferred list return requires distinct consumer storage",
+                                    ));
+                                }
                                 if let Some(layout) = nullable(expected, value.ty) {
                                     inference.widen_parameter(signature.id, index, layout);
                                     return direct_value(checker, value, layout, site);

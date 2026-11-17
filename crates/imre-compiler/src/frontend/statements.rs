@@ -324,7 +324,31 @@ impl StatementLowering for Checker<'_> {
                 }
                 self.document_annotation_value(value, self.returns, document)?
             } else if self.inferred_returns.is_some() {
-                self.expr(value)?
+                if let Some(context) = self.inferred_return_context {
+                    self.expr_in_context(
+                        value,
+                        context,
+                        |_, _| false,
+                        |checker, operand, expected, site| {
+                            if operand.ty != expected
+                                && checker.types.element(operand.ty).is_some()
+                                && checker.types.element(expected) == Some(Type::ObjectValue)
+                            {
+                                // An existing mutable owner cannot change representation.
+                                // Its checked source needs the Python calling convention.
+                                return Err(checker.classified_error(
+                                    Kind::ScopedObject,
+                                    site,
+                                    "the inferred return retains its original mutable storage",
+                                ));
+                            }
+                            checker.coerce(operand, expected, site)
+                        },
+                        None,
+                    )?
+                } else {
+                    self.expr(value)?
+                }
             } else {
                 origin = value.range();
                 let expected = self.registered_result_contract.unwrap_or(self.returns);

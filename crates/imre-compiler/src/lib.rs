@@ -2313,13 +2313,103 @@ print("result", call(b=2, a=1))
     }
 
     #[test]
+    fn inferred_consumer_constrains_fresh_producer_storage_in_one_graph() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("main.py");
+        let source = format!(
+            "{INFERRED_SET_GATHER}def update(items):\n    items.append(1)\n    return items\nprint(update(gather('a')))\n"
+        );
+        std::fs::write(&path, source).unwrap();
+        let mut passes = 0;
+        let mut output = super::ProgramOutput::new(super::CodegenLayout::Whole);
+        super::object_fallback(
+            Some(&mut output),
+            super::ProgramEntry::File(&path, None),
+            &CompileOptions::default(),
+            Default::default(),
+            None,
+            |graph, cache, call_error| {
+                passes += 1;
+                let checked = super::checked_lower_with(graph, cache, call_error)?;
+                let super::CheckedProgram::Native(fixed) = &checked else {
+                    panic!("the checked path must remain native");
+                };
+                let module = &fixed.ir.0;
+                let gather = &module.functions[0];
+                let update = &module.functions[1];
+                assert_eq!(
+                    module.types.element(gather.returns),
+                    Some(super::ir::Type::ObjectValue)
+                );
+                assert_eq!(update.locals[update.params[0]], gather.returns);
+                assert_eq!(update.returns, gather.returns);
+                assert!(update.body.iter().any(|statement| matches!(
+                    statement,
+                    super::ir::Statement::Return(value)
+                        if matches!(value.without_location().kind, super::ir::ExprKind::Local(slot) if slot == update.params[0])
+                )));
+                Ok(checked)
+            },
+        )
+        .unwrap();
+        assert_eq!(passes, 1);
+        let llvm = output.compilation.into_whole().llvm_ir;
+        let gather = llvm
+            .split_once("define internal ptr @fn_0(")
+            .unwrap()
+            .1
+            .split_once("\n}")
+            .unwrap()
+            .0;
+        assert!(!gather.contains("_list_copy("), "{gather}");
+        assert_eq!(gather.matches("call ptr @imre_seq_new(i32 5)").count(), 1);
+    }
+
+    #[test]
+    fn an_existing_aliased_mutable_return_keeps_its_owner() {
+        let source = "def relay(items):\n    alias = items\n    return alias\ndef update(items):\n    other = items\n    other.append(1)\n    return items\nvalues = ['a']\nresult = update(relay(values))\nprint(result is values, values)\n";
+        super::check(source).unwrap();
+        let invalid = format!("{source}status: int = True\n");
+        let error = super::check(&invalid).unwrap_err();
+        assert!(error.contains("expected int, got bool"), "{error}");
+    }
+
+    #[test]
+    fn an_unconditional_dead_append_does_not_widen_the_producer() {
+        let source = format!(
+            "{INFERRED_SET_GATHER}def update(items):\n    if False:\n        items.append(1)\n    return items\nprint(update(gather('a')))\n"
+        );
+        let mut graph = super::modules::SourceGraph::single(&source).unwrap();
+        let super::CheckedProgram::Native(fixed) = super::checked_lower(&mut graph).unwrap() else {
+            panic!("dead append must retain the native checked path");
+        };
+        assert_eq!(
+            fixed.ir.0.types.element(fixed.ir.0.functions[0].returns),
+            Some(super::ir::Type::Str)
+        );
+    }
+
+    #[test]
+    fn a_declared_and_a_mutating_consumer_can_share_an_inferred_producer() {
+        let prefix = format!(
+            "{INFERRED_SET_GATHER}def inspect(items: list[str]) -> int: return len(items)\ndef update(items):\n    items.append(1)\n    return items\n"
+        );
+        for usage in [
+            "print(inspect(gather('a')), update(gather('b')))\n",
+            "print(update(gather('b')), inspect(gather('a')))\n",
+        ] {
+            super::check(&format!("{prefix}{usage}")).unwrap();
+        }
+    }
+
+    #[test]
     fn set_layout_retry_uses_the_resolved_source() {
         use super::modules::LayoutHint;
 
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("main.py");
         let source = format!(
-            "{INFERRED_SET_GATHER}def update(items):\n    items.append(1)\n    return items\nprint(update(gather('a')))\n"
+            "from typing import Callable\n{INFERRED_SET_GATHER}def escape(value: int) -> Callable[[], int]:\n    return lambda: value\nprint(gather('a'), escape(1)())\n"
         );
         std::fs::write(&path, &source).unwrap();
         let options = CompileOptions::default();

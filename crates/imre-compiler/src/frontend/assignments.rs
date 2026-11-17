@@ -122,6 +122,11 @@ pub(super) enum ValueSource {
     /// A single unbound target stored under an exact coroutine callback annotation.
     CoroutineCallback(TypeDeclaration, usize),
     InferredList(DefinitionId),
+    /// An unannotated mutable parameter, including aliases of its original value.
+    InferredListParameter {
+        function: usize,
+        index: usize,
+    },
     LiteralStrings(Type),
     Function(usize),
     /// A different source method can occupy this captured slot when it is called.
