@@ -1024,6 +1024,11 @@ struct SourceInfo<'a> {
     text: Cow<'a, str>,
 }
 
+#[cfg(test)]
+thread_local! {
+    static EVAL_PREPARATIONS: std::cell::RefCell<Option<(String, usize)>> = const { std::cell::RefCell::new(None) };
+}
+
 /// A checked eval entry owned by its source unit from checking through emission.
 pub(crate) struct PreparedEval {
     text: String,
@@ -1032,6 +1037,14 @@ pub(crate) struct PreparedEval {
 
 impl PreparedEval {
     pub(crate) fn new(text: &str, optimization: i32) -> Result<Self, String> {
+        #[cfg(test)]
+        EVAL_PREPARATIONS.with_borrow_mut(|tracked| {
+            if let Some((target, count)) = tracked
+                && target == text
+            {
+                *count += 1;
+            }
+        });
         crate::analysis::check_source_complexity(text).map_err(str::to_owned)?;
         let parsed = ruff_python_parser::parse_expression(text)
             .map_err(|error| format!("SyntaxError: {error}"))?;
@@ -1863,6 +1876,35 @@ mod tests {
     use super::*;
     use crate::frontend::{FrameArguments, NamedBody};
     use crate::llvm::registered::permanent;
+
+    #[test]
+    fn possible_builtin_eval_owns_one_checked_entry() {
+        let directory = tempfile::tempdir().unwrap();
+        let entry = directory.path().join("main.py");
+        let prefix = "import sys\nbuiltin_eval = eval\ndef custom(text): return text\nif len(sys.argv) > 1:\n    eval = builtin_eval\nelse:\n    eval = custom\n";
+        let large = vec!["1"; 129].join("+");
+        std::fs::write(&entry, format!("{prefix}print(eval({large:?}))\n")).unwrap();
+        let error = crate::check_file(&entry, None).unwrap_err();
+        assert!(
+            error.contains("main.py:8:12") && error.contains("checked builtins.eval entry"),
+            "{error}"
+        );
+
+        let text = "41 + 1";
+        std::fs::write(&entry, format!("{prefix}print(eval({text:?}))\n")).unwrap();
+        EVAL_PREPARATIONS.with_borrow_mut(|tracked| *tracked = Some((text.to_owned(), 0)));
+        let result = crate::compile_file(&entry, None, &Default::default());
+        let count = EVAL_PREPARATIONS.with_borrow_mut(|tracked| tracked.take().unwrap().1);
+        result.unwrap();
+        assert_eq!(count, 1, "the checked entry must be reused by emission");
+
+        std::fs::write(
+            &entry,
+            "def eval(text): return text\nprint(eval(\"1 +\"))\n",
+        )
+        .unwrap();
+        crate::check_file(&entry, None).unwrap();
+    }
 
     #[test]
     fn ordinary_doctest_suites_place_owned_inputs_and_keep_the_fixed_runner() {
