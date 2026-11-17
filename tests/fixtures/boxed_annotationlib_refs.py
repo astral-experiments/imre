@@ -212,6 +212,21 @@ def current():
     }
     assert seen == [14]
 
+    def compound(value: "list[Choice]"):
+        pass
+
+    assert module.get_annotations(compound, globals={"Choice": int},
+                                  locals={"Choice": str}, eval_str=True) == {
+        "value": list[str],
+    }
+
+    def generic[T](value: "tuple[T, ...]"):
+        pass
+
+    assert module.get_annotations(generic, eval_str=True) == {
+        "value": tuple[generic.__type_params__[0], ...],
+    }
+
     def sums(reflected: 1 + int, nested: Left + (Right + 1)):
         pass
 

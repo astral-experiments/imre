@@ -952,9 +952,18 @@ def get_annotations(
             locals = {}
         locals = {param.__name__: param for param in type_params} | locals
 
+    if globals is None:
+        import builtins
+        if locals is None:
+            locals = builtins.locals()
+        globals = builtins.globals()
+    elif locals is None:
+        locals = globals
+
+    from _typing import _eval_type_expression
     return_value = {
         key: value if not isinstance(value, str)
-        else eval(_rewrite_star_unpack(value), globals, locals)
+        else _eval_type_expression(_rewrite_star_unpack(value), globals, locals)
         for key, value in ann.items()
     }
     return return_value
