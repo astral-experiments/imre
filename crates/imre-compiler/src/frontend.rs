@@ -8591,20 +8591,19 @@ impl<'a> Checker<'a> {
         };
         if arg.as_ref().is_some_and(|v| v.ty != Type::Str) {
             let v = arg.unwrap();
-            if v.ty != Type::ObjectValue
-                && (!matches!(
-                    v.ty,
-                    Type::Bool
-                        | Type::Int
-                        | Type::Float
-                        | Type::Bytes
-                        | Type::None
-                        | Type::ListInt
-                        | Type::List(_)
-                        | Type::Tuple(_)
-                        | Type::Dict(_)
-                        | Type::Set(_)
-                ) || !dataclass_values::can_format(v.ty, self.types, self.classes))
+            if !matches!(
+                v.ty,
+                Type::Bool
+                    | Type::Int
+                    | Type::Float
+                    | Type::Bytes
+                    | Type::None
+                    | Type::ListInt
+                    | Type::List(_)
+                    | Type::Tuple(_)
+                    | Type::Dict(_)
+                    | Type::Set(_)
+            ) || !dataclass_values::can_format(v.ty, self.types, self.classes)
             {
                 return Err(error(
                     self.source,
