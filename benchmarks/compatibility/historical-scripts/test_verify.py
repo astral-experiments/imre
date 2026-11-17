@@ -1,6 +1,7 @@
 """Focused controls for the historical 84-command join."""
 import copy
 import hashlib
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -48,6 +49,14 @@ class JoinTests(unittest.TestCase):
         inputs=copy.deepcopy(self.inputs);del inputs[1]["uv-01"]
         with self.assertRaisesRegex(ValueError,"join count"):verify.derive(*inputs)
         with self.assertRaisesRegex(ValueError,"duplicate"):verify.unique([{"id":"x"},{"id":"x"}])
+
+    def test_reviewed_anchors_survive_unrelated_addition(self):
+        raw = (verify.COMPAT/"frozen/scripts.jsonl").read_bytes()
+        extra = json.dumps({"id": "future-anchor"}).encode() + bytes([10])
+        self.assertEqual(verify.reviewed_frozen(raw + extra), self.inputs[2])
+        altered = raw.replace(b'"uv-10"', b'"uv-10" ', 1)
+        with self.assertRaisesRegex(ValueError, "reviewed frozen anchor differs"):
+            verify.reviewed_frozen(altered)
 
     def test_rebound_archive_digest_is_not_authority(self):
         raw=(verify.HERE/"archived-survey-7724.tsv").read_bytes().replace(b"uv-01",b"uv-XX",1)

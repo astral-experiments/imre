@@ -20,7 +20,15 @@ SHARDS = {
     "ruff-b": "eac09c76f8d16af9fd54bea7bd97f38f45dea837a4cc1cc7d375262a2f4be2fb",
     "ty": "920578c3c61ec1cbe44fdb543a6558d0914d303d4baaf2dc1e589648db4b08c6",
 }
-FROZEN_SHA = "b558dfc9780b41ad00ed7911c4b07db8f9e05ca2266b4a9ece957176a8132823"
+FROZEN_LINES = {
+    'uv-10': 'af524647216ad27262321cf10d0c5dce82617f46ee1b8487e90e77df4c3a9c8f',
+    'uv-extra-02': '0cd4203c658d6c1367038587e25525b81a1bcf787116b2a03cdbe80415a833b0',
+    'ty-05': '53cc722af7239871f66fb1214c4d4db3b6f0caaa298007a1c5f25441695a6cd4',
+    'uv-26': 'ac38a9e6c92e840eaffc8af28dc59a86af3be702537daa869f5868ae382caba5',
+    'uv-29': '8c3ead8936e565f1729d4183bd215b3bd04993140087cde57997e65746c65f3b',
+    'ruff-module-help': '6405f3bf4d789740ff537cb07667c8e9239b95d5ffec449809c8ab42659f525c',
+    'ruff-module-lint': 'dd6d8ff102cd93c43028e8044eb948bec5b76394fbea014e9db10e56f1a9ec69',
+}
 CHECKOUT = {"uv": "24688aaca1e7fd104437a0909d5db3afdc7dcdb0",
             "ruff": "65aee8892ce379af4ae9c8b5f6e0ab37b25d5ec9",
             "ty": "9b48f40c9f4fbea54387264318b8c0c6f0d6d184"}
@@ -55,13 +63,29 @@ def unique(rows):
     return result
 
 
+def reviewed_frozen(raw):
+    reviewed = {}
+    seen = set()
+    for line in raw.splitlines(keepends=True):
+        row = json.loads(line)
+        id = row["id"]
+        require(id not in seen, "duplicate frozen anchor ID")
+        seen.add(id)
+        if id in FROZEN_LINES:
+            require(hashlib.sha256(line).hexdigest() == FROZEN_LINES[id],
+                    f"reviewed frozen anchor differs: {id}")
+            reviewed[id] = row
+    require(set(reviewed) == set(FROZEN_LINES), "reviewed frozen anchor missing")
+    return reviewed
+
+
 def load():
     raw = checked(HERE/"archived-survey-7724.tsv", ARCHIVE_SHA)
     require(len(raw) == 240585, "archived byte count differs")
     archived = unique(csv.DictReader(io.StringIO(raw.decode()), delimiter="\t"))
     canonical = unique(json.loads(line) for name, digest in SHARDS.items()
                        for line in checked(COMPAT/"scripts"/(name+".jsonl"), digest).splitlines())
-    frozen = unique(json.loads(line) for line in checked(COMPAT/"frozen/scripts.jsonl", FROZEN_SHA).splitlines())
+    frozen = reviewed_frozen((COMPAT/"frozen/scripts.jsonl").read_bytes())
     return archived, canonical, frozen
 
 
