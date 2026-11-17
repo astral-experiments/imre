@@ -3292,7 +3292,7 @@ pub(crate) struct SourceGraph {
     /// Operands available to place after the selected source passes its own checks.
     pub(crate) registered_call_operands:
         std::cell::RefCell<HashMap<ModuleId, crate::dynamic::FunctionCallOperands>>,
-    /// Default-rule error ranges for the physical sources shared by every layout attempt.
+    /// Default-rule error ranges for the physical sources in this graph.
     pub(crate) registered_source_errors: std::cell::RefCell<RegisteredSourceErrors>,
     /// Contract of the original graph, valid only while its declarations still win.
     pub(crate) source_contract: Option<crate::analysis::SourceContract>,
