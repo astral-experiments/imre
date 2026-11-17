@@ -2629,6 +2629,109 @@ fn bisect_ints<const LEFT: bool>(values: &[Int], needle: &Int) -> usize {
     low
 }
 
+fn list_bisect_bounds<const LEFT: bool>(
+    list: &List,
+    needle: &Int,
+    lo: &Int,
+    hi: &Int,
+) -> Result<usize> {
+    let lo = signed_index(lo).ok_or_else(|| {
+        Error::new(
+            Kind::OverflowError,
+            "Python int too large to convert to C ssize_t",
+        )
+    })?;
+    let hi = signed_index(hi).ok_or_else(|| {
+        Error::new(
+            Kind::OverflowError,
+            "cannot fit 'int' into an index-sized integer",
+        )
+    })?;
+    if lo < 0 {
+        return Err(Error::new(Kind::ValueError, "lo must be non-negative"));
+    }
+    // SAFETY: exact integer comparisons cannot reenter or mutate this rooted list.
+    unsafe {
+        list.0.with(|values| {
+            let hi = if hi == -1 { values.len() as isize } else { hi };
+            if lo >= hi {
+                return Ok(Int::from_usize(lo as usize).into_raw());
+            }
+            let mut low = lo as usize;
+            let mut high = hi as usize;
+            let before = |value: &Int| {
+                if LEFT {
+                    value.cmp(needle).is_lt()
+                } else {
+                    !value.cmp(needle).is_gt()
+                }
+            };
+            if high <= values.len() {
+                let index = low + bisect_ints::<LEFT>(&values[low..high], needle);
+                return Ok((index << 1) | 1);
+            }
+            while low < high {
+                let mid = low + (high - low) / 2;
+                let value = values
+                    .get(mid)
+                    .ok_or_else(|| Error::new(Kind::IndexError, "list index out of range"))?;
+                if before(value) {
+                    low = mid + 1;
+                } else {
+                    high = mid;
+                }
+            }
+            Ok(Int::from_usize(low).into_raw())
+        })
+    }
+}
+
+/// Search a bounded exact integer list using the left insertion rule.
+///
+/// # Safety
+/// All four ABI operands are rooted for this nonreentrant read.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_list_bisect_left_bounds(
+    list: *const List,
+    needle: usize,
+    lo: usize,
+    hi: usize,
+) -> usize {
+    // SAFETY: the caller roots the list and integer words, and this search does not invoke callbacks.
+    let result = unsafe {
+        list_bisect_bounds::<true>(
+            &*list,
+            &Int::borrow(needle),
+            &Int::borrow(lo),
+            &Int::borrow(hi),
+        )
+    };
+    finish(result, 0)
+}
+
+/// Search a bounded exact integer list using the right insertion rule.
+///
+/// # Safety
+/// All four ABI operands are rooted for this nonreentrant read.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_list_bisect_right_bounds(
+    list: *const List,
+    needle: usize,
+    lo: usize,
+    hi: usize,
+) -> usize {
+    // SAFETY: the caller roots the list and integer words, and this search does not invoke callbacks.
+    let result = unsafe {
+        list_bisect_bounds::<false>(
+            &*list,
+            &Int::borrow(needle),
+            &Int::borrow(lo),
+            &Int::borrow(hi),
+        )
+    };
+    finish(result, 0)
+}
+
 /// Sums an exact integer list and an already-evaluated starting value.
 ///
 /// An i32 reduction avoids per-element integer owners and arithmetic calls.

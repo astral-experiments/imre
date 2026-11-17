@@ -13899,12 +13899,26 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
                 name @ ("bisect.bisect_left" | "bisect.bisect_right"),
             ))) => {
-                let params = [
+                let bounded = call.arguments.args.len() > 2
+                    || call.arguments.keywords.iter().any(|keyword| {
+                        keyword
+                            .arg
+                            .as_ref()
+                            .is_some_and(|name| matches!(name.as_str(), "lo" | "hi"))
+                    });
+                let mut params = vec![
                     parameter("a", Type::ListInt, None),
                     parameter("x", Type::Int, None),
                 ];
+                if bounded {
+                    params.push(parameter("lo", Type::Int, Some(Expr::integer(0))));
+                    params.push(parameter("hi", Type::Int, Some(Expr::integer(-1))));
+                }
                 let args = self
                     .arguments_with(call, &params, None, |checker, index, source| {
+                        if index == 3 && matches!(source, ast::Expr::NoneLiteral(_)) {
+                            return Ok(Expr::integer(-1));
+                        }
                         let value = checker.expr(source)?;
                         if value.ty != params[index].ty {
                             return Err(checker.object_runtime_export(name, source));
@@ -13912,13 +13926,13 @@ impl<'a> Checker<'a> {
                         Ok(value)
                     })
                     .map_err(|_| self.object_runtime_export(name, call))?;
-                return Ok(self.ordered_builtin(
-                    Builtin::BisectIntList {
-                        left: name.ends_with("_left"),
-                    },
-                    Type::Int,
-                    args,
-                ));
+                let left = name.ends_with("_left");
+                let builtin = if bounded {
+                    Builtin::BisectIntListBounds { left }
+                } else {
+                    Builtin::BisectIntList { left }
+                };
+                return Ok(self.ordered_builtin(builtin, Type::Int, args));
             }
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
                 name @ ("imre._calendar.month_grid"
