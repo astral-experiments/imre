@@ -172,6 +172,10 @@ impl ZipSources {
         }))
     }
 
+    pub(crate) fn archive_path(&self) -> &Path {
+        &self.path
+    }
+
     fn stem(&self, name: &str) -> String {
         let stem = name.replace('.', "/");
         if self.prefix.is_empty() {

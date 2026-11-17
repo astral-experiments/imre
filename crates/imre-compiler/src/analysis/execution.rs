@@ -185,6 +185,8 @@ struct Escape<'a, 'db> {
     guarded_names: Vec<TextRange>,
     session: &'db Session,
     open_providers: &'a [File],
+    selected_provider: &'a dyn Fn(&str) -> Option<File>,
+    selected_writes: HashMap<(ty_python_core::definition::Definition<'db>, &'a str), TextRange>,
     linked_exec: Option<&'a std::collections::HashSet<TextRange>>,
     literal_unit: Option<crate::dynamic::literal::LiteralUnit<'a>>,
     path: &'a Path,
@@ -209,10 +211,66 @@ impl<'ast, 'db> Escape<'ast, 'db> {
     }
 
     fn declared_function(&self, value: &Expr) -> Option<SourceFunction<'db>> {
-        let db = self.model.db();
         let ty @ Type::FunctionLiteral(_) = value.inferred_type(self.model)? else {
             return None;
         };
+        self.declared_source_type(ty)
+    }
+
+    /// Resolve a checked bound method without making it a linked-expression provider.
+    fn declared_bound_method(&self, value: &Expr) -> Option<SourceFunction<'db>> {
+        let ty @ Type::BoundMethod(_) = value.inferred_type(self.model)? else {
+            return None;
+        };
+        self.declared_source_type(ty)
+    }
+
+    /// Resolve an interface only for imported execution checking; it does not grant a linked entry.
+    fn selected_execution_target(
+        &self,
+        value: &Expr,
+    ) -> Option<(SourceFunction<'db>, Option<TextRange>)> {
+        let db = self.model.db();
+        let ty @ (Type::FunctionLiteral(_) | Type::BoundMethod(_)) =
+            value.inferred_type(self.model)?
+        else {
+            return None;
+        };
+        let TypeDefinition::Function(interface) =
+            ty.definition(db, &self.model.program_environment())?
+        else {
+            return None;
+        };
+        if !interface.file(db).path(db).is_vendored_path()
+            || (value.is_attribute_expr() && self.member_was_assigned(value))
+        {
+            return None;
+        }
+        let selected = self
+            .session
+            .selected_callable_definition(interface, self.selected_provider)?;
+        let DefinitionKind::Function(function) = selected.kind(db) else {
+            return None;
+        };
+        let replacement = match interface.scope(db).node(db) {
+            ty_python_core::scope::NodeWithScopeKind::Class(class)
+                if !self.selected_writes.is_empty() =>
+            {
+                let parsed = self.session.parsed(interface.file(db));
+                let owner = ty_python_core::semantic_index(db, interface.program_file(db))
+                    .try_definition(class.node(&parsed))?;
+                self.selected_writes
+                    .get(&(owner, interface.name(db)?.as_str()))
+                    .copied()
+            }
+            _ => None,
+        };
+        Some(((selected.file(db), function), replacement))
+    }
+
+    /// Preserve the selected physical Python definition; a stub or unrelated shadow is not an executable provider.
+    fn declared_source_type(&self, ty: Type<'db>) -> Option<SourceFunction<'db>> {
+        let db = self.model.db();
         let TypeDefinition::Function(def) = ty.definition(db, &self.model.program_environment())?
         else {
             return None;
@@ -482,9 +540,10 @@ impl<'ast, 'db> Escape<'ast, 'db> {
         (owner, declaration): SourceFunction<'_>,
         capture: Option<CapturedImport<'_>>,
         call: &'ast ExprCall,
+        selected_provider: bool,
     ) -> Option<ExecutionRequirement> {
-        let follows_open_source =
-            owner != self.model.file() && self.open_providers.contains(&owner);
+        let follows_open_source = owner != self.model.file()
+            && (selected_provider || self.open_providers.contains(&owner));
         let capture = capture.filter(|capture| capture.owner == owner);
         if !follows_open_source && capture.is_none() {
             return None;
@@ -493,7 +552,14 @@ impl<'ast, 'db> Escape<'ast, 'db> {
         let function = declaration.node(&parsed);
         let capture = capture.filter(|capture| capture.name == function.name.as_str());
         let captured = capture.is_some();
-        let bound = crate::frontend::fixed_call_arguments(call, &function.parameters)?;
+        let bound = if matches!(
+            call.func.inferred_type(self.model),
+            Some(Type::BoundMethod(_))
+        ) {
+            crate::frontend::fixed_bound_call_arguments(call, &function.parameters)?
+        } else {
+            crate::frontend::fixed_call_arguments(call, &function.parameters)?
+        };
         if !bound
             .iter()
             .all(|(_, argument)| self.argument_can_return(argument))
@@ -530,9 +596,9 @@ impl<'ast, 'db> Escape<'ast, 'db> {
         let mut nested = self.session.execution_visitor(path, &parsed, &model);
         nested.callbacks = callbacks;
         nested.visit_body(&function.body);
-        nested.first.filter(|error| {
-            callback || error.source == SourceCallable::Builtin(ExecutionIntrinsic::Exec)
-        })
+        nested
+            .first
+            .filter(|error| callback || matches!(error.source, SourceCallable::Builtin(_)))
     }
 
     fn exposes_captured_namespace(&self, value: &Expr) -> bool {
@@ -785,6 +851,19 @@ impl<'a> Escape<'a, '_> {
             return;
         }
         let Expr::Call(call) = expression else {
+            let db = self.model.db();
+            if let Expr::Attribute(attr) = expression
+                && attr.ctx == ruff_python_ast::ExprContext::Store
+                && self.reachable(attr.range())
+                && let Some(TypeDefinition::StaticClass(owner)) = attr
+                    .value
+                    .inferred_type(self.model)
+                    .and_then(|ty| ty.definition(db, &self.model.program_environment()))
+                && owner.file(db).path(db).is_vendored_path()
+            {
+                self.selected_writes
+                    .insert((owner, attr.attr.as_str()), attr.range());
+            }
             if self.has_live_import(expression) {
                 if self.exposes_captured_namespace(expression) {
                     self.captured.clear();
@@ -929,11 +1008,21 @@ impl<'a> Escape<'a, '_> {
             return;
         }
         let target = self.declared_function(&call.func);
-        if let Some(target) = target
-            && (capture.is_some() || !self.open_providers.is_empty())
-            && let Some(requirement) = self.imported_execution(target, capture, call)
+        let selected = self.selected_execution_target(&call.func);
+        if let Some(target) = selected
+            .map(|(target, _)| target)
+            .or(target)
+            .or_else(|| self.declared_bound_method(&call.func))
+            && (selected.is_some() || capture.is_some() || !self.open_providers.is_empty())
+            && let Some(requirement) =
+                self.imported_execution(target, capture, call, selected.is_some())
         {
-            self.first = Some(requirement);
+            self.first = Some(if let Some((_, Some(range))) = selected {
+                self.required(requirement.source, range,
+                    "monkeypatching a shipped method used for source execution is unsupported; call a local function or wrapper instead".into())
+            } else {
+                requirement
+            });
             return;
         }
         if live_import {
@@ -1404,6 +1493,8 @@ impl Session {
             guarded_names: Vec::new(),
             session: self,
             open_providers: &[],
+            selected_provider: &|_| None,
+            selected_writes: HashMap::new(),
             linked_exec: None,
             literal_unit: None,
             path,
@@ -1528,6 +1619,7 @@ impl Session {
         self.check_execution_with_imports(
             sources.map(|(id, path)| (id, path, false, None, None)),
             CapturedImports::default(),
+            &|_| None,
         )
     }
 
@@ -1543,6 +1635,7 @@ impl Session {
             ),
         > + Clone,
         mut captures: CapturedImports,
+        selected_provider: &dyn Fn(&str) -> Option<File>,
     ) -> Result<(), String> {
         let open_providers: Vec<_> = sources
             .clone()
@@ -1558,6 +1651,7 @@ impl Session {
             let model = SemanticModel::new(&self.db, source);
             let mut visitor = self.execution_visitor(path, &parsed, &model);
             visitor.open_providers = &open_providers;
+            visitor.selected_provider = selected_provider;
             visitor.linked_exec = linked_exec;
             visitor.literal_unit = literal_unit;
             let mut body = parsed.suite().as_slice();

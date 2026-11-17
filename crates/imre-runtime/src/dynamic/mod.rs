@@ -143,6 +143,11 @@ impl MainModuleFrame {
     }
 }
 
+struct LinkedZipPath {
+    archive: &'static Path,
+    namespaces: std::collections::HashSet<&'static str>,
+}
+
 #[derive(Clone)]
 struct SourceModule {
     // Registrations borrow the executable's path. An issued file loader owns its chosen origin.
@@ -365,6 +370,8 @@ pub(crate) struct Context {
     original_builtins: Option<Id>,
     source_builtins: Option<Id>,
     zip_directories: HashMap<String, crate::objects::ZipArchive>,
+    linked_zip_archives: Vec<&'static Path>,
+    linked_zip_paths: HashMap<PathBuf, LinkedZipPath>,
     zip_path_importers: Id,
     codec_entries: stdlib::codecs::Registry,
     warning_state: Option<stdlib::warnings_accel::State>,

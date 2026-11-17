@@ -17,6 +17,7 @@ pub(crate) struct ModuleLauncher {
     main: String,
     declarations: HashSet<String>,
     suspending_provider: bool,
+    zip_archives: HashSet<std::path::PathBuf>,
 }
 
 impl ModuleLauncher {
@@ -38,6 +39,7 @@ impl ModuleLauncher {
             main,
             declarations: HashSet::new(),
             suspending_provider: false,
+            zip_archives: HashSet::new(),
         }
     }
 
@@ -88,6 +90,18 @@ impl ModuleLauncher {
             .unwrap();
         }
         writeln!(self.main, "  call void @{function}({arguments})").unwrap();
+    }
+
+    /// Register a finite archive origin once in each launcher, before its linked members.
+    pub(crate) fn register_zip_archive(&mut self, archive: &Path) {
+        if self.zip_archives.insert(archive.to_owned()) {
+            let path = self.output.data(archive.as_os_str().as_encoded_bytes());
+            self.register(
+                "imre_dyn_register_zip_archive",
+                "ptr, ptr",
+                format_args!("ptr %ctx, ptr {path}"),
+            );
+        }
     }
 
     /// Attach one checked input to the module registered immediately before its inputs.
