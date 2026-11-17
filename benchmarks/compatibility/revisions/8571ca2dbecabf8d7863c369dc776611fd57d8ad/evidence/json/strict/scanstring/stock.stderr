@@ -1,0 +1,26 @@
+IMRE_UNITTEST {"event": "collection", "count": 8}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_scanstring.TestCScanstring.test_bad_escapes"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_scanstring.TestCScanstring.test_overflow"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_scanstring.TestCScanstring.test_scanstring"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_scanstring.TestCScanstring.test_surrogates"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_scanstring.TestPyScanstring.test_bad_escapes"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_scanstring.TestPyScanstring.test_overflow"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_scanstring.TestPyScanstring.test_scanstring"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_scanstring.TestPyScanstring.test_surrogates"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_scanstring.TestCScanstring.test_bad_escapes"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_scanstring.TestCScanstring.test_bad_escapes", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_scanstring.TestCScanstring.test_overflow"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_scanstring.TestCScanstring.test_overflow", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_scanstring.TestCScanstring.test_scanstring"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_scanstring.TestCScanstring.test_scanstring", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_scanstring.TestCScanstring.test_surrogates"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_scanstring.TestCScanstring.test_surrogates", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_scanstring.TestPyScanstring.test_bad_escapes"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_scanstring.TestPyScanstring.test_bad_escapes", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_scanstring.TestPyScanstring.test_overflow"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_scanstring.TestPyScanstring.test_overflow", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_scanstring.TestPyScanstring.test_scanstring"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_scanstring.TestPyScanstring.test_scanstring", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_scanstring.TestPyScanstring.test_surrogates"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_scanstring.TestPyScanstring.test_surrogates", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "summary", "run": 8, "successful": true}

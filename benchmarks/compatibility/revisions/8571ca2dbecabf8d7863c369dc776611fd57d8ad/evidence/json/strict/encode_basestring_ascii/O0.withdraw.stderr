@@ -1,0 +1,20 @@
+IMRE_UNITTEST {"event": "collection", "count": 6}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_encode_basestring_ascii"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_ordered_dict"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_sorted_dict"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_encode_basestring_ascii"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_ordered_dict"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_sorted_dict"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_encode_basestring_ascii"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_encode_basestring_ascii", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_ordered_dict"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_ordered_dict", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_sorted_dict"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_sorted_dict", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_encode_basestring_ascii"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_encode_basestring_ascii", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_ordered_dict"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_ordered_dict", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_sorted_dict"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_sorted_dict", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "summary", "run": 6, "successful": true}
