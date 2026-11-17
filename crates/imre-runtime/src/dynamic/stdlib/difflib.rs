@@ -29,6 +29,9 @@ pub(super) unsafe extern "C" fn imre_dyn_difflib_chain_b(
 
 /// Recognize an ordinary exact SequenceMatcher instance whose source globals and attributes need no hooks.
 fn receiver(ctx: &Context, scope: Id) -> Option<Id> {
+    if !unobserved_checkpoints(ctx) {
+        return None;
+    }
     let root = ctx.root_scope(scope);
     let globals = ctx.scope_data(root);
     if globals.module != "difflib" || globals.exec_globals.is_some() {
@@ -44,6 +47,36 @@ fn receiver(ctx: &Context, scope: Id) -> Option<Id> {
         return None;
     }
     Some(receiver)
+}
+
+/// Skipping source statements must not skip a Python observer or change an allocation trace.
+fn unobserved_checkpoints(ctx: &Context) -> bool {
+    if ctx.heap.allocation_traces.is_tracing()
+        || ctx.heap.gc_callback(0).is_some()
+        || ctx.heap.has_weak_values
+        || ctx.heap.has_unstarted_coroutines()
+    {
+        return false;
+    }
+    let count = ctx.heap.tracked_finalizer_count();
+    if count == 0 {
+        return true;
+    }
+    if count > 5 {
+        return false;
+    }
+    let Some(system) = ctx.threads.system_module else {
+        return false;
+    };
+    let Value::Module { scope, .. } = *ctx.heap.get(system) else {
+        return false;
+    };
+    let [stdin, stdout, stderr] = ["__stdin__", "__stdout__", "__stderr__"]
+        .map(|name| ctx.scope_name(scope, name).unwrap_or(NONE));
+    let [input, buffer, raw] =
+        super::io::text_descriptor_chain(&ctx.heap, stdin).unwrap_or([NONE; 3]);
+    ctx.heap
+        .finalizers_within(&[input, buffer, raw, stdout, stderr])
 }
 
 /// Build the public b2j dictionary and junk/popular sets from flat ASCII character positions.
