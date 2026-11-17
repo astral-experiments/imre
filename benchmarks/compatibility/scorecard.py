@@ -445,31 +445,58 @@ def matched_build(argv, tier, compiler, runtime):
     require(runtime_argument(argv) == runtime and argv[0] == compiler and option(argv, "--runtime") == runtime and option(argv, "--opt-level") == tier[1:] and "--no-cache" in argv, f"{tier} compiler/runtime or build flags differ")
 
 
-def successful_open_paths(text, cwd, *, preserve_traversal=False):
-    """Decode successful strace open calls, resolving relative dirfd paths."""
-    descriptors = {}; quoted = r'"(?:\\.|[^"\\])*"'
-    for line in text.splitlines():
-        call = re.search(r"\b(open|openat|openat2)\((.*)\)\s+=\s+(-?\d+)(?:<[^>]*>)?(?:\s|$)", line)
-        if not call or int(call.group(3)) < 0: continue
-        operation, args, fd = call.group(1), call.group(2), int(call.group(3))
-        pid = re.match(r"\s*(?:\[pid\s+(\d+)\]|(\d+))\s+", line)
-        pid = (pid.group(1) or pid.group(2)) if pid else "main"
-        if operation == "open":
-            match = re.match(rf"({quoted})(?:,|$)", args); base = cwd
+def successful_open_paths(text, cwd, *, preserve_traversal=False, kernel_events=False):
+    """Resolve strace opens; optionally emit strict -y lexical/kernel path events."""
+    descriptors = {}; previous = {}; quoted = r'"(?:\\.|[^"\\])*"'
+    def decode(value, annotation=False):
+        literal = '"' + value + '"' if annotation else value
+        try:
+            return os.fsdecode(ast.literal_eval('b'+literal)) if kernel_events else ast.literal_eval(literal)
+        except (ValueError, SyntaxError, UnicodeError):
+            require(False, "invalid open path in saved-image trace")
+    def path_for(dirfd, literal, pid, operation):
+        name = decode(literal); base = cwd
+        if operation not in {"open","creat"}:
+            raw = dirfd.strip(); annotated = re.fullmatch(r'([^<>]+)<([^<>]+)>',raw)
+            if kernel_events:
+                require(annotated is not None and (annotated[1] == "AT_FDCWD" or annotated[1].isdigit()), "unknown kernel dirfd")
+                base = decode(annotated[2],True)
+            else:
+                base = cwd if raw == "AT_FDCWD" else descriptors.get((pid,raw.split("<",1)[0]))
+                if base is None and annotated: base = annotated[2]
+        if kernel_events and operation in {"open","creat"}: require(name.startswith("/"), "unresolved relative open without kernel cwd")
+        require(isinstance(name,str) and (name.startswith("/") or isinstance(base,str) and base.startswith("/")), "unresolved successful relative open in saved-image trace")
+        return name if name.startswith("/") else posixpath.join(base,name)
+    for number,line in enumerate(text.splitlines(),1):
+        pm = re.match(r"\s*(?:\[pid\s+(\d+)\]|(\d+))\s+",line)
+        pid = (pm.group(1) or pm.group(2)) if pm else "main"; prior=previous.get(pid);previous[pid]=line
+        call = re.search(r"\b(open|openat|openat2|creat)\((.*)\)\s+=\s+(-?\d+)(?:<([^<>]*)>)?(?:\s|$)",line)
+        if kernel_events and not call and re.search(r"\b(?:open|openat|openat2|creat)\(|<\.\.\. (?:open|openat|openat2|creat) resumed>",line):
+            require(bool(re.search(r"\)\s+=\s+-1\b",line)), "unresolved native open event")
+        if not call or int(call[3]) < 0 or (call[1]=="creat" and not kernel_events): continue
+        op,args,fd=call[1],call[2],int(call[3]); dirfd=None
+        if op in {"open","creat"}: match=re.match(rf"({quoted})(?:,|$)(.*)",args)
+        else: match=re.match(rf"([^,]+),\s*({quoted})(?:,|$)(.*)",args);dirfd=match[1].strip() if match else None
+        require(match is not None,"cannot decode successful open in saved-image trace")
+        literal=match[1] if op in {"open","creat"} else match[2]
+        joined=path_for(dirfd,literal,pid,op);normalized=posixpath.normpath(joined)
+        descriptors[(pid,str(fd))]=joined if preserve_traversal else normalized
+        if not kernel_events:
+            yield Path(joined if preserve_traversal else normalized);continue
+        require(call[4] is not None,"successful open has no kernel fd path")
+        returned=decode(call[4],True);require(returned.startswith("/") and not returned.endswith(" (deleted)"),"invalid kernel fd path")
+        rest=(match[2] if op in {"open","creat"} else match[3]).strip()
+        if op=="openat2":
+            fm=re.search(r'\bflags=([^,}]+)',rest);require(fm is not None,"openat2 flags missing");flags=fm[1];mode=None
+        elif op=="creat": flags="CREAT";mode=rest
         else:
-            match = re.match(rf"([^,]+),\s*({quoted})(?:,|$)", args)
-            dirfd = match.group(1).strip() if match else ""
-            base = cwd if dirfd == "AT_FDCWD" else descriptors.get((pid, dirfd.split("<", 1)[0]))
-            if base is None and "<" in dirfd and dirfd.endswith(">"):
-                base = dirfd.split("<", 1)[1][:-1]
-        require(match is not None, "cannot decode successful open in saved-image trace")
-        try: name = ast.literal_eval(match.group(1 if operation == "open" else 2))
-        except (ValueError, SyntaxError): require(False, "invalid open path in saved-image trace")
-        require(isinstance(name, str) and (name.startswith("/") or isinstance(base, str) and base.startswith("/")), "unresolved successful relative open in saved-image trace")
-        joined = name if name.startswith("/") else posixpath.join(base, name)
-        path = joined if preserve_traversal else posixpath.normpath(joined)
-        descriptors[(pid, str(fd))] = path
-        yield Path(path)
+            parts=rest.split(",",1);flags=parts[0].strip();mode=parts[1].strip() if len(parts)>1 else None
+        witness=None
+        if prior and "S_IFDIR" in prior and re.search(r'\) = 0$',prior):
+            sm=re.search(rf'\bnewfstatat\(([^,]+),\s*({quoted}),',prior)
+            if sm: witness=posixpath.normpath(path_for(sm[1],sm[2],pid,"openat"))
+        yield {"line":number,"pid":pid,"operation":op,"lexical":joined,"path":Path(normalized),
+               "returned":Path(posixpath.normpath(returned)),"flags":flags,"mode":mode,"directory_witness":witness}
 
 
 def validate_trace(path, digest, image, source_leaf, source_path, cwd, forbidden_trees=()):

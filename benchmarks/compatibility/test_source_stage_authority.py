@@ -69,9 +69,9 @@ class AuthorityTests(unittest.TestCase):
         self.data=self.root/"benchmarks/compatibility/revisions"/PIN;self.data.mkdir(parents=True)
         source=self.root/"adapter.py";source.write_text("adapter\n");control=self.data/"control.c";control.write_text("control\n")
         staged=self.data/"stdlib/glob.jsonl";staged.parent.mkdir();staged.write_text("stage\n")
-        binding=self.data/"evidence/glob/binding.json";dump(binding,{"cohorts":{"finite":{"strict_source_control":"direct-and-withdraw-v1","probe":"fixed-probe","artifacts":{"probe_source":self.rel(control)}}}})
+        binding=self.data/"evidence/glob/binding.json";dump(binding,{"cohorts":{"finite":{"strict_source_control":"native-content-v1","probe":"fixed-probe","artifacts":{"probe_source":self.rel(control)}}}})
         self.binding=binding;self.control=control
-        family={"strict_source_control":"direct-and-withdraw-v1","binding":{"path":self.rel(binding),"sha256":digest(binding)},"staged_receipt":{"path":self.rel(staged),"sha256":digest(staged),"originals":24,"frozen_originals":24},"evidence_files":{self.rel(binding):digest(binding),self.rel(control):digest(control)},"artifact_files":[self.rel(control)]}
+        family={"strict_source_control":"native-content-v1","binding":{"path":self.rel(binding),"sha256":digest(binding)},"staged_receipt":{"path":self.rel(staged),"sha256":digest(staged),"originals":24,"frozen_originals":24},"evidence_files":{self.rel(binding):digest(binding),self.rel(control):digest(control)},"artifact_files":[self.rel(control)]}
         manifest={"schema":"imre.compatibility.source-stage.v1","imre_revision":PIN,"sources":{self.rel(source):digest(source),self.rel(control):digest(control)},"families":{"glob":family}}
         self.manifest=self.root/raw_control.SOURCE_MANIFEST;dump(self.manifest,manifest)
         self.git("add",".");self.git("commit","-qm","source stage");self.stage=self.git("rev-parse","HEAD").decode().strip();self.git("update-ref","refs/remotes/origin/main",self.stage)
@@ -101,14 +101,23 @@ class AuthorityTests(unittest.TestCase):
 
     def test_rehashed_strict_downgrade_or_probe_rebind_rejected(self):
         original=self.binding.read_bytes()
-        for change in ("delete-mode","rebind-probe"):
+        for change in ("delete-mode","downgrade-mode","rebind-probe"):
             binding=json.loads(original);c=binding["cohorts"]["finite"]
             if change=="delete-mode":del c["strict_source_control"]
+            elif change=="downgrade-mode":c["strict_source_control"]="direct-and-withdraw-v1"
             else:c["probe"]="different-probe"
             dump(self.binding,binding);self.entry["files"][self.rel(self.binding)]=digest(self.binding)
             # A mutable local manifest is not an alternate authority.
             dump(self.manifest,{"families":{"glob":{"binding":{"sha256":digest(self.binding)}}}})
             with self.subTest(change=change),self.assertRaisesRegex(ValueError,"immutable source stage"):self.validate()
+
+    def test_rehashed_bound_adapter_and_probe_source_mutation_rejected(self):
+        for path in (self.root/"adapter.py",self.control):
+            previous=path.read_bytes();path.write_bytes(previous+b"changed\n")
+            self.entry["files"][self.rel(path)]=digest(path)
+            with self.subTest(path=path.name),self.assertRaisesRegex(ValueError,"immutable source stage"):
+                self.validate()
+            path.write_bytes(previous);self.entry["files"][self.rel(path)]=digest(path)
 
     def test_missing_authority_cannot_downgrade(self):
         del self.entry["source_stage"]

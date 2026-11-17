@@ -1,0 +1,5 @@
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_logging.BufferingFormatterTest.test_default"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_logging.BufferingFormatterTest.test_default"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_logging.BufferingFormatterTest.test_default", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "summary", "run": 1, "successful": true}

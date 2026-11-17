@@ -1,0 +1,254 @@
+{
+  "schema": "imre.compatibility.native-content-policy.v1",
+  "sources": {
+    "glob": {
+      "repo": "https://github.com/python/cpython",
+      "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "path": "Lib/test/test_glob.py",
+      "sha256": "b4adbfa93158f2949957bc6b9c7f16aca58e3fa9b35c863a6caf36f4114a279a",
+      "git_blob": "d0ed5129253cdfb625ae092bb0e89f1b4c96dda4",
+      "archive": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock.source.py",
+      "member": null,
+      "witnesses": [
+        {
+          "first": 23,
+          "last": 28,
+          "sha256": "4ea299404468cb81aa6df14572fdc547fee1a6a0e54789fb4cadc64d5309c24c"
+        },
+        {
+          "first": 30,
+          "last": 46,
+          "sha256": "003c3caf1ae962135736623fb4afaaceaa310ce4c83bdbf38a31e6d20562ef27"
+        },
+        {
+          "first": 65,
+          "last": 85,
+          "sha256": "93d6faa139aa364a7a747667e87d2e617ac211a07bc93670ca32bf901a9cf28a"
+        }
+      ]
+    },
+    "os_helper": {
+      "repo": "https://github.com/python/cpython",
+      "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "path": "Lib/test/support/os_helper.py",
+      "sha256": "ffd61626a8353c9446ea44a9faa3e46e8c0bd75fce0d6d2647dd2bae02ee0c78",
+      "git_blob": "2c45fe2369ec36b574258e701bfc078114c5499d",
+      "archive": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/os-helper.zip",
+      "member": "cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/os_helper.py",
+      "witnesses": [
+        {
+          "first": 18,
+          "last": 22,
+          "sha256": "dfc972f872a0adf112798dcab53d5eaec8041b199e38c11acdb1feaff526c379"
+        },
+        {
+          "first": 68,
+          "last": 75,
+          "sha256": "87f32223207e0a0ed1de5424fc5c2703bf37135fd00446183242a8bdd45740c9"
+        },
+        {
+          "first": 108,
+          "last": 121,
+          "sha256": "54baf331f33d0895136464c7da7fb8352976887e78701defbbd2c336bba4b437"
+        },
+        {
+          "first": 148,
+          "last": 156,
+          "sha256": "de3e28344b4162a91bf4d3c01dfe257d3c7b70b9388a53911df4b36368abff21"
+        },
+        {
+          "first": 549,
+          "last": 575,
+          "sha256": "b5411e2808c55c2e0b2a6859b660528534eb9cc9e10aca6a0de714585575b468"
+        },
+        {
+          "first": 602,
+          "last": 605,
+          "sha256": "a617041b7c61011156ae6495e26e7a78865ce4c9faa026465be812d1d4ac6b41"
+        }
+      ]
+    }
+  },
+  "directory_flags": [
+    "O_RDONLY|O_CLOEXEC|O_DIRECTORY",
+    "O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY",
+    "O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY"
+  ],
+  "readonly_flags": "O_RDONLY|O_CLOEXEC",
+  "fixture": {
+    "root": "@test_{pid}_tmpæ_dir",
+    "write_flags": "O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC",
+    "write_mode": "0777",
+    "writes": [
+      "a/D",
+      "aab/F",
+      ".aa/G",
+      ".bb/H",
+      ".bb/.J",
+      "aaa/zzzF",
+      "ZZZ",
+      "EF",
+      "a/bcd/EF",
+      "a/bcd/efg/ha"
+    ],
+    "directory_read_flags": "O_RDONLY|O_NONBLOCK|O_CLOEXEC",
+    "directories": [
+      "",
+      ".bb",
+      "aaa",
+      "aab",
+      "a",
+      "a/bcd",
+      "a/bcd/efg",
+      ".aa"
+    ],
+    "each_count": 21
+  },
+  "system_common": [
+    {
+      "lexical": "/etc/ld.so.cache",
+      "kernel": "/etc/ld.so.cache",
+      "count": 1
+    },
+    {
+      "lexical": "/lib/x86_64-linux-gnu/libm.so.6",
+      "kernel": "/usr/lib/x86_64-linux-gnu/libm.so.6",
+      "count": 1
+    },
+    {
+      "lexical": "/lib/x86_64-linux-gnu/libgcc_s.so.1",
+      "kernel": "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
+      "count": 1
+    },
+    {
+      "lexical": "/lib/x86_64-linux-gnu/libc.so.6",
+      "kernel": "/usr/lib/x86_64-linux-gnu/libc.so.6",
+      "count": 1
+    },
+    {
+      "lexical": "/usr/lib/locale/C.utf8/LC_CTYPE",
+      "kernel": "/usr/lib/locale/C.utf8/LC_CTYPE",
+      "count": 1
+    },
+    {
+      "lexical": "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache",
+      "kernel": "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache",
+      "count": 1
+    },
+    {
+      "lexical": "/proc/self/maps",
+      "kernel": "/proc/{pid}/maps",
+      "count": 1
+    },
+    {
+      "lexical": "/proc/self/cgroup",
+      "kernel": "/proc/{pid}/cgroup",
+      "count": 1
+    },
+    {
+      "lexical": "/sys/fs/cgroup/cpu.max",
+      "kernel": "/sys/fs/cgroup/cpu.max",
+      "count": 1
+    },
+    {
+      "lexical": "/etc/localtime",
+      "kernel": "/usr/share/zoneinfo/America/New_York",
+      "count": 1
+    }
+  ],
+  "logging_extra": [
+    {
+      "lexical": "/lib/x86_64-linux-gnu/libssl.so.3",
+      "kernel": "/usr/lib/x86_64-linux-gnu/libssl.so.3",
+      "count": 1
+    },
+    {
+      "lexical": "/lib/x86_64-linux-gnu/libcrypto.so.3",
+      "kernel": "/usr/lib/x86_64-linux-gnu/libcrypto.so.3",
+      "count": 1
+    },
+    {
+      "lexical": "/lib/x86_64-linux-gnu/libz.so.1",
+      "kernel": "/usr/lib/x86_64-linux-gnu/libz.so.1.3.1",
+      "count": 1
+    },
+    {
+      "lexical": "/lib/x86_64-linux-gnu/libzstd.so.1",
+      "kernel": "/usr/lib/x86_64-linux-gnu/libzstd.so.1.5.7",
+      "count": 1
+    },
+    {
+      "lexical": "/usr/lib/locale/C.utf8/LC_IDENTIFICATION",
+      "kernel": "/usr/lib/locale/C.utf8/LC_IDENTIFICATION",
+      "count": 1
+    },
+    {
+      "lexical": "/usr/lib/locale/C.utf8/LC_MEASUREMENT",
+      "kernel": "/usr/lib/locale/C.utf8/LC_MEASUREMENT",
+      "count": 1
+    },
+    {
+      "lexical": "/usr/lib/locale/C.utf8/LC_TELEPHONE",
+      "kernel": "/usr/lib/locale/C.utf8/LC_TELEPHONE",
+      "count": 1
+    },
+    {
+      "lexical": "/usr/lib/locale/C.utf8/LC_ADDRESS",
+      "kernel": "/usr/lib/locale/C.utf8/LC_ADDRESS",
+      "count": 1
+    },
+    {
+      "lexical": "/usr/lib/locale/C.utf8/LC_NAME",
+      "kernel": "/usr/lib/locale/C.utf8/LC_NAME",
+      "count": 1
+    },
+    {
+      "lexical": "/usr/lib/locale/C.utf8/LC_PAPER",
+      "kernel": "/usr/lib/locale/C.utf8/LC_PAPER",
+      "count": 1
+    },
+    {
+      "lexical": "/usr/lib/locale/C.utf8/LC_MESSAGES",
+      "kernel": "/usr/lib/locale/C.utf8/LC_MESSAGES",
+      "count": 1
+    },
+    {
+      "lexical": "/usr/lib/locale/C.utf8/LC_MESSAGES/SYS_LC_MESSAGES",
+      "kernel": "/usr/lib/locale/C.utf8/LC_MESSAGES/SYS_LC_MESSAGES",
+      "count": 1
+    },
+    {
+      "lexical": "/usr/lib/locale/C.utf8/LC_MONETARY",
+      "kernel": "/usr/lib/locale/C.utf8/LC_MONETARY",
+      "count": 1
+    },
+    {
+      "lexical": "/usr/lib/locale/C.utf8/LC_COLLATE",
+      "kernel": "/usr/lib/locale/C.utf8/LC_COLLATE",
+      "count": 1
+    },
+    {
+      "lexical": "/usr/lib/locale/C.utf8/LC_TIME",
+      "kernel": "/usr/lib/locale/C.utf8/LC_TIME",
+      "count": 1
+    },
+    {
+      "lexical": "/usr/lib/locale/C.utf8/LC_NUMERIC",
+      "kernel": "/usr/lib/locale/C.utf8/LC_NUMERIC",
+      "count": 1
+    }
+  ],
+  "families": {
+    "glob": {
+      "opens": 2227,
+      "directories": 1833,
+      "image_reads": 6
+    },
+    "logging": {
+      "opens": 46,
+      "directories": 2,
+      "image_reads": 17,
+      "ld_cache_reads": 2
+    }
+  }
+}

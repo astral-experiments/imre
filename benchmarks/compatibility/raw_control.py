@@ -13,6 +13,7 @@ import re
 import subprocess
 import tarfile
 import zipfile
+from collections import Counter
 from functools import lru_cache
 from pathlib import Path
 
@@ -92,7 +93,7 @@ def find(lines, pattern, start=0):
 
 def stat(lines, pid, path, absent, start=0):
     tail = r'= -1 ENOENT\b' if absent else r'= 0$'
-    return find(lines, rf'^{pid}\s+newfstatat\(AT_FDCWD, {re.escape(json.dumps(path))}, .*{tail}', start)
+    return find(lines, rf'^{pid}\s+newfstatat\(AT_FDCWD(?:<[^<>]+>)?, {re.escape(json.dumps(path))}, .*{tail}', start)
 
 
 def exits(lines, parent, child, code, start):
@@ -140,11 +141,12 @@ def trace_direct_gate(text, command, probe, diagnostic, require):
             'missing direct int/bool diagnostic')
 
 
-def payload_alias(path):
-    return re.search(r'(?:^|/)proc/(?:[0-9]+|self|thread-self)/fd/[0-9]+(?:/|$)|(?:^|/)dev/fd/[0-9]+(?:/|$)', path) is not None
+def payload_alias(path, *, task=False):
+    task_part = r'(?:task/[0-9]+/)?' if task else ''
+    return re.search(r'(?:^|/)proc/(?:[0-9]+|self|thread-self)/'+task_part+r'fd/[0-9]+(?:/|$)|(?:^|/)dev/fd/[0-9]+(?:/|$)', path) is not None
 
 
-def trace_withdraw(api, text, image, probe, tree, stash, leaf, cwd, require, extra_sources=(), strict_payloads=False):
+def trace_withdraw(api, text, image, probe, tree, stash, leaf, cwd, require, extra_sources=(), strict_payloads=False, content_policy=None):
     """Allow only ENOENT withdrawn-path probes; never allow Python probes or child execs."""
     from posixpath import normpath
     lines = text.splitlines()
@@ -213,6 +215,8 @@ def trace_withdraw(api, text, image, probe, tree, stash, leaf, cwd, require, ext
         if strict_payloads:
             require(not re.search(r'(?:\b(?:open|openat|openat2|creat)\(.*<unfinished|<\.\.\. (?:open|openat|openat2|creat) resumed>)', line), 'unfinished native payload open is unverified')
             require(not re.search(r'\bcreat\(.*\) = [0-9]+(?:<[^>]*>)?$', line), 'native successful creat is unverified')
+    if content_policy is not None:
+        native_content(api, native, target[1], image, cwd, content_policy, require)
     for path in api.successful_open_paths('\n'.join(native), cwd, preserve_traversal=strict_payloads):
         lexical = str(path)
         path = Path(normpath(lexical))
@@ -228,6 +232,70 @@ def trace_withdraw(api, text, image, probe, tree, stash, leaf, cwd, require, ext
                          or name.startswith(launcher_stem+'.') and name.endswith(('.pyc','.pyo'))))
                      or 'libpython' in str(path).lower() or name.startswith('python'))
         require(not forbidden, 'native opened CPython, libpython, withdrawn source or matching bytecode')
+
+
+
+def native_content(api, lines, pid, image, cwd, context, require):
+    """Check the bounded single native PID against the frozen -y open census."""
+    policy, family, launcher, extension = context
+    require(policy.get('schema') == 'imre.compatibility.native-content-policy.v1' and family in policy.get('families',{}),
+            'invalid native content policy')
+    # These runs have one native PID. Do not extrapolate the policy across forks.
+    require(not any(re.search(r'\b(?:clone|clone3|fork|vfork|io_uring_setup)\(', line) for line in lines),
+            'native process or io_uring operation is unverified')
+    fixture = policy['fixture']; root = Path(cwd) / fixture['root'].format(pid=pid)
+    directories = {root / part for part in fixture['directories']} if family == 'glob' else set()
+    aliases = {root/'sym3':root/'a/bcd', root/'sym3/efg':root/'a/bcd/efg'} if family == 'glob' else {}
+    static = {Path(launcher).parent, Path(extension)}
+    allowed_dirs = static | directories | ({Path(cwd)} if family == 'glob' else set())
+    system = list(policy['system_common']) + (policy['logging_extra'] if family == 'logging' else [])
+    expected_system = Counter({(x['lexical'],x['kernel'].format(pid=pid)):x['count'] for x in system})
+    if family == 'logging': expected_system[('/etc/ld.so.cache','/etc/ld.so.cache')] = policy['families'][family]['ld_cache_reads']
+    observed_system=Counter(); writes=Counter(); reads=Counter(); counts=Counter()
+    for event in api.successful_open_paths('\n'.join(lines),cwd,kernel_events=True):
+        counts['opens'] += 1
+        lexical, path, returned, flags = event['lexical'], event['path'], event['returned'], event['flags']
+        require(event['pid'] == pid and event['operation'] in {'open','openat'}
+                and not any(payload_alias(x,task=True) for x in (lexical,str(path),str(returned)))
+                and '..' not in Path(lexical).parts, 'unauthorized native open operation, fd alias or traversal')
+        if flags in policy['directory_flags'] and event['mode'] is None:
+            require(path in allowed_dirs | set(aliases) and returned == aliases.get(path,path),
+                    'unauthorized native directory open')
+            counts['directories'] += 1
+        elif family == 'glob' and path in {root / x for x in fixture['writes']}:
+            require(returned == path and flags == fixture['write_flags'] and event['mode'] == fixture['write_mode'],
+                    'unauthorized fixture write mode or target')
+            writes[str(path.relative_to(root))] += 1
+        elif family == 'glob' and path in directories:
+            require(returned == path and flags == fixture['directory_read_flags'] and event['mode'] is None
+                    and event['directory_witness'] == str(path), 'unauthorized fixture directory read without S_IFDIR')
+            reads['' if path == root else str(path.relative_to(root))] += 1
+        elif path == Path(image) and returned == path and flags == policy['readonly_flags'] and event['mode'] is None:
+            counts['image_reads'] += 1
+        else:
+            pair=(str(path),str(returned))
+            require(pair in expected_system and flags == policy['readonly_flags'] and event['mode'] is None,
+                    'unauthorized native content open: '+lexical)
+            observed_system[pair] += 1
+    require(dict(counts) == {k:policy['families'][family][k] for k in ('opens','directories','image_reads')}
+            and observed_system == expected_system, 'native content open census differs')
+    expected=lambda names:Counter({name:fixture['each_count'] for name in names})
+    require(writes == (expected(fixture['writes']) if family == 'glob' else Counter())
+            and reads == (expected(fixture['directories']) if family == 'glob' else Counter()),
+            'native fixture operation census differs')
+
+
+def policy_sources(api, policy, require):
+    for item in policy.get('sources',{}).values():
+        require(item.get('repo') == 'https://github.com/python/cpython' and item.get('commit') == api.COHORT['cpython_commit'],
+                'fixture policy source pin differs')
+        path=api.repository_file(item['archive'],api.DATA_ROOT)
+        validate_stock_source(path,item.get('member'),item,None,require)
+        lines=stock_source_bytes(path,item.get('member'),item,require).splitlines(keepends=True)
+        for witness in item['witnesses']:
+            first,last=witness['first'],witness['last']
+            require(1 <= first <= last <= len(lines) and sha(b''.join(lines[first-1:last])) == witness['sha256'],
+                    'fixture source line witness differs')
 
 
 def event_index(path, require):
@@ -324,7 +392,7 @@ def source_stage_authority(api, family, activation_digest):
         require(isinstance(digest,str) and api.HEX64.fullmatch(digest) and sha(api.repository_file(loc,api.ROOT).read_bytes()) == digest, 'source-stage file digest differs')
     binding = json.loads(api.repository_file(binding_ref['path'],api.DATA_ROOT).read_text())
     cohorts = binding.get('cohorts',{})
-    require(cohorts and all(c.get('strict_source_control') == frozen['strict_source_control'] == 'direct-and-withdraw-v1'
+    require(cohorts and all(c.get('strict_source_control') == frozen['strict_source_control'] == 'native-content-v1'
                            for c in cohorts.values()), 'strict source control was removed or changed')
     artifacts = {loc for c in cohorts.values() for loc in c.get('artifacts',{}).values()}
     declared = frozen['artifact_files']
@@ -453,13 +521,32 @@ def adapt(api, family, locator, digest, source_json, activation_digest, cohort):
         and 'gcc -O2' in probe_build
         and 'cmp ' in probe_build, 'supervisor source/build identity missing')
     collector = text('collector')
-    require('trace=execve,execveat,open,openat,openat2,creat,io_uring_setup,newfstatat,rename,wait4,exit_group' in collector
-        and "'-f'" in collector
-        and "'-s','512'" in collector, 'raw trace collection lacks syscall or descendant coverage')
+    mode = binding.get('strict_source_control')
+    content = mode == 'native-content-v1'
+    syscalls = 'execve,execveat,open,openat,openat2,creat,io_uring_setup,newfstatat,rename,wait4,waitid,exit,exit_group,chdir,fchdir,close,close_range,dup,dup2,dup3,fcntl,clone,clone3,fork,vfork'
+    if content:
+        require("SYSCALLS='"+syscalls+"'" in collector and "'-f','-y'" in collector and "'-s','512'" in collector,
+                'run-only trace collection lacks kernel path or syscall coverage')
+        archive=obj('archive'); policy=obj('policy')
+        require(archive.get('schema') == 'imre.compatibility.capture-archive.v1' and family in archive.get('families',{})
+                and archive['families'][family].get(artifacts['original_binding']) == sha(data('original_binding'))
+                and archive['families'][family].get(artifacts['original_collector']) == sha(data('original_collector')),
+                'original capture archive or as-used controller differs')
+        for loc,digest in archive['families'][family].items():
+            require(api.binding_digest(entry,loc) == digest and sha(api.repository_file(loc,api.DATA_ROOT).read_bytes()) == digest,
+                    'original capture archive digest differs')
+        require(set(policy.get('sources',{})) == {'glob','os_helper'}
+                and policy['sources']['glob']['archive'] == artifacts.get('policy_glob_source')
+                and policy['sources']['os_helper']['archive'] == artifacts.get('policy_helper_source'),
+                'fixture policy source artifacts differ')
+        policy_sources(api,policy,require)
+    else:
+        require('trace=execve,execveat,open,openat,openat2,creat,io_uring_setup,newfstatat,rename,wait4,exit_group' in collector
+            and "'-f'" in collector and "'-s','512'" in collector, 'raw trace collection lacks syscall or descendant coverage')
     trace_gate(text('gate_trace'),command,probe,poison_path,text('gate_stderr'),require)
     require(data('gate_stdout')==b'', 'unexpected gate stdout')
     extra_sources = ()
-    if binding.get('strict_source_control') == 'direct-and-withdraw-v1':
+    if mode in {'direct-and-withdraw-v1','native-content-v1'}:
         direct = obj('direct_command'); direct_cmd = direct.get('command')
         require(isinstance(direct_cmd, list) and api.comparable_build(direct_cmd) == api.comparable_build(command)
                 and direct.get('supervisor_exit') == 0 and direct.get('image_exists') is False,
@@ -505,7 +592,23 @@ def adapt(api, family, locator, digest, source_json, activation_digest, cohort):
                     and hidden.get('IMRE_WITHDRAW_LAUNCHER') == extra_sources[0]
                     and hidden.get('IMRE_WITHDRAW_ARCHIVE') == extra_sources[1],
                     tier+' external Python path or withdrawn source configuration differs')
-        trace_withdraw(api,text(tier+'_trace'),image,probe,tree,stash,leaf,meta.get('cwd'),require,extra_sources,bool(extra_sources))
+        if content:
+            rec=obj(tier+'_recapture'); trace_loc=artifacts[tier+'_trace']; argv=rec.get('argv',[])
+            require(rec.get('schema') == 'imre.compatibility.run-only.v1' and rec.get('family') == family and rec.get('tier') == tier
+                    and rec.get('controller_sha256') == sha(data('collector')) and rec.get('archive_sha256') == sha(data('archive'))
+                    and len(argv) == 16 and argv[:9] == ['/usr/bin/strace','-f','-y','-qq','-s','512','-e','trace='+syscalls,'-o']
+                    and argv[9].endswith('/'+trace_loc) and argv[10:] == [probe,'withdraw',tree,stash,leaf,image]
+                    and rec.get('cwd') == meta.get('cwd') and rec.get('environment') == meta.get('withdrawal',{}).get('environment')
+                    and rec.get('timeout_seconds') == 30 and rec.get('exit_code') == 0
+                    and rec.get('image_sha256_before') == rec.get('image_sha256_after') == sums[image]
+                    and rec.get('trace_sha256') == sha(data(tier+'_trace'))
+                    and rec.get('stdout_sha256') == sha(data(tier+'_withdraw_stdout')) and data(tier+'_withdraw_stdout') == data(tier+'_stdout')
+                    and rec.get('stderr_sha256') == sha(data(tier+'_withdraw_stderr'))
+                    and rec.get('original_output_equal') is True and rec.get('restored_source_sha256') == source['sha256']
+                    and rec.get('restored_extra_sha256') == sha_lines(text('extra_restored')),
+                    tier+' run-only capture binding or output identity differs')
+        trace_withdraw(api,text(tier+'_trace'),image,probe,tree,stash,leaf,meta.get('cwd'),require,extra_sources,
+                       mode == 'direct-and-withdraw-v1', (policy,family,command[2],opt) if content else None)
         elf = meta.get('withdrawal',{}).get('readelf',{})
         elfraw = data(tier+'_readelf')
         require(elf.get('argv')==['readelf','-d',image]

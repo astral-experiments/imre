@@ -2,21 +2,23 @@
   "schema": "imre.compatibility.source-stage.v1",
   "imre_revision": "8571ca2dbecabf8d7863c369dc776611fd57d8ad",
   "sources": {
-    "benchmarks/compatibility/raw_control.py": "4939c512c41a7792850b757802e63c563707e476a215547b5447907193e1bc87",
-    "benchmarks/compatibility/scorecard.py": "e364a5defa6bdc03e334ea6a98854dc8c7e5e759a20d615290a18a986f6edecc",
+    "benchmarks/compatibility/raw_control.py": "84391f94e02b0d1d81276d575786ea24baab52ba53e2a71b3c3fb8da5a6fa1c2",
+    "benchmarks/compatibility/scorecard.py": "2a9fc8ecec28d3f31ed78e6de1b9334a92fb75f3b164d6661384e79a483fced8",
     "benchmarks/compatibility/test_raw_control_staged.py": "35de7ded34f47003b8fd649fe5842f630677ac8b8b2375f3dddda3e795f952ae",
-    "benchmarks/compatibility/test_source_stage_authority.py": "a9f811e0e597f22d77c4cf41d8045fae2a9f02b678ac24f955f571b9eae9fad1",
+    "benchmarks/compatibility/test_source_stage_authority.py": "1fbbe362e05d9009f6294fdb935d277a929ca1462e42aa6133eaf7b5fb3436c7",
     "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe_sources.c": "fa57a3d90c735b76210df621af5e32619afb282729922246da93c836d9437cd2",
-    "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/source-stage-limits.md": "438e83dd59ab54ffa661ae740b92947c6f63afde906c086233ee820009effe71",
+    "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/source-stage-limits.md": "347d7335dfbb9d474f3a1f38604219c2361a2807ec4e63ee1fc6acee3d3a8ed4",
     "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/collect.py": "f7ede8dc30e7052ceb4e70e5861a71e899dac85654c3337ce324f76819a79a22",
-    "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/collect.py": "1ef36d4eb9876710f07b2601664893175b8e589d7349ee3c20f7675777b5ee1a"
+    "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/collect.py": "1ef36d4eb9876710f07b2601664893175b8e589d7349ee3c20f7675777b5ee1a",
+    "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/controller.py": "6fb3743249fd5ca463e2ffecaed557b7b1674734b734ff6b7a5629cd7f7e57c6",
+    "benchmarks/compatibility/test_native_content_stage.py": "bc175f714c3e4a3b96a961578e011076229b462a8b11937dff8c9e810fb3b4e6"
   },
   "families": {
     "glob": {
-      "strict_source_control": "direct-and-withdraw-v1",
+      "strict_source_control": "native-content-v1",
       "binding": {
-        "path": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/binding.json",
-        "sha256": "3f850a7c96b5c076b687b55ba7fc82faca424c4e50fbd9c85101e58ebac04799"
+        "path": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/glob/binding.json",
+        "sha256": "ab3e5b4d295a2557b6041e452d4225f754dd9d1930d5140488b9efe4a4180928"
       },
       "staged_receipt": {
         "path": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/stdlib/glob.jsonl",
@@ -80,7 +82,20 @@
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock.capture.json": "8a157e416cd4f0a1ce290bd659184de20a2d9f2943c0e7d5883b2282a0bd1dc4",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock.source.py": "b4adbfa93158f2949957bc6b9c7f16aca58e3fa9b35c863a6caf36f4114a279a",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock.stderr": "78f7b43f5df4c5b4ee48ee85d408d60dbde8da51989d1bd3411300ee2e2c04cb",
-        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/archive.json": "9914eb9b31dc81bae36e6617a1dded5a47dbcdbb24451d76fdecc958294a9484",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/controller.py": "6fb3743249fd5ca463e2ffecaed557b7b1674734b734ff6b7a5629cd7f7e57c6",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/glob/O0/run.json": "56e1f9fab8f7792d5ba742812e1980c446324672eb57b126412cdfd6897acfd7",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/glob/O0/stderr.raw": "78f7b43f5df4c5b4ee48ee85d408d60dbde8da51989d1bd3411300ee2e2c04cb",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/glob/O0/stdout.raw": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/glob/O0/trace.raw": "fbd443b658b24b2101cb539149538fdd947d213c79afb432ec6e9fc71d9427fd",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/glob/O3/run.json": "e491853c72a9730f9725ca8a294707a46b7a49204acbef2f001b4da62c2a7eab",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/glob/O3/stderr.raw": "78f7b43f5df4c5b4ee48ee85d408d60dbde8da51989d1bd3411300ee2e2c04cb",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/glob/O3/stdout.raw": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/glob/O3/trace.raw": "7bcdd8e74d9419663e47183753adc2c9dfc1a3b0f80b11df3cf55e06e46f2bf7",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/glob/binding.json": "ab3e5b4d295a2557b6041e452d4225f754dd9d1930d5140488b9efe4a4180928",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/os-helper.zip": "5425c788742f3d18c815883bb188244d024ea8578b92812a574ec09f5f2b7225",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/policy.json": "d4ab0b8bfa712517efbf15ae31074211c484a237fadc38639374a7341a187a21"
       },
       "artifact_files": [
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe_sources.c",
@@ -90,16 +105,13 @@
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/O0.stderr",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/O0.stdout",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/O0.trace",
-        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/O0.withdraw.stderr",
-        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/O0.withdraw.stdout",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/O3.build.stderr",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/O3.build.stdout",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/O3.readelf.stdout",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/O3.stderr",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/O3.stdout",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/O3.trace",
-        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/O3.withdraw.stderr",
-        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/O3.withdraw.stdout",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/binding.json",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/cargo.raw",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/clean.raw",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/collect.py",
@@ -134,14 +146,26 @@
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock.capture.json",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock.source.py",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock.stderr",
-        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock.stdout"
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock.stdout",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/archive.json",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/controller.py",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/glob/O0/run.json",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/glob/O0/stderr.raw",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/glob/O0/stdout.raw",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/glob/O0/trace.raw",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/glob/O3/run.json",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/glob/O3/stderr.raw",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/glob/O3/stdout.raw",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/glob/O3/trace.raw",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/os-helper.zip",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/policy.json"
       ]
     },
     "logging": {
-      "strict_source_control": "direct-and-withdraw-v1",
+      "strict_source_control": "native-content-v1",
       "binding": {
-        "path": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/binding.json",
-        "sha256": "714aa014e6118af303d9b5db5ae464079edd1c749f542858e8124d1d3f4e24b1"
+        "path": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/logging/binding.json",
+        "sha256": "67c394073e35f21addf7d9aba228d406b41717b7fdbd7822aebbfcf632d0e8cb"
       },
       "staged_receipt": {
         "path": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/stdlib/logging.jsonl",
@@ -156,6 +180,7 @@
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/head.raw": "5411e27d53e0f58a9ac18c0382582fc4cafca2f7d4220903957cdc4c6a972b64",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/platform.raw": "d547b850af73e5cdddfeeb309e5a67a648fba4e43738ce976110851dd1adfbed",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock-version.raw": "8ec626acd0d3353bb4a7e0f367270a241b0025c9daac7743e9c0b18454c538c4",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock.source.py": "b4adbfa93158f2949957bc6b9c7f16aca58e3fa9b35c863a6caf36f4114a279a",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/O0.build.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/O0.build.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/O0.readelf.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -205,7 +230,20 @@
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/stock.capture.json": "ed9bb5cb9fded566df4be0ae8b42616bb7e60640b981036367bcf7c9379002aa",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/stock.source.zip": "4c20c1b660201205d308f1eded635a194336f619ea07232b14407f191f07029e",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/stock.stderr": "a71155c90219b6bbfbb7fabad6c8fa99cf9e14d8f21132637aa7a8fc9e9bce88",
-        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/stock.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/stock.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/archive.json": "9914eb9b31dc81bae36e6617a1dded5a47dbcdbb24451d76fdecc958294a9484",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/controller.py": "6fb3743249fd5ca463e2ffecaed557b7b1674734b734ff6b7a5629cd7f7e57c6",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/logging/O0/run.json": "e8cf98f47851679271ae34438ac42dbac34f6fa6a830afe718e7ab2b9bcf7da5",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/logging/O0/stderr.raw": "a71155c90219b6bbfbb7fabad6c8fa99cf9e14d8f21132637aa7a8fc9e9bce88",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/logging/O0/stdout.raw": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/logging/O0/trace.raw": "778a443726a7bbde2215991130c19b0fa02b2959e94a2c0503189a568fc36469",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/logging/O3/run.json": "e9481eaf1b9a007b6249b0fb2bbfb6a6aff166ef08a5766b813edd91f5f8cd08",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/logging/O3/stderr.raw": "a71155c90219b6bbfbb7fabad6c8fa99cf9e14d8f21132637aa7a8fc9e9bce88",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/logging/O3/stdout.raw": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/logging/O3/trace.raw": "c9f629dfb084aa1e15ed3191ae5c56688fb78f80ecee6cd1555c299bfe86b563",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/logging/binding.json": "67c394073e35f21addf7d9aba228d406b41717b7fdbd7822aebbfcf632d0e8cb",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/os-helper.zip": "5425c788742f3d18c815883bb188244d024ea8578b92812a574ec09f5f2b7225",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/policy.json": "d4ab0b8bfa712517efbf15ae31074211c484a237fadc38639374a7341a187a21"
       },
       "artifact_files": [
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe_sources.c",
@@ -214,22 +252,20 @@
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/head.raw",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/platform.raw",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock-version.raw",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock.source.py",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/O0.build.stderr",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/O0.build.stdout",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/O0.readelf.stdout",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/O0.stderr",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/O0.stdout",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/O0.trace",
-        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/O0.withdraw.stderr",
-        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/O0.withdraw.stdout",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/O3.build.stderr",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/O3.build.stdout",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/O3.readelf.stdout",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/O3.stderr",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/O3.stdout",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/O3.trace",
-        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/O3.withdraw.stderr",
-        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/O3.withdraw.stdout",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/binding.json",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/collect.py",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/direct-files.raw",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/direct.command.json",
@@ -259,7 +295,19 @@
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/stock.capture.json",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/stock.source.zip",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/stock.stderr",
-        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/stock.stdout"
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/stock.stdout",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/archive.json",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/controller.py",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/logging/O0/run.json",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/logging/O0/stderr.raw",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/logging/O0/stdout.raw",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/logging/O0/trace.raw",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/logging/O3/run.json",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/logging/O3/stderr.raw",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/logging/O3/stdout.raw",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/logging/O3/trace.raw",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/os-helper.zip",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/policy.json"
       ]
     }
   }
