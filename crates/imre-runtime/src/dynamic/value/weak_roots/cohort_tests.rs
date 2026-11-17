@@ -194,15 +194,15 @@ fn published_loop_sources_and_pulled_items_keep_finalizers_alive() {
 
 #[test]
 fn search_keeps_proven_paths_when_the_node_budget_runs_out() {
-    use super::{Heap, Root, RootPaths};
-    use std::collections::HashSet;
+    use super::{Heap, IdSet, Root, RootPaths};
 
     let mut heap = Heap::new();
     let first = heap.alloc(Value::List(Vec::new()));
     let second = heap.alloc(Value::List(Vec::new()));
     let root = heap.alloc(Value::List(vec![first, second]));
     let globals = [root, NONE];
-    let mut wanted = HashSet::from([first, second]);
+    let mut wanted = IdSet::default();
+    wanted.extend([first, second]);
     let mut paths = RootPaths::default();
     let mut nodes_left = 2; // Enough for the root and its first child.
     let mut edges_left = 32;
@@ -218,7 +218,8 @@ fn search_keeps_proven_paths_when_the_node_budget_runs_out() {
         .unwrap();
 
     assert_eq!(nodes_left, 0);
-    assert_eq!(wanted, HashSet::from([second]));
+    assert_eq!(wanted.len(), 1);
+    assert!(wanted.contains(&second));
     assert!(paths.contains(first));
     assert!(!paths.contains(second));
 
@@ -734,6 +735,115 @@ fn rechecks_surviving_operands_after_a_release() {
     assert!(heap.retained_paths_keep_owners([inner].into_iter(), false));
     heap.release_temporaries_since(0);
     assert!(!heap.retained_paths_keep_owners([].into_iter(), true));
+}
+
+#[test]
+fn alternating_surviving_roots_recheck_both_learned_trees() {
+    let mut heap = super::super::Heap::new();
+    let first = heap.alloc(Value::List(Vec::new()));
+    let second = heap.alloc(Value::List(Vec::new()));
+    heap.register_finalizer(first);
+    heap.register_finalizer(second);
+    let left = heap.alloc(Value::List(vec![first, second]));
+    let right = heap.alloc(Value::List(vec![first, second]));
+    heap.release_temporaries_since(0);
+
+    assert!(heap.retained_paths_keep_owners([left].into_iter(), true));
+    assert!(heap.retained_paths_keep_owners([right].into_iter(), true));
+    let Value::List(items) = heap.get_mut(left) else {
+        unreachable!()
+    };
+    items[1] = NONE;
+    let Value::List(items) = heap.get_mut(right) else {
+        unreachable!()
+    };
+    items[0] = NONE;
+    assert!(heap.retained_paths_keep_owners([left, right].into_iter(), true));
+
+    let Value::List(items) = heap.get_mut(left) else {
+        unreachable!()
+    };
+    items[0] = NONE;
+    assert!(!heap.retained_paths_keep_owners([left, right].into_iter(), true));
+}
+
+#[test]
+fn rotating_root_sets_revalidate_each_independent_tree() {
+    let mut heap = super::super::Heap::new();
+    let owners = std::array::from_fn::<_, 3, _>(|_| heap.alloc(Value::List(Vec::new())));
+    for owner in owners {
+        heap.register_finalizer(owner);
+    }
+    let roots = std::array::from_fn::<_, 3, _>(|_| heap.alloc(Value::List(owners.to_vec())));
+    heap.release_temporaries_since(0);
+
+    for root in roots {
+        assert!(heap.retained_paths_keep_owners([root].into_iter(), true));
+    }
+    for (index, root) in roots.into_iter().enumerate() {
+        let Value::List(items) = heap.get_mut(root) else {
+            unreachable!()
+        };
+        items.fill(NONE);
+        items[index] = owners[index];
+    }
+    assert!(heap.retained_paths_keep_owners(roots.into_iter(), true));
+
+    let Value::List(items) = heap.get_mut(roots[1]) else {
+        unreachable!()
+    };
+    items[1] = NONE;
+    assert!(!heap.retained_paths_keep_owners(roots.into_iter(), true));
+}
+
+#[test]
+fn extended_proof_does_not_promote_an_interior_node_to_a_root() {
+    let mut heap = super::super::Heap::new();
+    let first = heap.alloc(Value::List(Vec::new()));
+    heap.register_finalizer(first);
+    let interior = heap.alloc(Value::List(vec![first]));
+    let root = heap.alloc(Value::List(vec![interior]));
+    heap.release_temporaries_since(0);
+    assert!(heap.retained_paths_keep_owners([root].into_iter(), true));
+
+    let second = heap.alloc(Value::List(Vec::new()));
+    heap.register_finalizer(second);
+    let Value::List(items) = heap.get_mut(interior) else {
+        unreachable!()
+    };
+    items.push(second);
+    heap.release_temporaries_since(0);
+    assert!(heap.retained_paths_keep_owners([root].into_iter(), true));
+
+    let Value::List(items) = heap.get_mut(root) else {
+        unreachable!()
+    };
+    items.clear();
+    assert!(!heap.retained_paths_keep_owners([root].into_iter(), true));
+}
+
+#[test]
+fn exhausted_search_budget_does_not_claim_a_scalar_endpoint() {
+    let mut heap = super::super::Heap::new();
+    let first = heap.alloc(Value::List(Vec::new()));
+    let root = heap.alloc(Value::List(vec![first, NONE]));
+    let mut wanted = super::IdSet::default();
+    wanted.insert(NONE);
+    let mut paths = super::RootPaths::default();
+    let mut nodes = 2;
+    let mut edges = usize::MAX;
+    paths
+        .search(
+            &heap,
+            [(root, super::Root::Surviving)].into_iter(),
+            &mut wanted,
+            &mut nodes,
+            &mut edges,
+            super::Search::Indexed,
+        )
+        .unwrap();
+    assert!(wanted.contains(&NONE));
+    assert!(!paths.contains(NONE));
 }
 
 #[test]
