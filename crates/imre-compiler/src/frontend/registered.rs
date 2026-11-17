@@ -797,7 +797,7 @@ pub(super) fn finish_source_statement(
     scope.names = std::mem::take(&mut checker.names);
     let locals = scope.locals.len();
     let start = body.len();
-    let result = (&mut scope, SourceScope::frame_value)
+    let result = (&mut scope, SourceScope::statement_operand)
         .source_statement(statement, false, body)
         .ok()
         .map(|(op, continues)| {
@@ -1888,11 +1888,15 @@ struct SuiteBody {
 
 impl SuiteBody {
     fn check_run(&mut self, preparation: &SuitePreparation<'_>) {
+        self.check_through(preparation, self.statements.len());
+    }
+
+    fn check_through(&mut self, preparation: &SuitePreparation<'_>, end: usize) {
         if let Some(start) = self.check_from {
             self.refusal = self
                 .refusal
-                .or_else(|| preparation.checked_declaration_refusal(&self.statements[start..]));
-            self.check_from = self.falls_through.then_some(self.statements.len());
+                .or_else(|| preparation.checked_declaration_refusal(&self.statements[start..end]));
+            self.check_from = self.falls_through.then_some(end);
         }
     }
 
@@ -2791,16 +2795,6 @@ impl<'a> SuitePreparation<'a> {
         input
     }
 
-    fn registered_operand(
-        &self,
-        expr: &ast::Expr,
-        kind: RegisteredScope,
-        suspended: bool,
-    ) -> PhysicalOperand {
-        let operand = RegisteredOperand::prepare(expr, self.source, kind);
-        self.retain_operand(expr, kind, suspended, operand)
-    }
-
     fn retain_operand(
         &self,
         expr: &ast::Expr,
@@ -2875,15 +2869,44 @@ impl<'a> SuitePreparation<'a> {
             } else {
                 let first = operands.len();
                 let enclosing = self.refusal.take();
-                let lowered = scope.written_statement(stmt, &mut body.statements, |scope, expr| {
-                    let checked = scope.try_operand(|scope| scope.frame_value(expr));
-                    Some(self.region_operand(expr, kind, &mut operands, checked, suspended))
-                });
+                let body_start = body.statements.len();
+                let mut group = false;
+                let lowered =
+                    scope.written_statement(stmt, &mut body.statements, |scope, input| {
+                        if let StatementOperand::Result(expr) = input {
+                            let checked = scope.try_operand(|scope| scope.frame_value(expr));
+                            Some(self.region_operand(expr, kind, &mut operands, checked, suspended))
+                        } else {
+                            group = true;
+                            input.lower(scope)
+                        }
+                    });
+                let lowered = if lowered.is_err() && group {
+                    scope.truncate_locals(slots_before);
+                    scope.written_statement(stmt, &mut body.statements, |_, input| {
+                        let held =
+                            self.owned_operand(input.expression(), kind, suspended, |owner| {
+                                input.retained(owner, suspended)
+                            });
+                        let ty = if matches!(input, StatementOperand::Condition(_)) {
+                            Type::Bool
+                        } else {
+                            Type::PythonObject
+                        };
+                        Some(bind_operand(&mut operands, held, ty))
+                    })
+                } else {
+                    lowered
+                };
                 let refusal = std::mem::replace(&mut self.refusal, enclosing);
                 match lowered {
-                    Ok((Some(operation), _)) if operands.len() != first => {
-                        body.mixed(self, operation, refusal);
-                        continue;
+                    Ok((operation, continues)) if operands.len() != first => {
+                        body.check_through(self, body_start);
+                        if body.check_from.is_some() {
+                            body.refusal = body.refusal.or(refusal);
+                        }
+                        body.statements.extend(operation);
+                        Ok(continues)
                     }
                     Ok((operation, continues)) => {
                         body.statements.extend(operation);
@@ -2922,105 +2945,26 @@ impl<'a> SuitePreparation<'a> {
                 });
                 self.retain_operand(expr, kind, suspended, checked)
             };
-            let target_input = |input: BindingOperand<'_>| {
-                let checked =
-                    RegisteredOperand::prepare_with(self.source, kind, |scope| input.lower(scope));
-                let (BindingOperand::Value(expr) | BindingOperand::Index(expr)) = input;
-                self.retain_operand(expr, kind, suspended, checked)
-            };
-            if let ast::Stmt::Assert(assertion) = stmt {
-                let test = RegisteredOperand::prepare_with(self.source, kind, |scope| {
-                    scope.condition_operand(&assertion.test)
-                });
-                let start = operands.len();
-                let test = self.retain_operand(&assertion.test, kind, suspended, test);
-                let condition = bind_operand(&mut operands, test, Type::Bool);
-                let message = assertion.msg.as_deref().map(|message| {
-                    let checked = RegisteredOperand::prepare_with(self.source, kind, |scope| {
-                        scope.frame_value(message)
-                    });
-                    let value = self.retain_operand(message, kind, suspended, checked);
-                    bind_operand(&mut operands, value, Type::PythonObject)
-                });
-                let [checkpoint, branch] = assertion_statements(assertion, condition, message);
-                body.statements.push(checkpoint);
-                body.mixed(self, branch, self.operand_refusals(&operands[start..]));
-                continue;
-            }
-            let start = operands.len();
-            let mut keep = |input| bind_operand(&mut operands, input, Type::PythonObject);
-            if let ast::Stmt::ClassDef(class) = stmt {
-                body.statements.push(checkpoint(stmt));
-                let header = imre_ast::class_definition_expressions(class)
-                    .map(|expr| keep(self.registered_operand(expr, kind, suspended)))
-                    .collect();
-                let slot = scope.hidden(Type::PythonObject);
-                body.mixed(
-                    self,
-                    Statement::Assign(slot, class_definition(class, header)),
-                    self.operand_refusals(&operands[start..]),
-                );
-                body.statements.push(scope.store(
-                    class.name.as_str(),
-                    unpacking::take_pattern_temporary(Expr::local(slot, Type::PythonObject), slot),
-                ));
-                continue;
-            }
-            if let ast::Stmt::FunctionDef(def) = stmt {
-                body.statements.push(checkpoint(stmt));
-                let header = imre_ast::function_definition_expressions(def)
-                    .map(|expr| {
-                        let slot = scope.hidden(Type::PythonObject);
-                        let input = frame_value(expr);
-                        let refusal = self.operand_refusal(&input);
-                        body.mixed(self, Statement::Assign(slot, keep(input)), refusal);
-                        unpacking::take_pattern_temporary(
-                            Expr::local(slot, Type::PythonObject),
-                            slot,
-                        )
-                    })
-                    .collect();
-                body.statements
-                    .push(scope.store(def.name.as_str(), function_definition(def, header)));
-                continue;
-            }
             if let ast::Stmt::AnnAssign(ann) = stmt
                 && ann.value.is_none()
             {
                 body.statements.push(checkpoint(stmt));
-                if let Some(inputs) = values::bare_target_operands(&ann.target) {
-                    let (value, refusal) = self.bound_operation(
-                        Builtin::RegisteredDiscard,
-                        inputs.into_iter().map(frame_value),
-                        &mut operands,
-                    );
-                    body.mixed(self, value, refusal);
-                }
                 continue;
             }
-            if !stmt.is_assign_stmt()
+            if stmt.is_ann_assign_stmt()
                 && let Some(effect) = attribute_write(stmt)
             {
+                let start = operands.len();
+                let values = effect
+                    .operands()
+                    .map(|expr| bind_operand(&mut operands, frame_value(expr), Type::PythonObject))
+                    .collect();
                 body.statements.push(checkpoint(stmt));
-                let (value, refusal) = self.bound_operation(
-                    attribute_opcode(effect.action, effect.field),
-                    effect.operands().map(frame_value),
-                    &mut operands,
+                body.mixed(
+                    self,
+                    effect.statement(values),
+                    self.operand_refusals(&operands[start..]),
                 );
-                body.mixed(self, value, refusal);
-                continue;
-            }
-            if let ast::Stmt::AugAssign(assign) = stmt {
-                let statement = scope
-                    .augmented_assignment(assign, |input, _| {
-                        Some(keep(match input {
-                            BindingOperand::Value(expr) => frame_value(expr),
-                            BindingOperand::Index(_) => target_input(input),
-                        }))
-                    })
-                    .expect("validated augmented target after attribute lowering");
-                body.statements.push(checkpoint(stmt));
-                body.mixed(self, statement, self.operand_refusals(&operands[start..]));
                 continue;
             }
             if let Some((targets, rhs)) = imre_ast::assignment_parts(stmt) {
@@ -3065,27 +3009,6 @@ impl<'a> SuitePreparation<'a> {
                     && let Some(marker) = self.operations.get(&ann.target.range())
                 {
                     body.statements.push(Statement::Expr(marker.clone()));
-                }
-                continue;
-            } else if let ast::Stmt::Delete(delete) = stmt {
-                // A missing operand keeps its place between the other targets' checked effects.
-                body.statements.push(checkpoint(stmt));
-                for target in delete_targets(delete) {
-                    let (op, inputs) = deletion(target);
-                    let slots = scope.locals.len();
-                    if let Some(values) = inputs
-                        .clone()
-                        .map(|input| input.in_binding(&mut scope))
-                        .collect()
-                    {
-                        body.statements
-                            .push(Statement::Expr(operation(op, Type::None, values)));
-                    } else {
-                        scope.truncate_locals(slots);
-                        let (value, refusal) =
-                            self.bound_operation(op, inputs.map(target_input), &mut operands);
-                        body.mixed(self, value, refusal);
-                    }
                 }
                 continue;
             }
@@ -3154,20 +3077,6 @@ impl<'a> SuitePreparation<'a> {
             falls_through: body.falls_through,
             refusal: body.refusal,
         }
-    }
-
-    fn bound_operation(
-        &self,
-        opcode: Builtin,
-        inputs: impl Iterator<Item = PhysicalOperand>,
-        operands: &mut Vec<PhysicalOperand>,
-    ) -> (Statement, Option<PreparedRefusal>) {
-        let start = operands.len();
-        let values = inputs
-            .map(|input| bind_operand(operands, input, Type::PythonObject))
-            .collect();
-        let statement = Statement::Expr(operation(opcode, Type::None, values));
-        (statement, self.operand_refusals(&operands[start..]))
     }
 }
 
@@ -3339,11 +3248,10 @@ pub(super) fn raised_value<E>(
     Ok(Statement::raise_at(exception, cause, None))
 }
 
-// Only the three written value operations use the supplied reader. Nested
-// suites enter through the scope and own their own operand placement.
+// Nested suites own their operand placement. The reader supplies this statement's inputs.
 impl<'s, F> statements::StatementLowering for (&mut SourceScope<'s>, F)
 where
-    F: FnMut(&mut SourceScope<'s>, &ast::Expr) -> Option<Expr>,
+    F: FnMut(&mut SourceScope<'s>, StatementOperand<'_>) -> Option<Expr>,
 {
     type Error = ();
 
@@ -3363,13 +3271,32 @@ where
         CompoundSuites::default().branch(self.0, branch, output)
     }
 
-    fn definition(&mut self, def: &ast::StmtFunctionDef) -> StdResult<Option<Statement>, ()> {
-        let scope = &mut *self.0;
+    fn definition(
+        &mut self,
+        def: &ast::StmtFunctionDef,
+        body: &mut Vec<Statement>,
+    ) -> StdResult<Option<Statement>, ()> {
+        let (scope, read) = self;
         // Decorators and parameter defaults execute in the enclosing frame, including for generics.
         let header = scope
             .with_binding_operands(|scope| {
                 imre_ast::function_definition_expressions(def)
-                    .map(|expr| scope.ordinary_operand(expr))
+                    .map(|expr| {
+                        let value = read(scope, StatementOperand::Suspendable(expr))?;
+                        if !matches!(
+                            value.kind,
+                            ExprKind::Builtin(Builtin::RegisteredInput(_), _)
+                        ) {
+                            return Some(value);
+                        }
+                        // A later default may suspend. Keep this value until the definition binds.
+                        let slot = scope.hidden(Type::PythonObject);
+                        body.push(Statement::Assign(slot, value));
+                        Some(unpacking::take_pattern_temporary(
+                            Expr::local(slot, Type::PythonObject),
+                            slot,
+                        ))
+                    })
                     .collect::<Option<Vec<_>>>()
             })
             .ok_or(())?;
@@ -3384,7 +3311,7 @@ where
         if !scope.interactive && value.is_string_literal_expr() {
             return Ok((None, true));
         }
-        let value = read(scope, value).ok_or(())?;
+        let value = read(scope, StatementOperand::Result(value)).ok_or(())?;
         let effect = if scope.interactive {
             operation(Builtin::RegisteredDisplayHook, Type::None, vec![value])
         } else {
@@ -3396,7 +3323,7 @@ where
     fn returned(&mut self, ret: &ast::StmtReturn) -> StdResult<Statement, ()> {
         let (scope, read) = self;
         Ok(Statement::Return(match ret.value.as_deref() {
-            Some(value) => read(scope, value).ok_or(())?,
+            Some(value) => read(scope, StatementOperand::Result(value)).ok_or(())?,
             None => Expr::none(),
         }))
     }
@@ -3413,7 +3340,9 @@ where
         value: &ast::Expr,
     ) -> StdResult<Statement, ()> {
         let (scope, read) = self;
-        raised_value(raise, value, |expr| read(scope, expr).ok_or(()))
+        raised_value(raise, value, |expr| {
+            read(scope, StatementOperand::Result(expr)).ok_or(())
+        })
     }
 
     fn record_loop_transfer(&mut self, _: &Statement) -> bool {
@@ -3425,7 +3354,7 @@ where
         stmt: &ast::Stmt,
         output: &mut Vec<Statement>,
     ) -> StdResult<bool, ()> {
-        self.0.other_statement(stmt, output)
+        self.0.other_statement(stmt, output, &mut self.1)
     }
 }
 
@@ -3434,6 +3363,7 @@ impl SourceScope<'_> {
         &mut self,
         stmt: &ast::Stmt,
         output: &mut Vec<Statement>,
+        read: &mut impl FnMut(&mut Self, StatementOperand<'_>) -> Option<Expr>,
     ) -> StdResult<bool, ()> {
         let (statements, continues) = match stmt {
             ast::Stmt::AugAssign(assign) => {
@@ -3441,13 +3371,13 @@ impl SourceScope<'_> {
                     let statement = if let Some(effect) = attribute_write(stmt) {
                         let values = effect
                             .operands()
-                            .map(|node| scope.ordinary_operand(node))
+                            .map(|node| read(scope, StatementOperand::Suspendable(node)))
                             .collect::<Option<_>>()
                             .ok_or(())?;
                         effect.statement(values)
                     } else {
                         scope
-                            .augmented_assignment(assign, |input, scope| input.lower(scope))
+                            .augmented_assignment(assign, |input, scope| read(scope, input))
                             .ok_or(())?
                     };
                     output.push(statement);
@@ -3468,7 +3398,7 @@ impl SourceScope<'_> {
                 let operands = self
                     .with_binding_operands(|scope| {
                         imre_ast::class_definition_expressions(class)
-                            .map(|expr| scope.ordinary_operand(expr))
+                            .map(|expr| read(scope, StatementOperand::ClassHeader(expr)))
                             .collect::<Option<_>>()
                     })
                     .ok_or(())?;
@@ -3491,7 +3421,7 @@ impl SourceScope<'_> {
                 {
                     let operands = inputs
                         .into_iter()
-                        .map(|expr| self.frame_value(expr))
+                        .map(|expr| read(self, StatementOperand::Frame(expr)))
                         .collect::<Option<_>>()
                         .ok_or(())?;
                     let effect = operation(Builtin::RegisteredDiscard, Type::None, operands);
@@ -3521,9 +3451,19 @@ impl SourceScope<'_> {
                     .into_iter()
                     .map(|target| {
                         let (op, inputs) = deletion(target);
+                        let slots = self.locals.len();
                         let values = inputs
+                            .clone()
                             .map(|input| input.in_binding(self))
-                            .collect::<Option<_>>()?;
+                            .collect::<Option<Vec<_>>>()
+                            .or_else(|| {
+                                self.truncate_locals(slots);
+                                inputs
+                                    .map(|input| {
+                                        self.with_binding_operands(|scope| read(scope, input))
+                                    })
+                                    .collect()
+                            })?;
                         Some(Statement::Expr(operation(op, Type::None, values)))
                     })
                     .collect::<Option<_>>()
@@ -3541,12 +3481,37 @@ impl SourceScope<'_> {
 }
 
 #[derive(Clone, Copy)]
-enum BindingOperand<'a> {
+enum StatementOperand<'a> {
+    Result(&'a ast::Expr),
+    Frame(&'a ast::Expr),
+    Condition(&'a ast::Expr),
     Value(&'a ast::Expr),
+    Suspendable(&'a ast::Expr),
+    ClassHeader(&'a ast::Expr),
     Index(&'a ast::Expr),
 }
 
-impl BindingOperand<'_> {
+impl<'a> StatementOperand<'a> {
+    fn expression(self) -> &'a ast::Expr {
+        match self {
+            Self::Result(expr)
+            | Self::Frame(expr)
+            | Self::Condition(expr)
+            | Self::Value(expr)
+            | Self::Suspendable(expr)
+            | Self::ClassHeader(expr)
+            | Self::Index(expr) => expr,
+        }
+    }
+
+    fn retained(self, owner: &mut SourceScope<'_>, suspended: bool) -> Option<Expr> {
+        match self {
+            Self::ClassHeader(expr) => owner.operand(expr),
+            Self::Suspendable(expr) if suspended => owner.frame_value(expr),
+            _ => self.lower(owner),
+        }
+    }
+
     /// Read the value or key where its binding will run, including a suspension in that frame.
     fn in_binding(self, scope: &mut SourceScope<'_>) -> Option<Expr> {
         scope.with_binding_operands(|scope| self.lower(scope))
@@ -3554,7 +3519,11 @@ impl BindingOperand<'_> {
 
     fn lower(self, scope: &mut SourceScope<'_>) -> Option<Expr> {
         match self {
-            Self::Value(expr) => scope.ordinary_operand(expr),
+            Self::Frame(expr) | Self::Result(expr) => scope.frame_value(expr),
+            Self::Condition(expr) => scope.condition_operand(expr),
+            Self::Value(expr) | Self::Suspendable(expr) | Self::ClassHeader(expr) => {
+                scope.ordinary_operand(expr)
+            }
             Self::Index(key) => {
                 values::index_key(key, &mut |expr| scope.ordinary_operand(expr).ok_or(())).ok()
             }
@@ -3562,8 +3531,8 @@ impl BindingOperand<'_> {
     }
 }
 
-fn deletion(target: &ast::Expr) -> (Builtin, impl Iterator<Item = BindingOperand<'_>> + Clone) {
-    use BindingOperand::{Index, Value};
+fn deletion(target: &ast::Expr) -> (Builtin, impl Iterator<Item = StatementOperand<'_>> + Clone) {
+    use StatementOperand::{Index, Value};
     let (op, inputs) = match target {
         ast::Expr::Name(name) => (
             Builtin::RegisteredDeleteName(name.id.to_string(), name.range()),
@@ -3675,16 +3644,16 @@ impl unpacking::PatternBinder for SourceScope<'_> {
         let store = match target {
             ast::Expr::Name(name) => self.store(name.id.as_str(), value),
             ast::Expr::Attribute(attr) => {
-                let receiver = BindingOperand::Value(&attr.value)
+                let receiver = StatementOperand::Value(&attr.value)
                     .in_binding(self)
                     .ok_or(())?;
                 attribute_statement(ir::AttributeAction::Store, attr, vec![value, receiver])
             }
             ast::Expr::Subscript(sub) => {
-                let receiver = BindingOperand::Value(&sub.value)
+                let receiver = StatementOperand::Value(&sub.value)
                     .in_binding(self)
                     .ok_or(())?;
-                let key = BindingOperand::Index(&sub.slice)
+                let key = StatementOperand::Index(&sub.slice)
                     .in_binding(self)
                     .ok_or(())?;
                 Statement::assign_item(receiver, key, value)
@@ -3878,19 +3847,19 @@ impl SourceScope<'_> {
     fn augmented_assignment(
         &mut self,
         assign: &ast::StmtAugAssign,
-        mut operand: impl FnMut(BindingOperand<'_>, &mut Self) -> Option<Expr>,
+        mut operand: impl FnMut(StatementOperand<'_>, &mut Self) -> Option<Expr>,
     ) -> Option<Statement> {
         match assign.target.as_ref() {
             ast::Expr::Name(name) => {
-                let left = operand(BindingOperand::Value(&assign.target), self)?;
-                let right = operand(BindingOperand::Value(&assign.value), self)?;
+                let left = operand(StatementOperand::Suspendable(&assign.target), self)?;
+                let right = operand(StatementOperand::Suspendable(&assign.value), self)?;
                 Some(self.store(name.id.as_str(), in_place(assign.op, left, right)))
             }
             ast::Expr::Subscript(target) => Some(Statement::AugmentItem(
-                operand(BindingOperand::Value(&target.value), self)?,
-                operand(BindingOperand::Index(&target.slice), self)?,
+                operand(StatementOperand::Suspendable(&target.value), self)?,
+                operand(StatementOperand::Index(&target.slice), self)?,
                 ir::ItemUpdate::Protocol(assign.op.as_str()),
-                operand(BindingOperand::Value(&assign.value), self)?,
+                operand(StatementOperand::Suspendable(&assign.value), self)?,
             )),
             _ => None,
         }
@@ -3988,19 +3957,27 @@ impl SourceScope<'_> {
         Err(())
     }
 
-    fn assertion(&mut self, stmt: &ast::StmtAssert) -> StdResult<[Statement; 2], ()> {
-        let test = self.condition_operand(&stmt.test).ok_or(())?;
+    fn assertion(
+        &mut self,
+        stmt: &ast::StmtAssert,
+        read: &mut impl FnMut(&mut Self, StatementOperand<'_>) -> Option<Expr>,
+    ) -> StdResult<[Statement; 2], ()> {
+        let test = read(self, StatementOperand::Condition(&stmt.test)).ok_or(())?;
         let message = stmt
             .msg
             .as_deref()
             .filter(|_| ir::control::boolean_literal(&test) != Some(true))
-            .map(|message| self.frame_value(message).ok_or(()))
+            .map(|message| read(self, StatementOperand::Frame(message)).ok_or(()))
             .transpose()?;
         Ok(assertion_statements(stmt, test, message))
     }
 
+    fn statement_operand(&mut self, input: StatementOperand<'_>) -> Option<Expr> {
+        input.lower(self)
+    }
+
     fn statement(&mut self, stmt: &ast::Stmt, body: &mut Vec<Statement>) -> StdResult<bool, ()> {
-        let (operation, continues) = self.written_statement(stmt, body, Self::frame_value)?;
+        let (operation, continues) = self.written_statement(stmt, body, Self::statement_operand)?;
         body.extend(operation);
         Ok(continues)
     }
@@ -4009,11 +3986,13 @@ impl SourceScope<'_> {
         &mut self,
         stmt: &ast::Stmt,
         body: &mut Vec<Statement>,
-        read: impl FnMut(&mut Self, &ast::Expr) -> Option<Expr>,
+        mut read: impl FnMut(&mut Self, StatementOperand<'_>) -> Option<Expr>,
     ) -> StdResult<(Option<Statement>, bool), ()> {
         if let ast::Stmt::Assert(assertion) = stmt {
             if !self.omit_assertions {
-                body.extend(self.assertion(assertion)?);
+                let [checkpoint, branch] = self.assertion(assertion, &mut read)?;
+                body.push(checkpoint);
+                return Ok((Some(branch), true));
             }
             return Ok((None, true));
         }

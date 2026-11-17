@@ -2340,6 +2340,48 @@ mod tests {
     }
 
     #[test]
+    fn a_suspending_decorator_keeps_its_owner_before_a_residual_default() {
+        use crate::frontend::{
+            PhysicalOperand, RegisteredScope, RegisteredSource, SuitePreparation,
+        };
+        let text = "def make():\n    @(yield 'decorator')\n    def use(value=(lambda: object)()): pass\n    return use\n";
+        let mut module = PreparedBody::module(
+            "sample",
+            Path::new("sample.py"),
+            text,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let parsed = ruff_python_parser::parse_module(text).unwrap();
+        let function = parsed.syntax().body[0].as_function_def_stmt().unwrap();
+        let lexical = module.source.statement_sites.expressions.take_lexical();
+        let missing = HashMap::new();
+        let source = RegisteredSource {
+            lambdas: Some(&missing),
+            ..module.source.registered_source()
+        };
+        let mut preparation =
+            SuitePreparation::new(&module.source.namespace_operations, source, true);
+        preparation.sites.expressions = lexical;
+        let suite = preparation.physical_function_suite(
+            &function.body,
+            RegisteredScope::Function { is_async: false },
+            true,
+        );
+        assert!(matches!(
+            suite.operands.as_slice(),
+            [PhysicalOperand::Checked(_), PhysicalOperand::Residual(_)]
+        ));
+        module.source.statement_sites = preparation.sites;
+        install_test_function_body(&mut module.source, function, suite);
+        assert!(module.standalone().unwrap().1.lines().any(|line| {
+            line.trim_start()
+                .starts_with("call void @imre_dyn_suspend_operands(")
+        }));
+    }
+
+    #[test]
     fn mixed_function_header_keeps_its_binding_after_erasing_the_declaration() {
         use crate::frontend::PhysicalOperand;
         let text = "@decorate\ndef choose[T: bound() = fallback()](first=checked(), *, last=(lambda: item)()):\n    return T, first, last\n";
