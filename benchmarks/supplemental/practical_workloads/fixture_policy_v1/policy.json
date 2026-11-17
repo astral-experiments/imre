@@ -1,0 +1,52 @@
+{
+  "schema": "practical-workload-fixture-policy-v1",
+  "stock_commit": "99964c6734dbe008d69d5016eb60d25abd31ab0d",
+  "cases": ["ruff-publisher", "uv-publisher"],
+  "fixture": {
+    "executable_role": "$PYTHON",
+    "executable_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+    "stock_script": "benchmarks/supplemental/practical_workloads/stock_v1/fixtures/cargo_stub.py",
+    "script_sha256": "4a57e30e3cfc44ad1836a66760a844ceb628c68bf52031c2fac6f89e9356e85e",
+    "argv_tails": [
+      ["metadata", "--format-version", "1", "--no-deps"],
+      ["publish", "--workspace", "--exclude", "already", "--no-verify"]
+    ]
+  },
+  "stdlib": {
+    "implementation": "CPython",
+    "version": "3.14.5",
+    "root_relative_to_executable_directory": "../lib/python3.14",
+    "pyc_header": {
+      "magic_hex": "2b0e0d0a",
+      "flags": 0,
+      "timestamp_and_size": "match adjacent stdlib .py source"
+    },
+    "files_sha256": {
+      "__pycache__/contextlib.cpython-314.pyc": "323f23c2277ac10200a9aa7cf7786311c842b5afd5763db32ebfe06eead13988",
+      "__pycache__/copyreg.cpython-314.pyc": "d0a67514790f7871506b3f4448d4b4cfae57af46d612cefdafb7160a3964b76e",
+      "__pycache__/enum.cpython-314.pyc": "db644c2f9a59b5bf710caf2a2a8f7d25510ec9d8d9ff3fd73cf03f2e4d9dfe49",
+      "__pycache__/fnmatch.cpython-314.pyc": "1987c23715245e7631c887a6ab05b5787342950dc55b935091bc5e709e6f4b14",
+      "__pycache__/functools.cpython-314.pyc": "c7f16fbdf18052046c60d78a1abd04dc099115667f297f47e4b81ba3d493b16c",
+      "__pycache__/glob.cpython-314.pyc": "a0067541b5553d9c09e4fd0dbc7237399736975333eb7154a1df809e00174b1e",
+      "__pycache__/keyword.cpython-314.pyc": "1d8c709774736c754cfde79b21ac6e655f1892eb40569188265ef664f5b51c84",
+      "__pycache__/operator.cpython-314.pyc": "585276b12922f6d9c9ed53c0ec25ae4b70106ac0094f4904e93a0eac45d02aad",
+      "__pycache__/reprlib.cpython-314.pyc": "662d42465e8c6e40bb5438042f55095285d31e30ee47f4c52f78c5677042e868",
+      "__pycache__/types.cpython-314.pyc": "86d6e9bb3eb52bd0a37cc3d6688987130bd6c112bb719861282a7626e7759a1e",
+      "collections/__pycache__/__init__.cpython-314.pyc": "60343e923e6f44176f105357339fe328f23f97d1eb6fd2ee1b27dc82f1ba1615",
+      "encodings/__pycache__/__init__.cpython-314.pyc": "f6dd431247c2bfe36007546d44134e48d68460d01ffedb86f113b61e91463d3e",
+      "encodings/__pycache__/aliases.cpython-314.pyc": "02fc77902d6f3fdfad61ed36ee33c1bb1b98cb358c1b87967c06f6b779964c85",
+      "encodings/__pycache__/utf_8.cpython-314.pyc": "f3dca3f52a1084f5da099e6005e95144377b1bd6c6e3ac8d2b7d281ac1cb8c81",
+      "json/__pycache__/__init__.cpython-314.pyc": "9cc41f35d7d9c0bff9a7d17d427b8b25df8ade5ea31878146b24a93d75048568",
+      "json/__pycache__/decoder.cpython-314.pyc": "f11fa598bace7607eb0135ff3bb2612d3e1e758b6eef5c5ab042d61140c29f7f",
+      "json/__pycache__/encoder.cpython-314.pyc": "eaea36d5dd237ffef292dc3e3cc3511fef533b7bb5a064870e45b6c30bbccfa2",
+      "json/__pycache__/scanner.cpython-314.pyc": "cdf4b47f392ec3b0dcc85add26fa7e2772758b3fdc0db3bc8e21f7487dc9234a",
+      "pathlib/__pycache__/__init__.cpython-314.pyc": "2d96e0c7d68355bdd9082d3775d792510cdd9b2c5e88dc20a1954a9f0225d579",
+      "pathlib/__pycache__/_os.cpython-314.pyc": "948f0a5e8bfcca6e4b010fba98ffc851082fea84cfc173ea93ca6ef409426aea",
+      "re/__pycache__/__init__.cpython-314.pyc": "aac4913e85e70af308db9d58470f8ca7f0b687cc1d2b5930aedf3d23b1fd139c",
+      "re/__pycache__/_casefix.cpython-314.pyc": "161e2c3dc0932f439c6dd5a7187ee49f111e0f62a0f847cfa9f68172d37c3875",
+      "re/__pycache__/_compiler.cpython-314.pyc": "86e830fc1d8c42bfc478ed5edc2a378d0b436dc2fe63f7d9bd4e6b5c32c9fb01",
+      "re/__pycache__/_constants.cpython-314.pyc": "328e3af6873579e32399b937cb7f6b576fd6d90de259c621d44cecc5a2609625",
+      "re/__pycache__/_parser.cpython-314.pyc": "d259f76db39e3001f46a4cafa7eeeca4ea39a70fddcd6e2c4da071b93ef8d060"
+    }
+  }
+}
