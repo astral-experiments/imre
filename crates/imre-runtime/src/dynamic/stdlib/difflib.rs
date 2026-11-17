@@ -123,8 +123,7 @@ fn chain_b(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
         return Ok(None);
     }
     let root = ctx.root_scope(scope);
-    if !canonical_builtins(ctx, root, &["enumerate", "set", "len"])
-        || !unobserved_checkpoints(ctx)
+    if !canonical_builtins(ctx, root, &["enumerate", "set", "len"]) || !unobserved_checkpoints(ctx)
     {
         return Ok(None);
     }
