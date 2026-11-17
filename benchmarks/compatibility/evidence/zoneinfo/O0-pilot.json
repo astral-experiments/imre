@@ -1,0 +1,22 @@
+{
+  "argv": [
+    "timeout",
+    "20",
+    "/workspace/scratch/zoneinfo-O0-recovery.exe",
+    "-v",
+    "test.test_zoneinfo.test_zoneinfo.CCallingConventionTest.test_clear_cache"
+  ],
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "IMREFLAGS": "--opt-level 0",
+    "IMRE_PYTHON": "/workspace/scratch/stdlib-sdk/imre"
+  },
+  "timeout_seconds": 20,
+  "exit_code": 124,
+  "reported_originals": 0,
+  "binary_sha256": "aa634d8a6568a3f994362779ae4b65bfea01fbe6d56f8ddd091165b2f773f804",
+  "reason": "Direct finite selection of one stock original timed out before any individual outcome; this is collection-blocker evidence, not a test result.",
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}
