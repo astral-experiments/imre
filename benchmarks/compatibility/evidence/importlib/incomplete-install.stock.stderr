@@ -1,0 +1,420 @@
+test.test_importlib.builtin.test_finder (unittest.loader.ModuleSkipped.test.test_importlib.builtin.test_finder) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.builtin.test_loader (unittest.loader.ModuleSkipped.test.test_importlib.builtin.test_loader) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.extension.test_case_sensitivity (unittest.loader.ModuleSkipped.test.test_importlib.extension.test_case_sensitivity) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.extension.test_finder (unittest.loader.ModuleSkipped.test.test_importlib.extension.test_finder) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.extension.test_loader (unittest.loader.ModuleSkipped.test.test_importlib.extension.test_loader) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.extension.test_path_hook (unittest.loader.ModuleSkipped.test.test_importlib.extension.test_path_hook) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.frozen.test_finder (unittest.loader.ModuleSkipped.test.test_importlib.frozen.test_finder) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.frozen.test_loader (unittest.loader.ModuleSkipped.test.test_importlib.frozen.test_loader) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.import_.test___loader__ (unittest.loader.ModuleSkipped.test.test_importlib.import_.test___loader__) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.import_.test___package__ (unittest.loader.ModuleSkipped.test.test_importlib.import_.test___package__) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.import_.test_api (unittest.loader.ModuleSkipped.test.test_importlib.import_.test_api) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.import_.test_caching (unittest.loader.ModuleSkipped.test.test_importlib.import_.test_caching) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.import_.test_fromlist (unittest.loader.ModuleSkipped.test.test_importlib.import_.test_fromlist) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.import_.test_helpers (unittest.loader.ModuleSkipped.test.test_importlib.import_.test_helpers) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.import_.test_meta_path (unittest.loader.ModuleSkipped.test.test_importlib.import_.test_meta_path) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.import_.test_packages (unittest.loader.ModuleSkipped.test.test_importlib.import_.test_packages) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.import_.test_path (unittest.loader.ModuleSkipped.test.test_importlib.import_.test_path) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.import_.test_relative_imports (unittest.loader.ModuleSkipped.test.test_importlib.import_.test_relative_imports) ... skipped "No module named '_testmultiphase'"
+test_as_json (test.test_importlib.metadata.test_api.APITests.test_as_json) ... ok
+test_as_json_egg_info (test.test_importlib.metadata.test_api.APITests.test_as_json_egg_info) ... ok
+test_as_json_odd_case (test.test_importlib.metadata.test_api.APITests.test_as_json_odd_case) ... ok
+test_entry_points (test.test_importlib.metadata.test_api.APITests.test_entry_points) ... ok
+test_entry_points_allows_no_attributes (test.test_importlib.metadata.test_api.APITests.test_entry_points_allows_no_attributes) ... ok
+test_entry_points_distribution (test.test_importlib.metadata.test_api.APITests.test_entry_points_distribution) ... ok
+test_entry_points_missing_group (test.test_importlib.metadata.test_api.APITests.test_entry_points_missing_group) ... ok
+test_entry_points_missing_name (test.test_importlib.metadata.test_api.APITests.test_entry_points_missing_name) ... ok
+test_entry_points_unique_packages_normalized (test.test_importlib.metadata.test_api.APITests.test_entry_points_unique_packages_normalized)
+Entry points should only be exposed for the first package ... ok
+test_file_hash_repr (test.test_importlib.metadata.test_api.APITests.test_file_hash_repr) ... ok
+test_files_dist_info (test.test_importlib.metadata.test_api.APITests.test_files_dist_info) ... ok
+test_files_egg_info (test.test_importlib.metadata.test_api.APITests.test_files_egg_info) ... ok
+test_for_name_does_not_exist (test.test_importlib.metadata.test_api.APITests.test_for_name_does_not_exist) ... ok
+test_for_top_level (test.test_importlib.metadata.test_api.APITests.test_for_top_level) ... ok
+test_get_key (test.test_importlib.metadata.test_api.APITests.test_get_key)
+Getting a key gets the key. ... ok
+test_get_missing_key (test.test_importlib.metadata.test_api.APITests.test_get_missing_key)
+Requesting a missing key will return None. ... ok
+test_metadata_for_this_package (test.test_importlib.metadata.test_api.APITests.test_metadata_for_this_package) ... ok
+test_missing_key_legacy (test.test_importlib.metadata.test_api.APITests.test_missing_key_legacy)
+Requesting a missing key will still return None, but warn. ... ok
+test_more_complex_deps_requires_text (test.test_importlib.metadata.test_api.APITests.test_more_complex_deps_requires_text) ... ok
+test_name_normalization (test.test_importlib.metadata.test_api.APITests.test_name_normalization) ... ok
+test_prefix_not_matched (test.test_importlib.metadata.test_api.APITests.test_prefix_not_matched) ... ok
+test_read_text (test.test_importlib.metadata.test_api.APITests.test_read_text) ... ok
+test_requires_dist_info (test.test_importlib.metadata.test_api.APITests.test_requires_dist_info) ... ok
+test_requires_egg_info (test.test_importlib.metadata.test_api.APITests.test_requires_egg_info) ... ok
+test_requires_egg_info_empty (test.test_importlib.metadata.test_api.APITests.test_requires_egg_info_empty) ... ok
+test_requires_egg_info_file (test.test_importlib.metadata.test_api.APITests.test_requires_egg_info_file) ... ok
+test_retrieves_version_of_distinfo_pkg (test.test_importlib.metadata.test_api.APITests.test_retrieves_version_of_distinfo_pkg) ... ok
+test_retrieves_version_of_self (test.test_importlib.metadata.test_api.APITests.test_retrieves_version_of_self) ... ok
+test_version_egg_info_file (test.test_importlib.metadata.test_api.APITests.test_version_egg_info_file) ... ok
+test_invalidate_cache (test.test_importlib.metadata.test_api.InvalidateCache.test_invalidate_cache) ... ok
+test_name_normalization (test.test_importlib.metadata.test_api.LegacyDots.test_name_normalization) ... ok
+test_name_normalization_versionless_egg_info (test.test_importlib.metadata.test_api.LegacyDots.test_name_normalization_versionless_egg_info) ... ok
+test_distribution_at_pathlib (test.test_importlib.metadata.test_api.OffSysPathTests.test_distribution_at_pathlib)
+Demonstrate how to load metadata direct from a directory. ... ok
+test_distribution_at_str (test.test_importlib.metadata.test_api.OffSysPathTests.test_distribution_at_str) ... ok
+test_find_distributions_specified_path (test.test_importlib.metadata.test_api.OffSysPathTests.test_find_distributions_specified_path) ... ok
+test_abc_enforced (test.test_importlib.metadata.test_main.BasicTests.test_abc_enforced) ... ok
+test_for_name_does_not_exist (test.test_importlib.metadata.test_main.BasicTests.test_for_name_does_not_exist) ... ok
+test_invalid_inputs_to_from_name (test.test_importlib.metadata.test_main.BasicTests.test_invalid_inputs_to_from_name) ... ok
+test_package_not_found_mentions_metadata (test.test_importlib.metadata.test_main.BasicTests.test_package_not_found_mentions_metadata)
+When a package is not found, that could indicate that the ... ok
+test_retrieves_version_of_self (test.test_importlib.metadata.test_main.BasicTests.test_retrieves_version_of_self) ... ok
+test_egg (test.test_importlib.metadata.test_main.DirectoryTest.test_egg) ... ok
+test_egg_info (test.test_importlib.metadata.test_main.DirectoryTest.test_egg_info) ... ok
+test_interleaved_discovery (test.test_importlib.metadata.test_main.DiscoveryTests.test_interleaved_discovery)
+Ensure interleaved searches are safe. ... ok
+test_invalid_usage (test.test_importlib.metadata.test_main.DiscoveryTests.test_invalid_usage) ... ok
+test_package_discovery (test.test_importlib.metadata.test_main.DiscoveryTests.test_package_discovery) ... ok
+test_origin (test.test_importlib.metadata.test_main.EditableDistributionTest.test_origin) ... ok
+test_unicode_dir_on_sys_path (test.test_importlib.metadata.test_main.FileSystem.test_unicode_dir_on_sys_path)
+Ensure a Unicode subdirectory of a directory on sys.path ... ok
+test_entrypoint_with_colon_in_name (test.test_importlib.metadata.test_main.ImportTests.test_entrypoint_with_colon_in_name) ... ok
+test_import_nonexistent_module (test.test_importlib.metadata.test_main.ImportTests.test_import_nonexistent_module) ... ok
+test_resolve (test.test_importlib.metadata.test_main.ImportTests.test_resolve) ... ok
+test_resolve_without_attr (test.test_importlib.metadata.test_main.ImportTests.test_resolve_without_attr) ... ok
+test_discovery (test.test_importlib.metadata.test_main.InaccessibleSysPath.test_discovery)
+Discovering distributions should succeed even if ... skipped 'pyfakefs not available'
+test_discovery (test.test_importlib.metadata.test_main.MissingSysPath.test_discovery)
+Discovering distributions should succeed even if ... ok
+test_dashes_in_dist_name_found_as_underscores (test.test_importlib.metadata.test_main.NameNormalizationTests.test_dashes_in_dist_name_found_as_underscores)
+For a package with a dash in the name, the dist-info metadata ... ok
+test_dist_name_found_as_any_case (test.test_importlib.metadata.test_main.NameNormalizationTests.test_dist_name_found_as_any_case)
+Ensure the metadata loads when queried with any case. ... ok
+test_unique_distributions (test.test_importlib.metadata.test_main.NameNormalizationTests.test_unique_distributions)
+Two distributions varying only by non-normalized name on ... ok
+test_metadata_loads (test.test_importlib.metadata.test_main.NonASCIITests.test_metadata_loads) ... ok
+test_metadata_loads_egg_info (test.test_importlib.metadata.test_main.NonASCIITests.test_metadata_loads_egg_info) ... ok
+test_packages_distributions_on_eggs (test.test_importlib.metadata.test_main.PackagesDistributionsEggTest.test_packages_distributions_on_eggs)
+Test old-style egg packages with a variation of 'top_level.txt', ... ok
+test_packages_distributions_example (test.test_importlib.metadata.test_main.PackagesDistributionsPrebuiltTest.test_packages_distributions_example) ... ok
+test_packages_distributions_example2 (test.test_importlib.metadata.test_main.PackagesDistributionsPrebuiltTest.test_packages_distributions_example2)
+Test packages_distributions on a wheel built ... ok
+test_packages_distributions_all_module_types (test.test_importlib.metadata.test_main.PackagesDistributionsTest.test_packages_distributions_all_module_types)
+Test top-level modules detected on a package without 'top-level.txt'. ... ok
+test_packages_distributions_neither_toplevel_nor_files (test.test_importlib.metadata.test_main.PackagesDistributionsTest.test_packages_distributions_neither_toplevel_nor_files)
+Test a package built without 'top-level.txt' or a file list. ... ok
+test_packages_distributions_symlinked_top_level (test.test_importlib.metadata.test_main.PackagesDistributionsTest.test_packages_distributions_symlinked_top_level)
+Distribution is resolvable from a simple top-level symlink in RECORD. ... ok
+test_attr (test.test_importlib.metadata.test_main.TestEntryPoints.test_attr) ... ok
+test_entry_point_pickleable (test.test_importlib.metadata.test_main.TestEntryPoints.test_entry_point_pickleable) ... ok
+test_hashable (test.test_importlib.metadata.test_main.TestEntryPoints.test_hashable)
+EntryPoints should be hashable ... ok
+test_immutable (test.test_importlib.metadata.test_main.TestEntryPoints.test_immutable)
+EntryPoints should be immutable ... ok
+test_module (test.test_importlib.metadata.test_main.TestEntryPoints.test_module) ... ok
+test_positional_args (test.test_importlib.metadata.test_main.TestEntryPoints.test_positional_args)
+Capture legacy (namedtuple) construction, discouraged. ... ok
+test_repr (test.test_importlib.metadata.test_main.TestEntryPoints.test_repr) ... ok
+test_sortable (test.test_importlib.metadata.test_main.TestEntryPoints.test_sortable)
+EntryPoint objects are sortable, but result is undefined. ... ok
+test_case_insensitive (test.test_importlib.metadata.test_zip.TestEgg.test_case_insensitive) ... ok
+test_files (test.test_importlib.metadata.test_zip.TestEgg.test_files) ... ok
+test_missing_metadata (test.test_importlib.metadata.test_zip.TestEgg.test_missing_metadata) ... ok
+test_normalized_name (test.test_importlib.metadata.test_zip.TestEgg.test_normalized_name) ... ok
+test_one_distribution (test.test_importlib.metadata.test_zip.TestEgg.test_one_distribution) ... ok
+test_zip_entry_points (test.test_importlib.metadata.test_zip.TestEgg.test_zip_entry_points) ... ok
+test_zip_version (test.test_importlib.metadata.test_zip.TestEgg.test_zip_version) ... ok
+test_zip_version_does_not_match (test.test_importlib.metadata.test_zip.TestEgg.test_zip_version_does_not_match) ... ok
+test_case_insensitive (test.test_importlib.metadata.test_zip.TestZip.test_case_insensitive) ... ok
+test_files (test.test_importlib.metadata.test_zip.TestZip.test_files) ... ok
+test_missing_metadata (test.test_importlib.metadata.test_zip.TestZip.test_missing_metadata) ... ok
+test_one_distribution (test.test_importlib.metadata.test_zip.TestZip.test_one_distribution) ... ok
+test_zip_entry_points (test.test_importlib.metadata.test_zip.TestZip.test_zip_entry_points) ... ok
+test_zip_version (test.test_importlib.metadata.test_zip.TestZip.test_zip_version) ... ok
+test_zip_version_does_not_match (test.test_importlib.metadata.test_zip.TestZip.test_zip_version_does_not_match) ... ok
+test_spec_path_joinpath (test.test_importlib.resources.test_compatibilty_files.CompatibilityFilesNoReaderTests.test_spec_path_joinpath) ... ok
+test_child_path_is (test.test_importlib.resources.test_compatibilty_files.CompatibilityFilesTests.test_child_path_is) ... ok
+test_child_path_iter (test.test_importlib.resources.test_compatibilty_files.CompatibilityFilesTests.test_child_path_iter) ... ok
+test_child_path_name (test.test_importlib.resources.test_compatibilty_files.CompatibilityFilesTests.test_child_path_name) ... ok
+test_child_path_open (test.test_importlib.resources.test_compatibilty_files.CompatibilityFilesTests.test_child_path_open) ... ok
+test_open_invalid_mode (test.test_importlib.resources.test_compatibilty_files.CompatibilityFilesTests.test_open_invalid_mode) ... ok
+test_orphan_path_invalid (test.test_importlib.resources.test_compatibilty_files.CompatibilityFilesTests.test_orphan_path_invalid) ... ok
+test_orphan_path_is (test.test_importlib.resources.test_compatibilty_files.CompatibilityFilesTests.test_orphan_path_is) ... ok
+test_orphan_path_iter (test.test_importlib.resources.test_compatibilty_files.CompatibilityFilesTests.test_orphan_path_iter) ... ok
+test_orphan_path_name (test.test_importlib.resources.test_compatibilty_files.CompatibilityFilesTests.test_orphan_path_name) ... ok
+test_orphan_path_open (test.test_importlib.resources.test_compatibilty_files.CompatibilityFilesTests.test_orphan_path_open) ... ok
+test_spec_path_is (test.test_importlib.resources.test_compatibilty_files.CompatibilityFilesTests.test_spec_path_is) ... ok
+test_spec_path_iter (test.test_importlib.resources.test_compatibilty_files.CompatibilityFilesTests.test_spec_path_iter) ... ok
+test_spec_path_name (test.test_importlib.resources.test_compatibilty_files.CompatibilityFilesTests.test_spec_path_name) ... ok
+test_spec_path_open (test.test_importlib.resources.test_compatibilty_files.CompatibilityFilesTests.test_spec_path_open) ... ok
+test_wrap_spec (test.test_importlib.resources.test_compatibilty_files.CompatibilityFilesTests.test_wrap_spec) ... ok
+test_contents (test.test_importlib.resources.test_contents.ContentsDiskTests.test_contents) ... ok
+test_contents (test.test_importlib.resources.test_contents.ContentsNamespaceTests.test_contents) ... ok
+test_contents (test.test_importlib.resources.test_contents.ContentsZipTests.test_contents) ... ok
+test_custom_loader (test.test_importlib.resources.test_custom.CustomTraversableResourcesTests.test_custom_loader) ... ok
+test_implicit_files_package (test.test_importlib.resources.test_files.ImplicitContextFilesDiskTests.test_implicit_files_package)
+Without any parameter, files() will infer the location as the caller. ... ok
+test_implicit_files_submodule (test.test_importlib.resources.test_files.ImplicitContextFilesDiskTests.test_implicit_files_submodule)
+Without any parameter, files() will infer the location as the caller. ... ok
+test_implicit_files_with_compiled_importlib (test.test_importlib.resources.test_files.ImplicitContextFilesDiskTests.test_implicit_files_with_compiled_importlib)
+Caller detection works for compiled-only resources module. ... ok
+test_implicit_files_package (test.test_importlib.resources.test_files.ImplicitContextFilesZipTests.test_implicit_files_package)
+Without any parameter, files() will infer the location as the caller. ... ok
+test_implicit_files_submodule (test.test_importlib.resources.test_files.ImplicitContextFilesZipTests.test_implicit_files_submodule)
+Without any parameter, files() will infer the location as the caller. ... ok
+test_implicit_files_with_compiled_importlib (test.test_importlib.resources.test_files.ImplicitContextFilesZipTests.test_implicit_files_with_compiled_importlib)
+Caller detection works for compiled-only resources module. ... ok
+test_module_resources (test.test_importlib.resources.test_files.ModuleFilesDiskTests.test_module_resources)
+A module can have resources found adjacent to the module. ... ok
+test_module_resources (test.test_importlib.resources.test_files.ModuleFilesZipTests.test_module_resources)
+A module can have resources found adjacent to the module. ... ok
+test_joinpath_with_multiple_args (test.test_importlib.resources.test_files.OpenDiskTests.test_joinpath_with_multiple_args) ... ok
+test_old_parameter (test.test_importlib.resources.test_files.OpenDiskTests.test_old_parameter)
+Files used to take a 'package' parameter. Make sure anyone ... ok
+test_read_bytes (test.test_importlib.resources.test_files.OpenDiskTests.test_read_bytes) ... ok
+test_read_text (test.test_importlib.resources.test_files.OpenDiskTests.test_read_text) ... ok
+test_traversable (test.test_importlib.resources.test_files.OpenDiskTests.test_traversable) ... ok
+test_joinpath_with_multiple_args (test.test_importlib.resources.test_files.OpenNamespaceTests.test_joinpath_with_multiple_args) ... ok
+test_non_paths_in_dunder_path (test.test_importlib.resources.test_files.OpenNamespaceTests.test_non_paths_in_dunder_path)
+Non-path items in a namespace package's ``__path__`` are ignored. ... ok
+test_old_parameter (test.test_importlib.resources.test_files.OpenNamespaceTests.test_old_parameter)
+Files used to take a 'package' parameter. Make sure anyone ... ok
+test_read_bytes (test.test_importlib.resources.test_files.OpenNamespaceTests.test_read_bytes) ... ok
+test_read_text (test.test_importlib.resources.test_files.OpenNamespaceTests.test_read_text) ... ok
+test_traversable (test.test_importlib.resources.test_files.OpenNamespaceTests.test_traversable) ... ok
+test_joinpath_with_multiple_args (test.test_importlib.resources.test_files.OpenNamespaceZipTests.test_joinpath_with_multiple_args) ... ok
+test_old_parameter (test.test_importlib.resources.test_files.OpenNamespaceZipTests.test_old_parameter)
+Files used to take a 'package' parameter. Make sure anyone ... ok
+test_read_bytes (test.test_importlib.resources.test_files.OpenNamespaceZipTests.test_read_bytes) ... ok
+test_read_text (test.test_importlib.resources.test_files.OpenNamespaceZipTests.test_read_text) ... ok
+test_traversable (test.test_importlib.resources.test_files.OpenNamespaceZipTests.test_traversable) ... ok
+test_joinpath_with_multiple_args (test.test_importlib.resources.test_files.OpenZipTests.test_joinpath_with_multiple_args) ... ok
+test_old_parameter (test.test_importlib.resources.test_files.OpenZipTests.test_old_parameter)
+Files used to take a 'package' parameter. Make sure anyone ... ok
+test_read_bytes (test.test_importlib.resources.test_files.OpenZipTests.test_read_bytes) ... ok
+test_read_text (test.test_importlib.resources.test_files.OpenZipTests.test_read_text) ... ok
+test_traversable (test.test_importlib.resources.test_files.OpenZipTests.test_traversable) ... ok
+test_common_errors (test.test_importlib.resources.test_functional.FunctionalAPITest_ModuleAnchor.test_common_errors) ... ok
+test_contents (test.test_importlib.resources.test_functional.FunctionalAPITest_ModuleAnchor.test_contents) ... ok
+test_is_resource (test.test_importlib.resources.test_functional.FunctionalAPITest_ModuleAnchor.test_is_resource) ... ok
+test_open_binary (test.test_importlib.resources.test_functional.FunctionalAPITest_ModuleAnchor.test_open_binary) ... ok
+test_open_text (test.test_importlib.resources.test_functional.FunctionalAPITest_ModuleAnchor.test_open_text) ... ok
+test_path (test.test_importlib.resources.test_functional.FunctionalAPITest_ModuleAnchor.test_path) ... ok
+test_read_binary (test.test_importlib.resources.test_functional.FunctionalAPITest_ModuleAnchor.test_read_binary) ... ok
+test_read_text (test.test_importlib.resources.test_functional.FunctionalAPITest_ModuleAnchor.test_read_text) ... ok
+test_text_errors (test.test_importlib.resources.test_functional.FunctionalAPITest_ModuleAnchor.test_text_errors) ... ok
+test_common_errors (test.test_importlib.resources.test_functional.FunctionalAPITest_StringAnchor.test_common_errors) ... ok
+test_contents (test.test_importlib.resources.test_functional.FunctionalAPITest_StringAnchor.test_contents) ... ok
+test_is_resource (test.test_importlib.resources.test_functional.FunctionalAPITest_StringAnchor.test_is_resource) ... ok
+test_open_binary (test.test_importlib.resources.test_functional.FunctionalAPITest_StringAnchor.test_open_binary) ... ok
+test_open_text (test.test_importlib.resources.test_functional.FunctionalAPITest_StringAnchor.test_open_text) ... ok
+test_path (test.test_importlib.resources.test_functional.FunctionalAPITest_StringAnchor.test_path) ... ok
+test_read_binary (test.test_importlib.resources.test_functional.FunctionalAPITest_StringAnchor.test_read_binary) ... ok
+test_read_text (test.test_importlib.resources.test_functional.FunctionalAPITest_StringAnchor.test_read_text) ... ok
+test_text_errors (test.test_importlib.resources.test_functional.FunctionalAPITest_StringAnchor.test_text_errors) ... ok
+test_extant_path (test.test_importlib.resources.test_open.CommonBinaryTests.test_extant_path) ... ok
+test_importing_module_as_side_effect (test.test_importlib.resources.test_open.CommonBinaryTests.test_importing_module_as_side_effect)
+The anchor package can already be imported. ... ok
+test_missing_path (test.test_importlib.resources.test_open.CommonBinaryTests.test_missing_path)
+Attempting to open or read or request the path for a ... ok
+test_package_name (test.test_importlib.resources.test_open.CommonBinaryTests.test_package_name)
+Passing in the package name should succeed. ... ok
+test_package_object (test.test_importlib.resources.test_open.CommonBinaryTests.test_package_object)
+Passing in the package itself should succeed. ... ok
+test_pathlib_path (test.test_importlib.resources.test_open.CommonBinaryTests.test_pathlib_path)
+Passing in a pathlib.PurePath object for the path should succeed. ... ok
+test_string_path (test.test_importlib.resources.test_open.CommonBinaryTests.test_string_path)
+Passing in a string for the path should succeed. ... ok
+test_useless_loader (test.test_importlib.resources.test_open.CommonBinaryTests.test_useless_loader) ... ok
+test_extant_path (test.test_importlib.resources.test_open.CommonTextTests.test_extant_path) ... ok
+test_importing_module_as_side_effect (test.test_importlib.resources.test_open.CommonTextTests.test_importing_module_as_side_effect)
+The anchor package can already be imported. ... ok
+test_missing_path (test.test_importlib.resources.test_open.CommonTextTests.test_missing_path)
+Attempting to open or read or request the path for a ... ok
+test_package_name (test.test_importlib.resources.test_open.CommonTextTests.test_package_name)
+Passing in the package name should succeed. ... ok
+test_package_object (test.test_importlib.resources.test_open.CommonTextTests.test_package_object)
+Passing in the package itself should succeed. ... ok
+test_pathlib_path (test.test_importlib.resources.test_open.CommonTextTests.test_pathlib_path)
+Passing in a pathlib.PurePath object for the path should succeed. ... ok
+test_string_path (test.test_importlib.resources.test_open.CommonTextTests.test_string_path)
+Passing in a string for the path should succeed. ... ok
+test_useless_loader (test.test_importlib.resources.test_open.CommonTextTests.test_useless_loader) ... ok
+test_open_binary (test.test_importlib.resources.test_open.OpenDiskNamespaceTests.test_open_binary) ... ok
+test_open_binary_FileNotFoundError (test.test_importlib.resources.test_open.OpenDiskNamespaceTests.test_open_binary_FileNotFoundError) ... ok
+test_open_text_FileNotFoundError (test.test_importlib.resources.test_open.OpenDiskNamespaceTests.test_open_text_FileNotFoundError) ... ok
+test_open_text_default_encoding (test.test_importlib.resources.test_open.OpenDiskNamespaceTests.test_open_text_default_encoding) ... ok
+test_open_text_given_encoding (test.test_importlib.resources.test_open.OpenDiskNamespaceTests.test_open_text_given_encoding) ... ok
+test_open_text_with_errors (test.test_importlib.resources.test_open.OpenDiskNamespaceTests.test_open_text_with_errors)
+Raises UnicodeError without the 'errors' argument. ... ok
+test_open_binary (test.test_importlib.resources.test_open.OpenDiskTests.test_open_binary) ... ok
+test_open_binary_FileNotFoundError (test.test_importlib.resources.test_open.OpenDiskTests.test_open_binary_FileNotFoundError) ... ok
+test_open_text_FileNotFoundError (test.test_importlib.resources.test_open.OpenDiskTests.test_open_text_FileNotFoundError) ... ok
+test_open_text_default_encoding (test.test_importlib.resources.test_open.OpenDiskTests.test_open_text_default_encoding) ... ok
+test_open_text_given_encoding (test.test_importlib.resources.test_open.OpenDiskTests.test_open_text_given_encoding) ... ok
+test_open_text_with_errors (test.test_importlib.resources.test_open.OpenDiskTests.test_open_text_with_errors)
+Raises UnicodeError without the 'errors' argument. ... ok
+test_open_binary (test.test_importlib.resources.test_open.OpenNamespaceZipTests.test_open_binary) ... ok
+test_open_binary_FileNotFoundError (test.test_importlib.resources.test_open.OpenNamespaceZipTests.test_open_binary_FileNotFoundError) ... ok
+test_open_text_FileNotFoundError (test.test_importlib.resources.test_open.OpenNamespaceZipTests.test_open_text_FileNotFoundError) ... ok
+test_open_text_default_encoding (test.test_importlib.resources.test_open.OpenNamespaceZipTests.test_open_text_default_encoding) ... ok
+test_open_text_given_encoding (test.test_importlib.resources.test_open.OpenNamespaceZipTests.test_open_text_given_encoding) ... ok
+test_open_text_with_errors (test.test_importlib.resources.test_open.OpenNamespaceZipTests.test_open_text_with_errors)
+Raises UnicodeError without the 'errors' argument. ... ok
+test_open_binary (test.test_importlib.resources.test_open.OpenZipTests.test_open_binary) ... ok
+test_open_binary_FileNotFoundError (test.test_importlib.resources.test_open.OpenZipTests.test_open_binary_FileNotFoundError) ... ok
+test_open_text_FileNotFoundError (test.test_importlib.resources.test_open.OpenZipTests.test_open_text_FileNotFoundError) ... ok
+test_open_text_default_encoding (test.test_importlib.resources.test_open.OpenZipTests.test_open_text_default_encoding) ... ok
+test_open_text_given_encoding (test.test_importlib.resources.test_open.OpenZipTests.test_open_text_given_encoding) ... ok
+test_open_text_with_errors (test.test_importlib.resources.test_open.OpenZipTests.test_open_text_with_errors)
+Raises UnicodeError without the 'errors' argument. ... ok
+test_extant_path (test.test_importlib.resources.test_path.CommonTests.test_extant_path) ... ok
+test_importing_module_as_side_effect (test.test_importlib.resources.test_path.CommonTests.test_importing_module_as_side_effect)
+The anchor package can already be imported. ... ok
+test_missing_path (test.test_importlib.resources.test_path.CommonTests.test_missing_path)
+Attempting to open or read or request the path for a ... ok
+test_package_name (test.test_importlib.resources.test_path.CommonTests.test_package_name)
+Passing in the package name should succeed. ... ok
+test_package_object (test.test_importlib.resources.test_path.CommonTests.test_package_object)
+Passing in the package itself should succeed. ... ok
+test_pathlib_path (test.test_importlib.resources.test_path.CommonTests.test_pathlib_path)
+Passing in a pathlib.PurePath object for the path should succeed. ... ok
+test_string_path (test.test_importlib.resources.test_path.CommonTests.test_string_path)
+Passing in a string for the path should succeed. ... ok
+test_useless_loader (test.test_importlib.resources.test_path.CommonTests.test_useless_loader) ... ok
+test_natural_path (test.test_importlib.resources.test_path.PathDiskTests.test_natural_path) ... ok
+test_reading (test.test_importlib.resources.test_path.PathDiskTests.test_reading)
+Path should be readable and a pathlib.Path instance. ... ok
+test_reading (test.test_importlib.resources.test_path.PathMemoryTests.test_reading)
+Path should be readable and a pathlib.Path instance. ... ok
+test_reading (test.test_importlib.resources.test_path.PathZipTests.test_reading)
+Path should be readable and a pathlib.Path instance. ... ok
+test_remove_in_context_manager (test.test_importlib.resources.test_path.PathZipTests.test_remove_in_context_manager)
+It is not an error if the file that was temporarily stashed on the ... ok
+test_extant_path (test.test_importlib.resources.test_read.CommonBinaryTests.test_extant_path) ... ok
+test_importing_module_as_side_effect (test.test_importlib.resources.test_read.CommonBinaryTests.test_importing_module_as_side_effect)
+The anchor package can already be imported. ... ok
+test_missing_path (test.test_importlib.resources.test_read.CommonBinaryTests.test_missing_path)
+Attempting to open or read or request the path for a ... ok
+test_package_name (test.test_importlib.resources.test_read.CommonBinaryTests.test_package_name)
+Passing in the package name should succeed. ... ok
+test_package_object (test.test_importlib.resources.test_read.CommonBinaryTests.test_package_object)
+Passing in the package itself should succeed. ... ok
+test_pathlib_path (test.test_importlib.resources.test_read.CommonBinaryTests.test_pathlib_path)
+Passing in a pathlib.PurePath object for the path should succeed. ... ok
+test_string_path (test.test_importlib.resources.test_read.CommonBinaryTests.test_string_path)
+Passing in a string for the path should succeed. ... ok
+test_useless_loader (test.test_importlib.resources.test_read.CommonBinaryTests.test_useless_loader) ... ok
+test_extant_path (test.test_importlib.resources.test_read.CommonTextTests.test_extant_path) ... ok
+test_importing_module_as_side_effect (test.test_importlib.resources.test_read.CommonTextTests.test_importing_module_as_side_effect)
+The anchor package can already be imported. ... ok
+test_missing_path (test.test_importlib.resources.test_read.CommonTextTests.test_missing_path)
+Attempting to open or read or request the path for a ... ok
+test_package_name (test.test_importlib.resources.test_read.CommonTextTests.test_package_name)
+Passing in the package name should succeed. ... ok
+test_package_object (test.test_importlib.resources.test_read.CommonTextTests.test_package_object)
+Passing in the package itself should succeed. ... ok
+test_pathlib_path (test.test_importlib.resources.test_read.CommonTextTests.test_pathlib_path)
+Passing in a pathlib.PurePath object for the path should succeed. ... ok
+test_string_path (test.test_importlib.resources.test_read.CommonTextTests.test_string_path)
+Passing in a string for the path should succeed. ... ok
+test_useless_loader (test.test_importlib.resources.test_read.CommonTextTests.test_useless_loader) ... ok
+test_read_bytes (test.test_importlib.resources.test_read.ReadDiskTests.test_read_bytes) ... ok
+test_read_text_default_encoding (test.test_importlib.resources.test_read.ReadDiskTests.test_read_text_default_encoding) ... ok
+test_read_text_given_encoding (test.test_importlib.resources.test_read.ReadDiskTests.test_read_text_given_encoding) ... ok
+test_read_text_with_errors (test.test_importlib.resources.test_read.ReadDiskTests.test_read_text_with_errors)
+Raises UnicodeError without the 'errors' argument. ... ok
+test_read_bytes (test.test_importlib.resources.test_read.ReadNamespaceTests.test_read_bytes) ... ok
+test_read_text_default_encoding (test.test_importlib.resources.test_read.ReadNamespaceTests.test_read_text_default_encoding) ... ok
+test_read_text_given_encoding (test.test_importlib.resources.test_read.ReadNamespaceTests.test_read_text_given_encoding) ... ok
+test_read_text_with_errors (test.test_importlib.resources.test_read.ReadNamespaceTests.test_read_text_with_errors)
+Raises UnicodeError without the 'errors' argument. ... ok
+test_read_bytes (test.test_importlib.resources.test_read.ReadNamespaceZipTests.test_read_bytes) ... ok
+test_read_submodule_resource (test.test_importlib.resources.test_read.ReadNamespaceZipTests.test_read_submodule_resource) ... ok
+test_read_submodule_resource_by_name (test.test_importlib.resources.test_read.ReadNamespaceZipTests.test_read_submodule_resource_by_name) ... ok
+test_read_text_default_encoding (test.test_importlib.resources.test_read.ReadNamespaceZipTests.test_read_text_default_encoding) ... ok
+test_read_text_given_encoding (test.test_importlib.resources.test_read.ReadNamespaceZipTests.test_read_text_given_encoding) ... ok
+test_read_text_with_errors (test.test_importlib.resources.test_read.ReadNamespaceZipTests.test_read_text_with_errors)
+Raises UnicodeError without the 'errors' argument. ... ok
+test_read_bytes (test.test_importlib.resources.test_read.ReadZipTests.test_read_bytes) ... ok
+test_read_submodule_resource (test.test_importlib.resources.test_read.ReadZipTests.test_read_submodule_resource) ... ok
+test_read_submodule_resource_by_name (test.test_importlib.resources.test_read.ReadZipTests.test_read_submodule_resource_by_name) ... ok
+test_read_text_default_encoding (test.test_importlib.resources.test_read.ReadZipTests.test_read_text_default_encoding) ... ok
+test_read_text_given_encoding (test.test_importlib.resources.test_read.ReadZipTests.test_read_text_given_encoding) ... ok
+test_read_text_with_errors (test.test_importlib.resources.test_read.ReadZipTests.test_read_text_with_errors)
+Raises UnicodeError without the 'errors' argument. ... ok
+test_init_file (test.test_importlib.resources.test_reader.MultiplexedPathTest.test_init_file) ... ok
+test_init_no_paths (test.test_importlib.resources.test_reader.MultiplexedPathTest.test_init_no_paths) ... ok
+test_is_dir (test.test_importlib.resources.test_reader.MultiplexedPathTest.test_is_dir) ... ok
+test_is_file (test.test_importlib.resources.test_reader.MultiplexedPathTest.test_is_file) ... ok
+test_iterdir (test.test_importlib.resources.test_reader.MultiplexedPathTest.test_iterdir) ... ok
+test_iterdir_duplicate (test.test_importlib.resources.test_reader.MultiplexedPathTest.test_iterdir_duplicate) ... ok
+test_join_path (test.test_importlib.resources.test_reader.MultiplexedPathTest.test_join_path) ... ok
+test_join_path_common_subdir (test.test_importlib.resources.test_reader.MultiplexedPathTest.test_join_path_common_subdir) ... ok
+test_join_path_compound (test.test_importlib.resources.test_reader.MultiplexedPathTest.test_join_path_compound) ... ok
+test_name (test.test_importlib.resources.test_reader.MultiplexedPathTest.test_name) ... ok
+test_open_file (test.test_importlib.resources.test_reader.MultiplexedPathTest.test_open_file) ... ok
+test_repr (test.test_importlib.resources.test_reader.MultiplexedPathTest.test_repr) ... ok
+test_files (test.test_importlib.resources.test_reader.NamespaceReaderTest.test_files) ... ok
+test_init_error (test.test_importlib.resources.test_reader.NamespaceReaderTest.test_init_error) ... ok
+test_resource_path (test.test_importlib.resources.test_reader.NamespaceReaderTest.test_resource_path) ... ok
+test_as_file_does_not_keep_open (test.test_importlib.resources.test_resource.DeletingZipsTest.test_as_file_does_not_keep_open) ... skipped 'Desired but not supported.'
+test_entered_path_does_not_keep_open (test.test_importlib.resources.test_resource.DeletingZipsTest.test_entered_path_does_not_keep_open)
+Mimic what certifi does on import to make its bundle ... ok
+test_is_file_does_not_keep_open (test.test_importlib.resources.test_resource.DeletingZipsTest.test_is_file_does_not_keep_open) ... ok
+test_is_file_failure_does_not_keep_open (test.test_importlib.resources.test_resource.DeletingZipsTest.test_is_file_failure_does_not_keep_open) ... ok
+test_iterdir_does_not_keep_open (test.test_importlib.resources.test_resource.DeletingZipsTest.test_iterdir_does_not_keep_open) ... ok
+test_read_binary_does_not_keep_open (test.test_importlib.resources.test_resource.DeletingZipsTest.test_read_binary_does_not_keep_open) ... ok
+test_read_text_does_not_keep_open (test.test_importlib.resources.test_resource.DeletingZipsTest.test_read_text_does_not_keep_open) ... ok
+test_package_has_no_reader_fallback (test.test_importlib.resources.test_resource.ResourceCornerCaseTests.test_package_has_no_reader_fallback)
+Test odd ball packages which: ... ok
+test_is_dir (test.test_importlib.resources.test_resource.ResourceDiskTests.test_is_dir) ... ok
+test_is_file_exists (test.test_importlib.resources.test_resource.ResourceDiskTests.test_is_file_exists) ... ok
+test_is_file_missing (test.test_importlib.resources.test_resource.ResourceDiskTests.test_is_file_missing) ... ok
+test_is_submodule_resource (test.test_importlib.resources.test_resource.ResourceFromNamespaceDiskTests.test_is_submodule_resource) ... ok
+test_read_submodule_resource_by_name (test.test_importlib.resources.test_resource.ResourceFromNamespaceDiskTests.test_read_submodule_resource_by_name) ... ok
+test_submodule_contents (test.test_importlib.resources.test_resource.ResourceFromNamespaceDiskTests.test_submodule_contents) ... ok
+test_submodule_contents_by_name (test.test_importlib.resources.test_resource.ResourceFromNamespaceDiskTests.test_submodule_contents_by_name) ... ok
+test_submodule_sub_contents (test.test_importlib.resources.test_resource.ResourceFromNamespaceDiskTests.test_submodule_sub_contents) ... ok
+test_submodule_sub_contents_by_name (test.test_importlib.resources.test_resource.ResourceFromNamespaceDiskTests.test_submodule_sub_contents_by_name) ... ok
+test_is_submodule_resource (test.test_importlib.resources.test_resource.ResourceFromNamespaceZipTests.test_is_submodule_resource) ... ok
+test_read_submodule_resource_by_name (test.test_importlib.resources.test_resource.ResourceFromNamespaceZipTests.test_read_submodule_resource_by_name) ... ok
+test_submodule_contents (test.test_importlib.resources.test_resource.ResourceFromNamespaceZipTests.test_submodule_contents) ... ok
+test_submodule_contents_by_name (test.test_importlib.resources.test_resource.ResourceFromNamespaceZipTests.test_submodule_contents_by_name) ... ok
+test_submodule_sub_contents (test.test_importlib.resources.test_resource.ResourceFromNamespaceZipTests.test_submodule_sub_contents) ... ok
+test_submodule_sub_contents_by_name (test.test_importlib.resources.test_resource.ResourceFromNamespaceZipTests.test_submodule_sub_contents_by_name) ... ok
+test_as_file_directory (test.test_importlib.resources.test_resource.ResourceFromZipsTest01.test_as_file_directory) ... ok
+test_is_submodule_resource (test.test_importlib.resources.test_resource.ResourceFromZipsTest01.test_is_submodule_resource) ... ok
+test_read_submodule_resource_by_name (test.test_importlib.resources.test_resource.ResourceFromZipsTest01.test_read_submodule_resource_by_name) ... ok
+test_submodule_contents (test.test_importlib.resources.test_resource.ResourceFromZipsTest01.test_submodule_contents) ... ok
+test_submodule_contents_by_name (test.test_importlib.resources.test_resource.ResourceFromZipsTest01.test_submodule_contents_by_name) ... ok
+test_unrelated_contents (test.test_importlib.resources.test_resource.ResourceFromZipsTest02.test_unrelated_contents)
+Test thata zip with two unrelated subpackages return ... ok
+test_is_dir (test.test_importlib.resources.test_resource.ResourceLoaderTests.test_is_dir) ... ok
+test_is_file (test.test_importlib.resources.test_resource.ResourceLoaderTests.test_is_file) ... ok
+test_resource_contents (test.test_importlib.resources.test_resource.ResourceLoaderTests.test_resource_contents) ... ok
+test_resource_missing (test.test_importlib.resources.test_resource.ResourceLoaderTests.test_resource_missing) ... ok
+test_is_dir (test.test_importlib.resources.test_resource.ResourceZipTests.test_is_dir) ... ok
+test_is_file_exists (test.test_importlib.resources.test_resource.ResourceZipTests.test_is_file_exists) ... ok
+test_is_file_missing (test.test_importlib.resources.test_resource.ResourceZipTests.test_is_file_missing) ... ok
+test.test_importlib.source.test_case_sensitivity (unittest.loader.ModuleSkipped.test.test_importlib.source.test_case_sensitivity) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.source.test_file_loader (unittest.loader.ModuleSkipped.test.test_importlib.source.test_file_loader) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.source.test_finder (unittest.loader.ModuleSkipped.test.test_importlib.source.test_finder) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.source.test_path_hook (unittest.loader.ModuleSkipped.test.test_importlib.source.test_path_hook) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.source.test_source_encoding (unittest.loader.ModuleSkipped.test.test_importlib.source.test_source_encoding) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.test_abc (unittest.loader.ModuleSkipped.test.test_importlib.test_abc) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.test_api (unittest.loader.ModuleSkipped.test.test_importlib.test_api) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.test_lazy (unittest.loader.ModuleSkipped.test.test_importlib.test_lazy) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.test_locks (unittest.loader.ModuleSkipped.test.test_importlib.test_locks) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.test_namespace_pkgs (unittest.loader.ModuleSkipped.test.test_importlib.test_namespace_pkgs) ... skipped "No module named '_testmultiphase'"
+test_package_import__semantics (test.test_importlib.test_pkg_import.TestImport.test_package_import__semantics) ... ok
+test.test_importlib.test_spec (unittest.loader.ModuleSkipped.test.test_importlib.test_spec) ... skipped "No module named '_testmultiphase'"
+test_circular_imports (test.test_importlib.test_threaded_import.ThreadedImportTests.test_circular_imports) ... ok
+test_concurrent_futures_circular_import (test.test_importlib.test_threaded_import.ThreadedImportTests.test_concurrent_futures_circular_import) ... skipped 'not enough memory: 1.8G minimum needed'
+test_import_failure_race_condition (test.test_importlib.test_threaded_import.ThreadedImportTests.test_import_failure_race_condition) ... ok
+test_import_hangers (test.test_importlib.test_threaded_import.ThreadedImportTests.test_import_hangers) ... ok
+test_multiprocessing_pool_circular_import (test.test_importlib.test_threaded_import.ThreadedImportTests.test_multiprocessing_pool_circular_import) ... skipped 'not enough memory: 1.8G minimum needed'
+test_parallel_meta_path (test.test_importlib.test_threaded_import.ThreadedImportTests.test_parallel_meta_path) ... skipped 'not enough memory: 3.7G minimum needed'
+test_parallel_module_init (test.test_importlib.test_threaded_import.ThreadedImportTests.test_parallel_module_init) ... skipped 'not enough memory: 3.7G minimum needed'
+test_parallel_path_hooks (test.test_importlib.test_threaded_import.ThreadedImportTests.test_parallel_path_hooks) ... skipped 'not enough memory: 3.7G minimum needed'
+test_side_effect_import (test.test_importlib.test_threaded_import.ThreadedImportTests.test_side_effect_import) ... ok
+test.test_importlib.test_util (unittest.loader.ModuleSkipped.test.test_importlib.test_util) ... skipped "No module named '_testmultiphase'"
+test.test_importlib.test_windows (unittest.loader.ModuleSkipped.test.test_importlib.test_windows) ... skipped "No module named '_testmultiphase'"
+
+----------------------------------------------------------------------
+Ran 335 tests in 7.960s
+
+OK (skipped=38)
