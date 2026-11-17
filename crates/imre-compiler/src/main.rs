@@ -192,9 +192,16 @@ fn run() -> Result<ExitCode, String> {
             return Ok(ExitCode::from(2));
         }
         let uses_argument_source = |source: &str| {
-            ["exec", "import_module", "find_spec", "addsitedir"]
-                .iter()
-                .any(|name| source.contains(name))
+            [
+                "exec",
+                "__import__",
+                "argv",
+                "import_module",
+                "find_spec",
+                "addsitedir",
+            ]
+            .iter()
+            .any(|name| source.contains(name))
         };
         let links_argument_source = args.peek().is_some()
             && match &invocation {
@@ -204,6 +211,7 @@ fn run() -> Result<ExitCode, String> {
                 python_command::Invocation::Script { path, .. } if path.is_file() => {
                     std::fs::read_to_string(path).is_ok_and(|source| uses_argument_source(&source))
                 }
+                python_command::Invocation::Module { name, .. } => name == "inspect",
                 _ => false,
             };
         let mut options = BuildOptions::for_python(invocation)?;

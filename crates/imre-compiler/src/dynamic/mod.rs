@@ -172,6 +172,7 @@ struct Imports {
     names: Vec<(u32, String)>,
     module_flags: u32,
     explicit_roots: Vec<PathBuf>,
+    argument_roots: Vec<usize>,
     runtime_imports: bool,
     private_names: imre_ast::Names,
     invalid_executable: Option<Box<ModuleSyntaxError>>,
@@ -182,6 +183,7 @@ struct Imports {
     has_open_exec: bool,
     computed_import: bool,
     argument_imports: Vec<usize>,
+    argument_names: HashMap<String, usize>,
     site_names: HashMap<String, Option<usize>>,
     site_directories: Vec<(Option<usize>, SiteDirectory)>,
     imports_logging: bool,
@@ -202,6 +204,60 @@ struct Imports {
 enum SiteDirectory {
     Literal(PathBuf),
     Argument(usize),
+}
+
+/// Select the single module operand accepted by `python -m inspect`, without treating
+/// options or a qualified attribute after `:` as another source candidate.
+///
+/// ```python
+/// # python -m inspect --details weather_report:report
+/// importlib.import_module("weather_report")
+/// ```
+fn inspect_target(arguments: &[Option<String>]) -> Option<&str> {
+    let mut target = None;
+    let mut positional = false;
+    for argument in arguments {
+        let argument = argument.as_deref()?;
+        if !positional && argument == "--" {
+            positional = true;
+        } else if !positional && matches!(argument, "-d" | "--details") {
+            continue;
+        } else if (!positional && argument.starts_with('-')) || target.replace(argument).is_some() {
+            return None;
+        }
+    }
+    let module = target?.split(':').next()?;
+    crate::modules::valid_module_operand(module).then_some(module)
+}
+
+/// Omit heapq's standalone doctest dependency only for an imported copy of the
+/// shipped source. The exact terminal guard and the absence of earlier uses of
+/// either name establish that this import cannot run in that copy; `-m heapq`
+/// still discovers it.
+///
+/// ```python
+/// if __name__ == "__main__":
+///     import doctest
+/// ```
+fn omit_imported_heapq_doctest(
+    imports: &mut Imports,
+    name: &str,
+    source: &str,
+    module_entry: Option<&str>,
+) {
+    const MAIN: &str = "if __name__ == \"__main__\":\n\n    import doctest # pragma: no cover\n    print(doctest.testmod()) # pragma: no cover";
+    if name == "heapq"
+        && module_entry != Some(name)
+        && crate::modules::bundled_runtime_source(name)
+            .is_some_and(|(_, shipped)| source == shipped)
+        && let Some(prefix) = source.trim_end().strip_suffix(MAIN)
+        && !prefix.contains("__name__")
+        && !prefix.contains("doctest")
+    {
+        imports
+            .names
+            .retain(|(level, dependency)| *level != 0 || dependency != "doctest");
+    }
 }
 
 fn literal_path(expr: &Expr) -> Option<PathBuf> {
@@ -301,6 +357,9 @@ impl Imports {
     }
 
     fn argument_index(&self, expression: &Expr) -> Option<usize> {
+        if let Expr::Name(name) = expression {
+            return self.argument_names.get(name.id.as_str()).copied();
+        }
         let operand = expression.as_subscript_expr()?;
         let argv = operand.value.as_attribute_expr()?;
         if argv.attr.as_str() != "argv"
@@ -357,13 +416,23 @@ impl Imports {
                 self.paths(&x.left);
                 self.paths(&x.right);
             }
-            Expr::List(x) => self
-                .explicit_roots
-                .extend(x.elts.iter().filter_map(literal_path)),
-            Expr::Tuple(x) => self
-                .explicit_roots
-                .extend(x.elts.iter().filter_map(literal_path)),
+            Expr::List(x) => x.elts.iter().for_each(|item| self.path(item)),
+            Expr::Tuple(x) => x.elts.iter().for_each(|item| self.path(item)),
             _ => {}
+        }
+    }
+
+    /// Record only a written literal or a known launcher argument used as a search root.
+    /// The runtime still decides whether the path is active when an import executes.
+    ///
+    /// ```python
+    /// sys.path.insert(0, sys.argv[1])
+    /// ```
+    fn path(&mut self, expression: &Expr) {
+        if let Some(path) = literal_path(expression) {
+            self.explicit_roots.push(path);
+        } else if let Some(index) = self.argument_index(expression) {
+            self.argument_roots.push(index);
         }
     }
     fn add(&mut self, level: u32, name: &str) {
@@ -513,6 +582,10 @@ impl<'a> Visitor<'a> for GetterHeader<'_> {
 
 impl<'a> Visitor<'a> for Imports {
     fn visit_stmt(&mut self, s: &'a Stmt) {
+        let assigned_argument = match s {
+            Stmt::Assign(assignment) => self.argument_index(&assignment.value),
+            _ => None,
+        };
         if let Stmt::With(statement) = s
             && !statement.is_async
         {
@@ -657,9 +730,27 @@ impl<'a> Visitor<'a> for Imports {
             }
             _ => {}
         }
-        visitor::walk_stmt(self, s);
+        if matches!(s, Stmt::FunctionDef(_) | Stmt::ClassDef(_)) {
+            let arguments = self.argument_names.clone();
+            visitor::walk_stmt(self, s);
+            self.argument_names = arguments;
+        } else {
+            visitor::walk_stmt(self, s);
+        }
+        if let (Stmt::Assign(assignment), Some(index)) = (s, assigned_argument) {
+            for target in &assignment.targets {
+                if let Expr::Name(name) = target {
+                    self.argument_names.insert(name.id.to_string(), index);
+                }
+            }
+        }
     }
     fn visit_expr(&mut self, e: &'a Expr) {
+        if let Expr::Name(name) = e
+            && matches!(name.ctx, ast::ExprContext::Store | ast::ExprContext::Del)
+        {
+            self.argument_names.remove(name.id.as_str());
+        }
         if let Expr::Call(call) = e
             && let Expr::Attribute(function) = &*call.func
             && function.attr.as_str() == "addsitedir"
@@ -678,16 +769,8 @@ impl<'a> Visitor<'a> for Imports {
             && function.attr.as_str() == "import_module"
             && let Expr::Name(importlib) = &*function.value
             && self.importlib_names.contains(importlib.id.as_str())
-            && let Some(Expr::Subscript(operand)) = call.arguments.find_argument_value("name", 0)
-            && let Expr::Attribute(argv) = &*operand.value
-            && argv.attr.as_str() == "argv"
-            && matches!(&*argv.value, Expr::Name(sys) if self.sys_names.contains(sys.id.as_str()))
-            && let Expr::NumberLiteral(literal) = &*operand.slice
-            && let ast::Number::Int(index) = &literal.value
-            && let Some(index) = index
-                .as_i64()
-                .and_then(|index| usize::try_from(index).ok())
-                .and_then(|index| index.checked_sub(1))
+            && let Some(operand) = call.arguments.find_argument_value("name", 0)
+            && let Some(index) = self.argument_index(operand)
         {
             self.argument_imports.push(index);
         }
@@ -721,18 +804,26 @@ impl<'a> Visitor<'a> for Imports {
                 file: Some(file.clone()),
             });
         }
-        // A literal __import__ call cannot select a different provider at execution.
+        // A written literal or actual launcher argument bounds this import without scanning.
         if let Expr::Call(call) = e
             && matches!(&*call.func, Expr::Name(name) if name.id == "__import__")
-            && let Some(Expr::StringLiteral(name)) = call.arguments.find_argument_value("name", 0)
+            && let Some(operand) = call.arguments.find_argument_value("name", 0)
         {
-            self.uses_import_builtin = true;
             self.add(0, "importlib");
-            if matches!(
-                name.value.to_str().split('.').next(),
-                Some("decimal" | "_pydecimal" | "pyexpat" | "time" | "xml" | "zoneinfo")
-            ) {
-                self.add(0, name.value.to_str());
+            if let Some(name) = operand.as_string_literal_expr() {
+                self.uses_import_builtin = true;
+                if matches!(
+                    name.value.to_str().split('.').next(),
+                    Some("decimal" | "_pydecimal" | "pyexpat" | "time" | "xml" | "zoneinfo")
+                ) {
+                    self.add(0, name.value.to_str());
+                }
+            } else if let Some(index) = self.argument_index(operand) {
+                self.runtime_imports = true;
+                self.argument_imports.push(index);
+            } else {
+                self.uses_import_builtin = true;
+                self.computed_import = true;
             }
             self.visit_arguments(&call.arguments);
             return;
@@ -821,11 +912,11 @@ impl<'a> Visitor<'a> for Imports {
             if a.attr.as_str() == "append"
                 && let [item] = c.arguments.args.as_ref()
             {
-                self.explicit_roots.extend(literal_path(item));
+                self.path(item);
             } else if a.attr.as_str() == "insert"
                 && let [_, item] = c.arguments.args.as_ref()
             {
-                self.explicit_roots.extend(literal_path(item));
+                self.path(item);
             }
         }
         visitor::walk_expr(self, e);
@@ -1420,6 +1511,11 @@ pub(crate) fn compile(
             first.add(0, name);
             first.add(0, &format!("{name}.__main__"));
         }
+        if name == "inspect"
+            && let Some(target) = inspect_target(&options.launcher_arguments)
+        {
+            first.add(0, target);
+        }
     }
     for name in &options.include_modules {
         first.add(0, name);
@@ -1513,6 +1609,15 @@ pub(crate) fn compile(
         .filter(|_| !source_entry)
         .map(|path| cwd.join(path))
         .collect();
+    if !source_entry {
+        explicit_roots.extend(first.argument_roots.iter().filter_map(|index| {
+            options
+                .launcher_arguments
+                .get(*index)
+                .and_then(Option::as_deref)
+                .map(|path| cwd.join(path))
+        }));
+    }
     let mut site_lines = Vec::new();
     let mut site_inputs = SourceInputs::default();
     for (module, directory) in &first.site_directories {
@@ -1696,14 +1801,16 @@ pub(crate) fn compile(
                                existing: Option<&ruff_python_parser::Parsed<ast::ModModule>>,
                                getter: Option<&mut Imports>| {
         if output.is_some() {
-            let (imports, scanned) = scan_imports(source, kind, existing, getter, None, true)?;
+            let (mut imports, scanned) = scan_imports(source, kind, existing, getter, None, true)?;
+            omit_imported_heapq_doctest(&mut imports, name, source, module_entry);
             if let Some(module) = scanned {
                 scanned_modules.insert(unit, module);
             }
             return Ok(imports);
         }
-        let (imports, scanned) =
+        let (mut imports, scanned) =
             scan_imports_for_preparation(source, kind, |_| existing, getter, Some(source))?;
+        omit_imported_heapq_doctest(&mut imports, name, source, module_entry);
         if let Some(input) = scanned
             && imports.invalid_executable.is_none()
         {
@@ -1869,9 +1976,6 @@ pub(crate) fn compile(
             // Collect late imports and their bundled dependencies after the explicit
             // file graph, without parsing unrelated modules in project directories.
             let mut imports = Imports::default();
-            if uses_import_builtin && !seen.contains("pprint") {
-                imports.names.push((0, "pprint".to_owned()));
-            }
             // A runtime-selected decimal module in a standalone binary needs its private provider.
             if startup.is_none() && computed_import && !seen.contains("decimal") {
                 imports.add(0, "decimal");
@@ -1912,9 +2016,30 @@ pub(crate) fn compile(
                 false,
             )
         };
-        let ((owner, package, imports), origin) = item;
+        let ((owner, package, mut imports), origin) = item;
+        // The importlib bootstraps execute code objects selected from registered
+        // sources. Their loader implementation does not expose arbitrary source
+        // text to this application's imports; each selected source is scanned itself.
+        if origin == ImportOrigin::Provider
+            && matches!(
+                owner.as_str(),
+                "_frozen_importlib"
+                    | "importlib._bootstrap"
+                    | "_frozen_importlib_external"
+                    | "importlib._bootstrap_external"
+            )
+        {
+            imports.uses_exec = false;
+        }
         if origin == ImportOrigin::Startup {
-            for path in &imports.explicit_roots {
+            let argument_roots = imports.argument_roots.iter().filter_map(|index| {
+                options
+                    .launcher_arguments
+                    .get(*index)
+                    .and_then(Option::as_deref)
+                    .map(PathBuf::from)
+            });
+            for path in imports.explicit_roots.iter().cloned().chain(argument_roots) {
                 let path = cwd.join(path);
                 if startup_added_roots.insert(path.clone()) {
                     if !roots.contains(&path) {
@@ -2187,6 +2312,8 @@ pub(crate) fn compile(
                     if prefix != "unittest.loader" {
                         imports.computed_import = false;
                         getter.computed_import = false;
+                        imports.uses_import_builtin = false;
+                        getter.uses_import_builtin = false;
                     }
                     // An earlier regular project ancestor controls the live search path.
                     // Keep the registered alternative without following it into the project.
@@ -3333,7 +3460,7 @@ fn add_late_bundled_imports(
         imports.names.push((0, "http.server".to_owned()));
     }
     // Late imports can select children of a bundled package without naming them in source.
-    if uses_exec || uses_import_builtin || seen.contains("importlib") {
+    if uses_exec || uses_import_builtin || computed_import {
         for name in ["lzma", "compression.zstd"] {
             if !seen.contains(name) {
                 imports.add(0, name);
@@ -3349,14 +3476,11 @@ fn add_late_bundled_imports(
             }
         }
     }
-    if computed_import && !seen.contains("xml.parsers.expat") {
-        imports.names.push((0, "xml.parsers.expat".to_owned()));
-    }
     // Register the mock provider for imports from source-loaded modules.
     if uses_import_builtin && seen.contains("unittest") && !seen.contains("unittest.mock") {
         imports.add(0, "unittest.mock");
     }
-    if uses_import_builtin || seen.contains("importlib") {
+    if uses_import_builtin || computed_import {
         for name in [
             "_pyio",
             "colorsys",
