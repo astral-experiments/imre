@@ -15,6 +15,18 @@ use ty_python_semantic::{
     types::{Type, TypeDefinition},
 };
 
+/// Prove that an argument diagnostic comes from independently widened locals that
+/// were assigned together in every supported arm of an exhaustive, unguarded match.
+/// The proof rejects intervening reads or writes, since they could expose or replace
+/// the selected callable or argument before the call.
+///
+/// ```python
+/// match command:
+///     case Command.text: selected, value = as_text, "text"
+///     case Command.number: selected, value = as_number, 1
+///     case _: raise ValueError("unsupported command")
+/// selected(value)
+/// ```
 pub(super) fn explains(db: &dyn Db, file: File, diagnostic: &Diagnostic) -> bool {
     if !diagnostic.id().is_lint_named("invalid-argument-type") {
         return false;
@@ -125,6 +137,10 @@ pub(super) fn explains(db: &dyn Db, file: File, diagnostic: &Diagnostic) -> bool
     })
 }
 
+/// Accept a widened `None` only when the callee matches the parameter before any
+/// read, accepts only compatible enum literals, and its raising fallback is exactly
+/// excluded by an explicit entry profile. Without that exclusion the diagnostic must
+/// remain, even if the widening originated in a correlated match arm.
 fn rejects_none<'db>(
     db: &'db dyn Db,
     owner: File,
