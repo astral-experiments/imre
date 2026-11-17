@@ -314,10 +314,12 @@ class ForwardRef:
             raise error
         source = _rewrite_star_unpack(arg)
         try:
-            _validate_forward_ref(source)
+            linked = _validate_forward_ref(source)
         except SyntaxError:
             raise SyntaxError(f"Forward reference must be an expression -- got {arg!r}")
         try:
+            if not linked:
+                raise NotImplementedError("no compiled Python body for <module> (<string>:1)")
             return _eval_type_expression(source, globals, locals)
         except SyntaxError:
             if format == Format.VALUE:
@@ -330,6 +332,8 @@ class ForwardRef:
         except Exception:
             if format == Format.VALUE:
                 raise
+        if not linked:
+            return self
         # For an unresolved compound, retry with missing names represented by
         # scoped forward references, preserving already-known parts of the result.
         import builtins
