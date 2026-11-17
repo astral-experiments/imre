@@ -100,33 +100,55 @@ def _iglob(pathname, root_dir, dir_fd, recursive, dironly,
             if _isdir(_join(root_dir, dirname), dir_fd):
                 yield pathname
         return
-    if not dirname:
-        if recursive and _isrecursive(basename):
-            yield from _glob2(root_dir, basename, dir_fd, dironly,
-                             include_hidden=include_hidden)
+
+    # Expand magic directory components with an explicit depth-first stack. A
+    # recursive chain of generators otherwise keeps every intermediate frame
+    # suspended for the lifetime of each public iterator.
+    levels = []
+    while dirname and dirname != pathname and has_magic(dirname):
+        levels.append((basename, dironly))
+        pathname = dirname
+        dironly = True
+        dirname, basename = os.path.split(pathname)
+    levels.reverse()
+
+    def matches(directory, pattern, only_dirs):
+        if has_magic(pattern):
+            function = _glob2 if recursive and _isrecursive(pattern) else _glob1
         else:
-            yield from _glob1(root_dir, basename, dir_fd, dironly,
-                              include_hidden=include_hidden)
-        return
-    # `os.path.split()` returns the argument itself as a dirname if it is a
-    # drive or UNC path.  Prevent an infinite recursion if a drive or UNC path
-    # contains magic characters (i.e. r'\\?\C:').
-    if dirname != pathname and has_magic(dirname):
-        dirs = _iglob(dirname, root_dir, dir_fd, recursive, True,
-                      include_hidden=include_hidden)
+            function = _glob0
+        return function(directory, pattern, dir_fd, only_dirs,
+                        include_hidden=include_hidden)
+
+    if dirname:
+        initial = matches(_join(root_dir, dirname), basename, dironly)
+        prefix = dirname
     else:
-        dirs = [dirname]
-    if has_magic(basename):
-        if recursive and _isrecursive(basename):
-            glob_in_dir = _glob2
-        else:
-            glob_in_dir = _glob1
-    else:
-        glob_in_dir = _glob0
-    for dirname in dirs:
-        for name in glob_in_dir(_join(root_dir, dirname), basename, dir_fd, dironly,
-                               include_hidden=include_hidden):
-            yield os.path.join(dirname, name)
+        initial = matches(root_dir, basename, dironly)
+        prefix = None
+    stack = [(iter(initial), prefix, 0)]
+    try:
+        while stack:
+            iterator, prefix, level = stack[-1]
+            try:
+                name = next(iterator)
+            except StopIteration:
+                stack.pop()
+                continue
+            path = name if prefix is None else os.path.join(prefix, name)
+            if level == len(levels):
+                yield path
+            else:
+                pattern, only_dirs = levels[level]
+                found = matches(_join(root_dir, path), pattern, only_dirs)
+                stack.append((iter(found), path, level + 1))
+    finally:
+        # In particular, close a suspended recursive iterator on early close or
+        # an exception. Directory scans themselves are exhausted by _listdir.
+        for iterator, _, _ in reversed(stack):
+            close = getattr(iterator, "close", None)
+            if close is not None:
+                close()
 
 # These 2 helper functions non-recursively glob inside a literal directory.
 # They return a list of basenames.  _glob1 accepts a pattern while _glob0
@@ -216,14 +238,22 @@ def _listdir(dirname, dir_fd, dironly):
 
 # Recursively yields relative pathnames inside a literal directory.
 def _rlistdir(dirname, dir_fd, dironly, include_hidden=False):
-    names = _listdir(dirname, dir_fd, dironly)
-    for x in names:
-        if include_hidden or not _ishidden(x):
-            yield x
-            path = _join(dirname, x) if dirname else x
-            for y in _rlistdir(path, dir_fd, dironly,
-                               include_hidden=include_hidden):
-                yield _join(x, y)
+    # _listdir closes its scandir iterator before any result is yielded.
+    # Keep only list iterators and path prefixes while descending.
+    stack = [(iter(_listdir(dirname, dir_fd, dironly)), dirname, None)]
+    while stack:
+        names, directory, prefix = stack[-1]
+        try:
+            name = next(names)
+        except StopIteration:
+            stack.pop()
+            continue
+        if not include_hidden and _ishidden(name):
+            continue
+        relative = name if prefix is None else _join(prefix, name)
+        yield relative
+        path = _join(directory, name) if directory else name
+        stack.append((iter(_listdir(path, dir_fd, dironly)), path, relative))
 
 
 def _lexists(pathname, dir_fd):
