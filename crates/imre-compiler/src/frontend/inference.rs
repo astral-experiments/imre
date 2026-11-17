@@ -94,7 +94,7 @@ impl Checker<'_> {
         if let Some(ty) = self.graph.session.scalar_type(self.module, insertion.value) {
             return Some(ty);
         }
-        if !set {
+        if !set || self.returns == Type::PythonObject {
             return None;
         }
         let for_loop = insertion.for_loop?;
@@ -557,6 +557,8 @@ struct Pending {
     returns: Option<Type>,
     /// Storage requested by a checked consumer of this unannotated return.
     return_context: Option<Type>,
+    return_context_consumers: Vec<(usize, usize)>,
+    return_context_refused: bool,
     discovery: ReturnDiscovery,
 }
 
@@ -659,6 +661,8 @@ impl Inference {
             document_return: None,
             returns,
             return_context: None,
+            return_context_consumers: Vec::new(),
+            return_context_refused: false,
             discovery: if returns.is_some() {
                 ReturnDiscovery::Declared
             } else {
@@ -982,18 +986,66 @@ impl Inference {
         }
     }
 
+    pub(super) fn inferred_return(&self, id: usize) -> bool {
+        self.pending
+            .borrow()
+            .get(id)
+            .is_some_and(|p| !matches!(p.discovery, ReturnDiscovery::Declared))
+    }
+
     /// A checked call argument can request storage from an unannotated producer.
     /// Publishing the request once makes unsuccessful or recursive demands converge.
-    fn demand_list_return(&self, id: usize, actual: Type, expected: Type) {
+    pub(super) fn demand_list_return(
+        &self,
+        id: usize,
+        actual: Type,
+        expected: Type,
+        consumer: Option<(usize, usize)>,
+    ) {
         let mut pending = self.pending.borrow_mut();
         let producer = &mut pending[id];
-        if matches!(producer.discovery, ReturnDiscovery::Declared)
-            || producer.returns != Some(actual)
-            || producer.return_context == Some(expected)
+        if matches!(producer.discovery, ReturnDiscovery::Declared) {
+            return;
+        }
+        if producer.return_context_refused {
+            if consumer.is_none() && producer.returns != Some(Type::PythonObject) {
+                producer.returns = Some(Type::PythonObject);
+                producer.discovery = ReturnDiscovery::Independent;
+                drop(pending);
+                self.layout_changed();
+            }
+            return;
+        }
+        if let Some(consumer) = consumer
+            && !producer.return_context_consumers.contains(&consumer)
         {
+            producer.return_context_consumers.push(consumer);
+        }
+        if producer.returns != Some(actual) || producer.return_context == Some(expected) {
             return;
         }
         producer.return_context = Some(expected);
+        drop(pending);
+        self.layout_changed();
+    }
+
+    /// A shared native return ABI cannot satisfy incompatible checked consumers.
+    /// Release its context and place the inferred consumers requesting it. If
+    /// the write is through an alias, the producer itself needs ordinary storage.
+    fn refuse_list_return(&self, id: usize) {
+        let mut pending = self.pending.borrow_mut();
+        if pending[id].return_context_refused {
+            return;
+        }
+        pending[id].return_context_refused = true;
+        pending[id].return_context = None;
+        if pending[id].return_context_consumers.is_empty() {
+            pending[id].returns = Some(Type::PythonObject);
+            pending[id].discovery = ReturnDiscovery::Independent;
+        }
+        for (consumer, index) in std::mem::take(&mut pending[id].return_context_consumers) {
+            pending[consumer].params[index] = Some(Type::PythonObject);
+        }
         drop(pending);
         self.layout_changed();
     }
@@ -2369,7 +2421,11 @@ impl Checker<'_> {
             && let Some(Binding::Definition(definition)) = self.resolve(&call.func)
             && let Some(producer) = self.functions.get(&definition)
         {
-            inference.demand_list_return(producer.id, actual, expected);
+            if inference.pending.borrow()[producer.id].return_context_refused {
+                inference.widen_parameter(consumer, index, Type::PythonObject);
+                return Type::PythonObject;
+            }
+            inference.demand_list_return(producer.id, actual, expected, Some((consumer, index)));
         }
         expected
     }
@@ -2391,6 +2447,7 @@ impl Checker<'_> {
             && let Some(producer) = self.functions.get(&definition)
             && inference.pending.borrow()[producer.id].return_context == Some(actual)
         {
+            inference.refuse_list_return(producer.id);
             true
         } else {
             false
