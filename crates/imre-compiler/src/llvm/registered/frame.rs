@@ -1939,14 +1939,23 @@ impl RegisteredFrame<'_, '_> {
         exec: Option<super::sites::CompiledExec>,
     ) -> (&'static str, usize) {
         if let Some(child) = exec {
-            self.output.declare(
-                |d| &mut d.exec_operand,
-                "declare i64 @imre_dyn_exec_operand(ptr, i64, i64, ptr, i32, ptr)\n",
-            );
             let source = &mut values[0];
             for child in child.alternatives {
+                let name = if child.expression {
+                    self.output.declare(
+                        |d| &mut d.eval_operand,
+                        "declare i64 @imre_dyn_eval_operand(ptr, i64, i64, ptr, i32, ptr)\n",
+                    );
+                    "imre_dyn_eval_operand"
+                } else {
+                    self.output.declare(
+                        |d| &mut d.exec_operand,
+                        "declare i64 @imre_dyn_exec_operand(ptr, i64, i64, ptr, i32, ptr)\n",
+                    );
+                    "imre_dyn_exec_operand"
+                };
                 *source = self.checked(&format!(
-                    "call i64 @imre_dyn_exec_operand(ptr %ctx, i64 {callable}, i64 {source}, ptr {}, i32 {}, ptr {})",
+                    "call i64 @{name}(ptr %ctx, i64 {callable}, i64 {source}, ptr {}, i32 {}, ptr {})",
                     child.entry, child.flags, child.source
                 ));
             }

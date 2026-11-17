@@ -844,12 +844,29 @@ impl<'a> Escape<'a, '_> {
         }
         if let Some(source_callable) = source_callable
             && let Some(operand) = call.arguments.args.first()
+            && !(source_callable == SourceCallable::Builtin(ExecutionIntrinsic::Eval)
+                && call
+                    .func
+                    .as_name_expr()
+                    .is_some_and(|name| name.id == "eval")
+                && operand.is_string_literal_expr())
             && !(source_callable == SourceCallable::Builtin(ExecutionIntrinsic::Exec)
                 && (crate::frontend::exec_source_operand(call)
                     .is_some_and(Expr::is_string_literal_expr)
                     || self
                         .session
                         .selected_exec_literal(self.model.file(), self.parsed, self.model, call)
+                        .is_some()
+                    || self
+                        .session
+                        .selected_compiled_exec_source(
+                            self.model.file(),
+                            self.parsed,
+                            self.model,
+                            call,
+                            ruff_db::source::source_text(self.model.db(), self.model.file())
+                                .as_str(),
+                        )
                         .is_some()
                     || self
                         .linked_exec
@@ -925,6 +942,59 @@ pub(super) fn selected_module_exec_literal<'a>(
         return None;
     }
     assigned_value(model.db(), file, parsed, operand, Expr::is_name_expr)?.as_string_literal_expr()
+}
+
+/// Fold a bounded, side-effect-free source expression without executing Python.
+///
+/// This recognizes shapes such as `'x = ' + '1' * 3`, while deliberately
+/// refusing arbitrary values, deep trees, and results larger than one MiB.
+fn bounded_source_string(expression: &Expr, outer: &str) -> Option<String> {
+    const MAX_SOURCE: usize = 1 << 20;
+    fn fold(expression: &Expr, outer: &str, depth: usize) -> Option<String> {
+        if depth == 0 {
+            return None;
+        }
+        match expression {
+            Expr::StringLiteral(literal) => {
+                let text = crate::frontend::exec_literal_text(literal, outer).ok()?;
+                (text.len() <= MAX_SOURCE).then(|| text.to_owned())
+            }
+            Expr::BinOp(binary) if binary.op == ruff_python_ast::Operator::Add => {
+                let mut left = fold(&binary.left, outer, depth - 1)?;
+                let right = fold(&binary.right, outer, depth - 1)?;
+                if left.len().checked_add(right.len())? > MAX_SOURCE {
+                    return None;
+                }
+                left.try_reserve_exact(right.len()).ok()?;
+                left.push_str(&right);
+                Some(left)
+            }
+            Expr::BinOp(binary) if binary.op == ruff_python_ast::Operator::Mult => {
+                let text = fold(&binary.left, outer, depth - 1)?;
+                let ruff_python_ast::Number::Int(count) =
+                    &binary.right.as_number_literal_expr()?.value
+                else {
+                    return None;
+                };
+                let count = usize::try_from(count.as_i64()?).ok()?;
+                if text.is_empty() || count == 0 {
+                    return Some(String::new());
+                }
+                let size = text.len().checked_mul(count)?;
+                if size > MAX_SOURCE {
+                    return None;
+                }
+                let mut output = String::new();
+                output.try_reserve_exact(size).ok()?;
+                for _ in 0..count {
+                    output.push_str(&text);
+                }
+                Some(output)
+            }
+            _ => None,
+        }
+    }
+    fold(expression, outer, 32)
 }
 
 /// Give resolution and lowering the same checked virtual file for this decoded operand.
@@ -1038,6 +1108,52 @@ impl Session {
         selected_module_exec_literal(model, file, parsed, call)
     }
 
+    /// Recognize a fixed builtin `compile` result consumed by builtin `exec`.
+    ///
+    /// ```python
+    /// code = compile('answer = ' + '3' * 2, '<generated>', 'exec')
+    /// exec(code, namespace)
+    /// ```
+    ///
+    /// Only a sole reaching assignment and bounded literal source are linked;
+    /// the runtime checks the selected callable and code object's source again.
+    fn selected_compiled_exec_source(
+        &self,
+        file: File,
+        parsed: &ParsedModuleRef,
+        model: &SemanticModel<'_>,
+        call: &ExprCall,
+        outer: &str,
+    ) -> Option<String> {
+        if self.reads_custom_builtins(file, parsed, &call.func)
+            || ExecutionIntrinsic::resolve(model, &call.func) != Some(ExecutionIntrinsic::Exec)
+        {
+            return None;
+        }
+        let operand = crate::frontend::exec_source_operand(call)?;
+        let compiled =
+            assigned_value(&self.db, file, parsed, operand, Expr::is_name_expr)?.as_call_expr()?;
+        if self.reads_custom_builtins(file, parsed, &compiled.func)
+            || !super::resolves_to_stdlib_function(model, &compiled.func, "builtins", "compile")
+            || !compiled.arguments.keywords.is_empty()
+        {
+            return None;
+        }
+        let [source, filename, mode] = compiled.arguments.args.as_ref() else {
+            return None;
+        };
+        if filename
+            .as_string_literal_expr()?
+            .value
+            .to_str()
+            .contains('\0')
+            || mode.as_string_literal_expr()?.value.to_str() != "exec"
+        {
+            return None;
+        }
+        bounded_source_string(source, outer)
+    }
+
     /// The launcher can link the initial text of a fixed sys.argv operand. The
     /// runtime still evaluates the operand and checks its exact text at the call.
     fn selected_launcher_exec_source<'a>(
@@ -1080,6 +1196,15 @@ impl Session {
         let model = SemanticModel::new(&self.db, self.db.program_file(file));
         self.selected_exec_literal(file, &self.parsed(file), &model, call)
             .is_some()
+            || self
+                .selected_compiled_exec_source(
+                    file,
+                    &self.parsed(file),
+                    &model,
+                    call,
+                    ruff_db::source::source_text(&self.db, file).as_str(),
+                )
+                .is_some()
     }
 
     /// Resolve fixed operands after the selected parent's immediate imports are registered.
@@ -1137,6 +1262,10 @@ impl Session {
                     crate::frontend::exec_literal_text(literal, source).map_err(str::to_owned),
                     false,
                 );
+            } else if let Some(original) =
+                self.selected_compiled_exec_source(parent, parsed, &model, call, source)
+            {
+                add(Ok(&original), false);
             } else if let Some(original) =
                 self.selected_launcher_exec_source(parent, parsed, &model, call, launcher_arguments)
             {
