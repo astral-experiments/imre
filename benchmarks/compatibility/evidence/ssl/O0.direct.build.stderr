@@ -1,0 +1,2 @@
+ Compiling /workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_ssl.py (-O0)
+/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_ssl.py:43:1: Imre: imports must precede executable module statements

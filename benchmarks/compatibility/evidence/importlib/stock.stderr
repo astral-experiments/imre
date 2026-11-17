@@ -1,0 +1,9 @@
+test_nonmodule_with_methods (__main__.Frozen_NonModuleExtensionTests.test_nonmodule_with_methods) ... ok
+test_null_slots (__main__.Frozen_NonModuleExtensionTests.test_null_slots) ... ok
+test_nonmodule_with_methods (__main__.Source_NonModuleExtensionTests.test_nonmodule_with_methods) ... ok
+test_null_slots (__main__.Source_NonModuleExtensionTests.test_null_slots) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.002s
+
+OK

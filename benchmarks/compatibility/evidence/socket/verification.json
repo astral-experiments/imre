@@ -1,0 +1,33 @@
+{
+  "post_replay_artifact_verification": {
+    "/workspace/imre/target/release/imre": {
+      "recorded": "7231eb3143cf0299ccf2cd37c1929d767b4bdeb8e9170ec3ba6ce5261cc2bbba",
+      "observed": "7231eb3143cf0299ccf2cd37c1929d767b4bdeb8e9170ec3ba6ce5261cc2bbba",
+      "matches": true
+    },
+    "/workspace/imre/target/release/libimre_runtime.a": {
+      "recorded": "896d8a5aa2404ded4a998334b4712abe33374175f63cf0111755b08682a582e5",
+      "observed": "896d8a5aa2404ded4a998334b4712abe33374175f63cf0111755b08682a582e5",
+      "matches": true
+    },
+    "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang": {
+      "recorded": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+      "observed": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+      "matches": true
+    },
+    "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14": {
+      "recorded": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+      "observed": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+      "matches": true
+    }
+  },
+  "source_git_blob": "249bfeaa14cf374a047c58176da6cbb6e6ff43f4",
+  "receipt_validator": {
+    "argv": [
+      "python3",
+      "benchmarks/compatibility/scorecard.py",
+      "--validate"
+    ],
+    "exit_code": 0
+  }
+}

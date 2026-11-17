@@ -1,0 +1,100 @@
+{
+  "runner_revision": "80bce5b7d77c79e5478ec7f38e923d533b966e88",
+  "runner_source": "benchmarks/compatibility/replay_stdlib.py",
+  "runner_sha256": "b196330d76be57929ff4b937e4890d439ad1744c563d75a80416b0b92d55de39",
+  "reporting_adapter_sha256": "bf850d43bcf661a348062cb4e50329f9eb38fb0adcea9e2fbc18e3cef990a28e",
+  "reporting_adapter_purpose": "Preserve the raw two-line unittest description and derive a parseable result sidecar; see normalization.json. Original tests, fixtures, runner source, and scorecard validator were unchanged.",
+  "cwd": "/workspace/scratch/argparse-scorecard",
+  "argv": [
+    "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "-B",
+    "/workspace/scratch/run_argparse_replay.py",
+    "--python",
+    "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "--cpython",
+    "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115",
+    "--imre",
+    "/workspace/imre/target/release/imre",
+    "--runtime",
+    "/workspace/imre/target/release/libimre_runtime.a",
+    "--clang",
+    "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+    "--family",
+    "argparse",
+    "--manifest",
+    "benchmarks/cpython_stdlib/full/argparse/UPSTREAM.json",
+    "--timeout",
+    "600"
+  ],
+  "environment": {
+    "PYTHONDONTWRITEBYTECODE": "1"
+  },
+  "compile_timeout_seconds": 600,
+  "run_timeout_seconds": 600,
+  "result": {
+    "raw_denominator": 1893,
+    "receipts": 1893,
+    "stock_passing": 1893,
+    "paired": 0,
+    "omissions": 0,
+    "outcomes": {
+      "stock": {
+        "pass": 1893
+      },
+      "O0": {
+        "not_run": 1893
+      },
+      "O3": {
+        "not_run": 1893
+      }
+    },
+    "native_build_exit_codes": {
+      "O0": 1,
+      "O3": 1
+    },
+    "native_build_diagnostics_per_tier": 8,
+    "native_build_timeouts": 0,
+    "native_run_timeouts": 0
+  },
+  "supplemental_reachable_check": {
+    "argv": [
+      "/workspace/imre/target/release/imre",
+      "check",
+      "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_argparse.py",
+      "--module-root",
+      "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "--reachable-only"
+    ],
+    "timeout_seconds": 60,
+    "exit_code": 1,
+    "stdout": "reachable-check.stdout",
+    "stderr": "reachable-check.stderr",
+    "reason": "The documented reachable-only mode reports the same type-check blocker before collection."
+  },
+  "validator": {
+    "argv": [
+      "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+      "-B",
+      "benchmarks/compatibility/scorecard.py",
+      "--validate"
+    ],
+    "exit_code": 0
+  },
+  "artifact_hashes_reverified_after_replay": true,
+  "evidence_sha256": {
+    "O0.build.stderr": "7029e34e6a6c9adf5396dce9a4fff03d85d272168528811d1dfc12786723668d",
+    "O0.build.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "O3.build.stderr": "2ea1a574fc880bd7e466aab6d5226a2eebb2396755576efb802894df70c94dec",
+    "O3.build.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "build.json": "00374fb46a1cd5a278745132139dcb3b2812922ca5684e368d3ba1f72e914db7",
+    "cargo-build.log": "e724dd58d5f0a8d07024e42198dd18d117ff704ac55cd138ddbea048434e4b5b",
+    "fixtures.json": "b45f0922670de55f12ed453040656fccaba7a2527c4692f67e4cc70e09b1ee12",
+    "normalization.json": "eba405df4d80c17bd88d1c5237edd88d51e5777feb4f2e1f35470f699ccba602",
+    "reachable-check.stderr": "48bc32856f926298118ab8903c00e7e826191251dcce3c9c578688a00a4fea73",
+    "reachable-check.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "run.json": "5bdf2d48228233b048129f16c62f3cb9aa92794050f58e8df986a30d8986076b",
+    "stock.results.stderr": "04141afe21e89a5c03a79e1e4d8dfe8199406a8d5a5810c85af664b6e1780859",
+    "stock.stderr": "b6c37851b5ae9d6415a52ac7551391425dc8ab00ae312c4aca673bd8db66e779",
+    "stock.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

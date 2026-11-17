@@ -112,7 +112,7 @@ with Rust-competitive performance.
 
 Revision `49f0dc2ef78b82692e333252faf71b4fc7730949` · CPython **3.14.5** · Linux x86-64. These are original-test receipts at this revision, not cumulative credits.
 
-Frozen 45-family cohort: **0 pinned receipts** of **16,225 raw upstream originals**, **0 verified paired passes**; **16,225 originals have no receipt**.
+Frozen 45-family cohort: **4,179 pinned receipts** of **16,225 raw upstream originals**, **0 verified paired passes**; **12,046 originals have no receipt**.
 
 Supplemental pilots, outside the frozen cohort: **3 receipts** of **3 originals**, **3 verified paired passes**.
 
@@ -122,7 +122,10 @@ Scripts: **0 of 84 original commands have receipts**, **0 verified paired passes
 
 | Family | Raw originals | Stock | O0 | O3 | Paired at pin | Historical mixed-revision credits |
 | --- | ---: | --- | --- | --- | --- | ---: |
-| `argparse` | 1,893 | not run | not run | not run | unknown (not run) | 1,887 |
+| `argparse` | 1,893 | 1,893 pass | not run | not run | 0 verified | 1,887 |
+| `importlib` | 1,345 | 1,328 pass, 17 skip | not run | not run | 0 verified | 432 |
+| `socket` | 746 | 614 pass, 132 skip | not run | not run | 0 verified | 110 |
+| `ssl` | 195 | 180 pass, 15 skip | not run | not run | 0 verified | 66 |
 
 #### Supplemental pilots
 
