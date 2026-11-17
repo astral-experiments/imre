@@ -1794,10 +1794,8 @@ print("result", call(b=2, a=1))
         )
         .unwrap();
         std::fs::write(&path, "from difflib import SequenceMatcher\nprint(SequenceMatcher()._SequenceMatcher__chain_b())\n").unwrap();
-        let shadow = super::compile_file(&path, None, &CompileOptions::default())
-            .unwrap()
-            .llvm_ir;
-        assert!(!shadow.contains("call i64 @imre_dyn_difflib_chain_b("));
+        let shadow = super::compile_file(&path, None, &CompileOptions::default()).unwrap_err();
+        assert!(shadow.contains("standard-library shadowing is unsupported"));
     }
 
     #[test]
