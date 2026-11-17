@@ -2522,7 +2522,7 @@ impl Context {
                 module_definition: true,
                 // The supported module compile modes admit only future flags.
                 flags: module.flags,
-                flags_complete: true,
+                flags_and_body: 1,
                 ..Default::default()
             },
             name,

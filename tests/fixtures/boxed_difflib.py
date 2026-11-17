@@ -20,6 +20,10 @@ def current():
         "--- \n", "+++ \n", "@@ -1 +1 @@\n", "-old\n", "+new\n"
     ]
     check_live_matcher_state()
+    check_gc_chain_source()
+    check_constructor_dispatch()
+    check_unicode_index_order_and_popularity()
+    check_matching_blocks_dispatch()
 
 
 def check_live_matcher_state():
@@ -65,6 +69,20 @@ def check_live_matcher_state():
     finally:
         Match.__new__ = previous_new
 
+    constructor_globals = Match.__new__.__globals__
+    previous_tuple_new = constructor_globals["_tuple_new"]
+
+    def inspect_tuple_new(cls, parts):
+        frame = sys._getframe(2)
+        assert (frame.f_locals["besti"], frame.f_locals["bestj"], frame.f_locals["bestsize"]) == parts
+        return tuple.__new__(cls, parts)
+
+    constructor_globals["_tuple_new"] = inspect_tuple_new
+    try:
+        assert tuple(SequenceMatcher(None, "xab", "yab").find_longest_match()) == (1, 1, 2)
+    finally:
+        constructor_globals["_tuple_new"] = previous_tuple_new
+
     events = []
 
     def finalize(value):
@@ -80,3 +98,94 @@ def check_live_matcher_state():
                            [("y", [0]), ("a", [1]), ("b", [2])])]
     finally:
         del SequenceMatcher.__del__
+
+
+def check_gc_chain_source():
+    import gc
+    import sys
+
+    seen = []
+    old = gc.get_threshold()
+
+    def observe(phase, info):
+        if phase != "start":
+            return
+        frame = sys._getframe(1)
+        while frame is not None:
+            if frame.f_code.co_name == "__chain_b":
+                seen.append(True)
+                break
+            frame = frame.f_back
+
+    gc.callbacks.append(observe)
+    try:
+        gc.set_threshold(1, 1, 1)
+        matcher = SequenceMatcher(None, "", "abcdefghij" * 20, False)
+    finally:
+        gc.callbacks.remove(observe)
+        gc.set_threshold(*old)
+    assert seen and len(matcher.b2j) == 10
+
+
+def check_constructor_dispatch():
+    matcher = SequenceMatcher(None, "a", "b", False)
+    assert list(matcher.__dict__) == [
+        "isjunk", "a", "b", "autojunk", "matching_blocks", "opcodes",
+        "fullbcount", "b2j", "bjunk", "bpopular",
+    ]
+    seen = []
+    original = SequenceMatcher.set_seqs
+
+    def observe(self, a, b):
+        seen.append((self.isjunk, self.a, self.b, self.autojunk, a, b))
+
+    SequenceMatcher.set_seqs = observe
+    try:
+        SequenceMatcher(None, "a", "b", False)
+    finally:
+        SequenceMatcher.set_seqs = original
+    assert seen == [(None, None, None, False, "a", "b")]
+
+
+def check_unicode_index_order_and_popularity():
+    text = "雪" * 4 + "Ω" * 192 + "é🧪éx"
+    matcher = SequenceMatcher(None, "", text)
+    assert list(matcher.b2j.items()) == [("é", [196, 198]), ("🧪", [197]), ("x", [199])]
+    assert matcher.bjunk == set()
+    assert matcher.bpopular == {"雪", "Ω"}
+    matcher = SequenceMatcher(None, "", text, autojunk=False)
+    assert list(matcher.b2j) == ["雪", "Ω", "é", "🧪", "x"]
+    assert matcher.b2j["雪"] == [0, 1, 2, 3]
+
+
+def check_matching_blocks_dispatch():
+    import sys
+
+    matcher = SequenceMatcher(None, "abxcd", "abycd")
+    state = matcher.__dict__
+    blocks = matcher.get_matching_blocks()
+    assert state["matching_blocks"] is blocks
+    assert blocks == [Match(0, 0, 2), Match(3, 3, 2), Match(5, 5, 0)]
+    blocks[0] = Match(0, 0, 1)
+    assert matcher.get_matching_blocks() is blocks and matcher.ratio() == 0.6
+    marker = object()
+    matcher.matching_blocks = marker
+    assert matcher.get_matching_blocks() is marker
+
+    previous_make = Match.__dict__["_make"]
+    seen = []
+
+    def inspect_make(cls, triple):
+        caller = sys._getframe(1)
+        assert caller.f_code.co_name == "get_matching_blocks"
+        seen.append(tuple(caller.f_locals["non_adjacent"]))
+        return tuple.__new__(cls, triple)
+
+    Match._make = classmethod(inspect_make)
+    try:
+        assert SequenceMatcher(None, "a", "a").get_matching_blocks() == [
+            Match(0, 0, 1), Match(1, 1, 0)
+        ]
+    finally:
+        Match._make = previous_make
+    assert seen == [((0, 0, 1), (1, 1, 0))] * 2

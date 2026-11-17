@@ -2,10 +2,48 @@
 
 use super::super::{
     Context, ffi,
-    value::{Code, Id, NONE, Result, Value},
+    value::{self, Code, Id, NONE, Result, Value},
 };
 
+mod blocks;
+mod chain_unicode;
+mod constructor;
 mod matcher;
+
+/// Provenance packed into the authenticated bundled function's code definition.
+#[derive(Clone, Copy)]
+#[repr(u8)]
+enum DifflibBody {
+    Init = value::DIFFLIB_INIT_BODY as u8,
+    SetSeqs = value::DIFFLIB_SET_SEQS_BODY as u8,
+    SetSeq1 = value::DIFFLIB_SET_SEQ1_BODY as u8,
+    SetSeq2 = value::DIFFLIB_SET_SEQ2_BODY as u8,
+    ChainB = value::DIFFLIB_CHAIN_B_BODY as u8,
+    Find = value::DIFFLIB_FIND_BODY as u8,
+    GetBlocks = value::DIFFLIB_GET_BLOCKS_BODY as u8,
+}
+
+/// Fuse a pristine constructor only after normal lookup, binding, and Python frame entry.
+///
+/// # Safety
+/// The compiler passes a live context, entered scope, and original source entry.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_difflib_init(
+    raw: *mut Context,
+    scope: Id,
+    fallback: Code,
+) -> Id {
+    // SAFETY: this wrapper is reachable only from an authenticated entered Python frame.
+    let ctx = unsafe { &mut *raw };
+    match constructor::attempt(ctx, scope) {
+        Ok(Some(value)) => ffi::finish(ctx, Ok(value)),
+        Ok(None) => {
+            // SAFETY: the original source body uses the same context and bound frame.
+            unsafe { fallback(raw, scope) }
+        }
+        Err(error) => ffi::finish(ctx, Err(error)),
+    }
+}
 
 /// Run the canonical string constructor path after Python method lookup, binding, and frame entry.
 ///
@@ -51,6 +89,12 @@ fn receiver(ctx: &Context, scope: Id) -> Option<Id> {
 
 /// Skipping source statements must not skip a Python observer or change an allocation trace.
 fn unobserved_checkpoints(ctx: &Context) -> bool {
+    #[cfg(unix)]
+    if crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Acquire)
+        || !unobserved_signal_handlers(ctx)
+    {
+        return false;
+    }
     if ctx.heap.allocation_traces.is_tracing()
         || ctx.heap.gc_callback(0).is_some()
         || ctx.heap.has_weak_values
@@ -79,6 +123,23 @@ fn unobserved_checkpoints(ctx: &Context) -> bool {
         .finalizers_within(&[input, buffer, raw, stdout, stderr])
 }
 
+/// Source checkpoints can deliver a signal to a Python handler with the interrupted frame.
+#[cfg(unix)]
+fn unobserved_signal_handlers(ctx: &Context) -> bool {
+    let default = ctx.builtins.get("_signal.SIG_DFL").copied();
+    let ignore = ctx.builtins.get("_signal.SIG_IGN").copied();
+    let interrupt = ctx.builtins.get("_signal.default_int_handler").copied();
+    ctx.signal_handlers
+        .iter()
+        .enumerate()
+        .all(|(number, &handler)| {
+            handler == NONE
+                || Some(handler) == default
+                || Some(handler) == ignore
+                || (number == libc::SIGINT as usize && Some(handler) == interrupt)
+        })
+}
+
 fn canonical_builtins(ctx: &Context, root: Id, names: &[&str]) -> bool {
     let Some(builtins) = ctx.source_builtins else {
         return false;
@@ -89,7 +150,64 @@ fn canonical_builtins(ctx: &Context, root: Id, names: &[&str]) -> bool {
     })
 }
 
-/// Build the public b2j dictionary and junk/popular sets from flat ASCII character positions.
+/// Validate the direct original descriptor and its immutable defining class/scope provenance.
+fn trusted_method(ctx: &Context, class: Id, root: Id, name: &str, body: DifflibBody) -> bool {
+    let Value::Class {
+        scope: class_scope,
+        ancestors,
+        ..
+    } = ctx.heap.get(class)
+    else {
+        return false;
+    };
+    if ctx.scope_data(*class_scope).parent != Some(root)
+        || ancestors.len() != 1
+        || ancestors.first() != ctx.builtins.get("object")
+    {
+        return false;
+    }
+    let Some(function) = ctx.own_class_attr(class, name) else {
+        return false;
+    };
+    let Value::Function { code, scope, .. } = ctx.heap.get(function) else {
+        return false;
+    };
+    *scope == root && ctx.code_object(*code).definition.provider_body() == body as u8
+}
+
+#[derive(Clone, Copy)]
+enum ChainEncoding {
+    Ascii,
+    Unicode,
+}
+
+fn chain_encoding(ctx: &Context, b: Id) -> Option<ChainEncoding> {
+    let Value::Str(text) = ctx.heap.get(b) else {
+        return None;
+    };
+    if text.is_ascii() {
+        Some(ChainEncoding::Ascii)
+    } else if chain_unicode::can_pack(text) {
+        Some(ChainEncoding::Unicode)
+    } else {
+        None
+    }
+}
+
+fn build_chain(
+    ctx: &mut Context,
+    receiver: Id,
+    b: Id,
+    autojunk: bool,
+    encoding: ChainEncoding,
+) -> Result<()> {
+    match encoding {
+        ChainEncoding::Ascii => build_chain_ascii(ctx, receiver, b, autojunk),
+        ChainEncoding::Unicode => chain_unicode::build(ctx, receiver, b, autojunk),
+    }
+}
+
+/// Build public character positions from a flat ASCII or packed Unicode index.
 fn chain_b(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     let Some(receiver) = receiver(ctx, scope) else {
         return Ok(None);
@@ -103,9 +221,9 @@ fn chain_b(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     let Some(b) = ctx.plain_instance_field(receiver, "b") else {
         return Ok(None);
     };
-    if !matches!(ctx.heap.get(b), Value::Str(text) if text.is_ascii()) {
+    let Some(encoding) = chain_encoding(ctx, b) else {
         return Ok(None);
-    }
+    };
     let Some(autojunk) = ctx.plain_instance_field(receiver, "autojunk") else {
         return Ok(None);
     };
@@ -127,7 +245,12 @@ fn chain_b(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     {
         return Ok(None);
     }
+    build_chain(ctx, receiver, b, autojunk, encoding)?;
+    Ok(Some(NONE))
+}
 
+/// Materialize public ASCII character positions after the caller has completed every fallback guard.
+fn build_chain_ascii(ctx: &mut Context, receiver: Id, b: Id, autojunk: bool) -> Result<()> {
     let mut counts = [0usize; 256];
     let mut offsets = [0usize; 257];
     let mut order = [0u8; 256];
@@ -135,7 +258,7 @@ fn chain_b(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     let mut positions = Vec::new();
     let n = {
         let Value::Str(b) = ctx.heap.get(b) else {
-            return Ok(None);
+            unreachable!()
         };
         let bytes = b.as_bytes();
         debug_assert!(bytes.is_ascii());
@@ -211,7 +334,7 @@ fn chain_b(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
         ctx.heap.keep(key);
         super::super::builtins::set_add(ctx, popular, key)?;
     }
-    Ok(Some(NONE))
+    Ok(())
 }
 
 /// Search the current public `b2j`/`bjunk` state from the original bound source method.
@@ -230,6 +353,28 @@ pub(super) unsafe extern "C" fn imre_dyn_difflib_find_longest(
         Ok(Some(value)) => ffi::finish(ctx, Ok(value)),
         Ok(None) => {
             // SAFETY: fallback is the original source entry for this same frame and scope.
+            unsafe { fallback(raw, scope) }
+        }
+        Err(error) => ffi::finish(ctx, Err(error)),
+    }
+}
+
+/// Run the canonical matching-block path after ordinary binding and source frame entry.
+///
+/// # Safety
+/// The compiler supplies the entered source frame and its original linked fallback entry.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_difflib_get_blocks(
+    raw: *mut Context,
+    scope: Id,
+    fallback: Code,
+) -> Id {
+    // SAFETY: the authenticated compiler wrapper enters this exact source frame first.
+    let ctx = unsafe { &mut *raw };
+    match get_blocks(ctx, scope) {
+        Ok(Some(value)) => ffi::finish(ctx, Ok(value)),
+        Ok(None) => {
+            // SAFETY: fallback is the original source body for this context and bound frame.
             unsafe { fallback(raw, scope) }
         }
         Err(error) => ffi::finish(ctx, Err(error)),
@@ -492,6 +637,160 @@ fn plain_match_constructor(ctx: &Context, root: Id) -> Option<Id> {
     Some(constructor)
 }
 
+/// Require the genuine callback-free namedtuple classmethod and its live captured values.
+fn plain_match_make(ctx: &Context, class: Id) -> bool {
+    if [
+        "__iter__",
+        "__lt__",
+        "__gt__",
+        "__eq__",
+        "__ne__",
+        "__le__",
+        "__ge__",
+        "__len__",
+        "__del__",
+        "__getattribute__",
+    ]
+    .iter()
+    .any(|name| ctx.own_class_attr(class, name).is_some())
+    {
+        return false;
+    }
+    let Some(descriptor) = ctx.own_class_attr(class, "_make") else {
+        return false;
+    };
+    let Value::ClassMethod { callable, .. } = ctx.heap.get(descriptor) else {
+        return false;
+    };
+    let Value::Function { code, scope, .. } = ctx.heap.get(*callable) else {
+        return false;
+    };
+    if ctx.code_object(*code).definition.provider_body()
+        != value::COLLECTIONS_NAMEDTUPLE_MAKE_BODY as u8
+    {
+        return false;
+    }
+    let environment = ctx.scope_data(*scope);
+    if !environment.closure.environment || environment.closure.cells.len() != 3 {
+        return false;
+    }
+    let Some(root) = environment.parent else {
+        return false;
+    };
+    let globals = ctx.scope_data(root);
+    if globals.module != "collections" || globals.parent.is_some() || globals.exec_globals.is_some()
+    {
+        return false;
+    }
+    let Some(module) = ctx.dict_named_item(ctx.modules, "collections") else {
+        return false;
+    };
+    if !matches!(ctx.heap.get(module), Value::Module { scope, .. } if *scope == root) {
+        return false;
+    }
+    ctx.scope_name(*scope, "tuple_new") == ctx.builtins.get("tuple.__new__").copied()
+        && ctx.scope_name(*scope, "_len") == ctx.builtins.get("len").copied()
+        && ctx
+            .scope_name(*scope, "num_fields")
+            .and_then(|value| exact_index(ctx, value))
+            == Some(3)
+}
+
+/// Reject a virtual-method shadow even if an exposed instance dictionary contains callback-capable keys.
+fn no_instance_shadow(ctx: &Context, receiver: Id, name: &str) -> bool {
+    let Value::Instance {
+        fields, namespace, ..
+    } = ctx.heap.get(receiver)
+    else {
+        return false;
+    };
+    if fields.contains_key(name) {
+        return false;
+    }
+    namespace.is_none_or(|namespace| {
+        ctx.dict_storage(namespace)
+            .and_then(|dict| ctx.scalar_dict_name(dict, name))
+            == Some(None)
+    })
+}
+
+/// Source global and builtin lookup must neither enter Python nor select replacements.
+fn block_builtins(ctx: &Context, root: Id) -> bool {
+    let Some(builtins) = ctx.source_builtins else {
+        return false;
+    };
+    ["len", "range", "list", "map"].iter().all(|name| {
+        ctx.scalar_scope_name(root, name) == Some(None)
+            && ctx.scalar_dict_name(builtins, name) == Some(ctx.builtins.get(*name).copied())
+    })
+}
+
+/// Preserve the public matching-block list while computing canonical ASCII matches from one flat index.
+fn get_blocks(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
+    let Some(receiver) = receiver(ctx, scope) else {
+        return Ok(None);
+    };
+    let Some(current) = ctx.plain_instance_field(receiver, "matching_blocks") else {
+        return Ok(None);
+    };
+    if current != NONE {
+        return Ok(unobserved_checkpoints(ctx).then_some(current));
+    }
+    let root = ctx.root_scope(scope);
+    let Value::Instance { class, .. } = ctx.heap.get(receiver) else {
+        unreachable!()
+    };
+    if !trusted_method(
+        ctx,
+        *class,
+        root,
+        "get_matching_blocks",
+        DifflibBody::GetBlocks,
+    ) || !trusted_method(ctx, *class, root, "find_longest_match", DifflibBody::Find)
+        || !no_instance_shadow(ctx, receiver, "find_longest_match")
+        || !block_builtins(ctx, root)
+    {
+        return Ok(None);
+    }
+    let Some(constructor) = plain_match_constructor(ctx, root) else {
+        return Ok(None);
+    };
+    if ctx.scalar_scope_name(root, "Match") != Some(Some(constructor))
+        || !plain_match_make(ctx, constructor)
+    {
+        return Ok(None);
+    }
+    let Some(a) = ctx.plain_instance_field(receiver, "a") else {
+        return Ok(None);
+    };
+    let Some(b) = ctx.plain_instance_field(receiver, "b") else {
+        return Ok(None);
+    };
+    let (left, b_len) = match (ctx.heap.get(a), ctx.heap.get(b)) {
+        (Value::Str(left), Value::Str(right)) if left.is_ascii() && right.is_ascii() => {
+            (left.as_bytes(), right.len())
+        }
+        _ => return Ok(None),
+    };
+    let Some(b2j) = ctx.plain_instance_field(receiver, "b2j") else {
+        return Ok(None);
+    };
+    let Some(bjunk) = ctx.plain_instance_field(receiver, "bjunk") else {
+        return Ok(None);
+    };
+    let mut active = [false; 256];
+    for &byte in left {
+        active[byte as usize] = true;
+    }
+    if !unobserved_checkpoints(ctx) {
+        return Ok(None);
+    }
+    let Some(index) = ascii_positions(ctx, b2j, bjunk, &active, 0, b_len)? else {
+        return Ok(None);
+    };
+    blocks::build(ctx, receiver, a, b, &index, constructor)
+}
+
 fn find_longest(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     let Some(receiver) = receiver(ctx, scope) else {
         return Ok(None);
@@ -666,5 +965,27 @@ mod tests {
         let replacement = ctx.builtin("len");
         ctx.set_attr(class, "__new__", replacement).unwrap();
         assert_eq!(plain_match_constructor(&ctx, root), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn signal_handlers_that_can_inspect_the_interrupted_frame_require_source_checkpoints() {
+        let mut ctx: Context = ffi::new_context(
+            serde_json::json!({"paths": [], "python_version": "3.14"}),
+            ["imre"],
+        );
+        let default = ctx.signal_sentinel("_signal.SIG_DFL", libc::SIG_DFL);
+        let ignore = ctx.signal_sentinel("_signal.SIG_IGN", libc::SIG_IGN);
+        let interrupt = ctx.builtin("_signal.default_int_handler");
+        ctx.signal_handlers = vec![NONE; libc::SIGINT as usize + 3];
+        ctx.signal_handlers[1] = default;
+        ctx.signal_handlers[libc::SIGINT as usize] = interrupt;
+        ctx.signal_handlers[libc::SIGINT as usize + 1] = ignore;
+        assert!(super::unobserved_signal_handlers(&ctx));
+
+        ctx.signal_handlers[libc::SIGINT as usize + 1] = ctx.builtin("print");
+        assert!(!super::unobserved_signal_handlers(&ctx));
+        ctx.signal_handlers[libc::SIGINT as usize + 1] = interrupt;
+        assert!(!super::unobserved_signal_handlers(&ctx));
     }
 }

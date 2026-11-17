@@ -4650,7 +4650,7 @@ impl Context {
                     return self.code_local_field(obj, name);
                 }
                 "co_flags" => {
-                    if !code.definition.flags_complete {
+                    if !code.definition.flags_complete() {
                         return Err(Error::new(
                             "NotImplementedError",
                             "co_flags unavailable for this code object",
@@ -10010,7 +10010,8 @@ impl Context {
         entries.lookup_text(&self.heap, name).continue_value()
     }
 
-    fn scalar_scope_name(&self, scope: Id, name: &str) -> Option<Option<Id>> {
+    /// Resolve a scope binding only when dictionary lookup cannot enter Python.
+    pub(super) fn scalar_scope_name(&self, scope: Id, name: &str) -> Option<Option<Id>> {
         let frame = self.scope_data(scope);
         match frame
             .exec_globals

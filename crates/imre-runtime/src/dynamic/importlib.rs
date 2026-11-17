@@ -581,7 +581,7 @@ impl Context {
             value::CodeDefinition {
                 module_definition: true,
                 flags: flags.unwrap_or(0),
-                flags_complete: flags.is_some(),
+                flags_and_body: u8::from(flags.is_some()),
                 ..Default::default()
             },
             name_id,
