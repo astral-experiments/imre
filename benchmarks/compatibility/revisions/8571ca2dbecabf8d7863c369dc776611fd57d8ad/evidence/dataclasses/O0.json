@@ -1,0 +1,1959 @@
+{
+  "collection": 276,
+  "inventory_complete": true,
+  "originals": [
+    {
+      "id": "test.test_dataclasses.TestAbstract.test_abc_implementation",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 279
+    },
+    {
+      "id": "test.test_dataclasses.TestAbstract.test_maintain_abc",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 281
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_0_field_compare",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 283
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_1_field_compare",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 285
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_alternate_classmethod_constructor",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 287
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_class_attrs",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 289
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_class_marker",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 291
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_class_var",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 293
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_class_var_default_factory",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 295
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_class_var_frozen",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 297
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_class_var_no_default",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 299
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_class_var_with_default",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 301
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_classvar_default_factory",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 303
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_clean_traceback_from_fields_exception",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 305
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_compare_subclasses",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 307
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_dataclass_params_repr",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 309
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_dataclass_params_signature",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 311
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_dataclasses_pickleable",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 313
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_dataclasses_qualnames",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 315
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_default_factory",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 317
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_default_factory_derived",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 319
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_default_factory_not_called_if_value_given",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 321
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_default_factory_with_no_init",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 323
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_deliberately_mutable_defaults",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 325
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_disallowed_mutable_defaults",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 327
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_dont_include_other_annotations",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 329
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_dynamic_class_creation",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 331
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_dynamic_class_creation_using_field",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 333
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_eq_order",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 335
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_default",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 337
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_default_default_factory_error",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 339
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_metadata_custom_mapping",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 341
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_metadata_default",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 343
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_metadata_mapping",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 345
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_named_BUILTINS_frozen",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 347
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_named_like_builtin",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 349
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_named_like_builtin_frozen",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 351
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_named_object",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 353
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_named_object_frozen",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 355
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_named_self",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 357
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_no_default",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 359
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_order",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 361
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_recursive_repr",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 363
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_repr",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 365
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_with_special_single_underscore_names",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 367
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_function_annotations",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 369
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_generic_dataclasses",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 371
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_generic_dynamic",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 373
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_generic_extending",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 375
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_hash_field_rules",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 377
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_asdict",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 379
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_asdict_builtin_containers",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 381
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_asdict_builtin_object_containers",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 383
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_asdict_copy_values",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 385
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_asdict_defaultdict",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 387
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_asdict_factory",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 389
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_asdict_namedtuple",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 391
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_asdict_namedtuple_derived",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 393
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_asdict_namedtuple_key",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 395
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_asdict_nested",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 397
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_asdict_raises_on_classes",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 399
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_astuple",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 401
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_astuple_builtin_containers",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 403
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_astuple_builtin_object_containers",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 405
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_astuple_copy_values",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 407
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_astuple_defaultdict",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 409
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_astuple_factory",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 411
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_astuple_namedtuple",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 413
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_astuple_nested",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 415
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_astuple_raises_on_classes",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 417
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_fields_exception",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 419
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_fields_with_class_instance",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 421
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_incomplete_annotations",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 423
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_init_false_no_default",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 425
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_init_in_order",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 427
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_init_var",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 429
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_init_var_default_factory",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 431
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_init_var_inheritance",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 433
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_init_var_name_shadowing",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 435
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_init_var_no_default",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 437
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_init_var_preserve_type",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 439
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_init_var_with_default",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 441
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_intermediate_non_dataclass",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 443
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_is_dataclass",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 445
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_is_dataclass_genericalias",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 447
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_is_dataclass_inheritance",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 449
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_is_dataclass_when_getattr_always_returns",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 451
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_items_in_dicts",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 453
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_missing_default",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 455
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_missing_default_factory",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 457
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_missing_repr",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 459
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_named_init_params",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 461
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_no_fields",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 463
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_no_fields_but_member_variable",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 465
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_no_options",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 467
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_no_unhashable_default",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 469
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_not_in_compare",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 471
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_not_in_repr",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 473
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_not_other_dataclass",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 475
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_not_tuple",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 477
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_one_field_no_default",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 479
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_overwrite_fields_in_derived_class",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 481
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_overwrite_hash",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 483
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_post_init",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 485
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_post_init_classmethod",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 487
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_post_init_not_auto_added",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 489
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_post_init_staticmethod",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 491
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_post_init_super",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 493
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_recursive_annotation",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 495
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_simple_compare",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 497
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_two_fields_one_default",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 499
+    },
+    {
+      "id": "test.test_dataclasses.TestDescriptors.test_default_value",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 501
+    },
+    {
+      "id": "test.test_dataclasses.TestDescriptors.test_getting_field_calls_get",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 503
+    },
+    {
+      "id": "test.test_dataclasses.TestDescriptors.test_init_calls_set",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 505
+    },
+    {
+      "id": "test.test_dataclasses.TestDescriptors.test_lookup_on_class",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 507
+    },
+    {
+      "id": "test.test_dataclasses.TestDescriptors.test_lookup_on_instance",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 509
+    },
+    {
+      "id": "test.test_dataclasses.TestDescriptors.test_no_default_value",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 511
+    },
+    {
+      "id": "test.test_dataclasses.TestDescriptors.test_non_descriptor",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 513
+    },
+    {
+      "id": "test.test_dataclasses.TestDescriptors.test_set_name",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 515
+    },
+    {
+      "id": "test.test_dataclasses.TestDescriptors.test_setting_field_calls_set",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 517
+    },
+    {
+      "id": "test.test_dataclasses.TestDescriptors.test_setting_uninitialized_descriptor_field",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 519
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_docstring_deque_field",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 521
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_docstring_deque_field_with_default_factory",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 523
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_docstring_list_field",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 525
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_docstring_list_field_with_default_factory",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 527
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_docstring_no_fields",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 529
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_docstring_one_field",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 531
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_docstring_one_field_with_default",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 533
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_docstring_one_field_with_default_none",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 535
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_docstring_three_fields",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 537
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_docstring_two_fields",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 539
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_docstring_undefined_name",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 541
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_docstring_with_no_signature",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 543
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_docstring_with_unsolvable_forward_ref_in_init",
+      "occurrence": 1,
+      "outcome": "error",
+      "details": [
+        "no compiled Python body for <module> (<string>:1)"
+      ],
+      "line": 545
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_existing_docstring_not_overridden",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 547
+    },
+    {
+      "id": "test.test_dataclasses.TestEq.test_no_eq",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 549
+    },
+    {
+      "id": "test.test_dataclasses.TestEq.test_overwriting_eq",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 551
+    },
+    {
+      "id": "test.test_dataclasses.TestEq.test_recursive_eq",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 553
+    },
+    {
+      "id": "test.test_dataclasses.TestFieldNoAnnotation.test_field_without_annotation",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 555
+    },
+    {
+      "id": "test.test_dataclasses.TestFieldNoAnnotation.test_field_without_annotation_but_annotation_in_base",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 557
+    },
+    {
+      "id": "test.test_dataclasses.TestFieldNoAnnotation.test_field_without_annotation_but_annotation_in_base_not_dataclass",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 559
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_frozen",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 561
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_frozen_deepcopy_with_slots",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 563
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_frozen_deepcopy_without_slots",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 565
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_frozen_empty",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 567
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_frozen_hash",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 569
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_inherit",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 571
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_inherit_from_normal_class",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 573
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_inherit_frozen_from_nonfrozen",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 575
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_inherit_frozen_mutliple_inheritance",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 577
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_inherit_frozen_mutliple_inheritance_regular_mixins",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 579
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_inherit_nonfrozen_from_empty",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 581
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_inherit_nonfrozen_from_empty_frozen",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 583
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_inherit_nonfrozen_from_frozen",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 585
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_multiple_frozen_dataclasses_inheritance",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 587
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_non_frozen_normal_derived",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 589
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_non_frozen_normal_derived_from_empty_frozen",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 591
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_overwriting_frozen",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 593
+    },
+    {
+      "id": "test.test_dataclasses.TestHash.test_0_field_hash",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 595
+    },
+    {
+      "id": "test.test_dataclasses.TestHash.test_1_field_hash",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 597
+    },
+    {
+      "id": "test.test_dataclasses.TestHash.test_eq_only",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 599
+    },
+    {
+      "id": "test.test_dataclasses.TestHash.test_hash_no_args",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 601
+    },
+    {
+      "id": "test.test_dataclasses.TestHash.test_hash_rules",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 603
+    },
+    {
+      "id": "test.test_dataclasses.TestHash.test_unsafe_hash",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 605
+    },
+    {
+      "id": "test.test_dataclasses.TestInit.test_base_has_init",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 607
+    },
+    {
+      "id": "test.test_dataclasses.TestInit.test_inherit_from_protocol",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 609
+    },
+    {
+      "id": "test.test_dataclasses.TestInit.test_no_init",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 611
+    },
+    {
+      "id": "test.test_dataclasses.TestInit.test_overwriting_init",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 613
+    },
+    {
+      "id": "test.test_dataclasses.TestInitAnnotate.test_annotate_function",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 615
+    },
+    {
+      "id": "test.test_dataclasses.TestInitAnnotate.test_annotate_function_contains_forwardref",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 617
+    },
+    {
+      "id": "test.test_dataclasses.TestInitAnnotate.test_annotate_function_forwardref",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 619
+    },
+    {
+      "id": "test.test_dataclasses.TestInitAnnotate.test_annotate_function_init_false",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 621
+    },
+    {
+      "id": "test.test_dataclasses.TestInitAnnotate.test_annotate_function_not_replaced",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 623
+    },
+    {
+      "id": "test.test_dataclasses.TestInitAnnotate.test_init_false_forwardref",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 625
+    },
+    {
+      "id": "test.test_dataclasses.TestInitAnnotate.test_slots_true_init_false",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 627
+    },
+    {
+      "id": "test.test_dataclasses.TestKeywordArgs.test_KW_ONLY",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 629
+    },
+    {
+      "id": "test.test_dataclasses.TestKeywordArgs.test_KW_ONLY_as_string",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 631
+    },
+    {
+      "id": "test.test_dataclasses.TestKeywordArgs.test_KW_ONLY_twice",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 633
+    },
+    {
+      "id": "test.test_dataclasses.TestKeywordArgs.test_defaults",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 635
+    },
+    {
+      "id": "test.test_dataclasses.TestKeywordArgs.test_deferred_annotations",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 637
+    },
+    {
+      "id": "test.test_dataclasses.TestKeywordArgs.test_field_marked_as_kwonly",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 639
+    },
+    {
+      "id": "test.test_dataclasses.TestKeywordArgs.test_make_dataclass",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 641
+    },
+    {
+      "id": "test.test_dataclasses.TestKeywordArgs.test_match_args",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 643
+    },
+    {
+      "id": "test.test_dataclasses.TestKeywordArgs.test_no_classvar_kwarg",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 645
+    },
+    {
+      "id": "test.test_dataclasses.TestKeywordArgs.test_post_init",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 647
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_base",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 649
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_base_dataclass",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 651
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_cannot_be_pickled",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 653
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_class_var",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 655
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_dataclass_custom_decorator",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 657
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_dataclass_decorator_default",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 659
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_duplicate_field_names",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 661
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_funny_class_names_names",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 663
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_init_var",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 665
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_invalid_type_specification",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 667
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_keyword_field_names",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 669
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_module_attr",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 671
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_no_mutate_namespace",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 673
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_no_types",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 675
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_no_types_get_annotations",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 677
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_no_types_no_typing_import",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 679
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_non_identifier_field_names",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 681
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_other_params",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 683
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_pickle_support",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 685
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_simple",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 687
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_underscore_field_names",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 689
+    },
+    {
+      "id": "test.test_dataclasses.TestMatchArgs.test_bpo_43764",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 691
+    },
+    {
+      "id": "test.test_dataclasses.TestMatchArgs.test_explicit_match_args",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 693
+    },
+    {
+      "id": "test.test_dataclasses.TestMatchArgs.test_make_dataclasses",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 695
+    },
+    {
+      "id": "test.test_dataclasses.TestMatchArgs.test_match_args",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 697
+    },
+    {
+      "id": "test.test_dataclasses.TestMatchArgs.test_match_args_argument",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 699
+    },
+    {
+      "id": "test.test_dataclasses.TestOrdering.test_functools_total_ordering",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 701
+    },
+    {
+      "id": "test.test_dataclasses.TestOrdering.test_no_order",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 703
+    },
+    {
+      "id": "test.test_dataclasses.TestOrdering.test_overwriting_order",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 705
+    },
+    {
+      "id": "test.test_dataclasses.TestReplace.test",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 707
+    },
+    {
+      "id": "test.test_dataclasses.TestReplace.test_classvar",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 709
+    },
+    {
+      "id": "test.test_dataclasses.TestReplace.test_frozen",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 711
+    },
+    {
+      "id": "test.test_dataclasses.TestReplace.test_initvar_is_specified",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 713
+    },
+    {
+      "id": "test.test_dataclasses.TestReplace.test_initvar_with_default_value",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 715
+    },
+    {
+      "id": "test.test_dataclasses.TestReplace.test_invalid_field_name",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 717
+    },
+    {
+      "id": "test.test_dataclasses.TestReplace.test_invalid_object",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 719
+    },
+    {
+      "id": "test.test_dataclasses.TestReplace.test_no_init",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 721
+    },
+    {
+      "id": "test.test_dataclasses.TestReplace.test_recursive_repr",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 723
+    },
+    {
+      "id": "test.test_dataclasses.TestReplace.test_recursive_repr_indirection",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 725
+    },
+    {
+      "id": "test.test_dataclasses.TestReplace.test_recursive_repr_indirection_two",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 727
+    },
+    {
+      "id": "test.test_dataclasses.TestReplace.test_recursive_repr_misc_attrs",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 729
+    },
+    {
+      "id": "test.test_dataclasses.TestReplace.test_recursive_repr_two_attrs",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 731
+    },
+    {
+      "id": "test.test_dataclasses.TestRepr.test_no_repr",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 733
+    },
+    {
+      "id": "test.test_dataclasses.TestRepr.test_overwriting_repr",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 735
+    },
+    {
+      "id": "test.test_dataclasses.TestRepr.test_repr",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 737
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_add_slots_when_slots_exists",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 739
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_cant_inherit_from_iterator_slots",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 741
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_dataclass_derived_generic",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 743
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_dataclass_derived_generic_from_base",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 745
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_dataclass_derived_generic_from_slotted_base",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 747
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_dataclass_derived_generic_from_slotted_base_with_weakref",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 749
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_dataclass_derived_weakref_slot",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 751
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_dataclass_slot_dict",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 753
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_dataclass_slot_dict_ctype",
+      "occurrence": 1,
+      "outcome": "skip",
+      "details": [
+        "implementation detail specific to cpython"
+      ],
+      "line": 755
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_derived_added_field",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 757
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_frozen_pickle",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 759
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_frozen_slots_pickle_custom_state",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 761
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_generated_slots",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 763
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_generated_slots_value",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 765
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_original_class_is_gced",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 767
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_returns_new_class",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 769
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_simple",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 771
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_slots_no_weakref",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 773
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_slots_weakref",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 775
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_slots_weakref_base_str",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 777
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_slots_weakref_base_tuple",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 779
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_slots_with_default_factory_no_init",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 781
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_slots_with_default_no_init",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 783
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_slots_with_docs",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 785
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_slots_with_wrong_init_subclass",
+      "occurrence": 1,
+      "outcome": "skip",
+      "details": [
+        "implementation detail specific to cpython"
+      ],
+      "line": 787
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_weakref_slot_make_dataclass",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 789
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_weakref_slot_normal_base_weakref_slot",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 791
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_weakref_slot_subclass_no_weakref_slot",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 793
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_weakref_slot_subclass_weakref_slot",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 795
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_weakref_slot_without_slot",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 797
+    },
+    {
+      "id": "test.test_dataclasses.TestStringAnnotations.test_classvar",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 799
+    },
+    {
+      "id": "test.test_dataclasses.TestStringAnnotations.test_classvar_module_level_import",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 801
+    },
+    {
+      "id": "test.test_dataclasses.TestStringAnnotations.test_initvar",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 803
+    },
+    {
+      "id": "test.test_dataclasses.TestStringAnnotations.test_isnt_classvar",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 805
+    },
+    {
+      "id": "test.test_dataclasses.TestStringAnnotations.test_isnt_initvar",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 807
+    },
+    {
+      "id": "test.test_dataclasses.TestStringAnnotations.test_text_annotations",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 809
+    },
+    {
+      "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_class_cell_from_other_class",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 811
+    },
+    {
+      "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_dunder_class_with_new_property",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 813
+    },
+    {
+      "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_dunder_class_with_old_property",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 815
+    },
+    {
+      "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_empty_class_cell",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 817
+    },
+    {
+      "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_remembered_class",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 819
+    },
+    {
+      "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_slots_dunder_class_property_deleter",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 821
+    },
+    {
+      "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_slots_dunder_class_property_getter",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 823
+    },
+    {
+      "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_slots_dunder_class_property_setter",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 825
+    },
+    {
+      "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_wrapped",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 827
+    },
+    {
+      "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_zero_argument_super",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 829
+    }
+  ],
+  "fixtures": [],
+  "subtest_skips": [],
+  "summary": {
+    "event": "summary",
+    "run": 276,
+    "successful": false
+  },
+  "timed_out": false,
+  "argv": [
+    "/workspace/scratch/dataclasses-857-images/O0.exe"
+  ],
+  "exit_code": 0,
+  "timeout_seconds": 180,
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "00cfd96ef0f42dee4a8be25d281693e9f91967d6d974617f417edc512912c564"
+}

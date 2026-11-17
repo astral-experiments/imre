@@ -1,0 +1,7 @@
+stock {'pass': 275, 'skip': 1}
+O0 {'pass': 273, 'error': 1, 'skip': 2}
+O0 2 failed source opens; 13 failed source metadata probes; all ENOENT; 2 execs; withdrawn stream identical
+O3 {'pass': 273, 'error': 1, 'skip': 2}
+O3 2 failed source opens; 13 failed source metadata probes; all ENOENT; 2 execs; withdrawn stream identical
+276 exact schema-valid frozen originals, one finite cohort, identical ordered inventories; 273 strict pairs; no omissions
+stock/native launcher bytes, common cwd/environment/timeout, source blob/SHA, compiler/runtime/image hashes verified; combined strict validator and generated root table pass
