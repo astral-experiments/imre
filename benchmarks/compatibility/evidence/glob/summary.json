@@ -1,0 +1,28 @@
+{
+  "family": "glob",
+  "frozen_raw_originals": 24,
+  "stock_inventory": 24,
+  "repeated_occurrences": 0,
+  "tiers": {
+    "stock": {
+      "pass": 22,
+      "skip": 2
+    },
+    "O0": {
+      "pass": 21,
+      "skip": 2,
+      "not_run": 1
+    },
+    "O3": {
+      "pass": 21,
+      "skip": 2,
+      "not_run": 1
+    }
+  },
+  "paired": 21,
+  "blockers": [
+    "Intact O0 suite timed out at test_glob_many_open_files after nine passes and two skips. Intact O3 build timed out at 30 seconds; a concurrent direct O3 attempt timed out at 120 seconds. Individual named originals were then attempted at both tiers with bounded timeouts. Individual stderr is a concatenation of raw per-command streams with explicit ID markers; run.json records raw hashes and exact argv."
+  ],
+  "provenance": "provenance.json",
+  "inventory": "inventory.jsonl"
+}

@@ -1,0 +1,24 @@
+{
+  "family": "math",
+  "frozen_raw_originals": 89,
+  "stock_inventory": 89,
+  "repeated_occurrences": 0,
+  "tiers": {
+    "stock": {
+      "pass": 89
+    },
+    "O0": {
+      "not_run": 89
+    },
+    "O3": {
+      "not_run": 89
+    }
+  },
+  "paired": 0,
+  "blockers": [
+    "The canonical FILE runner rejected stock output because its doctest original prints a noncanonical path line (89 reported, 88 parsed). stock_reporter.py emits the discovered doctest ID ieee754_txt without changing the suite; fixture hash is in provenance.json.",
+    "Finite runner O0 stopped at runpy.py:88 before collection. Direct O0/O3 builds rejected unittest assertion argument types before execution."
+  ],
+  "provenance": "provenance.json",
+  "inventory": "inventory.jsonl"
+}

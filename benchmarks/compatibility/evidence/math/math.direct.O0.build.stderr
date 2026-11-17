@@ -1,0 +1,88 @@
+ Compiling /workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_math.py (-O0)
+error[invalid-argument-type]: Argument to bound method `TestCase.assertLess` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_math.py:1565:39
+     |
+1563 |         # slower but accurate code path that avoids the fma() call.
+1564 |         relative_err = median(Trial(math.sumprod, c, n) for i in range(times))
+1565 |         self.assertLess(relative_err, 1e-16)
+     |                                       ^^^^^ Expected `int`, found `float*`
+1566 |
+1567 |     def testModf(self):
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:266:9
+    |
+264 |             raise self.failureException(self._formatMessage(msg, repr(expr) + " is not false"))
+265 |
+266 |     def assertLess(self, a: int, b: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^               ------ Parameter declared here
+267 |         if not a < b:
+268 |             self.fail(self._formatMessage(msg, f"{a!r} not less than {b!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertGreater` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_math.py:2002:28
+     |
+2000 |     def test_inf_constant(self):
+2001 |         self.assertTrue(math.isinf(math.inf))
+2002 |         self.assertGreater(math.inf, 0.0)
+     |                            ^^^^^^^^ Expected `int`, found `float`
+2003 |         self.assertEqual(math.inf, float("inf"))
+2004 |         self.assertEqual(-math.inf, float("-inf"))
+     |
+info: element `float*` of union `int | float*` is not assignable to `int`
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:274:9
+    |
+272 |             self.fail(self._formatMessage(msg, f"{a!r} not less than or equal to {b!r}"))
+273 |
+274 |     def assertGreater(self, a: int, b: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^       ------ Parameter declared here
+275 |         if not a > b:
+276 |             self.fail(self._formatMessage(msg, f"{a!r} not greater than {b!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertGreater` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_math.py:2002:38
+     |
+2000 |     def test_inf_constant(self):
+2001 |         self.assertTrue(math.isinf(math.inf))
+2002 |         self.assertGreater(math.inf, 0.0)
+     |                                      ^^^ Expected `int`, found `float*`
+2003 |         self.assertEqual(math.inf, float("inf"))
+2004 |         self.assertEqual(-math.inf, float("-inf"))
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:274:9
+    |
+272 |             self.fail(self._formatMessage(msg, f"{a!r} not less than or equal to {b!r}"))
+273 |
+274 |     def assertGreater(self, a: int, b: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^               ------ Parameter declared here
+275 |         if not a > b:
+276 |             self.fail(self._formatMessage(msg, f"{a!r} not greater than {b!r}"))
+    |
+
+
+error[too-many-positional-arguments]: Too many positional arguments: expected 1, got 2
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_math.py:2576:41
+     |
+2575 |     def assertIsClose(self, a, b, *args, **kwargs):
+2576 |         self.assertTrue(self.isclose(a, b, *args, **kwargs),
+     |                                         ^
+2577 |                         msg="%s and %s should be close!" % (a, b))
+     |
+
+
+error[too-many-positional-arguments]: Too many positional arguments: expected 1, got 2
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_math.py:2580:42
+     |
+2579 |     def assertIsNotClose(self, a, b, *args, **kwargs):
+2580 |         self.assertFalse(self.isclose(a, b, *args, **kwargs),
+     |                                          ^
+2581 |                          msg="%s and %s should not be close!" % (a, b))
+     |
+
+
