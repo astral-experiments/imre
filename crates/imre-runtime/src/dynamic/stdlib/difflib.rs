@@ -21,6 +21,7 @@ enum DifflibBody {
     ChainB = value::DIFFLIB_CHAIN_B_BODY as u8,
     Find = value::DIFFLIB_FIND_BODY as u8,
     GetBlocks = value::DIFFLIB_GET_BLOCKS_BODY as u8,
+    Ratio = value::DIFFLIB_RATIO_BODY as u8,
 }
 
 /// Fuse a pristine constructor only after normal lookup, binding, and Python frame entry.
@@ -372,6 +373,28 @@ pub(super) unsafe extern "C" fn imre_dyn_difflib_get_blocks(
     // SAFETY: the authenticated compiler wrapper enters this exact source frame first.
     let ctx = unsafe { &mut *raw };
     match get_blocks(ctx, scope) {
+        Ok(Some(value)) => ffi::finish(ctx, Ok(value)),
+        Ok(None) => {
+            // SAFETY: fallback is the original source body for this context and bound frame.
+            unsafe { fallback(raw, scope) }
+        }
+        Err(error) => ffi::finish(ctx, Err(error)),
+    }
+}
+
+/// Sum canonical matching blocks after ordinary ratio lookup, binding, and frame entry.
+///
+/// # Safety
+/// The compiler supplies the entered source frame and its original linked fallback entry.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_difflib_ratio(
+    raw: *mut Context,
+    scope: Id,
+    fallback: Code,
+) -> Id {
+    // SAFETY: the authenticated compiler wrapper enters this exact source frame first.
+    let ctx = unsafe { &mut *raw };
+    match ratio(ctx, scope) {
         Ok(Some(value)) => ffi::finish(ctx, Ok(value)),
         Ok(None) => {
             // SAFETY: fallback is the original source body for this context and bound frame.
@@ -789,6 +812,156 @@ fn get_blocks(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
         return Ok(None);
     };
     blocks::build(ctx, receiver, a, b, &index, constructor)
+}
+
+/// Authenticate the live calculator and builtin loads before any public state changes.
+fn ratio_calculator(ctx: &Context, root: Id) -> Option<Id> {
+    let builtins = ctx.source_builtins?;
+    for name in ["sum", "len"] {
+        let canonical = *ctx.builtins.get(name)?;
+        if ctx.scalar_scope_name(root, name) != Some(None)
+            || ctx.scalar_dict_name(builtins, name) != Some(Some(canonical))
+        {
+            return None;
+        }
+    }
+    let calculator = ctx.scalar_scope_name(root, "_calculate_ratio")??;
+    let Value::Function { code, scope, .. } = ctx.heap.get(calculator) else {
+        return None;
+    };
+    (*scope == root
+        && ctx.code_object(*code).definition.provider_body()
+            == value::DIFFLIB_CALCULATE_RATIO_BODY as u8)
+        .then_some(calculator)
+}
+
+/// Read a live block's final item only when Python subscription cannot invoke a callback.
+fn block_size(ctx: &Context, block: Id, tuple: Id, object: Id) -> Option<i64> {
+    let items = match ctx.heap.get(block) {
+        Value::Tuple(items) | Value::List(items) => items,
+        Value::Instance {
+            class,
+            scalar: Some(storage),
+            ..
+        } => {
+            let Value::Class { ancestors, .. } = ctx.heap.get(*class) else {
+                return None;
+            };
+            if ancestors.as_slice() != [tuple, object]
+                || ctx.own_class_attr(*class, "__getitem__").is_some()
+            {
+                return None;
+            }
+            let Value::Tuple(items) = ctx.heap.get(*storage) else {
+                return None;
+            };
+            items
+        }
+        _ => return None,
+    };
+    let Value::Int(size) = ctx.heap.get(*items.last()?) else {
+        return None;
+    };
+    size.to_i64()
+}
+
+/// Sum the authoritative public list without accepting user-defined iteration or arithmetic.
+fn block_sum(ctx: &Context, list: Id) -> Option<i64> {
+    let Value::List(items) = ctx.heap.get(list) else {
+        return None;
+    };
+    let tuple = *ctx.builtins.get("tuple")?;
+    let object = *ctx.builtins.get("object")?;
+    items.iter().try_fold(0i64, |total, &block| {
+        total.checked_add(block_size(ctx, block, tuple, object)?)
+    })
+}
+
+/// Fuse the source generator/sum only when every skipped operation is callback-free.
+fn ratio(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
+    let Some(receiver) = receiver(ctx, scope) else {
+        return Ok(None);
+    };
+    let root = ctx.root_scope(scope);
+    let Value::Instance { class, .. } = ctx.heap.get(receiver) else {
+        unreachable!()
+    };
+    if !trusted_method(ctx, *class, root, "ratio", DifflibBody::Ratio)
+        || !trusted_method(
+            ctx,
+            *class,
+            root,
+            "get_matching_blocks",
+            DifflibBody::GetBlocks,
+        )
+        || !no_instance_shadow(ctx, receiver, "get_matching_blocks")
+    {
+        return Ok(None);
+    }
+    let Some(calculator) = ratio_calculator(ctx, root) else {
+        return Ok(None);
+    };
+    let Some(a) = ctx.plain_instance_field(receiver, "a") else {
+        return Ok(None);
+    };
+    let Some(b) = ctx.plain_instance_field(receiver, "b") else {
+        return Ok(None);
+    };
+    let length = match (ctx.heap.get(a), ctx.heap.get(b)) {
+        (Value::Str(a), Value::Str(b)) if a.is_ascii() && b.is_ascii() => {
+            let Some(length) = a
+                .len()
+                .checked_add(b.len())
+                .and_then(|n| i64::try_from(n).ok())
+            else {
+                return Ok(None);
+            };
+            length
+        }
+        _ => return Ok(None),
+    };
+    let Some(current) = ctx.plain_instance_field(receiver, "matching_blocks") else {
+        return Ok(None);
+    };
+    let matches = if current != NONE {
+        let Some(matches) = block_sum(ctx, current) else {
+            return Ok(None);
+        };
+        if !unobserved_checkpoints(ctx) {
+            return Ok(None);
+        }
+        matches
+    } else {
+        // The getter's own guards do not need to reject __getitem__: ratio does.
+        let Some(Some(match_class)) = ctx.scalar_scope_name(root, "Match") else {
+            return Ok(None);
+        };
+        if !matches!(ctx.heap.get(match_class), Value::Class { .. })
+            || ctx.own_class_attr(match_class, "__getitem__").is_some()
+        {
+            return Ok(None);
+        }
+        let Some(list) = get_blocks(ctx, scope)? else {
+            return Ok(None);
+        };
+        block_sum(ctx, list).expect("native blocks contain bounded exact integer sizes")
+    };
+    if length == 0 {
+        // The source returns its code-owned 1.0 constant; preserve that exact object.
+        let mark = ctx.heap.temporary_mark();
+        ctx.heap.reserve_temporaries(2)?;
+        let matches = ctx.int(matches);
+        ctx.heap.keep(matches);
+        let zero = ctx.int(0);
+        ctx.heap.keep(zero);
+        let result = ctx.call(calculator, vec![matches, zero], Vec::new());
+        ctx.heap.release_temporaries_since(mark);
+        result.map(Some)
+    } else {
+        Ok(Some(
+            ctx.alloc(Value::Float(2.0 * matches as f64 / length as f64)),
+        ))
+    }
 }
 
 fn find_longest(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
