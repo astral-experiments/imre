@@ -1115,9 +1115,7 @@ mod tests {
         )
         .unwrap();
         let mut graph = SourceGraph::load(&entry, None, &[installed.path().to_path_buf()]).unwrap();
-        let diagnostic = lower_with_caller_cache(&mut graph, None, None)
-            .err()
-            .unwrap();
+        let diagnostic = lower_with_caller_cache(&mut graph, None).err().unwrap();
         assert_eq!(diagnostic.kind, Kind::ScopedObject);
         assert_eq!(
             diagnostic.to_string(),
@@ -1310,7 +1308,7 @@ mod tests {
                 });
                 assert!(indirect);
             } else {
-                let Err(error) = lower_with_caller_cache(&mut graph, None, None) else {
+                let Err(error) = lower_with_caller_cache(&mut graph, None) else {
                     panic!("eager factory cannot enter a cold callback adapter");
                 };
                 assert_eq!(error.kind, Kind::UnsupportedRepresentation);
@@ -1378,7 +1376,7 @@ mod tests {
                 "{source}async def run() -> int:\n    cb: Callable[[int], Awaitable[int]] = factory\n    {tail}\n"
             );
             let mut graph = SourceGraph::single(&source).unwrap();
-            let Err(failure) = lower_with_caller_cache(&mut graph, None, None) else {
+            let Err(failure) = lower_with_caller_cache(&mut graph, None) else {
                 panic!("the stored factory still needs graph validation");
             };
             assert_eq!(failure.to_string(), super::EAGER_CALLBACK_ABI);

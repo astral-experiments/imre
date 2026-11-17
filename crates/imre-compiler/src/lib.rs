@@ -1207,23 +1207,13 @@ fn checked_lower_with(
         .then(|| graph.session.diagnostic_copy())
         .transpose()?;
     let lowered = if let Some(compiler) = cache.as_deref_mut() {
-        let mut fresh = compiler.cache.restore_hints(graph)?;
+        compiler.cache.restore_hints(graph)?;
         let callers = compiler.callers.prepare(graph);
-        let result = frontend::lower_with_caller_cache(
-            graph,
-            callers,
-            fresh.as_mut().map(frontend::SourceCheckSession::Borrowed),
-        );
+        let result = frontend::lower_with_caller_cache(graph, callers);
         compiler.cache.retain_hints(graph, result.is_ok());
         result
     } else {
-        let source_checks = retry_checks
-            .as_mut()
-            .map(frontend::SourceCheckSession::Borrowed)
-            .or_else(|| {
-                retry_with_cached_hints.then_some(frontend::SourceCheckSession::SharedGraph)
-            });
-        frontend::lower_with_caller_cache(graph, None, source_checks)
+        frontend::lower_with_caller_cache(graph, None)
     };
     // Registered-body admission runs after checking the application's source contracts.
     if let Some(error) = call_error {
@@ -2057,13 +2047,24 @@ print("result", call(b=2, a=1))
         )
         .map(drop);
         assert_eq!(passes, 1);
+        let error = result.unwrap_err();
         assert_eq!(
-            result.unwrap_err(),
+            error,
             format!(
                 "{}:9:13: Imre: expected int, got str; annotations are enforced contracts",
                 path.canonicalize().unwrap().display()
             )
         );
+        let mut incremental = super::IncrementalCompiler::default();
+        assert_eq!(incremental.check_file(&path, None).unwrap_err(), error);
+
+        let source = format!(
+            "import scores\n{INFERRED_SET_GATHER}def values():\n    yield 'value'\ndef prior() -> int:\n    return 'bad'\nscores.take('x')\n"
+        );
+        std::fs::write(&path, source).unwrap();
+        let cold = super::check_file(&path, None).unwrap_err();
+        assert!(cold.contains(":10:12:"), "{cold}");
+        assert_eq!(incremental.check_file(&path, None).unwrap_err(), cold);
     }
 
     #[test]

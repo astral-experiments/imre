@@ -2588,7 +2588,7 @@ print(Reader().read())
         );
         let mut graph = SourceGraph::single(text).unwrap();
         graph.registered_startup = true;
-        let report = super::super::lower_with_caller_cache(&mut graph, None, None)
+        let report = super::super::lower_with_caller_cache(&mut graph, None)
             .err()
             .unwrap();
         let suite = graph.modules[graph.entry].parsed.suite();
@@ -2615,7 +2615,7 @@ print(Reader().read())
             "    return set()\n",
         ))
         .unwrap();
-        let diagnostic = super::super::lower_with_caller_cache(&mut graph, None, None)
+        let diagnostic = super::super::lower_with_caller_cache(&mut graph, None)
             .err()
             .unwrap();
         assert_eq!(diagnostic.kind, Kind::ExactType);
@@ -2653,7 +2653,7 @@ print(Reader().read())
             "    values.append(True)\n",
         ))
         .unwrap();
-        let error = super::super::lower_with_caller_cache(&mut graph, None, None)
+        let error = super::super::lower_with_caller_cache(&mut graph, None)
             .err()
             .unwrap();
         assert_eq!(error.kind, Kind::ExactType);

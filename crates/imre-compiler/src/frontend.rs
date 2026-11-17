@@ -683,31 +683,19 @@ pub(crate) fn lower(graph: &SourceGraph) -> StdResult<ir::Module, String> {
 pub(crate) fn lower_with_owners(
     graph: &mut SourceGraph,
 ) -> StdResult<crate::CheckedIr, Diagnostic> {
-    lower_with_caller_cache(graph, None, None)?
+    lower_with_caller_cache(graph, None)?
         .into_native(graph)
         .map_err(Into::into)
-}
-
-/// Cached layout hints can keep a shared handle to the graph's quiet Salsa storage.
-pub(crate) enum SourceCheckSession<'a> {
-    Borrowed(&'a mut crate::analysis::Session),
-    SharedGraph,
 }
 
 pub(crate) fn lower_with_caller_cache(
     graph: &mut SourceGraph,
     mut cache: Option<&mut CallerCache>,
-    mut source_checks: Option<SourceCheckSession<'_>>,
 ) -> StdResult<crate::CheckedProgram, Diagnostic> {
     let mut key_reprs = HashSet::new();
     loop {
         let before = key_reprs.len();
-        let (lowered, checks) = lower_current(
-            graph,
-            cache.take(),
-            Some(&mut key_reprs),
-            !matches!(source_checks, Some(SourceCheckSession::SharedGraph)),
-        );
+        let (lowered, checks) = lower_current(graph, cache.take(), Some(&mut key_reprs), true);
         if let Err(reason) = &lowered
             && let Kind::MissingFormatter(owner) = reason.kind
         {
@@ -716,17 +704,7 @@ pub(crate) fn lower_with_caller_cache(
         if let Some(lowered) = lowered.transpose()
             && key_reprs.len() == before
         {
-            let session = match &mut source_checks {
-                Some(SourceCheckSession::SharedGraph) => {
-                    for &owner in &checks.unresolved {
-                        let _ = registered::retain_generator(graph, owner, &checks);
-                    }
-                    return lowered;
-                }
-                Some(SourceCheckSession::Borrowed(session)) => Some(&mut **session),
-                None => None,
-            };
-            if registered::finish_source_checks(graph, checks, session) {
+            if registered::finish_source_checks(graph, checks) {
                 // The cached refusal makes this definition use its original checked body.
                 continue;
             }
@@ -748,7 +726,7 @@ fn lower_current(
     registered::SourceChecks,
 ) {
     let mut inference = inference::Inference::default();
-    // Queue source checks only when they need to borrow the session under different rules.
+    // A solved placement can still be refused by the source contract after inference.
     inference.source_checks.solved =
         (defer_solved && !graph.session.uses_registered_body_rules()).then(Default::default);
     let mut layout_error = None;
@@ -17163,9 +17141,7 @@ print(get_indent("  source"))
         graph.registered_startup = true;
         graph.session.use_registered_body_rules();
         let (_, checks) = super::lower_current(&graph, None, None, true);
-        assert!(!super::registered::finish_source_checks(
-            &mut graph, checks, None
-        ));
+        assert!(!super::registered::finish_source_checks(&mut graph, checks));
     }
 
     #[test]
@@ -17246,7 +17222,7 @@ print(get_indent("  source"))
     fn an_untaken_append_still_checks_the_next_call_argument() {
         let source = "def take(value: int) -> int: return value\nvalues: list[int] = [3]\nif False:\n    print(values.append(True), take('wrong'))\n";
         let mut graph = crate::modules::SourceGraph::single(source).unwrap();
-        let Err(error) = super::lower_with_caller_cache(&mut graph, None, None) else {
+        let Err(error) = super::lower_with_caller_cache(&mut graph, None) else {
             panic!("expected the independent call diagnostic");
         };
         assert!(
@@ -17261,7 +17237,7 @@ print(get_indent("  source"))
     fn an_untaken_append_still_checks_the_argument_itself() {
         let source = "values: list[int] = [3]\nif False:\n    values.append(1 << 'wrong')\n";
         let mut graph = crate::modules::SourceGraph::single(source).unwrap();
-        let Err(error) = super::lower_with_caller_cache(&mut graph, None, None) else {
+        let Err(error) = super::lower_with_caller_cache(&mut graph, None) else {
             panic!("expected the bit shift's independent operand diagnostic");
         };
         assert!(
@@ -17284,7 +17260,7 @@ print(get_indent("  source"))
                 "def check(manager):\n    earlier = {earlier}\n    items: list[int] = [3]\n    items.append(True)\ndef produce():\n    return set()\ncheck(produce())\n"
             );
             let mut graph = crate::modules::SourceGraph::single(&source).unwrap();
-            let Err(error) = super::lower_with_caller_cache(&mut graph, None, None) else {
+            let Err(error) = super::lower_with_caller_cache(&mut graph, None) else {
                 panic!("expected to reject the bad write after {earlier}");
             };
             assert_eq!(error.kind, super::Kind::ExactType);
@@ -17308,7 +17284,7 @@ print(get_indent("  source"))
                 "def check(manager):\n    with manager as stream:\n{body}def get_context():\n    return set()\ncheck(get_context())\n"
             );
             let mut graph = crate::modules::SourceGraph::single(&source).unwrap();
-            let Err(error) = super::lower_with_caller_cache(&mut graph, None, None) else {
+            let Err(error) = super::lower_with_caller_cache(&mut graph, None) else {
                 panic!("expected the independent list operand to fail");
             };
             assert_eq!(error.kind, super::Kind::ExactType);
