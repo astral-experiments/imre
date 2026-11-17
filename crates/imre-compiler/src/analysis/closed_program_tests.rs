@@ -4,6 +4,22 @@ use std::fs;
 use tempfile::tempdir;
 
 #[test]
+fn heterogeneous_unannotated_lists_use_object_storage_without_erasing_contracts() {
+    let project = tempdir().unwrap();
+    let main = project.path().join("main.py");
+    fs::write(
+        &main,
+        "import sys\nsys.path.append('unused')\nvalues = [None, 1, 'text', [2]]\nprint(values)\n",
+    )
+    .unwrap();
+    crate::check_file(&main, None).unwrap();
+
+    fs::write(&main, "values: list[int] = [1, True]\n").unwrap();
+    let error = crate::check_file(&main, None).unwrap_err();
+    assert!(error.contains("expected int, got bool"), "{error}");
+}
+
+#[test]
 fn explicitly_written_bool_and_int_union_arms_keep_both_contracts() {
     let dir = tempdir().unwrap();
     let entry = dir.path().join("main.py");
