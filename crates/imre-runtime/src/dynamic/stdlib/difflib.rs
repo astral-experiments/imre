@@ -547,6 +547,9 @@ fn find_longest(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     if alo > ahi || ahi > a_len || blo > bhi || bhi > b_len {
         return Ok(None);
     }
+    if !unobserved_checkpoints(ctx) {
+        return Ok(None);
+    }
     let best = if ascii {
         let (Value::Str(a), Value::Str(b)) = (ctx.heap.get(a), ctx.heap.get(b)) else {
             unreachable!()
