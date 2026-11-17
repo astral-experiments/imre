@@ -17,12 +17,9 @@ pub fn thread_entry(def: &ast::StmtFunctionDef) -> Option<ThreadEntry> {
     let (stmts, params) = (&def.body, &def.parameters);
     if let Some(lock_only) = parameters(stmts, params) {
         Some(ThreadEntry::Parameters { lock_only })
-    } else if let Some(names) = captured_thread_locks(stmts, params) {
-        Some(ThreadEntry::Captured(
-            names.into_iter().map(str::to_owned).collect(),
-        ))
     } else {
-        None
+        captured_thread_locks(stmts, params)
+            .map(|names| ThreadEntry::Captured(names.into_iter().map(str::to_owned).collect()))
     }
 }
 

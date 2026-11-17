@@ -943,14 +943,43 @@ pub(super) fn prepare_detached(
     ))
 }
 
+/// Limit canonical worker admission to callers that own the mutable context.
+/// Shared callers can inspect ready callbacks and hash operations, but cannot
+/// prepare a projected or direct lock call that requires canonical resolution.
+trait WorkerTargetContext {
+    fn context(&self) -> &Context;
+    fn mutable_context(&mut self) -> Option<&mut Context>;
+}
+
+impl WorkerTargetContext for &Context {
+    fn context(&self) -> &Context {
+        self
+    }
+
+    fn mutable_context(&mut self) -> Option<&mut Context> {
+        None
+    }
+}
+
+impl WorkerTargetContext for &mut Context {
+    fn context(&self) -> &Context {
+        self
+    }
+
+    fn mutable_context(&mut self) -> Option<&mut Context> {
+        Some(self)
+    }
+}
+
 // Validate the actual bound method and its operands before starting an OS
 // thread. No Python handle, callback, or pointer into Context may cross here.
 fn worker_target(
-    ctx: &mut Context,
+    mut owner: impl WorkerTargetContext,
     target: Id,
     args: Id,
     kwargs: Id,
 ) -> Result<(Operation, Vec<Id>)> {
+    let ctx = owner.context();
     if target == NONE {
         return Ok((Operation::Empty, Vec::new()));
     }
@@ -971,9 +1000,17 @@ fn worker_target(
             &operands[..1]
         };
     if let Some(captured) = Callback::capture(ctx, target_value, roots, pos, Some(kwargs), true)? {
-        return captured
-            .resolve(ctx)?
-            .ok_or_else(super::thread_callback::unsupported_target);
+        let operation = if let Some(ctx) = owner.mutable_context() {
+            captured.resolve(ctx)?
+        } else {
+            match captured {
+                super::thread_callback::Capture::Ready(operation, roots) => {
+                    Some((operation, roots))
+                }
+                super::thread_callback::Capture::Projected { .. } => None,
+            }
+        };
+        return operation.ok_or_else(super::thread_callback::unsupported_target);
     }
     if let Value::Method {
         callable, receiver, ..
@@ -982,6 +1019,9 @@ fn worker_target(
         && keywords.is_empty()
         && matches!(ctx.heap.get(receiver), Value::PrimitiveLock(_))
     {
+        let ctx = owner
+            .mutable_context()
+            .ok_or_else(super::thread_callback::unsupported_target)?;
         let operation =
             super::thread_callback::prepare_primitive_acquire(ctx, callable, receiver, receiver)
                 .map_err(|error| {
@@ -1154,7 +1194,7 @@ pub(super) fn prepare_start(
             args,
             kwargs,
         } => {
-            let (operation, roots) = worker_target(ctx, target, args, kwargs)?;
+            let (operation, roots) = worker_target(&mut *ctx, target, args, kwargs)?;
             (operation, roots, RunMode::Default)
         }
         RunEntry::Bound { function } => {
