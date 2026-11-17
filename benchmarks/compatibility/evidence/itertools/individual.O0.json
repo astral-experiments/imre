@@ -1,0 +1,1925 @@
+{
+  "artifact_sha256": "6bfebae6397931c09b11fda4e729ed0ebe258c8039e0e520a1e69d18872fed7c",
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "TMPDIR": "/workspace/scratch/replay-tmp/itertools",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "IMREFLAGS": "--opt-level 0",
+    "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+    "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+  },
+  "individual_runs": {
+    "test.test_itertools.LengthTransparency.test_repeat": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.LengthTransparency.test_repeat"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "0d6cd3e3e30eff099784cd6794d16ea25c603a02ca4d4122fa9f25a906272893"
+    },
+    "test.test_itertools.LengthTransparency.test_repeat_with_negative_times": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.LengthTransparency.test_repeat_with_negative_times"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "207dc48e95c901b5d6247aca930ba3835b7d0c0a3bfd97ee7666543005b304ec"
+    },
+    "test.test_itertools.RegressionTests.test_issue30347_1": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.RegressionTests.test_issue30347_1"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "fa91c4d25178e01458cdf0435c26791864708ae5814273af6bfa5fd9e43b8979"
+    },
+    "test.test_itertools.RegressionTests.test_issue30347_2": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.RegressionTests.test_issue30347_2"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "35ba88dd95022a731f07330ecdce73dbbb941c0fee207777b5a119cbfcfbbc2c"
+    },
+    "test.test_itertools.RegressionTests.test_long_chain_of_empty_iterables": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.RegressionTests.test_long_chain_of_empty_iterables"
+      ],
+      "exit_code": -9,
+      "timed_out": true,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "9464c38fceb4cff7514755de73ec8104f79f94ff9519b13140c3b73a29742fb3"
+    },
+    "test.test_itertools.RegressionTests.test_sf_793826": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.RegressionTests.test_sf_793826"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "2b1255b64106861d78bc80ace907cdeffabb9721c24a70b8f1ca097a651f684a"
+    },
+    "test.test_itertools.RegressionTests.test_sf_950057": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.RegressionTests.test_sf_950057"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "72432de0553639d90d0198875ebd7a07e34c17384695185db549a55a3c3a28aa"
+    },
+    "test.test_itertools.SizeofTest.test_combinations_sizeof": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.SizeofTest.test_combinations_sizeof"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "1fba0fc45552ed06e5f886878a0c61380e3404b2d906472d35425bf382091666"
+    },
+    "test.test_itertools.SizeofTest.test_combinations_with_replacement_sizeof": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.SizeofTest.test_combinations_with_replacement_sizeof"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "36f8541d1d4423a0f8d398ef0f82c78a3e23ba413dfe8cfc1d1c7a2f54edfc39"
+    },
+    "test.test_itertools.SizeofTest.test_permutations_sizeof": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.SizeofTest.test_permutations_sizeof"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "32a49f1e677dd6c42c18720e642d9b7a616d73661268016470b38d962454c6fc"
+    },
+    "test.test_itertools.SizeofTest.test_product_sizeof": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.SizeofTest.test_product_sizeof"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "3f07be59fbfe6c7b192344daeed98fb5a47b8453931c072e093575dde2d3e806"
+    },
+    "test.test_itertools.SubclassWithKwargsTest.test_keywords_in_subclass": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.SubclassWithKwargsTest.test_keywords_in_subclass"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e6f235eb01b495d338ed96d7b6fe58590a6bb3a735aba95c6c29aa92644cf1aa"
+    },
+    "test.test_itertools.TestBasicOps.test_StopIteration": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_StopIteration"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "2df43afe58d5811ff59cc953730fba08c439d3009fcbe253230d63398b259a80"
+    },
+    "test.test_itertools.TestBasicOps.test_accumulate": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_accumulate"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "7c08ab126f0b6792ef04e2b10db23137693ffc09ab0e7707d7b4b8a777d10148"
+    },
+    "test.test_itertools.TestBasicOps.test_batched": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_batched"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "841c56996ecc771a786bff9c6a7f364f9e597054cca0aa9f250663f333b6b203"
+    },
+    "test.test_itertools.TestBasicOps.test_bug_7244": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_bug_7244"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "b0dee7d3623610e71435714742ea65f596c3efe4527e6fcfed59f0d4eb1147e6"
+    },
+    "test.test_itertools.TestBasicOps.test_chain": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_chain"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "dd03d51e91830016f77bb1cf6611b48351fe8f0d900ede4db8a256edd1dd9075"
+    },
+    "test.test_itertools.TestBasicOps.test_chain_from_iterable": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_chain_from_iterable"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "dd1e2cb737929df904a8d3fa0f4bfde1d2e0c2c9e9c2d8d0277c6972a4224cb1"
+    },
+    "test.test_itertools.TestBasicOps.test_combinations": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_combinations"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "f30a35bd553f0e188f1c02e40f197bc90b65bf76e1d762e3002de7b789a1950b"
+    },
+    "test.test_itertools.TestBasicOps.test_combinations_result_gc": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_combinations_result_gc"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "ae9b4ccb20238ef632e1c9921b6e3a51c542b1b4c61572bfe60e2ae229a49f5d"
+    },
+    "test.test_itertools.TestBasicOps.test_combinations_tuple_reuse": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_combinations_tuple_reuse"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "b8add0dd2ae19027e09f44fcead35e5bdb2f34b6b2430e1067f5ffef1576ac07"
+    },
+    "test.test_itertools.TestBasicOps.test_combinations_with_replacement": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_combinations_with_replacement"
+      ],
+      "exit_code": -9,
+      "timed_out": true,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "fc6d8f7d78e685725bc6c28b1426d3083fe79c90452e177ad3224c16e180e218"
+    },
+    "test.test_itertools.TestBasicOps.test_combinations_with_replacement_result_gc": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_combinations_with_replacement_result_gc"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "d1afd009017807c570b3f9b6f23196cef3d52d126ba91a925bd8fdaaf69c10f8"
+    },
+    "test.test_itertools.TestBasicOps.test_combinations_with_replacement_tuple_reuse": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_combinations_with_replacement_tuple_reuse"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "ad27fc1fc91b55444e56481d39c75662c66368b2ce1c77980631822e53417ff4"
+    },
+    "test.test_itertools.TestBasicOps.test_combinatorics": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_combinatorics"
+      ],
+      "exit_code": -9,
+      "timed_out": true,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "73dde086567174f11b20f5ec183f20584a6459cce2ff155f335d5b803b0703f9"
+    },
+    "test.test_itertools.TestBasicOps.test_compress": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_compress"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "14e703b316902643be483b41afa66ddd6483fde88c0da9ac20197d1b08ae9ea3"
+    },
+    "test.test_itertools.TestBasicOps.test_count": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_count"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "b7a505e2ca750aca8f38e55c48d6fcd3ebaeeb9eb3dd9f45aaecb3ef541720f2"
+    },
+    "test.test_itertools.TestBasicOps.test_count_threading": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_count_threading"
+      ],
+      "exit_code": 1,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "5117988552783622eff86a571e0bdf591defb6e63856847995a60f5b96b7039c"
+    },
+    "test.test_itertools.TestBasicOps.test_count_with_step": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_count_with_step"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "63e33fad677690b130ec7842d0b2db579022a71465e187390b281a51f2586be5"
+    },
+    "test.test_itertools.TestBasicOps.test_count_with_step_threading": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_count_with_step_threading"
+      ],
+      "exit_code": 1,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "8d042b231e3604c7cc6ba0f34a91bbf1699269d556ee20780b3da482fbea33af"
+    },
+    "test.test_itertools.TestBasicOps.test_cycle": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_cycle"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "09fed91672bd2c4810ddf40b6c91b5f25cce1a25fa1e5f8b9eea3047cfb54b8d"
+    },
+    "test.test_itertools.TestBasicOps.test_dropwhile": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_dropwhile"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "b4503080f38d8b6b0b51df22e45c8afc67ee7e9e233378532a30fa485c6c70d8"
+    },
+    "test.test_itertools.TestBasicOps.test_filter": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_filter"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "1369ff4feeb34bd89dacbd770b46040b47a812b5ef5473ea7dafc88ff48e3f6b"
+    },
+    "test.test_itertools.TestBasicOps.test_filterfalse": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_filterfalse"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "4a5f0af324ac587a3343e3ecc95e91bf1745ff29cdb165fd44ebe82edcc5bfc4"
+    },
+    "test.test_itertools.TestBasicOps.test_groupby": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_groupby"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "8d4470de8d70d91b66318461e1b50d727d4a42360b5defd906c386fb53c06c56"
+    },
+    "test.test_itertools.TestBasicOps.test_groupby_reentrant_eq_does_not_crash": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_groupby_reentrant_eq_does_not_crash"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "529e20ab7cd735af2ee0620206d413067f01b65de11a29653d7c7cf828b0880c"
+    },
+    "test.test_itertools.TestBasicOps.test_grouper_reentrant_eq_does_not_crash": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_grouper_reentrant_eq_does_not_crash"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "aab2bb8fd6781adfaf32daca048b1fcda37c4c4e4ad98d4c4800fd2a206862bf"
+    },
+    "test.test_itertools.TestBasicOps.test_immutable_types": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_immutable_types"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "4cceefe92ebda52e69ada7e4699dd41f243b6876cadc1fe84bb990318884722a"
+    },
+    "test.test_itertools.TestBasicOps.test_islice": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_islice"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "167b1ab2c309354ece51faae862eb3e6ed7d0fdd0d1daa28df3d38077465572d"
+    },
+    "test.test_itertools.TestBasicOps.test_map": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_map"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "27baf6cda02d25de3488f57c10f58506f83d2b0f6ba9c91baa2ff6ed88dbf5d3"
+    },
+    "test.test_itertools.TestBasicOps.test_pairwise": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_pairwise"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "018e3ca4d5cbaa21330e8aa8521a0ee0f5f57609a958bdc11d6b0e1cbab33c50"
+    },
+    "test.test_itertools.TestBasicOps.test_pairwise_reenter": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_pairwise_reenter"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "b0c1344296405c2ffb0fcb17b18e523794496cb8e6b68060112d1a81dfec5cca"
+    },
+    "test.test_itertools.TestBasicOps.test_pairwise_reenter2": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_pairwise_reenter2"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "8ab54764c3e5637ef7dac2cf2c7e021aa2aa60efed35b0390ec2ec643870c220"
+    },
+    "test.test_itertools.TestBasicOps.test_pairwise_result_gc": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_pairwise_result_gc"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "92cda4ee3c43619111938cc2664f0d26fffcd65591dc944e3633abc68d928cfc"
+    },
+    "test.test_itertools.TestBasicOps.test_permutations": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_permutations"
+      ],
+      "exit_code": -9,
+      "timed_out": true,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "c5d1e3a28e100f0c25c41060f0f9b011a0e5476c8dea0abf69f1215ed9b2c290"
+    },
+    "test.test_itertools.TestBasicOps.test_permutations_result_gc": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_permutations_result_gc"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "ef2cf87940e29cab93647beb5fe1ce57a57283e70529d90c6b72b71e953182e0"
+    },
+    "test.test_itertools.TestBasicOps.test_permutations_tuple_reuse": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_permutations_tuple_reuse"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "2e34643dc0f814dfc34eb54b6ca0087b7eafd8f4e235ad194cc68cd7bd60d5d5"
+    },
+    "test.test_itertools.TestBasicOps.test_product": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_product"
+      ],
+      "exit_code": -9,
+      "timed_out": true,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e8351d8e1bcb72a0e35e4cdb6330dc2fa66852eb4d3564a7c7e889b9355deb17"
+    },
+    "test.test_itertools.TestBasicOps.test_product_result_gc": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_product_result_gc"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "954b3dbd15ed7e9cd148678e60f0933505c98886b87c3b33012da3711e0708d7"
+    },
+    "test.test_itertools.TestBasicOps.test_product_tuple_reuse": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_product_tuple_reuse"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "533fe98d0d05ea49344da39b05ccc4086d1663e79a8fc6776253af74d58fb5cf"
+    },
+    "test.test_itertools.TestBasicOps.test_repeat": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_repeat"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "de766cf19fbe4c277fd106c29a0fab3ef0024054309c007e35a080a913a13220"
+    },
+    "test.test_itertools.TestBasicOps.test_repeat_with_negative_times": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_repeat_with_negative_times"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "f8d78b24eb815b2e83637fd5a6358d8b4eb954233773308b70499c2b97f45159"
+    },
+    "test.test_itertools.TestBasicOps.test_starmap": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_starmap"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "93056d9b31ffd443b61a626bb51836d4935fecd5506fb87acfe0c579d9df0c98"
+    },
+    "test.test_itertools.TestBasicOps.test_takewhile": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_takewhile"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "367dcc18e91a88b7fedc5f01c4127ae05364770f0c4674b8144276bad597298f"
+    },
+    "test.test_itertools.TestBasicOps.test_tee": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_tee"
+      ],
+      "exit_code": -9,
+      "timed_out": true,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "86966a10839fc2ff406bbb6633260f9842188aebb57ca5dc355b5b42d9cd0c25"
+    },
+    "test.test_itertools.TestBasicOps.test_tee_concurrent": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_tee_concurrent"
+      ],
+      "exit_code": 1,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "7ca10719d596e5089b7d32b9a7ead66dcf3ccde7b6385b5bcfa48039d46d6692"
+    },
+    "test.test_itertools.TestBasicOps.test_tee_dealloc_segfault": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_tee_dealloc_segfault"
+      ],
+      "exit_code": -9,
+      "timed_out": true,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "ac6c680830631f29f54ae6702fb6209263bb906a3fa6033adf0cd2bd14cb6d2b"
+    },
+    "test.test_itertools.TestBasicOps.test_tee_del_backward": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_tee_del_backward"
+      ],
+      "exit_code": -9,
+      "timed_out": true,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e06fbf5c625f43443b9d5bb2f61f8583962127e54b050098fea57493bc5d4e0a"
+    },
+    "test.test_itertools.TestBasicOps.test_tee_reenter": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_tee_reenter"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "c66617ca1581d2bd94599dcd217840b5bc642372ca8aad2e5d745928ceed0b35"
+    },
+    "test.test_itertools.TestBasicOps.test_zip": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_zip"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "d5369eef79ba0c1f9a84c83b04382772d872409d02c38fb208d8bb862fae8989"
+    },
+    "test.test_itertools.TestBasicOps.test_zip_longest_bad_iterable": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_zip_longest_bad_iterable"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "a489dc1acf273ca1e70c31006e1ff4c15ee4c36257a970adfd17553740109d5e"
+    },
+    "test.test_itertools.TestBasicOps.test_zip_longest_result_gc": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_zip_longest_result_gc"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "9235dae5efc79d94de152d1eb9d00acdf1954408a4fc1586d3da6835dfaef17e"
+    },
+    "test.test_itertools.TestBasicOps.test_zip_longest_tuple_reuse": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_zip_longest_tuple_reuse"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "f58a0812cdeb61f8f64d8be29943b6daf6f84fdb537863f0b64fea3f3346c3fd"
+    },
+    "test.test_itertools.TestBasicOps.test_zip_tuple_reuse": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_zip_tuple_reuse"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "c21b6ccd280c9580e08b8c2d3b817a41933cf0652abbc43e0e5b8a1900b2df3a"
+    },
+    "test.test_itertools.TestBasicOps.test_ziplongest": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestBasicOps.test_ziplongest"
+      ],
+      "exit_code": 1,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e9f3c4b31ad7e0cdb24673b8eff49a30353ab9dcdeeb35a6f874dafa11545f3f"
+    },
+    "test.test_itertools.TestExamples.test_accumulate": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestExamples.test_accumulate"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "f7ceb6f7401ef34ef1549147f0160fe6560a243093aed1426e6e06628169a4aa"
+    },
+    "test.test_itertools.TestExamples.test_chain": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestExamples.test_chain"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "d4743747d232b99495cff6c3f089c433acc76bea67fc0da17f27f60da0a20f0b"
+    },
+    "test.test_itertools.TestExamples.test_chain_from_iterable": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestExamples.test_chain_from_iterable"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "c1db9cde02a088b02ddf994d93c2eae59d2e65a12f4ca675fc6d6475cf59a46a"
+    },
+    "test.test_itertools.TestExamples.test_combinations": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestExamples.test_combinations"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "ca54ddefd3a98f51311dce133f4b181b8c80055cc534ba1ed1c80d3242d22f47"
+    },
+    "test.test_itertools.TestExamples.test_combinations_with_replacement": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestExamples.test_combinations_with_replacement"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "d43c09c3b1303b75ac09bfb4e4e13a34818b4c24c733d6a2ef9dc01ccbc16b6c"
+    },
+    "test.test_itertools.TestExamples.test_compress": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestExamples.test_compress"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "819a9c08fca70092495dde388499dbd0da90accfee5ca60e00a8395cdb1c16fa"
+    },
+    "test.test_itertools.TestExamples.test_count": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestExamples.test_count"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "fcbb6d3241d643e3bac1c8769774be1ea2535b0860d1a8aec7aed56559053728"
+    },
+    "test.test_itertools.TestExamples.test_cycle": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestExamples.test_cycle"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "82c2f4c941ba966c9e4e599f06e828abab8a0a1dc1c05dfd1309d6f195878a7d"
+    },
+    "test.test_itertools.TestExamples.test_dropwhile": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestExamples.test_dropwhile"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "2466decda805230718807bda49eda8d81371b4b8f8218fd359e8c947509b2051"
+    },
+    "test.test_itertools.TestExamples.test_filter": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestExamples.test_filter"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "de7fdc5149ce3773a0b317bbf95cdf8f54a9e6981eb858da6f3289069f1eefe9"
+    },
+    "test.test_itertools.TestExamples.test_filterfalse": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestExamples.test_filterfalse"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "f23777062c23295aa08dfc0f3dbf6ed4221fc5e541af55205af0f56e43e2f137"
+    },
+    "test.test_itertools.TestExamples.test_groupby": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestExamples.test_groupby"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "a0cf46921def5c4f45ae013fc47b71003526f171422929ed6d42d6a2060da02a"
+    },
+    "test.test_itertools.TestExamples.test_islice": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestExamples.test_islice"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "b5e5d3ba5eca8adfc1000a74eb82ddc82873d96acd5388a8be23c3e00a48a99f"
+    },
+    "test.test_itertools.TestExamples.test_map": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestExamples.test_map"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "39b22fed3a7508e9f8b1a13e61c4905357db379a1c568188162e437071f14a9e"
+    },
+    "test.test_itertools.TestExamples.test_permutations": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestExamples.test_permutations"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "bacbd4c522d62279249acf8706e27290f5d12a74e6f5c5f7737961379e04abb6"
+    },
+    "test.test_itertools.TestExamples.test_product": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestExamples.test_product"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "eaae896cae1e22333a47ff642eb06ebf51639c3d4eb007dfe4d13c11f6203e97"
+    },
+    "test.test_itertools.TestExamples.test_repeat": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestExamples.test_repeat"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "c30ad8e721bbbac1f05180c86db2de92dd6e048804352bc71a4c8b55b2bfe7ae"
+    },
+    "test.test_itertools.TestExamples.test_stapmap": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestExamples.test_stapmap"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "3da201ca36f078aa3171d85fd5ea8dda9ae22460ce6374dc46a54d0be207d8b4"
+    },
+    "test.test_itertools.TestExamples.test_takewhile": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestExamples.test_takewhile"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "08197f22c15387653df93e4f985dd87550b6de58f43abf430751d5bcac2deeb8"
+    },
+    "test.test_itertools.TestExamples.test_zip": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestExamples.test_zip"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "a06b73cbad1ec038558971d50c26e4fab5b0ff2a0ecf1a49bcc43da8cff93a0f"
+    },
+    "test.test_itertools.TestExamples.test_zip_longest": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestExamples.test_zip_longest"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "46a6e1ded7c402c5a7f9f98e0f2fdfbf2090d4f828acc6219ee1f39e368aacf2"
+    },
+    "test.test_itertools.TestGC.test_accumulate": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestGC.test_accumulate"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "4eac8d5a0b52900e1e1c170c72922d532efdce2320fbf28c7085aa8e5f39aafa"
+    },
+    "test.test_itertools.TestGC.test_batched": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestGC.test_batched"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "0b2920fd09b889550907afae303de43b7f2c05f607a9c920ffdcdfffa40902f3"
+    },
+    "test.test_itertools.TestGC.test_chain": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestGC.test_chain"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "144812717331373e2b9b3e4b10813dfb9a162e5cea89082fe4ae0c88e3140f15"
+    },
+    "test.test_itertools.TestGC.test_chain_from_iterable": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestGC.test_chain_from_iterable"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "0498187dd328b17f1e481d9aaaa01e8b31d5fb297dbddd2f6faad3c8bfdfb30b"
+    },
+    "test.test_itertools.TestGC.test_combinations": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestGC.test_combinations"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "dfd0f1cf685136701e329194e7f59d2566a92e2c51d576bf56c3c6de043c4ade"
+    },
+    "test.test_itertools.TestGC.test_combinations_with_replacement": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestGC.test_combinations_with_replacement"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "a6ea8c7aa4e50641e77e4c406aabd0a9b8da7a6b9ed46f4547f0da618835ba7c"
+    },
+    "test.test_itertools.TestGC.test_compress": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestGC.test_compress"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "0882dfc0301dcc159f67cd37c89947c4ef39347471aef2382081c01e91705cf2"
+    },
+    "test.test_itertools.TestGC.test_count": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestGC.test_count"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "9af3df9c4a7a721d69bc297605eb4899234854927b8a01c88069fd9cc56f350f"
+    },
+    "test.test_itertools.TestGC.test_cycle": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestGC.test_cycle"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "afba43f99668b0c40eea94827b3865a6eb40ff20b3b055d0c0fd611742efd309"
+    },
+    "test.test_itertools.TestGC.test_dropwhile": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestGC.test_dropwhile"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "16b22924649dedd5f033c1f1c9b1b4b8b95d82cb690ff5352519c6ffa289c538"
+    },
+    "test.test_itertools.TestGC.test_filter": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestGC.test_filter"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "41bbde1570a31f350a557926966cfc5bcb9c08b0306e34a9069b3be339b4d0af"
+    },
+    "test.test_itertools.TestGC.test_filterfalse": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestGC.test_filterfalse"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "043dceb75eab391572c1c0a83ae74dedfaf4fa907db5b4568539cafa254ae3d0"
+    },
+    "test.test_itertools.TestGC.test_groupby": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestGC.test_groupby"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "f4c336191c351d5dc588a7b51631e9f0442b1d7fc8af47eaa2a13b934ed58811"
+    },
+    "test.test_itertools.TestGC.test_islice": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestGC.test_islice"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "69ef6a117a052550858a62107a5739e2f3c40a09434165ed5d5d9b292fb6e667"
+    },
+    "test.test_itertools.TestGC.test_issue2246": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestGC.test_issue2246"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "b1ee1b565ad072f2677b34b4735d83796bfc9839578b673555804106256792a4"
+    },
+    "test.test_itertools.TestGC.test_map": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestGC.test_map"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "6586d726013e5e0df1052c0e14ad61dce3c4c813807761cc8f2e79463b06b87e"
+    },
+    "test.test_itertools.TestGC.test_pairwise": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestGC.test_pairwise"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "7b679f8a1d0c8f17e7c425e73d392205508b068060976935d187aa99b3dce457"
+    },
+    "test.test_itertools.TestGC.test_permutations": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestGC.test_permutations"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "676dae626880b70dcc763b367c237254ad388c223098b7091ba64ca45220aa83"
+    },
+    "test.test_itertools.TestGC.test_product": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestGC.test_product"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "6073528b9812415fca40a5f83ae51bfb42a19a086139ebd8c9c33eafe33f6000"
+    },
+    "test.test_itertools.TestGC.test_repeat": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestGC.test_repeat"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "bb1f2ffc8912af095fe02b096e6983b758e0c61944e47ea169ed4322bcb0cdfe"
+    },
+    "test.test_itertools.TestGC.test_starmap": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestGC.test_starmap"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "00a4d632b279f84fd6d498a895f8123a3c88ec3f5d1e53e25626903ef9a8192a"
+    },
+    "test.test_itertools.TestGC.test_takewhile": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestGC.test_takewhile"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "ee55c0ac86368bcd07e7001ecf897419bdc0b526a243d1d406496b26cb57490c"
+    },
+    "test.test_itertools.TestGC.test_zip": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestGC.test_zip"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "664a2d6e030bca9244dd20010c0e950dd7a3c9edfdcca1a3c6e00b31c9f1ba6c"
+    },
+    "test.test_itertools.TestGC.test_zip_longest": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestGC.test_zip_longest"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e8ca74979838e66a7268f9d7f89233d01c8126184a7c84849a9cac1da8b97eb5"
+    },
+    "test.test_itertools.TestPurePythonRoughEquivalents.test_batched_recipe": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestPurePythonRoughEquivalents.test_batched_recipe"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e95845267f6f377e7fa86174ffac78562d102cf3d69f8dbece13336ca819d4ea"
+    },
+    "test.test_itertools.TestPurePythonRoughEquivalents.test_groupby_recipe": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestPurePythonRoughEquivalents.test_groupby_recipe"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "33f63628ac2eee53511a4edea6d17780f9a17657b101d8cc40dd6086acaf4e8c"
+    },
+    "test.test_itertools.TestPurePythonRoughEquivalents.test_islice_recipe": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestPurePythonRoughEquivalents.test_islice_recipe"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e7ca43a1cb80d5b3a041d4953f24339042cd638ad81258a046356e2c67f83534"
+    },
+    "test.test_itertools.TestPurePythonRoughEquivalents.test_tee_recipe": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestPurePythonRoughEquivalents.test_tee_recipe"
+      ],
+      "exit_code": -9,
+      "timed_out": true,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "4ebd0f9db7b389bcf47eff6ddf15d0036f027c5fa771f42ca354caf50b3ffe87"
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_accumulate": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestVariousIteratorArgs.test_accumulate"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "772f85dd96d4c7a179570734a5f252e33dbeb0cea729f43b5601386f7b863e9a"
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_batched": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestVariousIteratorArgs.test_batched"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "762b8397c816f8c991f91b2a742a0cd7a3ff7a8205b611b2b6959586dc700b66"
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_chain": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestVariousIteratorArgs.test_chain"
+      ],
+      "exit_code": -9,
+      "timed_out": true,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "6f1e201db0cf8934693150f8318c3a1f17424b01cefe8073ffcbaa512bf35194"
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_compress": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestVariousIteratorArgs.test_compress"
+      ],
+      "exit_code": -9,
+      "timed_out": true,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "725be75fc7b6e609f368f30c3d698f9a91df6a0f0b4f0e12d6bc10003e1227ea"
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_cycle": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestVariousIteratorArgs.test_cycle"
+      ],
+      "exit_code": -9,
+      "timed_out": true,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "414d16a521570a676737452282b804dff3e74317c18e45c48607d604ec41fd28"
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_dropwhile": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestVariousIteratorArgs.test_dropwhile"
+      ],
+      "exit_code": -9,
+      "timed_out": true,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "4319d26d89d95975158386631bd19f43130edc793cb40294c953d632fd34fef6"
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_filter": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestVariousIteratorArgs.test_filter"
+      ],
+      "exit_code": -9,
+      "timed_out": true,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "0833902128acde2a8354e505ab271fc6b6407efa49e82f32b1c69727c96d7879"
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_filterfalse": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestVariousIteratorArgs.test_filterfalse"
+      ],
+      "exit_code": -9,
+      "timed_out": true,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "b1be2f6a4fcf765513a679f4cd0eac5042a8dce3616154280db304bd1145f492"
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_groupby": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestVariousIteratorArgs.test_groupby"
+      ],
+      "exit_code": -9,
+      "timed_out": true,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "b7f97f576c82c1ee3c4eda9d0beaa6b5ed591d459d66f13e04b9dae3c265b657"
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_islice": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestVariousIteratorArgs.test_islice"
+      ],
+      "exit_code": -9,
+      "timed_out": true,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "a0b33e00c12844ed705edcdde207d405f31fd6ba2c2b6de9f2b4fd71739f157a"
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_map": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestVariousIteratorArgs.test_map"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "375df7749142fb434c99e6960a144b35a415d9b9743ffdaea0b228ba02490ed5"
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_pairwise": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestVariousIteratorArgs.test_pairwise"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "5cc0623f46b1907477be1fbed7a9b30dd4d8662c248c0d399ab64c15cf65a660"
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_product": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestVariousIteratorArgs.test_product"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "a3432cbd20e968e70f88c93271a00f564ab90a5079684b0595b12a46e0cf99bb"
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_starmap": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestVariousIteratorArgs.test_starmap"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "4cdd8d65ab6740dca05cbccb91d8ecf8189868825e31e39b78b1e282de7c73b7"
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_takewhile": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestVariousIteratorArgs.test_takewhile"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "bf57ebe7e81133b11dac0108d0d9e6f9177bf76dbb68b3263408d402e4b730ad"
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_tee": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestVariousIteratorArgs.test_tee"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "21f44fc4cbf0d2eaf7fc68b90c1a755bdd8c50b5090e70d0f8b04bdefec8c124"
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_zip": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestVariousIteratorArgs.test_zip"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "3984da3289422e7674897398afa42a06e7347e5fd616a5d8c4d5e5ca7a4ac5ca"
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_ziplongest": {
+      "argv": [
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.TestVariousIteratorArgs.test_ziplongest"
+      ],
+      "exit_code": -9,
+      "timed_out": true,
+      "timeout_seconds": 8,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "1ba3e757a0a500c0b0b32d9225550bf5c10292db1d54b7680178279f37b102b6"
+    }
+  },
+  "observations": {
+    "test.test_itertools.LengthTransparency.test_repeat": {
+      "outcome": "pass",
+      "line": 2
+    },
+    "test.test_itertools.LengthTransparency.test_repeat_with_negative_times": {
+      "outcome": "pass",
+      "line": 9
+    },
+    "test.test_itertools.RegressionTests.test_issue30347_1": {
+      "outcome": "pass",
+      "line": 16
+    },
+    "test.test_itertools.RegressionTests.test_issue30347_2": {
+      "outcome": "pass",
+      "line": 23
+    },
+    "test.test_itertools.RegressionTests.test_sf_793826": {
+      "outcome": "pass",
+      "line": 31
+    },
+    "test.test_itertools.RegressionTests.test_sf_950057": {
+      "outcome": "pass",
+      "line": 38
+    },
+    "test.test_itertools.SizeofTest.test_combinations_sizeof": {
+      "outcome": "skip",
+      "line": 45
+    },
+    "test.test_itertools.SizeofTest.test_combinations_with_replacement_sizeof": {
+      "outcome": "skip",
+      "line": 52
+    },
+    "test.test_itertools.SizeofTest.test_permutations_sizeof": {
+      "outcome": "skip",
+      "line": 59
+    },
+    "test.test_itertools.SizeofTest.test_product_sizeof": {
+      "outcome": "skip",
+      "line": 66
+    },
+    "test.test_itertools.SubclassWithKwargsTest.test_keywords_in_subclass": {
+      "outcome": "pass",
+      "line": 73
+    },
+    "test.test_itertools.TestBasicOps.test_StopIteration": {
+      "outcome": "pass",
+      "line": 80
+    },
+    "test.test_itertools.TestBasicOps.test_accumulate": {
+      "outcome": "pass",
+      "line": 87
+    },
+    "test.test_itertools.TestBasicOps.test_batched": {
+      "outcome": "pass",
+      "line": 94
+    },
+    "test.test_itertools.TestBasicOps.test_bug_7244": {
+      "outcome": "pass",
+      "line": 101
+    },
+    "test.test_itertools.TestBasicOps.test_chain": {
+      "outcome": "pass",
+      "line": 108
+    },
+    "test.test_itertools.TestBasicOps.test_chain_from_iterable": {
+      "outcome": "pass",
+      "line": 115
+    },
+    "test.test_itertools.TestBasicOps.test_combinations": {
+      "outcome": "pass",
+      "line": 122
+    },
+    "test.test_itertools.TestBasicOps.test_combinations_result_gc": {
+      "outcome": "skip",
+      "line": 129
+    },
+    "test.test_itertools.TestBasicOps.test_combinations_tuple_reuse": {
+      "outcome": "skip",
+      "line": 136
+    },
+    "test.test_itertools.TestBasicOps.test_combinations_with_replacement_result_gc": {
+      "outcome": "skip",
+      "line": 144
+    },
+    "test.test_itertools.TestBasicOps.test_combinations_with_replacement_tuple_reuse": {
+      "outcome": "skip",
+      "line": 151
+    },
+    "test.test_itertools.TestBasicOps.test_compress": {
+      "outcome": "pass",
+      "line": 159
+    },
+    "test.test_itertools.TestBasicOps.test_count": {
+      "outcome": "pass",
+      "line": 166
+    },
+    "test.test_itertools.TestBasicOps.test_count_threading": {
+      "outcome": "error",
+      "line": 173
+    },
+    "test.test_itertools.TestBasicOps.test_count_with_step": {
+      "outcome": "pass",
+      "line": 184
+    },
+    "test.test_itertools.TestBasicOps.test_count_with_step_threading": {
+      "outcome": "error",
+      "line": 191
+    },
+    "test.test_itertools.TestBasicOps.test_cycle": {
+      "outcome": "pass",
+      "line": 202
+    },
+    "test.test_itertools.TestBasicOps.test_dropwhile": {
+      "outcome": "pass",
+      "line": 209
+    },
+    "test.test_itertools.TestBasicOps.test_filter": {
+      "outcome": "pass",
+      "line": 216
+    },
+    "test.test_itertools.TestBasicOps.test_filterfalse": {
+      "outcome": "pass",
+      "line": 223
+    },
+    "test.test_itertools.TestBasicOps.test_groupby": {
+      "outcome": "pass",
+      "line": 230
+    },
+    "test.test_itertools.TestBasicOps.test_groupby_reentrant_eq_does_not_crash": {
+      "outcome": "pass",
+      "line": 237
+    },
+    "test.test_itertools.TestBasicOps.test_grouper_reentrant_eq_does_not_crash": {
+      "outcome": "pass",
+      "line": 244
+    },
+    "test.test_itertools.TestBasicOps.test_immutable_types": {
+      "outcome": "skip",
+      "line": 251
+    },
+    "test.test_itertools.TestBasicOps.test_islice": {
+      "outcome": "pass",
+      "line": 258
+    },
+    "test.test_itertools.TestBasicOps.test_map": {
+      "outcome": "pass",
+      "line": 265
+    },
+    "test.test_itertools.TestBasicOps.test_pairwise": {
+      "outcome": "pass",
+      "line": 272
+    },
+    "test.test_itertools.TestBasicOps.test_pairwise_reenter": {
+      "outcome": "pass",
+      "line": 279
+    },
+    "test.test_itertools.TestBasicOps.test_pairwise_reenter2": {
+      "outcome": "pass",
+      "line": 286
+    },
+    "test.test_itertools.TestBasicOps.test_pairwise_result_gc": {
+      "outcome": "skip",
+      "line": 293
+    },
+    "test.test_itertools.TestBasicOps.test_permutations_result_gc": {
+      "outcome": "skip",
+      "line": 301
+    },
+    "test.test_itertools.TestBasicOps.test_permutations_tuple_reuse": {
+      "outcome": "skip",
+      "line": 308
+    },
+    "test.test_itertools.TestBasicOps.test_product_result_gc": {
+      "outcome": "skip",
+      "line": 316
+    },
+    "test.test_itertools.TestBasicOps.test_product_tuple_reuse": {
+      "outcome": "skip",
+      "line": 323
+    },
+    "test.test_itertools.TestBasicOps.test_repeat": {
+      "outcome": "pass",
+      "line": 330
+    },
+    "test.test_itertools.TestBasicOps.test_repeat_with_negative_times": {
+      "outcome": "pass",
+      "line": 337
+    },
+    "test.test_itertools.TestBasicOps.test_starmap": {
+      "outcome": "pass",
+      "line": 344
+    },
+    "test.test_itertools.TestBasicOps.test_takewhile": {
+      "outcome": "pass",
+      "line": 351
+    },
+    "test.test_itertools.TestBasicOps.test_tee_concurrent": {
+      "outcome": "error",
+      "line": 359
+    },
+    "test.test_itertools.TestBasicOps.test_tee_reenter": {
+      "outcome": "pass",
+      "line": 372
+    },
+    "test.test_itertools.TestBasicOps.test_zip": {
+      "outcome": "pass",
+      "line": 379
+    },
+    "test.test_itertools.TestBasicOps.test_zip_longest_bad_iterable": {
+      "outcome": "pass",
+      "line": 386
+    },
+    "test.test_itertools.TestBasicOps.test_zip_longest_result_gc": {
+      "outcome": "skip",
+      "line": 393
+    },
+    "test.test_itertools.TestBasicOps.test_zip_longest_tuple_reuse": {
+      "outcome": "skip",
+      "line": 400
+    },
+    "test.test_itertools.TestBasicOps.test_zip_tuple_reuse": {
+      "outcome": "skip",
+      "line": 407
+    },
+    "test.test_itertools.TestBasicOps.test_ziplongest": {
+      "outcome": "error",
+      "line": 414
+    },
+    "test.test_itertools.TestExamples.test_accumulate": {
+      "outcome": "pass",
+      "line": 425
+    },
+    "test.test_itertools.TestExamples.test_chain": {
+      "outcome": "pass",
+      "line": 432
+    },
+    "test.test_itertools.TestExamples.test_chain_from_iterable": {
+      "outcome": "pass",
+      "line": 439
+    },
+    "test.test_itertools.TestExamples.test_combinations": {
+      "outcome": "pass",
+      "line": 446
+    },
+    "test.test_itertools.TestExamples.test_combinations_with_replacement": {
+      "outcome": "pass",
+      "line": 453
+    },
+    "test.test_itertools.TestExamples.test_compress": {
+      "outcome": "pass",
+      "line": 460
+    },
+    "test.test_itertools.TestExamples.test_count": {
+      "outcome": "pass",
+      "line": 467
+    },
+    "test.test_itertools.TestExamples.test_cycle": {
+      "outcome": "pass",
+      "line": 474
+    },
+    "test.test_itertools.TestExamples.test_dropwhile": {
+      "outcome": "pass",
+      "line": 481
+    },
+    "test.test_itertools.TestExamples.test_filter": {
+      "outcome": "pass",
+      "line": 488
+    },
+    "test.test_itertools.TestExamples.test_filterfalse": {
+      "outcome": "pass",
+      "line": 495
+    },
+    "test.test_itertools.TestExamples.test_groupby": {
+      "outcome": "pass",
+      "line": 502
+    },
+    "test.test_itertools.TestExamples.test_islice": {
+      "outcome": "pass",
+      "line": 509
+    },
+    "test.test_itertools.TestExamples.test_map": {
+      "outcome": "pass",
+      "line": 516
+    },
+    "test.test_itertools.TestExamples.test_permutations": {
+      "outcome": "pass",
+      "line": 523
+    },
+    "test.test_itertools.TestExamples.test_product": {
+      "outcome": "pass",
+      "line": 530
+    },
+    "test.test_itertools.TestExamples.test_repeat": {
+      "outcome": "pass",
+      "line": 537
+    },
+    "test.test_itertools.TestExamples.test_stapmap": {
+      "outcome": "pass",
+      "line": 544
+    },
+    "test.test_itertools.TestExamples.test_takewhile": {
+      "outcome": "pass",
+      "line": 551
+    },
+    "test.test_itertools.TestExamples.test_zip": {
+      "outcome": "pass",
+      "line": 558
+    },
+    "test.test_itertools.TestExamples.test_zip_longest": {
+      "outcome": "pass",
+      "line": 565
+    },
+    "test.test_itertools.TestGC.test_accumulate": {
+      "outcome": "pass",
+      "line": 572
+    },
+    "test.test_itertools.TestGC.test_batched": {
+      "outcome": "pass",
+      "line": 579
+    },
+    "test.test_itertools.TestGC.test_chain": {
+      "outcome": "pass",
+      "line": 586
+    },
+    "test.test_itertools.TestGC.test_chain_from_iterable": {
+      "outcome": "pass",
+      "line": 593
+    },
+    "test.test_itertools.TestGC.test_combinations": {
+      "outcome": "pass",
+      "line": 600
+    },
+    "test.test_itertools.TestGC.test_combinations_with_replacement": {
+      "outcome": "pass",
+      "line": 607
+    },
+    "test.test_itertools.TestGC.test_compress": {
+      "outcome": "pass",
+      "line": 614
+    },
+    "test.test_itertools.TestGC.test_count": {
+      "outcome": "pass",
+      "line": 621
+    },
+    "test.test_itertools.TestGC.test_cycle": {
+      "outcome": "pass",
+      "line": 628
+    },
+    "test.test_itertools.TestGC.test_dropwhile": {
+      "outcome": "pass",
+      "line": 635
+    },
+    "test.test_itertools.TestGC.test_filter": {
+      "outcome": "pass",
+      "line": 642
+    },
+    "test.test_itertools.TestGC.test_filterfalse": {
+      "outcome": "pass",
+      "line": 649
+    },
+    "test.test_itertools.TestGC.test_groupby": {
+      "outcome": "pass",
+      "line": 656
+    },
+    "test.test_itertools.TestGC.test_islice": {
+      "outcome": "pass",
+      "line": 663
+    },
+    "test.test_itertools.TestGC.test_issue2246": {
+      "outcome": "pass",
+      "line": 670
+    },
+    "test.test_itertools.TestGC.test_map": {
+      "outcome": "pass",
+      "line": 677
+    },
+    "test.test_itertools.TestGC.test_pairwise": {
+      "outcome": "pass",
+      "line": 684
+    },
+    "test.test_itertools.TestGC.test_permutations": {
+      "outcome": "pass",
+      "line": 691
+    },
+    "test.test_itertools.TestGC.test_product": {
+      "outcome": "pass",
+      "line": 698
+    },
+    "test.test_itertools.TestGC.test_repeat": {
+      "outcome": "pass",
+      "line": 705
+    },
+    "test.test_itertools.TestGC.test_starmap": {
+      "outcome": "pass",
+      "line": 712
+    },
+    "test.test_itertools.TestGC.test_takewhile": {
+      "outcome": "pass",
+      "line": 719
+    },
+    "test.test_itertools.TestGC.test_zip": {
+      "outcome": "pass",
+      "line": 726
+    },
+    "test.test_itertools.TestGC.test_zip_longest": {
+      "outcome": "pass",
+      "line": 733
+    },
+    "test.test_itertools.TestPurePythonRoughEquivalents.test_batched_recipe": {
+      "outcome": "pass",
+      "line": 740
+    },
+    "test.test_itertools.TestPurePythonRoughEquivalents.test_groupby_recipe": {
+      "outcome": "pass",
+      "line": 747
+    },
+    "test.test_itertools.TestPurePythonRoughEquivalents.test_islice_recipe": {
+      "outcome": "pass",
+      "line": 754
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_accumulate": {
+      "outcome": "pass",
+      "line": 762
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_batched": {
+      "outcome": "pass",
+      "line": 769
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_map": {
+      "outcome": "pass",
+      "line": 784
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_pairwise": {
+      "outcome": "pass",
+      "line": 791
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_product": {
+      "outcome": "pass",
+      "line": 798
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_starmap": {
+      "outcome": "pass",
+      "line": 805
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_takewhile": {
+      "outcome": "pass",
+      "line": 812
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_tee": {
+      "outcome": "pass",
+      "line": 819
+    },
+    "test.test_itertools.TestVariousIteratorArgs.test_zip": {
+      "outcome": "pass",
+      "line": 826
+    }
+  }
+}
