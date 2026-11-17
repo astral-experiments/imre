@@ -1,6 +1,7 @@
 """Check the scorecard's counting and evidence boundaries."""
 import copy
 import json
+import hashlib
 import unittest
 
 import scorecard
@@ -9,24 +10,70 @@ from replay_stdlib import parse
 
 class ScorecardTests(unittest.TestCase):
     def script(self):
-        digest = "a" * 64
-        run = {"outcome": "pass", "argv": ["python", "script.py"], "exit_code": 0, "stdout_sha256": digest, "stderr_sha256": digest, "effects_sha256": digest, "effects_manifest": "effects.json", "evidence": "run.log"}
+        sha = lambda value: hashlib.sha256(value.encode()).hexdigest()
+        run = {"outcome": "pass", "argv": ["python", "script.py"], "exit_code": 0, "stdout": "", "stderr": "", "effects_manifest": '{"files":[]}', "stdout_sha256": sha(""), "stderr_sha256": sha(""), "effects_sha256": sha('{"files":[]}'), "evidence": "run.log"}
         runs = {t: copy.deepcopy(run) for t in scorecard.TIERS}; runs["stock"]["version"] = "3.14.5"
-        return {"schema": scorecard.SCHEMA, "kind": "script", "id": "script:original-command", "source": {"repo": "https://github.com/example/repo", "commit": "b" * 40, "path": "script.py", "sha256": digest}, "normalized_invocation": {"cwd": "$REPO", "argv": ["python", "script.py"], "env": {}}, "imre_revision": scorecard.COHORT["imre_revision"], "platform": scorecard.COHORT["platform"], "runs": runs, "comparisons": {t: {d: "exact" for d in scorecard.DIMENSIONS} for t in ("O0", "O3")}, "omission_reason": None, "paired": True}
+        preimages = {"dist-workspace.toml": "b" * 64}
+        return {"schema": scorecard.SCHEMA, "kind": "script", "id": "script:original-command", "source": {"repo": "https://github.com/example/repo", "commit": "b" * 40, "path": "script.py", "sha256": "a" * 64}, "normalized_invocation": {"cwd": "$REPO", "argv": ["python", "script.py"], "env": {}}, "imre_revision": scorecard.COHORT["imre_revision"], "platform": scorecard.COHORT["platform"], "runs": runs, "fixture_provenance": {"status": "exact_frozen", "preimages": {t: copy.deepcopy(preimages) for t in scorecard.TIERS}}, "comparisons": {t: {d: "exact" for d in scorecard.DIMENSIONS} for t in ("O0", "O3")}, "omission_reason": None, "paired": True}
+
+    def anchors(self, r):
+        reference = {k: v for k, v in r["runs"]["stock"].items() if k in {"exit_code", "stdout", "stderr", "effects_manifest", "stdout_sha256", "stderr_sha256", "effects_sha256"}}
+        raw = json.dumps({"id": r["id"], "source": r["source"], "normalized_invocation": r["normalized_invocation"], "fixture_scope": "complete command fixture", "preimages": r["fixture_provenance"]["preimages"]["stock"], "reference": reference}, sort_keys=True)
+        anchor = {"schema": "imre.compatibility.frozen-script.v1", "id": r["id"], "source": r["source"], "normalized_invocation": r["normalized_invocation"], "evidence": {"locator": "frozen campaign receipt/excerpt", "raw": raw, "raw_sha256": hashlib.sha256(raw.encode()).hexdigest()}}
+        return {r["id"]: anchor}
+
+    def test_exact_frozen_control(self):
+        r = self.script(); scorecard.validate_record(r, "script", {}, self.anchors(r))
+
+    def test_reconstructed_same_output_triple_is_not_paired(self):
+        r = self.script(); anchors = self.anchors(r)
+        r["fixture_provenance"]["status"] = "reconstructed"
+        with self.assertRaisesRegex(ValueError, "paired does not match"): scorecard.validate_record(r, "script", {}, anchors)
+        r["paired"] = False; scorecard.validate_record(r, "script", {}, anchors)
+
+    def test_wrong_preimage_or_frozen_reference_cannot_pair(self):
+        r = self.script(); anchors = self.anchors(r)
+        r["fixture_provenance"]["preimages"]["stock"]["dist-workspace.toml"] = "c" * 64
+        with self.assertRaisesRegex(ValueError, "paired does not match"): scorecard.validate_record(r, "script", {}, anchors)
+        r = self.script(); anchors = self.anchors(r)
+        for run in r["runs"].values():
+            run["effects_manifest"] = '{"files":["reconstructed README"]}'
+            run["effects_sha256"] = hashlib.sha256(run["effects_manifest"].encode()).hexdigest()
+        with self.assertRaisesRegex(ValueError, "paired does not match"): scorecard.validate_record(r, "script", {}, anchors)
+
+    def test_raw_digest_inconsistency_is_rejected(self):
+        for field in ("stdout", "stderr", "effects_manifest"):
+            r = self.script(); anchors = self.anchors(r); r["runs"]["O3"][field] += "tampered"
+            with self.assertRaisesRegex(ValueError, "digest inconsistent"): scorecard.validate_record(r, "script", {}, anchors)
+
+    def test_manifest_label_is_not_raw_effect_evidence(self):
+        r = self.script(); anchors = self.anchors(r)
+        run = r["runs"]["O0"]; run["effects_manifest"] = "effects.json"; run["effects_sha256"] = hashlib.sha256(b"effects.json").hexdigest()
+        with self.assertRaisesRegex(ValueError, "expected raw JSON object"): scorecard.validate_record(r, "script", {}, anchors)
+
+    def test_frozen_evidence_digest_is_verified(self):
+        r = self.script(); anchors = self.anchors(r); anchors[r["id"]]["evidence"]["raw"] += "tampered"
+        with self.assertRaisesRegex(ValueError, "digest inconsistent"): scorecard.validate_record(r, "script", {}, anchors)
+
+    def test_missing_command_remains_classified_without_credit(self):
+        r = self.script(); r["fixture_provenance"] = {"status": "unknown"}; r["paired"] = False
+        r["runs"] = {t: {"outcome": "not_run", "argv": [], "reason": "fixture missing"} for t in scorecard.TIERS}
+        r["comparisons"] = {t: {d: "not_checked" for d in scorecard.DIMENSIONS} for t in ("O0", "O3")}
+        scorecard.validate_record(r, "script", {})
 
     def test_script_pair_requires_exact_observations(self):
-        r = self.script(); scorecard.validate_record(r, "script", {})
-        r["runs"]["O3"]["stdout_sha256"] = "c" * 64
-        with self.assertRaisesRegex(ValueError, "contradicts observations"): scorecard.validate_record(r, "script", {})
+        r = self.script(); anchors = self.anchors(r)
+        r["runs"]["O3"]["stdout"] = "different"; r["runs"]["O3"]["stdout_sha256"] = hashlib.sha256(b"different").hexdigest()
+        with self.assertRaisesRegex(ValueError, "contradicts observations"): scorecard.validate_record(r, "script", {}, anchors)
         r["comparisons"]["O3"]["stdout"] = "different"; r["paired"] = False
-        scorecard.validate_record(r, "script", {})
+        scorecard.validate_record(r, "script", {}, anchors)
 
     def test_non_stock_success_and_skips_do_not_pair(self):
         for outcome in ("skip", "error", "timeout", "not_run", "omitted"):
-            r = self.script(); r["runs"]["stock"].update(outcome=outcome, reason="not available")
+            r = self.script(); anchors = self.anchors(r); r["runs"]["stock"].update(outcome=outcome, reason="not available")
             if outcome == "omitted": r["omission_reason"] = "explicit omission"
-            with self.assertRaisesRegex(ValueError, "paired does not match"): scorecard.validate_record(r, "script", {})
-            r["paired"] = False; scorecard.validate_record(r, "script", {})
+            with self.assertRaisesRegex(ValueError, "paired does not match"): scorecard.validate_record(r, "script", {}, anchors)
+            r["paired"] = False; scorecard.validate_record(r, "script", {}, anchors)
 
     def test_pilot_and_unreplayed_denominators(self):
         fs, scripts = scorecard.summary()
