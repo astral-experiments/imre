@@ -300,7 +300,14 @@ fn run() -> Result<ExitCode, String> {
             None
         };
     let split = !whole_program
-        && (native.is_some() || (native_objects && (clang.is_some() || options.address_sanitizer)));
+        && native_objects
+        && (native.is_some()
+            || clang.is_some()
+            || bundled.is_some()
+            || options.address_sanitizer
+            || std::env::var_os("PATH").is_some_and(|path| {
+                std::env::split_paths(&path).any(|dir| dir.join("clang-18").is_file())
+            }));
     if split && linux && !options.address_sanitizer {
         options.bundled_provider_archive = build_cache::provider_archive(&optimization);
     }
