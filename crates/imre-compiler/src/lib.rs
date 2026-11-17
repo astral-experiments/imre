@@ -689,7 +689,10 @@ fn object_fallback(
     });
     let ordered_command_import = options.command.is_some()
         && import_failure == Some(modules::EntryImportFailure::AfterStatement);
+    let command_dependency_import = options.command.is_some()
+        && import_failure == Some(modules::EntryImportFailure::DependencyAfterStatement);
     let object_imports = options.module_entry.is_some()
+        || command_dependency_import
         || import_failure == Some(modules::EntryImportFailure::ZipImport)
         || (options.sitecustomize
             && import_failure == Some(modules::EntryImportFailure::MissingModule))
