@@ -1,0 +1,14 @@
+IMRE_UNITTEST {"event": "collection", "count": 4}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_separators.TestCSeparators.test_illegal_separators"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_separators.TestCSeparators.test_separators"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_separators.TestPySeparators.test_illegal_separators"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_separators.TestPySeparators.test_separators"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_separators.TestCSeparators.test_illegal_separators"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_separators.TestCSeparators.test_illegal_separators", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_separators.TestCSeparators.test_separators"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_separators.TestCSeparators.test_separators", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_separators.TestPySeparators.test_illegal_separators"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_separators.TestPySeparators.test_illegal_separators", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_separators.TestPySeparators.test_separators"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_separators.TestPySeparators.test_separators", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "summary", "run": 4, "successful": true}
