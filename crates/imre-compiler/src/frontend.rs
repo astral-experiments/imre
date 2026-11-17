@@ -6343,6 +6343,12 @@ impl<'a> Checker<'a> {
             } else {
                 let key_value = self.expr(key)?;
                 if !self.types.hashable_key(key_value.ty) {
+                    if key_value.ty == Type::PythonObject {
+                        return Err(self.object_builtin_error_with_checked_calls(
+                            "dictionary key hashing",
+                            key,
+                        ));
+                    }
                     return Err(error(
                         self.source,
                         key,
@@ -16205,6 +16211,9 @@ impl<'a> Checker<'a> {
             };
             if matches!(value.ty, Type::CmpKey(..)) {
                 return Ok(self.cmp_key_hash(value.clone()));
+            }
+            if value.ty == Type::PythonObject && self.unshadowed_builtin(&call.func, "hash") {
+                return Err(self.object_builtin_error_with_checked_calls("hash", call));
             }
             let args = match value.ty {
                 Type::Class(id)
