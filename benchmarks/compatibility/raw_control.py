@@ -80,6 +80,8 @@ def trace_gate(text, command, probe, poison_path, diagnostic, require):
 
 
 def trace_withdraw(api, text, image, probe, tree, stash, leaf, cwd, require):
+    """Allow only ENOENT withdrawn-path probes; never allow Python probes or child execs."""
+    from posixpath import normpath
     lines = text.splitlines()
     first, target = execs(lines, require)
     require(first[2:] == (probe, [probe, 'withdraw', tree, stash, leaf, image])
@@ -96,24 +98,27 @@ def trace_withdraw(api, text, image, probe, tree, stash, leaf, cwd, require):
     restored = find(lines, rf'^{first[1]}\s+rename\({re.escape(json.dumps(stash))}, {re.escape(json.dumps(tree))}\) = 0$', b+1)
     exists = stat(lines, first[1], leaf, False, restored+1)
     find(lines, rf'^{first[1]}\s+exit_group\(0\)', exists+1)
+    require(isinstance(cwd, str) and Path(cwd).is_absolute(), 'native cwd missing')
     stem = Path(leaf).stem.lower()
     for line in lines[target[0]:waited+1]:
         # A successful io_uring setup would permit unobserved asynchronous opens.
         require(not re.search(r'\bio_uring_setup\(.*= [0-9]+$', line), 'native io_uring may hide file access')
-        m = OPEN.match(line)
+        m = OPEN.match(line) or re.match(r'^\d+\s+newfstatat\(.*?("(?:[^"\\]|\\.)*")', line)
         if m:
             path = json.loads(m[1]).lower()
             name = Path(path).name
-            forbidden = ('libpython' in path
-                or re.fullmatch(r'python(?:[0-9.]+)?', name)
-                or name == stem+'.py'
+            python_probe = 'libpython' in path or any(part.startswith('python') for part in Path(path).parts)
+            require(not python_probe, 'native probed CPython or libpython')
+            resolved = Path(normpath(path if Path(path).is_absolute() else str(Path(cwd)/path)))
+            withdrawn = (name == stem+'.py'
                 or name in {stem+'.pyc', stem+'.pyo'}
-                or (name.startswith(stem+'.')
-                and name.endswith(('.pyc', '.pyo')))
-                or path == stash.lower()
-                or path.startswith(stash.lower()+'/'))
-            require(not forbidden, 'native opened CPython, libpython, withdrawn source or matching bytecode')
-    require(isinstance(cwd, str) and Path(cwd).is_absolute(), 'native cwd missing')
+                or (name.startswith(stem+'.') and name.endswith(('.pyc', '.pyo')))
+                or resolved.is_relative_to(Path(tree.lower()))
+                or resolved.is_relative_to(Path(stash.lower()))
+                or Path(stash).name.lower() in Path(path).parts)
+            # Only an explicit ENOENT proves this withdrawn path was absent.
+            require(not withdrawn or re.search(r'\) = -1 ENOENT(?: \([^)]*\))?$', line),
+                    'native opened CPython, libpython, withdrawn source or matching bytecode')
     for path in api.successful_open_paths('\n'.join(lines[target[0]:waited+1]), cwd):
         name = path.name.lower()
         cached = path.parent.name == '__pycache__' and name.startswith(stem+'.') and path.suffix in {'.pyc','.pyo'}
