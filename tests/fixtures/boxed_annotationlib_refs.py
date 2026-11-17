@@ -216,28 +216,18 @@ def current():
         pass
 
     manual.__annotations__ = {"value": "Token"}
-    assert module.get_annotations(manual, globals={"__builtins__": {"Token": bytes}},
-                                  eval_str=True) == {"value": bytes}
+    assert module.get_annotations(manual) == {"value": "Token"}
     try:
         module.ForwardRef("Token").evaluate(globals={"__builtins__": {"Token": bytes}})
     except NameError as error:
         assert error.name == "Token"
     else:
         raise AssertionError("ForwardRef must not use custom builtins for a bare name")
-    manual.__annotations__ = {"value": "Ｋey"}
-    namespace = {"Key": 23}
-    assert module.get_annotations(manual, globals=namespace, eval_str=True) == {"value": 23}
-    assert "__builtins__" in namespace
 
     def grouped(a: "(int)", b: "(((int)))", c: "int # declared", d: "int ", e: "\nint"):
         pass
 
     assert module.get_annotations(grouped, eval_str=True) == {"a": int, "b": int, "c": int, "d": int, "e": int}
-    for spelling in (" int", "\tint"):
-        manual.__annotations__ = {"value": spelling}
-        namespace = {}
-        assert module.get_annotations(manual, globals=namespace, eval_str=True) == {"value": int}
-        assert "__builtins__" in namespace
     manual.__annotations__ = {"value": "("}
     namespace = {}
     try:
@@ -283,15 +273,42 @@ def current():
 
 
 def unsupported():
+    def checked(value: "int", compound: "list[int]", normalized: "Ｋey", choice: "Choice"):
+        pass
+
+    assert annotationlib.get_annotations(checked, globals={"Key": bytes, "Choice": int},
+                                         locals={"Key": str, "Choice": bytes}, eval_str=True) == {
+        "value": int, "compound": list[int], "normalized": str, "choice": bytes,
+    }
+    assert annotationlib.get_annotations(checked, globals={"Key": bytes, "Choice": int}, eval_str=True) == {
+        "value": int, "compound": list[int], "normalized": bytes, "choice": int,
+    }
+    def custom_builtin(value: "Token"):
+        pass
+    assert annotationlib.get_annotations(custom_builtin, globals={"__builtins__": {"Token": bytes}},
+                                         eval_str=True) == {"value": bytes}
+    assert annotationlib.ForwardRef("Choice").evaluate(globals={"Choice": int}) is int
+    from contextlib import AbstractContextManager
+    assert annotationlib.get_annotations(AbstractContextManager.__enter__, eval_str=True) == {
+        "return": AbstractContextManager,
+    }
+    namespace = {}
+    exec("from __future__ import annotations\ndef postponed(value: int, quoted: 'int'): pass", namespace)
+    assert annotationlib.get_annotations(namespace["postponed"], eval_str=True) == {"value": int, "quoted": "int"}
+
     def manual(value):
         pass
 
-    for source in ("int ", "\nint", "(int)", "(((int)))", "int # runtime-only"):
+    for source in (
+        "int", "Token", "Ｋey", " int", "\tint", "int ", "\nint", "(int)", "(((int)))", "int # runtime-only",
+    ):
         # Build a fresh, unlinked string, even when that spelling also appears in a declaration.
         text = "".join((source[:-1], source[-1:]))
         manual.__annotations__ = {"value": text}
+        namespace = {"Key": 23, "__builtins__": {"int": int, "Token": bytes}}
+        assert annotationlib.get_annotations(manual) == {"value": text}
         try:
-            annotationlib.get_annotations(manual, eval_str=True)
+            annotationlib.get_annotations(manual, globals=namespace, eval_str=True)
         except NotImplementedError as error:
             assert "declare the annotation in source or avoid eval_str" in str(error)
         else:

@@ -74,10 +74,7 @@ pub(super) fn annotation_operand<R>(
         };
     };
     let bind = |index| ExprKind::Builtin(Builtin::BindAnnotationExpression(index), Vec::new());
-    // A postponed name already has its spelling and needs no executable child.
-    let kind = if bundled || (string_annotations && expr.is_name_expr()) {
-        ExprKind::Str(text)
-    } else if let Some(index) = children.get_index_of(&text) {
+    let kind = if let Some(index) = children.get_index_of(&text) {
         bind(index)
     } else {
         let expanded;
@@ -91,6 +88,15 @@ pub(super) fn annotation_operand<R>(
             .ok()
             .and_then(|source| {
                 let parsed = annotation_expression(&source)?;
+                // Bundled compounds were never executable; link only the bare names
+                // previously resolved by the runtime annotation shortcut.
+                if bundled
+                    && !parsed.syntax().body.as_name_expr().is_some_and(|name| {
+                        source.trim_start_matches([' ', '\t']) == &source[name.range()]
+                    })
+                {
+                    return None;
+                }
                 prepare_child(&source, &parsed)
             });
         match child {
@@ -197,7 +203,7 @@ mod tests {
         };
         let sites = observe(&parsed.syntax().body, source, false, false);
         assert_eq!(sites.values.len(), 4);
-        assert_eq!(sites.children.len(), 2);
+        assert_eq!(sites.children.len(), 3);
         let [
             crate::ir::Statement::Position(range, None),
             crate::ir::Statement::Return(_),
@@ -213,10 +219,8 @@ mod tests {
         }
         let site = |token| TextSize::try_from(text.find(token).unwrap()).unwrap();
         assert!(sites.children.contains_key("(lambda: 1)()"));
-        assert!(
-            matches!(&sites.values[&site("'Name'")].kind, ExprKind::Str(text) if text == "Name")
-        );
-        assert!(!sites.children.contains_key("Name"));
+        assert!(matches!(&sites.values[&site("'Name'")].kind,
+            ExprKind::Builtin(Builtin::BindAnnotationExpression(index), _) if sites.children.get_index(*index).unwrap().0 == "Name"));
         assert!(!sites.values.contains_key(&site("'skip")));
     }
 
@@ -290,6 +294,7 @@ def dormant(): return f"\ud801{1}", t"{x}"
     #[test]
     fn future_operands_require_a_child_only_when_their_spelling_is_compiled() {
         let text = "mod_field: A[B]
+bare: Name
 @decorator
 class C:
     field: C[D]
@@ -314,12 +319,14 @@ after: K[L]
         let site = |spelling| TextSize::try_from(text.find(spelling).unwrap()).unwrap();
         for bundled in [false, true] {
             let sites = observe(&parsed.syntax().body, source, true, bundled);
-            assert_eq!(sites.values.len(), 7);
-            assert_eq!(sites.children.len(), if bundled { 0 } else { 7 });
-            for spelling in ["A[B]", "C[D]", "E[F]", "*Items", "None", "I[J]", "K[L]"] {
+            assert_eq!(sites.values.len(), 8);
+            assert_eq!(sites.children.len(), if bundled { 1 } else { 8 });
+            for spelling in [
+                "A[B]", "Name", "C[D]", "E[F]", "*Items", "None", "I[J]", "K[L]",
+            ] {
                 let location = site(spelling);
                 let value = &sites.values[&location].kind;
-                if bundled {
+                if bundled && spelling != "Name" {
                     assert!(matches!(value, ExprKind::Str(text) if text == spelling));
                 } else {
                     assert!(
