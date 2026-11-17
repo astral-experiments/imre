@@ -2,7 +2,7 @@ import code
 import codeop
 
 
-def current():
+def available():
     assert code.compile_command is codeop.compile_command
     console = code.InteractiveConsole()
     assert isinstance(console.compile, codeop.CommandCompiler)
@@ -12,6 +12,11 @@ def current():
 
     namespace = {}
     interpreter = code.InteractiveInterpreter(namespace)
+    return interpreter, namespace
+
+
+def current():
+    interpreter, namespace = available()
     interpreter.runcode(compile("answer = 6 * 7", "<console>", "exec"))
     assert namespace["answer"] == 42
     try:
