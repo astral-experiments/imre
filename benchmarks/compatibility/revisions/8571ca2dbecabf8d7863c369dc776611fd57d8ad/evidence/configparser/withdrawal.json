@@ -1,0 +1,13 @@
+{
+  "performed": true,
+  "source": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_configparser.py",
+  "source_sha256_before": "6b82ad0b279850f3081c84c3fc459cb16afc8d11a4d14783c4f017e095974df4",
+  "bytecode": [],
+  "runs": [
+    "O0",
+    "O3"
+  ],
+  "source_absent": true,
+  "source_sha256_after": "6b82ad0b279850f3081c84c3fc459cb16afc8d11a4d14783c4f017e095974df4",
+  "restored_by_hash": true
+}

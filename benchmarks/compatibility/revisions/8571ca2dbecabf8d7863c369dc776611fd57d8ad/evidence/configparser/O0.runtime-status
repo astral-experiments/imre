@@ -1,0 +1,6 @@
+Name:	O0.exe
+Pid:	11630
+PPid:	11626
+NoNewPrivs:	1
+Seccomp:	2
+Seccomp_filters:	2

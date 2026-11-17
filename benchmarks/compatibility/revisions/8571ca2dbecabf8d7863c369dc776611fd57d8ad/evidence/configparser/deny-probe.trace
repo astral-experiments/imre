@@ -1,0 +1,8 @@
+10689 execve("/bin/sh", ["/bin/sh", "-c", "/usr/bin/true"], 0x561c7852f0e0 /* 74 vars */) = 0
+10689 openat(AT_FDCWD, "/workspace/scratch/config-8571/deny_child_exec.so", O_RDONLY|O_CLOEXEC) = 3
+10689 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+10689 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+10690 execve("/usr/bin/true", ["/usr/bin/true"], 0x55bee42b7248 /* 74 vars */) = -1 EPERM (Operation not permitted)
+10690 +++ exited with 126 +++
+10689 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=10690, si_uid=1000, si_status=126, si_utime=0, si_stime=0} ---
+10689 +++ exited with 126 +++
