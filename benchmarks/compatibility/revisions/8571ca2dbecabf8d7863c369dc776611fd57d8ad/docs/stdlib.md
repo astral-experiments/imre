@@ -13,7 +13,7 @@ Scripts: **0 of 84 original commands have receipts**, **0 observed intersections
 
 | Family | Raw originals | Stock | O0 | O3 | Observed stock/O0/O3 passes | Verified credited pairs | Historical mixed-revision credits |
 | --- | ---: | --- | --- | --- | ---: | --- | ---: |
-| `argparse` | 1,893 | not run | not run | not run | unknown (not run) | unknown (not run) | 1,887 |
+| `argparse` | 1,893 | not run | not run | not run | unknown (not run) | pending (1,893 staged, unverified) | 1,887 |
 | `base64` | 41 | not run | not run | not run | unknown (not run) | pending (41 staged, unverified) | 40 |
 | `collections` | 659 | not run | not run | not run | unknown (not run) | unknown (not run) | 639 |
 | `configparser` | 344 | 339 pass, 5 skip | 339 pass, 5 skip | 339 pass, 5 skip | 339 | 339 verified | 339 |

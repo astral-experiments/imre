@@ -1,0 +1,8 @@
+cede56ffc2497950f43b7a4aff1c170dbab2f13aa6a75d33e09dd5dd27a7a5e6  /workspace/imre/target/release/imre
+885133ce1695a4a49db6c813228a5b9c6ecbb37c22a3394cb2fae2eb6e32324b  /workspace/imre/target/release/libimre_runtime.a
+10cdd30ddd59ff46ea6f5c8c88bc21124fc7ceb3763daae50e883ca95f2530aa  /workspace/scratch/argparse-8571-probe
+c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304  /workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14
+bd3892b42c83f276327c141a7d6b38ed08c07a56c6076e4d3aefeddf90515499  /workspace/scratch/argparse-8571-fixtures/Lib/test/test_argparse.py
+bd3892b42c83f276327c141a7d6b38ed08c07a56c6076e4d3aefeddf90515499  /workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_argparse.py
+af0fa90673a0e21cf031516d88cc61fd243b39757494bf69d36379e35d4da33c  /workspace/scratch/argparse-8571-O0.exe
+1e1716175de06212b1375c5a8f5dc4cf7c45d555864efd81f54193eb4636da3e  /workspace/scratch/argparse-8571-O3.exe

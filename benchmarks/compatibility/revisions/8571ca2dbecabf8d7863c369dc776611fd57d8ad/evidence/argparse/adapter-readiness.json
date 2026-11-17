@@ -1,0 +1,32 @@
+{
+  "adapter": "raw-control-v1",
+  "existing_active_families": [
+    "configparser",
+    "fnmatch",
+    "pathlib",
+    "urllib",
+    "csv",
+    "base64"
+  ],
+  "checks": [
+    {
+      "name": "correct finite stock/O0/O3 row",
+      "accepted": true
+    },
+    {
+      "name": "full-stock evidence substituted without changing finite cohort",
+      "accepted": false,
+      "reason": "test.test_argparse.TestAddArgumentMetavar.test_nargs_1_metavar_length0: stock raw original ID, occurrence, outcome or line differs"
+    },
+    {
+      "name": "rehashed paired row and mapping moved to full-stock inventory cohort",
+      "accepted": true
+    },
+    {
+      "name": "rehashed finite cohort substitutes different full-suite stock launcher archive",
+      "accepted": true
+    }
+  ],
+  "activation_ready": false,
+  "blocker": "The adapter accepts rehashed full-stock/finite-native configuration mismatches."
+}

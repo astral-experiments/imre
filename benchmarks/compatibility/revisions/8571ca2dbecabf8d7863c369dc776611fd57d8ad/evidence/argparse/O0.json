@@ -1,0 +1,336 @@
+{
+  "collection": 45,
+  "inventory_complete": true,
+  "originals": [
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_1_metavar_length0",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 48
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_1_metavar_length1",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 50
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_1_metavar_length2",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 52
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_1_metavar_length3",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 54
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_1_metavar_string",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 56
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_2_metavar_length0",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 58
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_2_metavar_length1",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 60
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_2_metavar_length2",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 62
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_2_metavar_length3",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 64
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_2_metavar_string",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 66
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_3_metavar_length0",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 68
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_3_metavar_length1",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 70
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_3_metavar_length2",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 72
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_3_metavar_length3",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 74
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_3_metavar_string",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 76
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_None_metavar_length0",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 78
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_None_metavar_length1",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 80
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_None_metavar_length2",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 82
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_None_metavar_length3",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 84
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_None_metavar_string",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 86
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_oneormore_metavar_length0",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 88
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_oneormore_metavar_length1",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 90
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_oneormore_metavar_length2",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 92
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_oneormore_metavar_length3",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 94
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_oneormore_metavar_string",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 96
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_optional_metavar_length0",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 98
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_optional_metavar_length1",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 100
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_optional_metavar_length2",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 102
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_optional_metavar_length3",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 104
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_optional_metavar_string",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 106
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_parser_metavar_length0",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 108
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_parser_metavar_length1",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 110
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_parser_metavar_length2",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 112
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_parser_metavar_length3",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 114
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_parser_metavar_string",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 116
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_remainder_metavar_length0",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 118
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_remainder_metavar_length1",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 120
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_remainder_metavar_length2",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 122
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_remainder_metavar_length3",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 124
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_remainder_metavar_string",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 126
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_zeroormore_metavar_length0",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 128
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_zeroormore_metavar_length1",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 130
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_zeroormore_metavar_length2",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 132
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_zeroormore_metavar_length3",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 134
+    },
+    {
+      "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_zeroormore_metavar_string",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 136
+    }
+  ],
+  "fixtures": [],
+  "subtest_skips": [],
+  "summary": {
+    "event": "summary",
+    "run": 45,
+    "successful": true
+  },
+  "timed_out": false,
+  "argv": [
+    "/workspace/scratch/argparse-8571-O0.exe"
+  ],
+  "timeout_seconds": 90,
+  "exit_code": 0,
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "49342c4f024da075b53fd1149f401dd7d8c6587a60677e613d1a9ddd99720554"
+}
