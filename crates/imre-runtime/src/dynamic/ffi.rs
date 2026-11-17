@@ -3124,7 +3124,7 @@ pub(super) unsafe extern "C" fn imre_dyn_define(
         // SAFETY: the emitter initializes the union with the function ABI selected by the tag.
         let body = unsafe {
             match definition.tag {
-                0 | value::DIFFLIB_INIT_BODY..=value::COLLECTIONS_NAMEDTUPLE_MAKE_BODY => {
+                0 | value::DIFFLIB_INIT_BODY..=value::DIFFLIB_CALCULATE_RATIO_BODY => {
                     value::Body::Native(definition.entry.native, NONE)
                 }
                 value::NATIVE_SUSPENDED_BODY => value::Body::Suspended(definition.entry.suspended),
@@ -3144,7 +3144,7 @@ pub(super) unsafe extern "C" fn imre_dyn_define(
             (qualname, doc),
             (filename, definition.first_line),
         );
-        if (value::DIFFLIB_INIT_BODY..=value::COLLECTIONS_NAMEDTUPLE_MAKE_BODY)
+        if (value::DIFFLIB_INIT_BODY..=value::DIFFLIB_CALCULATE_RATIO_BODY)
             .contains(&definition.tag)
         {
             let Value::Code(code) = ctx.heap.get_mut(code) else {

@@ -1224,6 +1224,7 @@ impl SourceMap<'_> {
         }
         let provider = if self.bundled && self.path == Path::new("<imre stdlib>/difflib.py") {
             match prefix.name {
+                "_calculate_ratio" => Some((None, permanent::DIFFLIB_CALCULATE_RATIO_BODY)),
                 "SequenceMatcher.__init__" => {
                     Some((Some("imre_dyn_difflib_init"), permanent::DIFFLIB_INIT_BODY))
                 }
@@ -1241,6 +1242,10 @@ impl SourceMap<'_> {
                 "SequenceMatcher.get_matching_blocks" => Some((
                     Some("imre_dyn_difflib_get_blocks"),
                     permanent::DIFFLIB_GET_BLOCKS_BODY,
+                )),
+                "SequenceMatcher.ratio" => Some((
+                    Some("imre_dyn_difflib_ratio"),
+                    permanent::DIFFLIB_RATIO_BODY,
                 )),
                 _ => None,
             }

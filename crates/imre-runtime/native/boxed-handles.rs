@@ -29,3 +29,5 @@ pub(crate) const DIFFLIB_CHAIN_B_BODY: u32 = 5;
 pub(crate) const DIFFLIB_FIND_BODY: u32 = 6;
 pub(crate) const DIFFLIB_GET_BLOCKS_BODY: u32 = 7;
 pub(crate) const COLLECTIONS_NAMEDTUPLE_MAKE_BODY: u32 = 8;
+pub(crate) const DIFFLIB_RATIO_BODY: u32 = 9;
+pub(crate) const DIFFLIB_CALCULATE_RATIO_BODY: u32 = 10;

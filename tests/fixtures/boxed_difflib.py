@@ -24,6 +24,7 @@ def current():
     check_constructor_dispatch()
     check_unicode_index_order_and_popularity()
     check_matching_blocks_dispatch()
+    check_ratio_dispatch()
 
 
 def check_live_matcher_state():
@@ -189,3 +190,28 @@ def check_matching_blocks_dispatch():
     finally:
         Match._make = previous_make
     assert seen == [((0, 0, 1), (1, 1, 0))] * 2
+
+
+def check_ratio_dispatch():
+    import difflib
+    import sys
+
+    empty = SequenceMatcher(None, "", "")
+    assert empty.ratio() is empty.ratio()
+    matcher = SequenceMatcher(None, "ab", "ab")
+    matcher.matching_blocks = [(0, 0, -1), [0, 0, 2]]
+    assert matcher.ratio() == 0.5
+
+    original = difflib._calculate_ratio
+
+    def inspect(matches, length):
+        caller = sys._getframe(1)
+        assert caller.f_code.co_name == "ratio"
+        assert caller.f_locals["matches"] == matches
+        return matches, length
+
+    difflib._calculate_ratio = inspect
+    try:
+        assert matcher.ratio() == (1, 4)
+    finally:
+        difflib._calculate_ratio = original
