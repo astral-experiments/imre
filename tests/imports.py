@@ -2423,6 +2423,8 @@ def main() -> None:
                 command = [compiler, "build", str(case / "main.py"), "-o", str(executable),
                            "--runtime", runtime, "--clang", args.clang, "--opt-level", str(level),
                            *build_flags]
+                if name == "reload_source_plugin":
+                    command += ["--include-module", "plugins.report"]
                 if args.sanitize:
                     command.append("--sanitize")
                 # Optimizing these bundled-module integration cases can take several minutes.
