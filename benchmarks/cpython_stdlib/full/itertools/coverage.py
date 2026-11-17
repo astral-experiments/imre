@@ -51,7 +51,7 @@ REVIEWED = {
     "TestBasicOps.test_takewhile": (None, ["takewhile"]),
     "TestBasicOps.test_tee_del_backward": ("int", ["repeat", "tee", "any", "del"]),
     "TestBasicOps.test_zip_longest_bad_iterable": (None, ["zip_longest propagates the original __iter__ exception"]),
-    "TestBasicOps.test_ziplongest": (None, ["zip_longest, fill values and uneven iterables"]),
+    "TestBasicOps.test_ziplongest": (None, ["zip_longest, fill values and uneven iterables; exact finite keyword-error statements dispatched by a native fixture adapter"]),
     "TestExamples.test_accumulate": ("list[int]", ["accumulate"]),
     "TestExamples.test_chain": ("str", ["chain"]),
     "TestExamples.test_chain_from_iterable": ("str", ["chain.from_iterable"]),
@@ -70,12 +70,20 @@ REVIEWED = {
     "TestPurePythonRoughEquivalents.test_batched_recipe": (None, ["batched compared with the original Python recipe using islice"]),
     "TestVariousIteratorArgs.test_accumulate": (None, ["accumulate"]),
     "TestVariousIteratorArgs.test_batched": (None, ["batched"]),
+    "TestVariousIteratorArgs.test_chain": (None, ["chain with one and two iterables, iterator protocols and exception propagation"]),
     "TestVariousIteratorArgs.test_compress": (None, ["compress"]),
+    "TestVariousIteratorArgs.test_cycle": (None, ["cycle and islice over iterator protocols, exhaustion and exception propagation"]),
     "TestVariousIteratorArgs.test_dropwhile": (None, ["dropwhile"]),
+    "TestVariousIteratorArgs.test_filter": (None, ["builtins.filter with iterator protocols, predicates and exception propagation"]),
     "TestVariousIteratorArgs.test_filterfalse": (None, ["filterfalse"]),
+    "TestVariousIteratorArgs.test_groupby": (None, ["groupby keys across iterator protocols and exception propagation"]),
+    "TestVariousIteratorArgs.test_islice": (None, ["islice with a step across iterator protocols and exception propagation"]),
     "TestVariousIteratorArgs.test_map": (None, ["builtins.map"]),
+    "TestVariousIteratorArgs.test_product": (None, ["product rejects invalid iterables and propagates iterator exceptions"]),
     "TestVariousIteratorArgs.test_starmap": (None, ["starmap"]),
     "TestVariousIteratorArgs.test_takewhile": (None, ["takewhile"]),
+    "TestVariousIteratorArgs.test_tee": (None, ["tee produces independent iterators and propagates iterator exceptions"]),
+    "TestVariousIteratorArgs.test_zip": (None, ["builtins.zip with one and two iterables, iterator protocols and exception propagation"]),
     "TestVariousIteratorArgs.test_ziplongest": (None, ["zip_longest"]),
 }
 # These original methods exercise the same makecycle helper and contain no assertions.
@@ -164,6 +172,25 @@ class OriginalSource:
         collect(node)
         preamble = ("from itertools import " + ", ".join(sorted(exports)) + "\n") if exports else ""
         preamble += "".join(value for _, value in sorted(globals_.items()))
+        if owner == "TestBasicOps" and method == "test_ziplongest":
+            statements = [n for n in ast.walk(node) if isinstance(n, ast.For)
+                          and isinstance(n.target, ast.Name) and n.target.id == "stmt"]
+            calls = [n for n in ast.walk(node) if isinstance(n, ast.Call)
+                     and isinstance(n.func, ast.Name) and n.func.id == "eval"]
+            expected = ["zip_longest('abc', fv=1)", "zip_longest('abc', fillvalue=1, bogus_keyword=None)"]
+            if (len(statements) != 1 or not isinstance(statements[0].iter, ast.List)
+                    or [ast.literal_eval(e) for e in statements[0].iter.elts] != expected
+                    or len(calls) != 1 or ast.unparse(calls[0]) != "eval(stmt, globals(), locals())"):
+                raise ValueError("review the original zip_longest keyword-error statements")
+            # The original body uses eval only as a fixture for two fixed calls.
+            # Dispatch those exact calls natively; arbitrary evaluated source remains unsupported.
+            preamble += '''def eval(stmt, globalns, localns):
+    if stmt == "zip_longest('abc', fv=1)":
+        return zip_longest('abc', fv=1)
+    if stmt == "zip_longest('abc', fillvalue=1, bogus_keyword=None)":
+        return zip_longest('abc', fillvalue=1, bogus_keyword=None)
+    raise AssertionError("unexpected eval fixture source")
+'''
         reviewed = REVIEWED.get(owner + "." + method)
         equality = reviewed[0] if reviewed else EXAMPLE_TYPES.get(method) if owner == "TestExamples" else None
         prefix = typed_case(equality) if equality else testcase_fixture()
