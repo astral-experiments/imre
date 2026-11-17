@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 use icu_properties::{CodePointMapData, props::EastAsianWidth};
 use ruff_text_size::{Ranged, TextRange, TextSize};
 
-use crate::dynamic::value::{TracebackAnchor, TracebackSpan};
+use crate::dynamic::ModuleInitializer;
+use crate::dynamic::value::{CodeObject, TracebackAnchor, TracebackSpan};
 
 use super::{Context, Error, Id, NONE, Result, Value};
 
@@ -189,6 +190,19 @@ fn multiline_instruction(
 }
 
 impl<'a> FrameLine<'a> {
+    /// Use `-c` source only for code emitted by the command's compilation unit.
+    /// A nested `exec("...")` also uses `<string>` but has a separate entry.
+    fn command_source(ctx: &'a Context, code: &CodeObject) -> Option<&'a str> {
+        let entry = ctx.heap.compilation_entry(code)?;
+        let source = ctx.sources.get("__main__")?.first()?;
+        let ModuleInitializer::Native(command_entry) = source.code else {
+            return None;
+        };
+        std::ptr::fn_addr_eq(entry, command_entry)
+            .then(|| ctx.config["command_source"].as_str())
+            .flatten()
+    }
+
     fn new(
         ctx: &'a Context,
         code: Id,
@@ -205,7 +219,7 @@ impl<'a> FrameLine<'a> {
         ) {
             None
         } else if matches!(&file, TraceText::Scalar(text) if text == "<string>") {
-            ctx.config["command_source"].as_str()
+            Self::command_source(ctx, code)
         } else if ctx.config["bundled_root"]
             .as_str()
             .is_some_and(|root| path.is_some_and(|p| p.starts_with(root)))
