@@ -268,7 +268,38 @@ struct AsciiPositions {
     junk: [bool; 256],
 }
 
-fn ascii_positions(ctx: &Context, b2j: Id, bjunk: Id) -> Result<Option<AsciiPositions>> {
+/// Visit only positions the Python loop would reach before its first upper-bound break.
+fn bounded_positions(
+    ctx: &Context,
+    list: Id,
+    blo: usize,
+    bhi: usize,
+    mut visit: impl FnMut(usize),
+) -> Option<()> {
+    let Value::List(items) = ctx.heap.get(list) else {
+        return None;
+    };
+    for &item in items {
+        let index = exact_index(ctx, item)?;
+        if index < blo {
+            continue;
+        }
+        if index >= bhi {
+            break;
+        }
+        visit(index);
+    }
+    Some(())
+}
+
+fn ascii_positions(
+    ctx: &Context,
+    b2j: Id,
+    bjunk: Id,
+    active: &[bool; 256],
+    blo: usize,
+    bhi: usize,
+) -> Result<Option<AsciiPositions>> {
     let Value::Dict(entries) = ctx.heap.get(b2j) else {
         return Ok(None);
     };
@@ -282,13 +313,17 @@ fn ascii_positions(ctx: &Context, b2j: Id, bjunk: Id) -> Result<Option<AsciiPosi
     let mut counts = [0usize; 256];
     let mut lists = [NONE; 256];
     for &(key, value) in entries.iter() {
-        let Some(key) = single_char(ctx, key).filter(char::is_ascii) else {
+        let Some(key) = single_char(ctx, key) else {
             return Ok(None);
         };
-        let Value::List(items) = ctx.heap.get(value) else {
+        if !key.is_ascii() || !active[key as usize] {
+            continue;
+        }
+        let mut count = 0;
+        if bounded_positions(ctx, value, blo, bhi, |_| count += 1).is_none() {
             return Ok(None);
-        };
-        counts[key as usize] = items.len();
+        }
+        counts[key as usize] = count;
         lists[key as usize] = value;
     }
     let mut offsets = [0usize; 257];
@@ -305,22 +340,17 @@ fn ascii_positions(ctx: &Context, b2j: Id, bjunk: Id) -> Result<Option<AsciiPosi
         if list == NONE {
             continue;
         }
-        let Value::List(items) = ctx.heap.get(list) else {
-            unreachable!()
-        };
-        for &item in items {
-            let Some(index) = exact_index(ctx, item) else {
-                return Ok(None);
-            };
-            positions.push(index);
-        }
+        bounded_positions(ctx, list, blo, bhi, |index| positions.push(index))
+            .expect("validated positions do not change during native search");
     }
     let mut junk = [false; 256];
     for &(key, _) in junk_entries.iter() {
-        let Some(key) = single_char(ctx, key).filter(char::is_ascii) else {
+        let Some(key) = single_char(ctx, key) else {
             return Ok(None);
         };
-        junk[key as usize] = true;
+        if key.is_ascii() {
+            junk[key as usize] = true;
+        }
     }
     Ok(Some(AsciiPositions {
         offsets,
@@ -336,7 +366,14 @@ struct UnicodePositions {
     junk: Vec<char>,
 }
 
-fn unicode_positions(ctx: &Context, b2j: Id, bjunk: Id) -> Result<Option<UnicodePositions>> {
+fn unicode_positions(
+    ctx: &Context,
+    b2j: Id,
+    bjunk: Id,
+    active: &[char],
+    blo: usize,
+    bhi: usize,
+) -> Result<Option<UnicodePositions>> {
     let Value::Dict(entries) = ctx.heap.get(b2j) else {
         return Ok(None);
     };
@@ -355,10 +392,9 @@ fn unicode_positions(ctx: &Context, b2j: Id, bjunk: Id) -> Result<Option<Unicode
         let Some(key) = single_char(ctx, key) else {
             return Ok(None);
         };
-        let Value::List(_) = ctx.heap.get(value) else {
-            return Ok(None);
-        };
-        groups.push((key, value));
+        if active.binary_search(&key).is_ok() {
+            groups.push((key, value));
+        }
     }
     groups.sort_unstable_by_key(|&(key, _)| key);
     let mut keys = Vec::new();
@@ -372,18 +408,15 @@ fn unicode_positions(ctx: &Context, b2j: Id, bjunk: Id) -> Result<Option<Unicode
     offsets.push(0);
     for (key, value) in groups {
         keys.push(key);
-        let Value::List(items) = ctx.heap.get(value) else {
-            unreachable!()
-        };
-        positions
-            .try_reserve(items.len())
-            .map_err(|_| crate::Error::memory_error())?;
-        for &item in items {
-            let Some(index) = exact_index(ctx, item) else {
-                return Ok(None);
-            };
-            positions.push(index);
+        let mut count = 0;
+        if bounded_positions(ctx, value, blo, bhi, |_| count += 1).is_none() {
+            return Ok(None);
         }
+        positions
+            .try_reserve(count)
+            .map_err(|_| crate::Error::memory_error())?;
+        bounded_positions(ctx, value, blo, bhi, |index| positions.push(index))
+            .expect("validated positions do not change during native search");
         offsets.push(positions.len());
     }
     let mut junk = Vec::new();
@@ -404,6 +437,62 @@ fn unicode_positions(ctx: &Context, b2j: Id, bjunk: Id) -> Result<Option<Unicode
     }))
 }
 
+/// Permit only a named-tuple constructor whose complete call path cannot enter Python.
+/// A custom constructor could inspect this source frame's locals and line number.
+fn plain_match_constructor(ctx: &Context, root: Id) -> Option<Id> {
+    let constructor = ctx.scope_name(root, "Match")?;
+    let Value::Class {
+        metaclass: None,
+        ancestors,
+        namedtuple_fields: Some(fields),
+        ..
+    } = ctx.heap.get(constructor)
+    else {
+        return None;
+    };
+    if fields.as_ref() != ["a", "b", "size"]
+        || ancestors.as_slice() != [*ctx.builtins.get("tuple")?, *ctx.builtins.get("object")?]
+        || ctx.own_class_attr(constructor, "__init__").is_some()
+    {
+        return None;
+    }
+    let new = ctx.own_class_attr(constructor, "__new__")?;
+    let Value::StaticMethod { callable, .. } = ctx.heap.get(new) else {
+        return None;
+    };
+    let Value::Function { code, scope, .. } = ctx.heap.get(*callable) else {
+        return None;
+    };
+    let code = ctx.code_object(*code);
+    let entry = code.native_entry()?;
+    if !std::ptr::fn_addr_eq(entry, ffi::namedtuple_constructor as Code) {
+        return None;
+    }
+    let Value::Tuple(varnames) = ctx.heap.get(code.varnames) else {
+        return None;
+    };
+    if varnames.len() != 4
+        || varnames
+            .iter()
+            .zip(["_cls", "a", "b", "size"])
+            .any(|(&name, expected)| ctx.str_value(name).ok() != Some(expected))
+    {
+        return None;
+    }
+    let globals = ctx.scope_data(*scope).exec_globals.as_ref()?.dict;
+    let Value::Dict(entries) = ctx.heap.get(globals) else {
+        return None;
+    };
+    if entries
+        .iter()
+        .any(|&(key, _)| !matches!(ctx.heap.get(key), Value::Str(_)))
+        || ctx.dict_named_item(globals, "_tuple_new") != ctx.builtins.get("tuple.__new__").copied()
+    {
+        return None;
+    }
+    Some(constructor)
+}
+
 fn find_longest(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     let Some(receiver) = receiver(ctx, scope) else {
         return Ok(None);
@@ -412,6 +501,9 @@ fn find_longest(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     if !canonical_builtins(ctx, root, &["len", "range"]) {
         return Ok(None);
     }
+    let Some(constructor) = plain_match_constructor(ctx, root) else {
+        return Ok(None);
+    };
     let Some(a) = ctx.plain_instance_field(receiver, "a") else {
         return Ok(None);
     };
@@ -451,11 +543,15 @@ fn find_longest(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
         return Ok(None);
     }
     let best = if ascii {
-        let Some(index) = ascii_positions(ctx, b2j, bjunk)? else {
-            return Ok(None);
-        };
         let (Value::Str(a), Value::Str(b)) = (ctx.heap.get(a), ctx.heap.get(b)) else {
             unreachable!()
+        };
+        let mut active = [false; 256];
+        for &byte in &a.as_bytes()[alo..ahi] {
+            active[byte as usize] = true;
+        }
+        let Some(index) = ascii_positions(ctx, b2j, bjunk, &active, blo, bhi)? else {
+            return Ok(None);
         };
         matcher::longest_ascii(
             a.as_bytes(),
@@ -466,9 +562,6 @@ fn find_longest(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
             &index.junk,
         )?
     } else {
-        let Some(index) = unicode_positions(ctx, b2j, bjunk)? else {
-            return Ok(None);
-        };
         let (Value::Str(a), Value::Str(b)) = (ctx.heap.get(a), ctx.heap.get(b)) else {
             unreachable!()
         };
@@ -481,6 +574,16 @@ fn find_longest(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
             .map_err(|_| crate::Error::memory_error())?;
         left.extend(a.chars());
         right.extend(b.chars());
+        let mut active = Vec::new();
+        active
+            .try_reserve_exact(ahi - alo)
+            .map_err(|_| crate::Error::memory_error())?;
+        active.extend_from_slice(&left[alo..ahi]);
+        active.sort_unstable();
+        active.dedup();
+        let Some(index) = unicode_positions(ctx, b2j, bjunk, &active, blo, bhi)? else {
+            return Ok(None);
+        };
         matcher::longest_unicode(
             &left,
             &right,
@@ -491,7 +594,6 @@ fn find_longest(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
             &index.junk,
         )?
     };
-    let constructor = ctx.lookup(root, "Match")?;
     ctx.heap.reserve_temporaries(3)?;
     let left = ctx.int(best.0 as i64);
     ctx.heap.keep(left);
@@ -501,4 +603,61 @@ fn find_longest(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     ctx.heap.keep(size);
     ctx.call(constructor, vec![left, right, size], Vec::new())
         .map(Some)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Context, NONE, Value, ffi, plain_match_constructor};
+
+    #[test]
+    fn match_constructor_requires_a_callback_free_namedtuple_path() {
+        let mut ctx: Context = ffi::new_context(
+            serde_json::json!({"paths": [], "python_version": "3.14"}),
+            ["imre"],
+        );
+        let root = ctx.scope("difflib", None);
+        let scope = ctx.scope("difflib", None);
+        let tuple = ctx.builtin("tuple");
+        let class = ctx
+            .allocate_class("Match".into(), scope, vec![tuple])
+            .unwrap();
+        let Value::Class {
+            namedtuple_fields, ..
+        } = ctx.heap.get_mut(class)
+        else {
+            unreachable!()
+        };
+        *namedtuple_fields = Some(vec!["a".into(), "b".into(), "size".into()].into());
+        let name = ctx.text("<lambda>");
+        let parameters =
+            ctx.text(r#"{"positional":["_cls","a","b","size"],"scope_complete":true}"#);
+        let filename = ctx.text("<string>");
+        let code = ctx.prelinked_code(
+            super::super::super::value::Body::Native(ffi::namedtuple_constructor, NONE),
+            root,
+            name,
+            parameters,
+            (name, NONE),
+            (filename, 1),
+        );
+        let varnames = ["_cls", "a", "b", "size"].map(|name| ctx.text(name));
+        let varnames = ctx.alloc(Value::Tuple(varnames.to_vec()));
+        let Value::Code(metadata) = ctx.heap.get_mut(code) else {
+            unreachable!()
+        };
+        metadata.varnames = varnames;
+        let allocate = ctx.text("_tuple_new");
+        let tuple_new = ctx.builtin("tuple.__new__");
+        let globals = ctx.dict(vec![(allocate, tuple_new)]);
+        let function = ctx.construct_function(&[code, globals], &[]).unwrap();
+        let descriptor =
+            super::super::super::method_decorator::static_method(&mut ctx, function).unwrap();
+        ctx.bind(scope, "__new__", descriptor);
+        ctx.bind(root, "Match", class);
+        assert_eq!(plain_match_constructor(&ctx, root), Some(class));
+
+        let replacement = ctx.builtin("len");
+        ctx.set_attr(class, "__new__", replacement).unwrap();
+        assert_eq!(plain_match_constructor(&ctx, root), None);
+    }
 }

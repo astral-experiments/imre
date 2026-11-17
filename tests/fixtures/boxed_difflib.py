@@ -23,7 +23,9 @@ def current():
 
 
 def check_live_matcher_state():
+    import difflib
     import gc
+    import sys
 
     matcher = SequenceMatcher(None, "ab", "yy")
     matcher.b2j["a"] = [0]
@@ -34,8 +36,33 @@ def check_live_matcher_state():
     matcher.b2j["a"] = [1, 0]
     assert matcher.find_longest_match(0, 2, 0, 1) == Match(0, 0, 0)
     assert SequenceMatcher(None, "é雪", "x雪").find_longest_match() == Match(1, 1, 1)
+    assert SequenceMatcher(None, "x", "y" * 4096, False).find_longest_match() == Match(0, 0, 0)
     del matcher
     gc.collect()
+
+    def inspect_match(*parts):
+        frame = sys._getframe(1)
+        assert (frame.f_locals["besti"], frame.f_locals["bestj"], frame.f_locals["bestsize"]) == parts
+        return Match(*parts)
+
+    difflib.Match = inspect_match
+    try:
+        assert SequenceMatcher(None, "xab", "yab").find_longest_match() == Match(1, 1, 2)
+    finally:
+        difflib.Match = Match
+
+    previous_new = Match.__dict__["__new__"]
+
+    def inspect_new(cls, *parts):
+        frame = sys._getframe(1)
+        assert (frame.f_locals["besti"], frame.f_locals["bestj"], frame.f_locals["bestsize"]) == parts
+        return tuple.__new__(cls, parts)
+
+    Match.__new__ = staticmethod(inspect_new)
+    try:
+        assert tuple(SequenceMatcher(None, "xab", "yab").find_longest_match()) == (1, 1, 2)
+    finally:
+        Match.__new__ = previous_new
 
     events = []
 
