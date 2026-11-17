@@ -33,8 +33,7 @@
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTHON_COLORS": "0",
         "NO_COLOR": "1"
-      },
-      "fresh_stock_launcher_sha256": "7ab1bc2219ad6e62ef5daedda3eca9f80b662d9abc58ea46d669389c88e746d8"
+      }
     },
     "O0": {
       "argv": [

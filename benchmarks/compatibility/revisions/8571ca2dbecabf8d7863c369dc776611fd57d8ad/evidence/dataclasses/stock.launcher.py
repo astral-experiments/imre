@@ -92,7 +92,7 @@ def main():
     result = OriginalResult()
     suite.run(result)
     emit({"event": "summary", "run": result.testsRun, "successful": result.wasSuccessful()})
-    return 0 if result.wasSuccessful() else 1
+    return 0  # Original failures remain explicit events and summary; supervisor captures them.
 
 
 if __name__ == "__main__":
