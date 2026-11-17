@@ -15,6 +15,8 @@ The [argparse accepted-omission ledger](../cpython_stdlib/full/argparse/accepted
 
 The [base64 accepted-omission ledger](revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/omissions/base64/accepted-omissions-linux.tsv) uses the same schema and applies only to the five interpreter-module-launch originals in the staged Imre revision `8571ca2dbecabf8d7863c369dc776611fd57d8ad`. The validator joins its exact staged base64 receipts, which retain the 41-case denominator and native `not_run` outcomes; the historical canonical receipts are outside this policy. Stream API witnesses are staged stock/O0/O3 pass observations whose receipt flags are checked; strict credit awaits independent snapshot activation. No child CLI, real file path, process stdin, help, or invalid-flag witness is claimed.
 
+The [hashlib accepted-omission ledger](revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/omissions/hashlib/accepted-omissions-linux.tsv) accepts only the explicitly CPython-only original that inspects hash-object C type instantiation flags. Its adjacent paired witness covers internal `_hashlib` types, not the omitted flag for every algorithm-specific type. The 82 originals, raw pass/skip/error outcomes, 67 pairs, public hashing behavior, and unomitted threaded-hashing error remain unchanged.
+
 `scorecard.py --check` and `--validate` check the policies against the pinned inventory, source, historical gap, and canonical receipts. It can also be checked alone:
 
 ```sh
