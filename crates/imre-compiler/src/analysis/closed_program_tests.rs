@@ -4,12 +4,104 @@ use std::fs;
 use tempfile::tempdir;
 
 #[test]
-fn bytearray_fallback_preserves_a_source_calls_exact_argument_contract() {
+fn fallback_call_bytearray_preserves_exact_argument_contract() {
     let project = tempdir().unwrap();
     let entry = project.path().join("main.py");
     fs::write(&entry, "buffer = bytearray()\nprint(buffer)\ndef score(x: int) -> int:\n    return x\nscore(True)\n").unwrap();
     let error = crate::check_file(&entry, None).unwrap_err();
     assert!(error.contains("expected int, got bool"), "{error}");
+    let error = crate::compile_file(&entry, None, &Default::default())
+        .err()
+        .unwrap();
+    assert!(error.contains("expected int, got bool"), "{error}");
+}
+
+#[test]
+fn fallback_call_aliases_and_nested_operands() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    fs::write(
+        project.path().join("takes.py"),
+        "def take(value: int) -> int:\n    return value\n",
+    )
+    .unwrap();
+    fs::write(
+        &entry,
+        "from takes import take as score\nprint(bytearray())\nscore(value=True)\n",
+    )
+    .unwrap();
+    let error = crate::check_file(&entry, None).unwrap_err();
+    assert!(
+        error.contains(":3:13: Imre: expected int, got bool"),
+        "{error}"
+    );
+    fs::write(&entry, "def inner(x: int) -> bool:\n    return False\ndef outer(x: int):\n    pass\nprint(bytearray())\nouter(inner(True))\n").unwrap();
+    let error = crate::check_file(&entry, None).unwrap_err();
+    assert!(
+        error.contains(":6:13: Imre: expected int, got bool"),
+        "{error}"
+    );
+    assert!(!error.contains(":6:7:"), "{error}");
+    fs::write(&entry, "def inner(x: int) -> bool:\n    return False\ndef outer(x: bool, y: int):\n    pass\nprint(bytearray())\nouter(inner(True))\n").unwrap();
+    let error = crate::check_file(&entry, None).unwrap_err();
+    assert!(
+        error.starts_with(&format!(
+            "{}:6:13: Imre: expected int, got bool",
+            entry.display()
+        )),
+        "{error}"
+    );
+    assert!(error.contains("missing-argument"), "{error}");
+}
+
+#[test]
+fn fallback_call_partial_binding_and_deferred_source_policy() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    for args in ["'x', *[]", "'x', 2"] {
+        fs::write(
+            &entry,
+            format!(
+                "def take(value: int):\n    pass\nprint(bytearray())\nif False:\n    take({args})\n"
+            ),
+        )
+        .unwrap();
+        let error = crate::check_file(&entry, None).unwrap_err();
+        assert!(error.contains("expected int, got str"), "{error}");
+    }
+    fs::write(
+        &entry,
+        "def take(value: int, other: int):\n    pass\nprint(bytearray())\ntake(True)\n",
+    )
+    .unwrap();
+    let error = crate::check_file(&entry, None).unwrap_err();
+    assert!(
+        error.contains("missing-argument") && !error.contains("got bool"),
+        "{error}"
+    );
+    for extra in ["", "marker = (other := 1)\n"] {
+        fs::write(&entry, format!("def take(value: int) -> int:\n    return value\nprint(bytearray())\n{extra}def f(value: take(True)):\n    pass\n")).unwrap();
+        let error = crate::check_file(&entry, None).unwrap_err();
+        assert!(
+            error.contains("unsupported type annotation") && !error.contains("got bool"),
+            "{error}"
+        );
+    }
+    fs::write(&entry, "from typing import TYPE_CHECKING\ndef take(value: int):\n    pass\nprint(bytearray())\nif False:\n    take(True)\nif TYPE_CHECKING:\n    take(True)\ntake(*(True,))\n").unwrap();
+    crate::check_file(&entry, None).unwrap();
+}
+
+#[test]
+fn fallback_call_archived_thread_keeps_original_argument_diagnostic() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("worker_unused.py");
+    fs::write(project.path().join("scores.py"), "def take(value: int) -> int:\n    return value\n\ndef measure() -> int:\n    return take('x')\n").unwrap();
+    fs::write(&entry, "import socket\nimport threading\n\nimport scores\n\ndef receive(stream):\n    with stream as source:\n        print(source.recv(2))\n\nif False:\n    reader, writer = socket.socketpair()\n    writer.sendall(b\"Rx\")\n    task = threading.Thread(target=receive, args=(reader,))\n    task.start()\n    task.join()\n    writer.close()\nscores.measure()\n").unwrap();
+    let error = crate::check_file(&entry, None).unwrap_err();
+    assert!(
+        error.contains("scores.py:5:17: Imre: expected int, got str"),
+        "{error}"
+    );
 }
 
 #[test]

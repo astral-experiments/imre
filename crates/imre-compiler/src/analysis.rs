@@ -4,6 +4,7 @@ mod class_cell;
 #[cfg(test)]
 mod closed_program_tests;
 mod correlated_calls;
+mod exact_calls;
 mod execution;
 #[cfg(test)]
 mod incremental_tests;
@@ -4074,17 +4075,10 @@ impl Session {
             if !declarations.parameters(&self.db).is_empty() {
                 self.dormant_call_errors(index, path, declarations, &mut dormant);
             }
-            // Merge source diagnostics in operand order, including cached ty-clean bodies.
-            dormant.sort_by_key(|(start, _)| *start);
-            let mut dormant = dormant.into_iter().peekable();
             // The default body check covers ty's declaration rules on the same bindings.
-            if checked_bodies
+            let clean = checked_bodies
                 .and_then(|bodies| bodies.get(&index))
-                .is_some_and(Vec::is_empty)
-            {
-                errors.extend(dormant.map(|(_, message)| message));
-                continue;
-            }
+                .is_some_and(Vec::is_empty);
             let checked = CheckedFile::new(
                 &self.db,
                 file,
@@ -4096,17 +4090,50 @@ impl Session {
                 Some(declarations),
                 result_scopes.get(&file).map_or(&[][..], Vec::as_slice),
             );
-            for error in file_errors(&self.db, checked) {
-                while let Some((_, message)) =
-                    dormant.next_if(|(start, _)| error.range.is_none_or(|r| *start <= r.start()))
-                {
+            let ty_errors = if clean {
+                &[][..]
+            } else {
+                file_errors(&self.db, checked).as_slice()
+            };
+            let mut exact_calls = Vec::new();
+            if !declarations.parameters(&self.db).is_empty() {
+                self.exact_scalar_calls(
+                    index,
+                    path,
+                    declarations,
+                    skipped.map_or(&[], |ranges| ranges[index].as_slice()),
+                    ty_errors,
+                    &mut exact_calls,
+                );
+            }
+            // Merge source diagnostics in operand order, including cached ty-clean bodies.
+            let mut dormant: Vec<_> = dormant
+                .into_iter()
+                .map(|(start, message)| (start, message, false))
+                .chain(
+                    exact_calls
+                        .into_iter()
+                        .map(|(start, message)| (start, message, true)),
+                )
+                .collect();
+            dormant.sort_by_key(|(start, _, _)| *start);
+            let mut dormant = dormant.into_iter().peekable();
+            for error in ty_errors {
+                while let Some((_, message, _)) = dormant.next_if(|(start, _, exact_call)| {
+                    error.range.is_none_or(|r| {
+                        *start <= r.start()
+                            || *exact_call
+                                && CALL_ARGUMENT_RULES.contains(&error.rule.as_str())
+                                && r.contains(*start)
+                    })
+                }) {
                     errors.push(message);
                 }
                 let original =
                     native.and_then(|report| self.original_operand(error, modules, index, report));
                 errors.push(original.map_or_else(|| error.rendered.clone(), ToString::to_string));
             }
-            errors.extend(dormant.map(|(_, message)| message));
+            errors.extend(dormant.map(|(_, message, _)| message));
         }
         if !errors.is_empty() {
             return Err(errors.join("\n"));
