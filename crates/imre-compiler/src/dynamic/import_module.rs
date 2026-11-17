@@ -1,5 +1,6 @@
 use super::{Expr, Visitor, ast, visitor};
 use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph, bundled_source};
+use ruff_text_size::Ranged;
 
 /// Borrow the shipped Python module selected by this target and entry point.
 pub(crate) fn bundled_module_source(
@@ -289,11 +290,12 @@ pub(crate) fn registered_imports(
                 if let Some(name) = target(call) {
                     self.imports.targets.push(name);
                 } else if !self.graph.modules[self.module].bundled {
-                    self.imports.computed = true;
                     if let Some(name) =
                         launcher_target(self.graph, self.module, call, self.arguments)
                     {
                         self.imports.targets.push(name);
+                    } else {
+                        self.imports.computed = true;
                     }
                 }
             }
@@ -332,16 +334,32 @@ pub(crate) fn registered_imports(
 }
 
 /// An actual launcher argument can name a source winner without scanning unrelated files.
+/// A module-level alias is accepted only when its assignment precedes the call.
+///
+/// ```python
+/// name = sys.argv[1]
+/// importlib.import_module(name)
+/// ```
 fn launcher_target(
     graph: &SourceGraph,
     module: usize,
     call: &ast::ExprCall,
     arguments: &[Option<String>],
 ) -> Option<String> {
-    let operand = call
-        .arguments
-        .find_argument_value("name", 0)?
-        .as_subscript_expr()?;
+    let operand = call.arguments.find_argument_value("name", 0)?;
+    let operand = if let Expr::Name(name) = operand
+        && let Some(Binding::Value(definition)) = graph.resolve(module, operand)
+        && definition.module == module
+        && let ast::Stmt::Assign(assignment) =
+            &graph.modules[module].parsed.syntax().body[definition.statement]
+        && assignment.end() <= call.start()
+        && matches!(assignment.targets.as_slice(), [Expr::Name(target)] if target.id == name.id)
+    {
+        &*assignment.value
+    } else {
+        operand
+    };
+    let operand = operand.as_subscript_expr()?;
     let argv = operand.value.as_attribute_expr()?;
     if argv.attr.as_str() != "argv"
         || graph.resolve(module, &argv.value)
