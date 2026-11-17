@@ -1879,6 +1879,41 @@ mod tests {
     use crate::llvm::registered::permanent;
 
     #[test]
+    fn exact_tuple_truth_keeps_arbitrary_rich_results_on_the_python_protocol() {
+        let source = concat!(
+            "def selected(callback, a: int, b: int):\n",
+            "    if (a, 1) == (b, 1): callback(True)\n",
+            "    if callback == callback: callback(False)\n",
+        );
+        let prepared = PreparedBody::module(
+            "app",
+            Path::new("app.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let mut output = Output::default();
+        let file = output.data(b"app.py");
+        prepared.emit(&mut output, 0, &file).unwrap();
+        let body = &output.functions;
+        let results: Vec<_> = body
+            .lines()
+            .filter(|line| line.contains("call i64 @imre_dyn_op_at("))
+            .map(|line| line.split_whitespace().next().unwrap())
+            .collect();
+        assert!(results.iter().any(|result| body.contains(&format!(
+            "icmp eq i64 {result}, {}", permanent::TRUE,
+        ))));
+        assert_eq!(body.matches("call i1 @imre_dyn_truth_at(").count(), 1);
+        assert!(
+            results.iter().any(
+                |result| body.contains(&format!("@imre_dyn_truth_at(ptr %ctx, i64 {result},",))
+            )
+        );
+    }
+
+    #[test]
     fn selected_eval_uses_one_entry_from_the_optimized_source_unit() {
         let directory = tempfile::tempdir().unwrap();
         let entry = directory.path().join("main.py");
