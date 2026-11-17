@@ -4181,6 +4181,78 @@ impl Session {
         report.matching_declared_operand(path, error.range?, declaration, annotation)
     }
 
+    /// A configured `Mock` evaluates its arguments before entering the object runtime. Preserve
+    /// the fixed scalar contract when SDK layout selection stopped before reaching that call.
+    fn configured_mock_operand(
+        &self,
+        error: &CheckedError,
+        modules: &[crate::modules::SourceModule],
+        module: usize,
+        path: &Path,
+    ) -> Option<crate::frontend::phase::Diagnostic> {
+        use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
+
+        if !error.rule.is_lint_named("invalid-argument-type") {
+            return None;
+        }
+        let range = error.range?;
+        let (owner, parameter) = error.declaration?;
+        let owner_index = self.files.iter().position(|&file| file == owner)?;
+        modules[owner_index].project_path()?;
+        let owner_source = self.db.program_file(owner);
+        let parsed_owner =
+            ruff_db::parsed::parsed_module(&self.db, owner_source.python_file(&self.db))
+                .load(&self.db);
+        let parameter = covering_node(parsed_owner.syntax().into(), parameter)
+            .ancestors()
+            .find_map(|node| match node {
+                AnyNodeRef::Parameter(parameter) if parameter.annotation.is_some() => {
+                    Some(parameter)
+                }
+                _ => None,
+            })?;
+        let expected = parameter.inferred_type(&SemanticModel::new(&self.db, owner_source))?;
+        let source = self.db.program_file(self.files[module]);
+        let parsed =
+            ruff_db::parsed::parsed_module(&self.db, source.python_file(&self.db)).load(&self.db);
+        let nodes = covering_node(parsed.syntax().into(), range);
+        let mut calls = nodes.ancestors().filter_map(|node| match node {
+            AnyNodeRef::ExprCall(call) => Some(call),
+            _ => None,
+        });
+        let operand = calls.find_map(|call| {
+            call.arguments
+                .args
+                .iter()
+                .chain(call.arguments.keywords.iter().map(|kw| &kw.value))
+                .find(|argument| argument.range() == range)
+        })?;
+        let model = SemanticModel::new(&self.db, source);
+        if !calls.any(|call| {
+            let Some(callee @ ty_python_semantic::types::Type::ClassLiteral(_)) =
+                call.func.inferred_type(&model)
+            else {
+                return false;
+            };
+            matches!(callee.definition(&self.db, &model.program_environment()),
+                Some(ty_python_semantic::types::TypeDefinition::StaticClass(class))
+                    if class.name(&self.db).as_deref() == Some("Mock")
+                        && self.files.iter().zip(modules).any(|(&file, module)|
+                            file == class.file(&self.db) && module.is_bundled("unittest.mock")))
+                && call
+                    .arguments
+                    .args
+                    .iter()
+                    .chain(call.arguments.keywords.iter().map(|kw| &kw.value))
+                    .any(|argument| argument.range().contains_range(range))
+        }) {
+            return None;
+        }
+        let actual = operand.inferred_type(&model)?;
+        Self::scalar_contract_error(&model, expected, operand, actual, || true)
+            .map(|report| report.with_path(path))
+    }
+
     fn errors(
         &self,
         roots: impl Iterator<Item = usize>,
@@ -4209,7 +4281,21 @@ impl Session {
                         self.original_operand(error, checked_modules?, index, report)
                     });
                     original.map_or_else(
-                        || std::borrow::Cow::Borrowed(error.rendered.as_str()),
+                        || {
+                            checked_modules
+                                .and_then(|modules| {
+                                    self.configured_mock_operand(
+                                        error,
+                                        modules,
+                                        index,
+                                        &modules[index].path,
+                                    )
+                                })
+                                .map_or_else(
+                                    || std::borrow::Cow::Borrowed(error.rendered.as_str()),
+                                    |report| std::borrow::Cow::Owned(report.to_string()),
+                                )
+                        },
                         |report| std::borrow::Cow::Owned(report.to_string()),
                     )
                 })
