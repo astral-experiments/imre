@@ -25,7 +25,7 @@ def withdrawal(directory, binding, run, tier, trace=None):
     raw_control.trace_withdraw(
         scorecard, trace or (directory / f"{tier}.trace").read_text(), meta["argv"][0],
         binding["probe"], tree, tree + ".raw-control-stash", leaf, meta["cwd"],
-        scorecard.require, binding["withdraw_sources"],
+        scorecard.require, binding["withdraw_sources"], strict_payloads=True,
     )
 
 

@@ -445,7 +445,7 @@ def matched_build(argv, tier, compiler, runtime):
     require(runtime_argument(argv) == runtime and argv[0] == compiler and option(argv, "--runtime") == runtime and option(argv, "--opt-level") == tier[1:] and "--no-cache" in argv, f"{tier} compiler/runtime or build flags differ")
 
 
-def successful_open_paths(text, cwd):
+def successful_open_paths(text, cwd, *, preserve_traversal=False):
     """Decode successful strace open calls, resolving relative dirfd paths."""
     descriptors = {}; quoted = r'"(?:\\.|[^"\\])*"'
     for line in text.splitlines():
@@ -466,7 +466,8 @@ def successful_open_paths(text, cwd):
         try: name = ast.literal_eval(match.group(1 if operation == "open" else 2))
         except (ValueError, SyntaxError): require(False, "invalid open path in saved-image trace")
         require(isinstance(name, str) and (name.startswith("/") or isinstance(base, str) and base.startswith("/")), "unresolved successful relative open in saved-image trace")
-        path = posixpath.normpath(name if name.startswith("/") else posixpath.join(base, name))
+        joined = name if name.startswith("/") else posixpath.join(base, name)
+        path = joined if preserve_traversal else posixpath.normpath(joined)
         descriptors[(pid, str(fd))] = path
         yield Path(path)
 
@@ -587,6 +588,10 @@ def validate_snapshot_record(r, kind, eligible, check):
     if omission:
         check(kind == "stdlib" and r.get("policy_omission") == accepted_policy_locator(r) and r.get("policy_omission") is not None, "snapshot omission is not an accepted canonical policy omission")
     entry = activation_entry(r.get("family")) if kind == "stdlib" else None
+    if entry and kind == "stdlib":
+        import raw_control
+        if COHORT["imre_revision"] == raw_control.SOURCE_PIN and r["family"] in raw_control.SOURCE_FAMILIES:
+            raw_control.source_stage_authority(sys.modules[__name__], r["family"], raw_control.sha(json.dumps(entry, sort_keys=True).encode()))
     if entry and entry.get("adapter") != "row-v1":
         validate_activated_family_record(r, eligible, check, entry)
         return

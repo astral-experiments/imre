@@ -10,6 +10,7 @@ import hashlib
 import json
 import posixpath
 import re
+import subprocess
 import tarfile
 import zipfile
 from functools import lru_cache
@@ -139,7 +140,11 @@ def trace_direct_gate(text, command, probe, diagnostic, require):
             'missing direct int/bool diagnostic')
 
 
-def trace_withdraw(api, text, image, probe, tree, stash, leaf, cwd, require, extra_sources=()):
+def payload_alias(path):
+    return re.search(r'(?:^|/)proc/(?:[0-9]+|self|thread-self)/fd/[0-9]+(?:/|$)|(?:^|/)dev/fd/[0-9]+(?:/|$)', path) is not None
+
+
+def trace_withdraw(api, text, image, probe, tree, stash, leaf, cwd, require, extra_sources=(), strict_payloads=False):
     """Allow only ENOENT withdrawn-path probes; never allow Python probes or child execs."""
     from posixpath import normpath
     lines = text.splitlines()
@@ -177,7 +182,8 @@ def trace_withdraw(api, text, image, probe, tree, stash, leaf, cwd, require, ext
     stem = Path(leaf).stem.lower()
     extra_paths = {Path(p) for source in extra_sources for p in (source, source+'.raw-control-stash')}
     launcher_stem = Path(extra_sources[0]).stem.lower() if extra_sources else None
-    for line in lines[target[0]:waited+1]:
+    native = lines[target[0]:waited+1]
+    for line in native:
         # A successful io_uring setup would permit unobserved asynchronous opens.
         require(not re.search(r'\bio_uring_setup\(.*= [0-9]+$', line), 'native io_uring may hide file access')
         m = OPEN.match(line) or re.match(r'^\d+\s+newfstatat\(.*?("(?:[^"\\]|\\.)*")', line)
@@ -185,6 +191,8 @@ def trace_withdraw(api, text, image, probe, tree, stash, leaf, cwd, require, ext
             try: path = ast.literal_eval(m[1])
             except (ValueError, SyntaxError): require(False, "invalid traced path")
             require(isinstance(path, str), "invalid traced path")
+            if strict_payloads and re.search(r'\b(?:open|openat|openat2|creat)\(.*\) = [0-9]+(?:<[^>]*>)?$', line):
+                require(not payload_alias(path), 'native opened a payload fd alias')
             folded = path.lower()
             name = Path(path).name.lower()
             python_probe = 'libpython' in folded or any(part.startswith('python') for part in Path(folded).parts)
@@ -202,7 +210,15 @@ def trace_withdraw(api, text, image, probe, tree, stash, leaf, cwd, require, ext
             # Only an explicit ENOENT proves this withdrawn path was absent.
             require(not withdrawn or re.search(r'\) = -1 ENOENT(?: \([^)]*\))?$', line),
                     'native opened CPython, libpython, withdrawn source or matching bytecode')
-    for path in api.successful_open_paths('\n'.join(lines[target[0]:waited+1]), cwd):
+        if strict_payloads:
+            require(not re.search(r'(?:\b(?:open|openat|openat2|creat)\(.*<unfinished|<\.\.\. (?:open|openat|openat2|creat) resumed>)', line), 'unfinished native payload open is unverified')
+            require(not re.search(r'\bcreat\(.*\) = [0-9]+(?:<[^>]*>)?$', line), 'native successful creat is unverified')
+    for path in api.successful_open_paths('\n'.join(native), cwd, preserve_traversal=strict_payloads):
+        lexical = str(path)
+        path = Path(normpath(lexical))
+        if strict_payloads:
+            require(path.suffix.lower() not in {'.py','.pyc','.pyo','.zip','.whl'} and not payload_alias(lexical) and not payload_alias(str(path)),
+                    'native opened unauthorized Python source, bytecode, archive or fd payload')
         name = path.name.lower()
         cached = path.parent.name == '__pycache__' and name.startswith(stem+'.') and path.suffix in {'.pyc','.pyo'}
         forbidden = (path.is_relative_to(Path(tree)) or path.is_relative_to(Path(stash))
@@ -242,6 +258,79 @@ def comparable_run(run, extension, compiler, require):
         meta = metas[tier]; env = meta.get('environment', {})
         require(cwd(meta) == cwd(stock) and common(meta) == settings and meta.get('timeout_seconds') == stock.get('timeout_seconds') and isinstance(meta.get('timeout_seconds'), (int,float)) and meta['timeout_seconds'] > 0, tier+' finite cohort common configuration differs from stock')
         require(posixpath.normpath(env.get('PYTHONPATH','')) == posixpath.normpath(extension) and env.get('IMRE_PYTHON') == compiler and env.get('IMREFLAGS') == '--opt-level '+opt, tier+' finite cohort tier configuration differs')
+
+
+SOURCE_PIN = '8571ca2dbecabf8d7863c369dc776611fd57d8ad'
+SOURCE_MANIFEST = f'benchmarks/compatibility/revisions/{SOURCE_PIN}/controls/glob-logging-source-stage.json'
+SOURCE_FAMILIES = frozenset({'glob', 'logging'})
+
+
+def git(root, *args):
+    try:
+        return subprocess.check_output(['git','--no-replace-objects',*args], cwd=root, stderr=subprocess.DEVNULL)
+    except subprocess.CalledProcessError as exc:
+        raise ValueError('source stage Git authority is unavailable or unreachable') from exc
+
+
+@lru_cache(maxsize=None)
+def source_manifest(root, commit, blob, digest):
+    raw = git(root,'show','--no-textconv',f'{commit}:{SOURCE_MANIFEST}')
+    computed = hashlib.sha1(f'blob {len(raw)}\0'.encode()+raw).hexdigest()
+    if computed != blob or sha(raw) != digest: raise ValueError('source-stage manifest Git blob or digest differs')
+    return json.loads(raw)
+
+
+@lru_cache(maxsize=None)
+def source_stage_authority(api, family, activation_digest):
+    """Authenticate a newly activated family against an earlier public source stage."""
+    require = api.require
+    entry = api.activation_entry(family)
+    anchor = entry.get('source_stage')
+    require(isinstance(anchor, dict) and set(anchor) == {'commit','manifest','git_blob','sha256'}
+            and isinstance(anchor['commit'], str) and api.HEX40.fullmatch(anchor['commit'])
+            and anchor['manifest'] == SOURCE_MANIFEST and isinstance(anchor['git_blob'],str)
+            and api.HEX40.fullmatch(anchor['git_blob']) and isinstance(anchor['sha256'],str)
+            and api.HEX64.fullmatch(anchor['sha256']), 'missing fixed source-stage authority')
+    commit = anchor['commit']; head = git(api.ROOT,'rev-parse','HEAD').decode().strip()
+    remote = git(api.ROOT,'remote','get-url','origin').decode().strip()
+    require(remote in {'https://github.com/astral-experiments/imre.git','git@github.com:astral-experiments/imre.git'}
+            and commit != head and git(api.ROOT,'cat-file','-t',commit).strip() == b'commit',
+            'source stage must be a distinct public commit')
+    git(api.ROOT,'merge-base','--is-ancestor',commit,head)
+    git(api.ROOT,'merge-base','--is-ancestor',commit,'refs/remotes/origin/main')
+    manifest = source_manifest(api.ROOT,commit,anchor['git_blob'],anchor['sha256'])
+    require(manifest.get('schema') == 'imre.compatibility.source-stage.v1'
+            and manifest.get('imre_revision') == api.COHORT['imre_revision']
+            and isinstance(manifest.get('sources'),dict) and family in manifest.get('families',{}),
+            'invalid source-stage manifest')
+    frozen = manifest['families'][family]; binding_ref = frozen['binding']; staged = frozen['staged_receipt']
+    receipt = f"benchmarks/compatibility/revisions/{api.COHORT['imre_revision']}/verified/stdlib/{family}.jsonl"
+    expected_keys = {'adapter','receipt','staged_receipt','sources','files','source_stage'}
+    if staged['originals'] < staged['frozen_originals']: expected_keys.add('staged_originals')
+    require(set(entry) == expected_keys and entry.get('adapter') == 'raw-control-v1' and entry.get('receipt') == receipt
+            and entry.get('staged_receipt') == staged['path'] and entry.get('sources') == {'binding':binding_ref['path']}
+            and ('staged_originals' not in expected_keys or entry['staged_originals'] == staged['originals']),
+            'activation entry differs from immutable source stage')
+    fixed = {}
+    for group in (manifest['sources'], frozen['evidence_files'],
+                  {binding_ref['path']:binding_ref['sha256'], staged['path']:staged['sha256']}):
+        for loc,digest in group.items():
+            require(loc not in fixed or fixed[loc] == digest, 'inconsistent source-stage digest sets')
+            fixed[loc] = digest
+    files = entry.get('files')
+    require(isinstance(files,dict) and set(files) == set(fixed)|{receipt}
+            and all(files.get(loc)==digest for loc,digest in fixed.items()), 'activation file set differs from immutable source stage')
+    for loc,digest in files.items():
+        require(isinstance(digest,str) and api.HEX64.fullmatch(digest) and sha(api.repository_file(loc,api.ROOT).read_bytes()) == digest, 'source-stage file digest differs')
+    binding = json.loads(api.repository_file(binding_ref['path'],api.DATA_ROOT).read_text())
+    cohorts = binding.get('cohorts',{})
+    require(cohorts and all(c.get('strict_source_control') == frozen['strict_source_control'] == 'direct-and-withdraw-v1'
+                           for c in cohorts.values()), 'strict source control was removed or changed')
+    artifacts = {loc for c in cohorts.values() for loc in c.get('artifacts',{}).values()}
+    declared = frozen['artifact_files']
+    require(isinstance(declared,list) and len(declared) == len(set(declared)) and artifacts == set(declared)
+            and artifacts <= set(fixed), 'binding artifact set differs from immutable source stage')
+    return manifest
 
 
 @lru_cache(maxsize=None)
@@ -416,7 +505,7 @@ def adapt(api, family, locator, digest, source_json, activation_digest, cohort):
                     and hidden.get('IMRE_WITHDRAW_LAUNCHER') == extra_sources[0]
                     and hidden.get('IMRE_WITHDRAW_ARCHIVE') == extra_sources[1],
                     tier+' external Python path or withdrawn source configuration differs')
-        trace_withdraw(api,text(tier+'_trace'),image,probe,tree,stash,leaf,meta.get('cwd'),require,extra_sources)
+        trace_withdraw(api,text(tier+'_trace'),image,probe,tree,stash,leaf,meta.get('cwd'),require,extra_sources,bool(extra_sources))
         elf = meta.get('withdrawal',{}).get('readelf',{})
         elfraw = data(tier+'_readelf')
         require(elf.get('argv')==['readelf','-d',image]
