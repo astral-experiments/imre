@@ -3644,6 +3644,12 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
             rejected = run(imre, "-B", entry, stdin=b"pass\n")
             assert (rejected.returncode, rejected.stdout) == (1, b""), rejected
             assert intrinsic in rejected.stderr and b"without a linked body" in rejected.stderr, rejected
+        entry = root / "replaced_bdb.py"
+        entry.write_text("import bdb\ndef replacement(self, source): return source\n"
+                         "bdb.Bdb.runeval = replacement\nprint(bdb.Bdb().runeval(input()))\n")
+        rejected = run(imre, "-B", entry, stdin=b"pass\n")
+        assert (rejected.returncode, rejected.stdout) == (1, b""), rejected
+        assert b"monkeypatching a shipped method" in rejected.stderr and b"local function" in rejected.stderr, rejected
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_inspect_signature.py")
         (root / "weather_report.py").write_text("def report(temp):\n    return f'{temp} C'\n")
         compare("-Bm", "inspect", "weather_report:report")

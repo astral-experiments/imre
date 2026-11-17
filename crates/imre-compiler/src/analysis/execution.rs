@@ -186,6 +186,7 @@ struct Escape<'a, 'db> {
     session: &'db Session,
     open_providers: &'a [File],
     selected_provider: &'a dyn Fn(&str) -> Option<File>,
+    selected_writes: HashMap<(ty_python_core::definition::Definition<'db>, &'a str), TextRange>,
     linked_exec: Option<&'a std::collections::HashSet<TextRange>>,
     literal_unit: Option<crate::dynamic::literal::LiteralUnit<'a>>,
     path: &'a Path,
@@ -225,7 +226,10 @@ impl<'ast, 'db> Escape<'ast, 'db> {
     }
 
     /// Resolve an interface only for imported execution checking; it does not grant a linked entry.
-    fn selected_execution_target(&self, value: &Expr) -> Option<SourceFunction<'db>> {
+    fn selected_execution_target(
+        &self,
+        value: &Expr,
+    ) -> Option<(SourceFunction<'db>, Option<TextRange>)> {
         let db = self.model.db();
         let ty @ (Type::FunctionLiteral(_) | Type::BoundMethod(_)) =
             value.inferred_type(self.model)?
@@ -237,9 +241,7 @@ impl<'ast, 'db> Escape<'ast, 'db> {
         else {
             return None;
         };
-        if !interface.file(db).path(db).is_vendored_path()
-            || self.selected_callable_was_replaced(interface, value.start())
-        {
+        if !interface.file(db).path(db).is_vendored_path() || self.member_was_assigned(value) {
             return None;
         }
         let selected = self
@@ -248,55 +250,18 @@ impl<'ast, 'db> Escape<'ast, 'db> {
         let DefinitionKind::Function(function) = selected.kind(db) else {
             return None;
         };
-        Some((selected.file(db), function))
-    }
-
-    /// A write to the resolved module or class member invalidates its interface correspondence.
-    fn selected_callable_was_replaced(
-        &self,
-        interface: ty_python_core::definition::Definition<'db>,
-        before: TextSize,
-    ) -> bool {
-        use ty_python_core::scope::NodeWithScopeKind;
-        let db = self.model.db();
-        let Some(name) = interface.name(db) else {
-            return true;
-        };
-        let index = ty_python_core::semantic_index(db, self.model.program_file());
-        let scope_owner = match interface.scope(db).node(db) {
-            NodeWithScopeKind::Class(class) => {
+        let replacement = match interface.scope(db).node(db) {
+            ty_python_core::scope::NodeWithScopeKind::Class(class) => {
                 let parsed = self.session.parsed(interface.file(db));
-                ty_python_core::semantic_index(db, interface.program_file(db))
-                    .try_definition(class.node(&parsed))
+                let owner = ty_python_core::semantic_index(db, interface.program_file(db))
+                    .try_definition(class.node(&parsed))?;
+                self.selected_writes
+                    .get(&(owner, interface.name(db)?.as_str()))
+                    .copied()
             }
             _ => None,
         };
-        index.scope_ids().any(|scope| {
-            index
-                .use_def_map(scope.file_scope_id(db))
-                .definitions_with_usage()
-                .any(|(_, def, _)| {
-                    let DefinitionKind::Assignment(assignment) = def.kind(db) else {
-                        return false;
-                    };
-                    let Some(attr) = assignment.target(self.parsed).as_attribute_expr() else {
-                        return false;
-                    };
-                    if attr.attr.as_str() != name || attr.start() >= before {
-                        return false;
-                    }
-                    let Some(ty) = attr.value.inferred_type(self.model) else {
-                        return false;
-                    };
-                    match ty.definition(db, &self.model.program_environment()) {
-                        Some(TypeDefinition::StaticClass(owner)) => Some(owner) == scope_owner,
-                        Some(TypeDefinition::Module(module)) => {
-                            module.file(db) == Some(interface.file(db))
-                        }
-                        _ => false,
-                    }
-                })
-        })
+        Some(((selected.file(db), function), replacement))
     }
 
     /// Preserve the selected physical Python definition; a stub or unrelated shadow is not an executable provider.
@@ -882,6 +847,21 @@ impl<'a> Escape<'a, '_> {
             return;
         }
         let Expr::Call(call) = expression else {
+            if let Expr::Attribute(attr) = expression
+                && attr.ctx == ruff_python_ast::ExprContext::Store
+                && self.reachable(attr.range())
+                && let Some(TypeDefinition::StaticClass(owner)) =
+                    attr.value.inferred_type(self.model).and_then(|ty| {
+                        ty.definition(self.model.db(), &self.model.program_environment())
+                    })
+                && owner
+                    .file(self.model.db())
+                    .path(self.model.db())
+                    .is_vendored_path()
+            {
+                self.selected_writes
+                    .insert((owner, attr.attr.as_str()), attr.range());
+            }
             if self.has_live_import(expression) {
                 if self.exposes_captured_namespace(expression) {
                     self.captured.clear();
@@ -1028,13 +1008,19 @@ impl<'a> Escape<'a, '_> {
         let target = self.declared_function(&call.func);
         let selected = self.selected_execution_target(&call.func);
         if let Some(target) = selected
+            .map(|(target, _)| target)
             .or(target)
             .or_else(|| self.declared_bound_method(&call.func))
             && (selected.is_some() || capture.is_some() || !self.open_providers.is_empty())
             && let Some(requirement) =
                 self.imported_execution(target, capture, call, selected.is_some())
         {
-            self.first = Some(requirement);
+            self.first = Some(if let Some((_, Some(range))) = selected {
+                self.required(requirement.source, range,
+                    "monkeypatching a shipped method used for source execution is unsupported; call a local function or wrapper instead".into())
+            } else {
+                requirement
+            });
             return;
         }
         if live_import {
@@ -1506,6 +1492,7 @@ impl Session {
             session: self,
             open_providers: &[],
             selected_provider: &|_| None,
+            selected_writes: HashMap::new(),
             linked_exec: None,
             literal_unit: None,
             path,
