@@ -1,0 +1,143 @@
+{
+  "files": {
+    "created": [
+      {
+        "bytes": 978,
+        "kind": "file",
+        "mode": "0o600",
+        "path": "cargo.log",
+        "sha256": "c80dff955c48531a4a855a0185dcc2100f264255d26a8e05c64c294d9127a52f"
+      },
+      {
+        "bytes": 66,
+        "kind": "file",
+        "mode": "0o600",
+        "path": "published.txt",
+        "sha256": "e2f90dec20c234af40fdb892d39f1c50ebe0499da17c5217bf98d50393fba564"
+      }
+    ],
+    "deleted": [],
+    "modified": []
+  },
+  "processes": [
+    {
+      "argv": [
+        "metadata",
+        "--format-version",
+        "1",
+        "--no-deps"
+      ],
+      "cwd": "$WORK",
+      "env": {
+        "CARGO_LOG": "$WORK/cargo.log",
+        "HOME": "$WORK/home",
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "NO_PROXY": "127.0.0.1",
+        "PATH": "/usr/bin",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONHASHSEED": "0",
+        "PYTHONNOUSERSITE": "1",
+        "TZ": "UTC"
+      },
+      "exit": 0,
+      "stderr": "",
+      "stdout": "{\"workspace_members\": [\"already-id\", \"fresh-id\"], \"packages\": [{\"id\": \"already-id\", \"name\": \"already\", \"version\": \"1.0\", \"publish\": null}, {\"id\": \"fresh-id\", \"name\": \"fresh\", \"version\": \"2.0\", \"publish\": null}]}\n"
+    },
+    {
+      "argv": [
+        "publish",
+        "--workspace",
+        "--exclude",
+        "already",
+        "--no-verify"
+      ],
+      "cwd": "$WORK",
+      "env": {
+        "CARGO_LOG": "$WORK/cargo.log",
+        "HOME": "$WORK/home",
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "NO_PROXY": "127.0.0.1",
+        "PATH": "/usr/bin",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONHASHSEED": "0",
+        "PYTHONNOUSERSITE": "1",
+        "TZ": "UTC"
+      },
+      "exit": 0,
+      "stderr": "",
+      "stdout": ""
+    }
+  ],
+  "registry": [
+    {
+      "body_hex": "",
+      "headers": [
+        [
+          "Accept-Encoding",
+          "identity"
+        ],
+        [
+          "Host",
+          "$REGISTRY_AUTHORITY"
+        ],
+        [
+          "User-Agent",
+          "uv-crates-io-publish (github.com/astral-sh/uv)"
+        ],
+        [
+          "Connection",
+          "close"
+        ]
+      ],
+      "method": "GET",
+      "request_line": "GET /api/v1/crates/already/1.0 HTTP/1.1",
+      "response": {
+        "body_hex": "7b7d",
+        "headers": [
+          [
+            "Content-Length",
+            "2"
+          ]
+        ],
+        "status": 200
+      },
+      "target": "/api/v1/crates/already/1.0"
+    },
+    {
+      "body_hex": "",
+      "headers": [
+        [
+          "Accept-Encoding",
+          "identity"
+        ],
+        [
+          "Host",
+          "$REGISTRY_AUTHORITY"
+        ],
+        [
+          "User-Agent",
+          "uv-crates-io-publish (github.com/astral-sh/uv)"
+        ],
+        [
+          "Connection",
+          "close"
+        ]
+      ],
+      "method": "GET",
+      "request_line": "GET /api/v1/crates/fresh/2.0 HTTP/1.1",
+      "response": {
+        "body_hex": "7b7d",
+        "headers": [
+          [
+            "Content-Length",
+            "2"
+          ]
+        ],
+        "status": 404
+      },
+      "target": "/api/v1/crates/fresh/2.0"
+    }
+  ]
+}

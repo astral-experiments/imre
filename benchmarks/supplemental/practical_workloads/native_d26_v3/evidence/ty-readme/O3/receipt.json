@@ -1,0 +1,119 @@
+{
+  "build": {
+    "argv": [
+      "/workspace/imre/target/release/imre",
+      "build",
+      "/workspace/practical-d26-scratch-retry/ty-readme-O3/scripts/transform_readme.py",
+      "--module-root",
+      "/workspace/practical-d26-scratch-retry/ty-readme-O3",
+      "--no-cache",
+      "--opt-level",
+      "3",
+      "--runtime",
+      "/workspace/imre/target/release/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "-o",
+      "/workspace/practical-d26-scratch-retry/ty-readme-O3.exe"
+    ],
+    "elapsed_seconds": 74.57,
+    "exit_code": 0,
+    "image_exists": true,
+    "image_sha256": "d5508954aa4779e4bfe9abcc629599216a1880787fb98ad27586f4fac2877b09",
+    "stderr_sha256": "c7e1610d00d9b5e09ab4af1e86d8c65f0c25345110fbb60be8aef849d19edd0b",
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "timed_out": false
+  },
+  "case": "ty-readme",
+  "linkage": {
+    "ldd": {
+      "argv": [
+        "ldd",
+        "/workspace/practical-d26-scratch-retry/ty-readme-O3.exe"
+      ],
+      "exit_code": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "ee3100752f5b02820e145116fe19344e754bd616ea1a1ae13172a1eece0b94f2",
+      "timed_out": false
+    },
+    "readelf": {
+      "argv": [
+        "readelf",
+        "-d",
+        "/workspace/practical-d26-scratch-retry/ty-readme-O3.exe"
+      ],
+      "exit_code": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "6769bd4c400cb5d48ed600702c4c048a2e0031f4502fd7d627020877d3875924",
+      "timed_out": false
+    }
+  },
+  "reference_sha256": "764cd766a9ddca783630cc146f8fc9ed47ed3158eab4b8336fbb179631a1e6eb",
+  "run": {
+    "argv": [
+      "/usr/bin/strace",
+      "-f",
+      "-qq",
+      "-s",
+      "512",
+      "-e",
+      "trace=execve,execveat,open,openat,openat2,creat,io_uring_setup,clone,clone3,fork,vfork,rename,renameat,renameat2,newfstatat,wait4,exit_group",
+      "-o",
+      "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_d26_v3/evidence/ty-readme/O3/trace",
+      "/workspace/practical-d26-scratch-retry/supervisor",
+      "/workspace/practical-d26-scratch-retry/ty-readme-O3/scripts/transform_readme.py",
+      "/workspace/practical-d26-scratch-retry/ty-readme-O3.source",
+      "-",
+      "-",
+      "/workspace/practical-d26-scratch-retry/ty-readme-O3.exe",
+      "scripts/transform_readme.py"
+    ],
+    "bytecode_present_before": false,
+    "comparison_dimensions": {
+      "cargo_journal": true,
+      "http_requests": true,
+      "mutations": true,
+      "status": true,
+      "stderr": true,
+      "stdout": true
+    },
+    "cwd": "/workspace/practical-d26-scratch-retry/ty-readme-O3",
+    "environment": {
+      "HOME": "/workspace/practical-d26-scratch-retry/ty-readme-O3/home",
+      "LANG": "C.UTF-8",
+      "LC_ALL": "C.UTF-8",
+      "PATH": "/usr/bin",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONHASHSEED": "0",
+      "PYTHONNOUSERSITE": "1",
+      "TZ": "UTC"
+    },
+    "exit_code": 0,
+    "roles": {
+      "$CORPUS": "/workspace/practical-d26-scratch-retry/ty-readme-O3-external",
+      "$PYTHON": "/workspace/fixture-policy-private/bin/python3.14",
+      "$WORK": "/workspace/practical-d26-scratch-retry/ty-readme-O3"
+    },
+    "source_restored_sha256": "d6a13d50218b55e3b73587974e8357b9bc68b7c364d8bb10d04708fec5e2d64f",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "timed_out": false,
+    "trace_sha256": "3a46659dc4d3da7e59b7613913eb78779c1a8829abb9e2e999374b8197b76b51",
+    "umask": "0077",
+    "workload_argv": [
+      "scripts/transform_readme.py"
+    ],
+    "zip_restored_sha256": null
+  },
+  "source": {
+    "bytes": 2641,
+    "commit": "d4e4bf90906c7677049bc3a29d1735de7d22052d",
+    "git_blob": "4b20727cd3b38ef011b9f779a706d977089c487a",
+    "path": "scripts/transform_readme.py",
+    "repo": "https://github.com/astral-sh/ty",
+    "sha256": "d6a13d50218b55e3b73587974e8357b9bc68b7c364d8bb10d04708fec5e2d64f",
+    "vendored": "sources/ty/scripts/transform_readme.py"
+  },
+  "status": "observed_exact",
+  "tier": "O3"
+}

@@ -1,0 +1,57 @@
+18069 execve("/workspace/practical-d26-scratch-retry/supervisor", ["/workspace/practical-d26-scratch-retry/supervisor", "/workspace/practical-d26-scratch-retry/ty-readme-O3/scripts/transform_readme.py", "/workspace/practical-d26-scratch-retry/ty-readme-O3.source", "-", "-", "/workspace/practical-d26-scratch-retry/ty-readme-O3.exe", "scripts/transform_readme.py"], 0x7fff60200770 /* 8 vars */) = 0
+18069 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+18069 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+18069 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3/scripts/transform_readme.py", {st_mode=S_IFREG|0644, st_size=2641, ...}, AT_SYMLINK_NOFOLLOW) = 0
+18069 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3.source", 0x7fffcf3f3a80, AT_SYMLINK_NOFOLLOW) = -1 ENOENT (No such file or directory)
+18069 rename("/workspace/practical-d26-scratch-retry/ty-readme-O3/scripts/transform_readme.py", "/workspace/practical-d26-scratch-retry/ty-readme-O3.source") = 0
+18069 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3/scripts/transform_readme.py", 0x7fffcf3f3a80, AT_SYMLINK_NOFOLLOW) = -1 ENOENT (No such file or directory)
+18069 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7ffbbf0b3a10) = 18070
+18069 wait4(18070,  <unfinished ...>
+18070 execve("/workspace/practical-d26-scratch-retry/ty-readme-O3.exe", ["scripts/transform_readme.py"], 0x7fffcf3f3c98 /* 8 vars */) = 0
+18070 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+18070 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3
+18070 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3
+18070 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+18070 openat(AT_FDCWD, "/usr/lib/locale/locale-archive", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18070 openat(AT_FDCWD, "/usr/share/locale/locale.alias", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18070 openat(AT_FDCWD, "/usr/lib/locale/C.UTF-8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18070 openat(AT_FDCWD, "/usr/lib/locale/C.utf8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = 3
+18070 openat(AT_FDCWD, "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache", O_RDONLY|O_CLOEXEC) = 3
+18070 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3
+18070 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18070 open("/workspace/practical-d26-scratch-retry/ty-readme-O3", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3
+18070 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3/scripts/__init__.py", 0x7ffd02175758, 0) = -1 ENOENT (No such file or directory)
+18070 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3/scripts/__init__.pyc", 0x7ffd02175758, 0) = -1 ENOENT (No such file or directory)
+18070 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3/scripts", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18070 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18070 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18070 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18070 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18070 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+18070 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18070 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18070 openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3
+18070 openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3
+18070 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18070 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18070 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18070 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18070 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18070 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18070 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18070 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18070 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18070 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18070 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18070 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18070 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18070 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+18070 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ty-readme-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18070 openat(AT_FDCWD, "dist-workspace.toml", O_RDONLY|O_CLOEXEC) = 3
+18070 openat(AT_FDCWD, "README.md", O_RDONLY|O_CLOEXEC) = 3
+18070 openat(AT_FDCWD, "README.md", O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC, 0666) = 3
+18070 exit_group(0)                     = ?
+18069 <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 18070
+18069 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=18070, si_uid=1000, si_status=0, si_utime=9 /* 0.09 s */, si_stime=2 /* 0.02 s */} ---
+18069 rename("/workspace/practical-d26-scratch-retry/ty-readme-O3.source", "/workspace/practical-d26-scratch-retry/ty-readme-O3/scripts/transform_readme.py") = 0
+18069 exit_group(0)                     = ?

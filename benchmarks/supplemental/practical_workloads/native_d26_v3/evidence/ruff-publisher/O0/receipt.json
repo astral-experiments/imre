@@ -1,0 +1,191 @@
+{
+  "build": {
+    "argv": [
+      "/workspace/imre/target/release/imre",
+      "build",
+      "/workspace/practical-d26-scratch-retry/ruff-publisher-O0/scripts/publish-crates.py",
+      "--module-root",
+      "/workspace/practical-d26-scratch-retry/ruff-publisher-O0",
+      "--no-cache",
+      "--opt-level",
+      "0",
+      "--runtime",
+      "/workspace/imre/target/release/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "-o",
+      "/workspace/practical-d26-scratch-retry/ruff-publisher-O0.exe"
+    ],
+    "elapsed_seconds": 16.91,
+    "exit_code": 0,
+    "image_exists": true,
+    "image_sha256": "baa49c337502835dd91af14b3c3621c4be07e916d3b1df601b28b3cc8a327e7d",
+    "stderr_sha256": "bcce0a862e52cccbc05ce56d16d0ae3f79c8306dce6b1999a14418fda590e062",
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "timed_out": false
+  },
+  "case": "ruff-publisher",
+  "gate": {
+    "argv": [
+      "/usr/bin/strace",
+      "-f",
+      "-qq",
+      "-s",
+      "512",
+      "-e",
+      "trace=execve,execveat,newfstatat,openat,openat2,clone,clone3,fork,vfork,wait4,exit_group",
+      "-o",
+      "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_d26_v3/evidence/ruff-publisher/O0/gate.trace",
+      "/workspace/practical-d26-scratch-retry/raw_control_probe",
+      "gate",
+      "/workspace/practical-d26-scratch-retry/ruff-publisher-O0.exe.gate",
+      "/workspace/imre/target/release/imre",
+      "build",
+      "/workspace/practical-d26-scratch-retry/ruff-publisher-O0/scripts/publish-crates.py",
+      "--module-root",
+      "/workspace/practical-d26-scratch-retry/ruff-publisher-O0",
+      "--no-cache",
+      "--opt-level",
+      "0",
+      "--runtime",
+      "/workspace/imre/target/release/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "-o",
+      "/workspace/practical-d26-scratch-retry/ruff-publisher-O0.exe.gate"
+    ],
+    "build_argv": [
+      "/workspace/imre/target/release/imre",
+      "build",
+      "/workspace/practical-d26-scratch-retry/ruff-publisher-O0/scripts/publish-crates.py",
+      "--module-root",
+      "/workspace/practical-d26-scratch-retry/ruff-publisher-O0",
+      "--no-cache",
+      "--opt-level",
+      "0",
+      "--runtime",
+      "/workspace/imre/target/release/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "-o",
+      "/workspace/practical-d26-scratch-retry/ruff-publisher-O0.exe.gate"
+    ],
+    "compiler_exit_code": 1,
+    "image": "/workspace/practical-d26-scratch-retry/ruff-publisher-O0.exe.gate",
+    "image_absent_after": true,
+    "injected_sha256": "06f1325727719b984c1c16ac1ff30978aabeaa0fa01b03c96655656fa6bcceb1",
+    "module_sha256": "14841721c7b84f57d26a6a38a53827c683daf10930b9f297cfc15335bd1257b5",
+    "positive_sha256": "c6f13456d53d1dd1cc155d72d9e63cd999e361e1c983d366e477c8432693a021",
+    "probe_exit_code": 0,
+    "stderr_sha256": "94cceb33fc367d37dc57aefcafd44289e9e9af73f733221e11b97aa922e903be",
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "trace_sha256": "bffd4c0b5d94ebf3ca95d781e3252df6ba44a066a78ed9ffe6949181979e1512"
+  },
+  "linkage": {
+    "ldd": {
+      "argv": [
+        "ldd",
+        "/workspace/practical-d26-scratch-retry/ruff-publisher-O0.exe"
+      ],
+      "exit_code": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "7be82bc399d6896bd2ae184b86f987a122022b553fc98dfec8c65452fd577d35",
+      "timed_out": false
+    },
+    "readelf": {
+      "argv": [
+        "readelf",
+        "-d",
+        "/workspace/practical-d26-scratch-retry/ruff-publisher-O0.exe"
+      ],
+      "exit_code": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "9ccef43560bdb2159a74052a1a0aa87c91653d0edda947c33bd30afe50474414",
+      "timed_out": false
+    }
+  },
+  "reference_sha256": "3b29cdc856e403bad24155317bfa34b681f5cee70023485e903ae320f7647c00",
+  "run": {
+    "argv": [
+      "/usr/bin/strace",
+      "-f",
+      "-qq",
+      "-s",
+      "512",
+      "-e",
+      "trace=execve,execveat,open,openat,openat2,creat,io_uring_setup,clone,clone3,fork,vfork,rename,renameat,renameat2,newfstatat,wait4,exit_group",
+      "-o",
+      "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_d26_v3/evidence/ruff-publisher/O0/trace",
+      "/workspace/practical-d26-scratch-retry/supervisor",
+      "/workspace/practical-d26-scratch-retry/ruff-publisher-O0/scripts/publish-crates.py",
+      "/workspace/practical-d26-scratch-retry/ruff-publisher-O0.run-only.source",
+      "-",
+      "/workspace/practical-d26-scratch-retry/ruff-publisher-O0.run-only.zip",
+      "/workspace/practical-d26-scratch-retry/ruff-publisher-O0.exe",
+      "scripts/publish-crates.py",
+      "--api-url",
+      "http://127.0.0.1:37185/api/v1",
+      "--cargo",
+      "/workspace/fixture-policy-private/bin/python3.14",
+      "/workspace/practical-d26-scratch-retry/ruff-publisher-O0-external/fixtures/cargo_stub.py",
+      "--no-verify"
+    ],
+    "bytecode_present_before": false,
+    "comparison_dimensions": {
+      "cargo_journal": true,
+      "http_requests": true,
+      "mutations": true,
+      "status": true,
+      "stderr": true,
+      "stdout": true
+    },
+    "cwd": "/workspace/practical-d26-scratch-retry/ruff-publisher-O0",
+    "environment": {
+      "CARGO_LOG": "/workspace/practical-d26-scratch-retry/ruff-publisher-O0/cargo.log",
+      "HOME": "/workspace/practical-d26-scratch-retry/ruff-publisher-O0/home",
+      "LANG": "C.UTF-8",
+      "LC_ALL": "C.UTF-8",
+      "NO_PROXY": "127.0.0.1",
+      "PATH": "/usr/bin",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONHASHSEED": "0",
+      "PYTHONNOUSERSITE": "1",
+      "TZ": "UTC"
+    },
+    "exit_code": 0,
+    "roles": {
+      "$CORPUS": "/workspace/practical-d26-scratch-retry/ruff-publisher-O0-external",
+      "$PYTHON": "/workspace/fixture-policy-private/bin/python3.14",
+      "$REGISTRY_AUTHORITY": "127.0.0.1:37185",
+      "$REGISTRY_ORIGIN": "http://127.0.0.1:37185",
+      "$WORK": "/workspace/practical-d26-scratch-retry/ruff-publisher-O0"
+    },
+    "source_restored_sha256": "c6f13456d53d1dd1cc155d72d9e63cd999e361e1c983d366e477c8432693a021",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stdout_sha256": "8ae5ee580a8a028cc7cc202708581c3817ae97ec7852fd563e4a03ce9d37bde9",
+    "timed_out": false,
+    "trace_sha256": "dd7c878dc75a77b21a7e0150afe348449d8400c1262df432772080d56b6931ae",
+    "umask": "0077",
+    "workload_argv": [
+      "scripts/publish-crates.py",
+      "--api-url",
+      "http://127.0.0.1:37185/api/v1",
+      "--cargo",
+      "/workspace/fixture-policy-private/bin/python3.14",
+      "/workspace/practical-d26-scratch-retry/ruff-publisher-O0-external/fixtures/cargo_stub.py",
+      "--no-verify"
+    ],
+    "zip_restored_sha256": null
+  },
+  "source": {
+    "bytes": 6891,
+    "commit": "65aee8892ce379af4ae9c8b5f6e0ab37b25d5ec9",
+    "git_blob": "0ad38297e973be20e7b22a6c70332047ae522629",
+    "path": "scripts/publish-crates.py",
+    "repo": "https://github.com/astral-sh/ruff",
+    "sha256": "c6f13456d53d1dd1cc155d72d9e63cd999e361e1c983d366e477c8432693a021",
+    "vendored": "sources/ruff/scripts/publish-crates.py"
+  },
+  "status": "observed_exact",
+  "tier": "O0"
+}

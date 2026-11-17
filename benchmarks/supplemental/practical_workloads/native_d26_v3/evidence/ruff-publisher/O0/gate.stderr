@@ -1,0 +1,2 @@
+ Compiling /workspace/practical-d26-scratch-retry/ruff-publisher-O0/scripts/publish-crates.py (-O0)
+/workspace/practical-d26-scratch-retry/ruff-publisher-O0/architecture_control.py:1:15: Imre: expected int, got bool; annotations are enforced contracts

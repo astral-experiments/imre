@@ -1,0 +1,27 @@
+16426 execve("/workspace/practical-d26-scratch-retry/raw_control_probe", ["/workspace/practical-d26-scratch-retry/raw_control_probe", "gate", "/workspace/practical-d26-scratch-retry/uv-publisher-O0.exe.gate", "/workspace/imre/target/release/imre", "build", "/workspace/practical-d26-scratch-retry/uv-publisher-O0/scripts/publish-crates.py", "--module-root", "/workspace/practical-d26-scratch-retry/uv-publisher-O0", "--no-cache", "--opt-level", "0", "--runtime", "/workspace/imre/target/release/libimre_runtime.a", "--clang", "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang", "-o", "/workspace/practical-d26-scratch-retry/uv-publisher-O0.exe.gate"], 0x7ffdc41ffcb0 /* 7 vars */) = 0
+16426 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+16426 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+16426 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/uv-publisher-O0.exe.gate", 0x7ffd0da5c140, 0) = -1 ENOENT (No such file or directory)
+16426 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7f3e472a9a10) = 16427
+16426 wait4(16427,  <unfinished ...>
+16427 execve("/workspace/imre/target/release/imre", ["/workspace/imre/target/release/imre", "build", "/workspace/practical-d26-scratch-retry/uv-publisher-O0/scripts/publish-crates.py", "--module-root", "/workspace/practical-d26-scratch-retry/uv-publisher-O0", "--no-cache", "--opt-level", "0", "--runtime", "/workspace/imre/target/release/libimre_runtime.a", "--clang", "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang", "-o", "/workspace/practical-d26-scratch-retry/uv-publisher-O0.exe.gate"], 0x7ffd0da5c478 /* 7 vars */) = 0
+16427 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+16427 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3
+16427 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3
+16427 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+16427 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3
+16427 openat2(AT_FDCWD, "/workspace/practical-d26-scratch-retry/uv-publisher-O0/scripts/publish-crates.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+16427 openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3
+16427 openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3
+16427 openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3
+16427 openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3
+16427 openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3
+16427 openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3
+16427 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3
+16427 openat2(AT_FDCWD, "/workspace/practical-d26-scratch-retry/uv-publisher-O0/architecture_control.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+16427 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/uv-publisher-O0", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+16427 exit_group(1)                     = ?
+16426 <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 1}], 0, NULL) = 16427
+16426 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=16427, si_uid=1000, si_status=1, si_utime=49 /* 0.49 s */, si_stime=12 /* 0.12 s */} ---
+16426 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/uv-publisher-O0.exe.gate", 0x7ffd0da5c140, 0) = -1 ENOENT (No such file or directory)
+16426 exit_group(0)                     = ?

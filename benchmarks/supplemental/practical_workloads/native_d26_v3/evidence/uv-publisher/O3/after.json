@@ -1,0 +1,33 @@
+[
+  {
+    "bytes": 1272,
+    "kind": "file",
+    "mode": "0o600",
+    "path": "cargo.log",
+    "sha256": "eec2c738784893d0eba42fa27dbc0e82422933e07143ae3ada11e5f353dc92b0"
+  },
+  {
+    "kind": "directory",
+    "mode": "0o700",
+    "path": "home"
+  },
+  {
+    "bytes": 66,
+    "kind": "file",
+    "mode": "0o600",
+    "path": "published.txt",
+    "sha256": "e2f90dec20c234af40fdb892d39f1c50ebe0499da17c5217bf98d50393fba564"
+  },
+  {
+    "kind": "directory",
+    "mode": "0o700",
+    "path": "scripts"
+  },
+  {
+    "bytes": 6118,
+    "kind": "file",
+    "mode": "0o644",
+    "path": "scripts/publish-crates.py",
+    "sha256": "bc45ffb7097a253601a62a46ac7b356d3005a5b12d5be346eacc5a5df412bddb"
+  }
+]

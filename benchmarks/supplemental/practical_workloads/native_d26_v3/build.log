@@ -1,0 +1,1093 @@
+[psm 0.1.32] cargo:rustc-check-cfg=cfg(switchable_stack,asm,link_asm)
+[psm 0.1.32] cargo:rerun-if-env-changed=CC_x86_64-unknown-linux-gnu
+[psm 0.1.32] CC_x86_64-unknown-linux-gnu = None
+[psm 0.1.32] cargo:rerun-if-env-changed=CC_x86_64_unknown_linux_gnu
+[psm 0.1.32] CC_x86_64_unknown_linux_gnu = None
+[psm 0.1.32] cargo:rerun-if-env-changed=HOST_CC
+[psm 0.1.32] HOST_CC = None
+[psm 0.1.32] cargo:rerun-if-env-changed=CC
+[psm 0.1.32] CC = Some(/usr/bin/cc)
+[psm 0.1.32] cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+[imre-ast 0.1.5] cargo::rustc-check-cfg=cfg(has_epollexclusive)
+[imre-ast 0.1.5] cargo::rerun-if-changed=src/epoll_flags.h
+[imre-ast 0.1.5] cargo:rerun-if-env-changed=CC_x86_64-unknown-linux-gnu
+[imre-ast 0.1.5] CC_x86_64-unknown-linux-gnu = None
+[imre-ast 0.1.5] cargo:rerun-if-env-changed=CC_x86_64_unknown_linux_gnu
+[imre-ast 0.1.5] CC_x86_64_unknown_linux_gnu = None
+[imre-ast 0.1.5] cargo:rerun-if-env-changed=HOST_CC
+[imre-ast 0.1.5] HOST_CC = None
+[imre-ast 0.1.5] cargo:rerun-if-env-changed=CC
+[imre-ast 0.1.5] CC = Some(/usr/bin/cc)
+[imre-ast 0.1.5] cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+[liblzma-sys 0.4.9] cargo:rerun-if-changed=build.rs
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=LZMA_API_STATIC
+[liblzma-sys 0.4.9] cargo:root=/workspace/imre/target/release/build/liblzma-sys-3013c6e9e7f2f9c3/out
+[liblzma-sys 0.4.9] cargo:include=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/liblzma-sys-0.4.9/xz/src/liblzma/api
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=CC_FORCE_DISABLE
+[liblzma-sys 0.4.9] CC_FORCE_DISABLE = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=CC_x86_64-unknown-linux-gnu
+[liblzma-sys 0.4.9] CC_x86_64-unknown-linux-gnu = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=CC_x86_64_unknown_linux_gnu
+[liblzma-sys 0.4.9] CC_x86_64_unknown_linux_gnu = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=HOST_CC
+[liblzma-sys 0.4.9] HOST_CC = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=CC
+[liblzma-sys 0.4.9] CC = Some(/usr/bin/cc)
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=ZSTD_SYS_USE_PKG_CONFIG
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=CC_FORCE_DISABLE
+[zstd-sys 2.0.16+zstd.1.5.7] CC_FORCE_DISABLE = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=CC_x86_64-unknown-linux-gnu
+[zstd-sys 2.0.16+zstd.1.5.7] CC_x86_64-unknown-linux-gnu = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=CC_x86_64_unknown_linux_gnu
+[zstd-sys 2.0.16+zstd.1.5.7] CC_x86_64_unknown_linux_gnu = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=HOST_CC
+[zstd-sys 2.0.16+zstd.1.5.7] HOST_CC = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=CC
+[zstd-sys 2.0.16+zstd.1.5.7] CC = Some(/usr/bin/cc)
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+[psm 0.1.32] cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+[psm 0.1.32] CRATE_CC_NO_DEFAULTS = None
+[psm 0.1.32] cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+[psm 0.1.32] CRATE_CC_NO_DEFAULTS = None
+[psm 0.1.32] cargo:rerun-if-env-changed=CFLAGS
+[psm 0.1.32] CFLAGS = None
+[psm 0.1.32] cargo:rerun-if-env-changed=HOST_CFLAGS
+[psm 0.1.32] HOST_CFLAGS = None
+[psm 0.1.32] cargo:rerun-if-env-changed=CFLAGS_x86_64_unknown_linux_gnu
+[psm 0.1.32] CFLAGS_x86_64_unknown_linux_gnu = None
+[psm 0.1.32] cargo:rerun-if-env-changed=CFLAGS_x86_64-unknown-linux-gnu
+[psm 0.1.32] CFLAGS_x86_64-unknown-linux-gnu = None
+[imre-ast 0.1.5] cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+[imre-ast 0.1.5] CRATE_CC_NO_DEFAULTS = None
+[imre-ast 0.1.5] cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+[imre-ast 0.1.5] CRATE_CC_NO_DEFAULTS = None
+[imre-ast 0.1.5] cargo:rerun-if-env-changed=CFLAGS
+[imre-ast 0.1.5] CFLAGS = None
+[imre-ast 0.1.5] cargo:rerun-if-env-changed=HOST_CFLAGS
+[imre-ast 0.1.5] HOST_CFLAGS = None
+[imre-ast 0.1.5] cargo:rerun-if-env-changed=CFLAGS_x86_64_unknown_linux_gnu
+[imre-ast 0.1.5] CFLAGS_x86_64_unknown_linux_gnu = None
+[imre-ast 0.1.5] cargo:rerun-if-env-changed=CFLAGS_x86_64-unknown-linux-gnu
+[imre-ast 0.1.5] CFLAGS_x86_64-unknown-linux-gnu = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+[zstd-sys 2.0.16+zstd.1.5.7] CRATE_CC_NO_DEFAULTS = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+[zstd-sys 2.0.16+zstd.1.5.7] CRATE_CC_NO_DEFAULTS = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=CFLAGS
+[zstd-sys 2.0.16+zstd.1.5.7] CFLAGS = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=HOST_CFLAGS
+[zstd-sys 2.0.16+zstd.1.5.7] HOST_CFLAGS = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=CFLAGS_x86_64_unknown_linux_gnu
+[zstd-sys 2.0.16+zstd.1.5.7] CFLAGS_x86_64_unknown_linux_gnu = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=CFLAGS_x86_64-unknown-linux-gnu
+[zstd-sys 2.0.16+zstd.1.5.7] CFLAGS_x86_64-unknown-linux-gnu = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+[liblzma-sys 0.4.9] CRATE_CC_NO_DEFAULTS = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+[liblzma-sys 0.4.9] CRATE_CC_NO_DEFAULTS = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=CFLAGS
+[liblzma-sys 0.4.9] CFLAGS = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=HOST_CFLAGS
+[liblzma-sys 0.4.9] HOST_CFLAGS = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=CFLAGS_x86_64_unknown_linux_gnu
+[liblzma-sys 0.4.9] CFLAGS_x86_64_unknown_linux_gnu = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=CFLAGS_x86_64-unknown-linux-gnu
+[liblzma-sys 0.4.9] CFLAGS_x86_64-unknown-linux-gnu = None
+[psm 0.1.32] cargo:rerun-if-env-changed=CFLAGS
+[psm 0.1.32] CFLAGS = None
+[psm 0.1.32] cargo:rerun-if-env-changed=HOST_CFLAGS
+[psm 0.1.32] HOST_CFLAGS = None
+[psm 0.1.32] cargo:rerun-if-env-changed=CFLAGS_x86_64_unknown_linux_gnu
+[psm 0.1.32] CFLAGS_x86_64_unknown_linux_gnu = None
+[psm 0.1.32] cargo:rerun-if-env-changed=CFLAGS_x86_64-unknown-linux-gnu
+[psm 0.1.32] CFLAGS_x86_64-unknown-linux-gnu = None
+[psm 0.1.32] cargo:rustc-cfg=asm
+[psm 0.1.32] cargo:rustc-cfg=link_asm
+[psm 0.1.32] cargo:rustc-cfg=switchable_stack
+[psm 0.1.32] cargo:rerun-if-env-changed=CC_FORCE_DISABLE
+[psm 0.1.32] CC_FORCE_DISABLE = None
+[psm 0.1.32] cargo:rerun-if-env-changed=CC_x86_64-unknown-linux-gnu
+[psm 0.1.32] CC_x86_64-unknown-linux-gnu = None
+[psm 0.1.32] cargo:rerun-if-env-changed=CC_x86_64_unknown_linux_gnu
+[psm 0.1.32] CC_x86_64_unknown_linux_gnu = None
+[psm 0.1.32] cargo:rerun-if-env-changed=HOST_CC
+[psm 0.1.32] HOST_CC = None
+[psm 0.1.32] cargo:rerun-if-env-changed=CC
+[psm 0.1.32] CC = Some(/usr/bin/cc)
+[psm 0.1.32] cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+[psm 0.1.32] CRATE_CC_NO_DEFAULTS = None
+[psm 0.1.32] cargo:rerun-if-env-changed=CFLAGS
+[psm 0.1.32] CFLAGS = None
+[psm 0.1.32] cargo:rerun-if-env-changed=HOST_CFLAGS
+[psm 0.1.32] HOST_CFLAGS = None
+[psm 0.1.32] cargo:rerun-if-env-changed=CFLAGS_x86_64_unknown_linux_gnu
+[psm 0.1.32] CFLAGS_x86_64_unknown_linux_gnu = None
+[psm 0.1.32] cargo:rerun-if-env-changed=CFLAGS_x86_64-unknown-linux-gnu
+[psm 0.1.32] CFLAGS_x86_64-unknown-linux-gnu = None
+[imre-ast 0.1.5] cargo:rerun-if-env-changed=CFLAGS
+[imre-ast 0.1.5] CFLAGS = None
+[imre-ast 0.1.5] cargo:rerun-if-env-changed=HOST_CFLAGS
+[imre-ast 0.1.5] HOST_CFLAGS = None
+[imre-ast 0.1.5] cargo:rerun-if-env-changed=CFLAGS_x86_64_unknown_linux_gnu
+[imre-ast 0.1.5] CFLAGS_x86_64_unknown_linux_gnu = None
+[imre-ast 0.1.5] cargo:rerun-if-env-changed=CFLAGS_x86_64-unknown-linux-gnu
+[imre-ast 0.1.5] CFLAGS_x86_64-unknown-linux-gnu = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=CFLAGS
+[liblzma-sys 0.4.9] CFLAGS = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=HOST_CFLAGS
+[liblzma-sys 0.4.9] HOST_CFLAGS = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=CFLAGS_x86_64_unknown_linux_gnu
+[liblzma-sys 0.4.9] CFLAGS_x86_64_unknown_linux_gnu = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=CFLAGS_x86_64-unknown-linux-gnu
+[liblzma-sys 0.4.9] CFLAGS_x86_64-unknown-linux-gnu = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=CFLAGS
+[zstd-sys 2.0.16+zstd.1.5.7] CFLAGS = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=HOST_CFLAGS
+[zstd-sys 2.0.16+zstd.1.5.7] HOST_CFLAGS = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=CFLAGS_x86_64_unknown_linux_gnu
+[zstd-sys 2.0.16+zstd.1.5.7] CFLAGS_x86_64_unknown_linux_gnu = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=CFLAGS_x86_64-unknown-linux-gnu
+[zstd-sys 2.0.16+zstd.1.5.7] CFLAGS_x86_64-unknown-linux-gnu = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+[zstd-sys 2.0.16+zstd.1.5.7] CRATE_CC_NO_DEFAULTS = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=CFLAGS
+[zstd-sys 2.0.16+zstd.1.5.7] CFLAGS = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=HOST_CFLAGS
+[zstd-sys 2.0.16+zstd.1.5.7] HOST_CFLAGS = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=CFLAGS_x86_64_unknown_linux_gnu
+[zstd-sys 2.0.16+zstd.1.5.7] CFLAGS_x86_64_unknown_linux_gnu = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=CFLAGS_x86_64-unknown-linux-gnu
+[zstd-sys 2.0.16+zstd.1.5.7] CFLAGS_x86_64-unknown-linux-gnu = None
+[psm 0.1.32] cargo:rerun-if-env-changed=CC_FORCE_DISABLE
+[psm 0.1.32] CC_FORCE_DISABLE = None
+[psm 0.1.32] cargo:rerun-if-env-changed=AR_x86_64-unknown-linux-gnu
+[psm 0.1.32] AR_x86_64-unknown-linux-gnu = None
+[psm 0.1.32] cargo:rerun-if-env-changed=AR_x86_64_unknown_linux_gnu
+[psm 0.1.32] AR_x86_64_unknown_linux_gnu = None
+[psm 0.1.32] cargo:rerun-if-env-changed=HOST_AR
+[psm 0.1.32] HOST_AR = None
+[psm 0.1.32] cargo:rerun-if-env-changed=AR
+[psm 0.1.32] AR = None
+[psm 0.1.32] cargo:rerun-if-env-changed=ARFLAGS
+[psm 0.1.32] ARFLAGS = None
+[psm 0.1.32] cargo:rerun-if-env-changed=HOST_ARFLAGS
+[psm 0.1.32] HOST_ARFLAGS = None
+[psm 0.1.32] cargo:rerun-if-env-changed=ARFLAGS_x86_64_unknown_linux_gnu
+[psm 0.1.32] ARFLAGS_x86_64_unknown_linux_gnu = None
+[psm 0.1.32] cargo:rerun-if-env-changed=ARFLAGS_x86_64-unknown-linux-gnu
+[psm 0.1.32] ARFLAGS_x86_64-unknown-linux-gnu = None
+[imre-ast 0.1.5] cargo::rustc-cfg=has_epollexclusive
+[psm 0.1.32] cargo:rerun-if-env-changed=AR_x86_64-unknown-linux-gnu
+[psm 0.1.32] AR_x86_64-unknown-linux-gnu = None
+[psm 0.1.32] cargo:rerun-if-env-changed=AR_x86_64_unknown_linux_gnu
+[psm 0.1.32] AR_x86_64_unknown_linux_gnu = None
+[psm 0.1.32] cargo:rerun-if-env-changed=HOST_AR
+[psm 0.1.32] HOST_AR = None
+[psm 0.1.32] cargo:rerun-if-env-changed=AR
+[psm 0.1.32] AR = None
+[psm 0.1.32] cargo:rerun-if-env-changed=ARFLAGS
+[psm 0.1.32] ARFLAGS = None
+[psm 0.1.32] cargo:rerun-if-env-changed=HOST_ARFLAGS
+[psm 0.1.32] HOST_ARFLAGS = None
+[psm 0.1.32] cargo:rerun-if-env-changed=ARFLAGS_x86_64_unknown_linux_gnu
+[psm 0.1.32] ARFLAGS_x86_64_unknown_linux_gnu = None
+[psm 0.1.32] cargo:rerun-if-env-changed=ARFLAGS_x86_64-unknown-linux-gnu
+[psm 0.1.32] ARFLAGS_x86_64-unknown-linux-gnu = None
+[blake3 1.8.7] cargo::rustc-check-cfg=cfg(blake3_sse2_ffi, values(none()))
+[blake3 1.8.7] cargo::rustc-check-cfg=cfg(blake3_sse2_rust, values(none()))
+[blake3 1.8.7] cargo::rustc-check-cfg=cfg(blake3_sse41_ffi, values(none()))
+[blake3 1.8.7] cargo::rustc-check-cfg=cfg(blake3_sse41_rust, values(none()))
+[blake3 1.8.7] cargo::rustc-check-cfg=cfg(blake3_avx2_ffi, values(none()))
+[blake3 1.8.7] cargo::rustc-check-cfg=cfg(blake3_avx2_rust, values(none()))
+[blake3 1.8.7] cargo::rustc-check-cfg=cfg(blake3_avx512_ffi, values(none()))
+[blake3 1.8.7] cargo::rustc-check-cfg=cfg(blake3_neon, values(none()))
+[blake3 1.8.7] cargo::rustc-check-cfg=cfg(blake3_wasm32_simd, values(none()))
+[blake3 1.8.7] cargo::rerun-if-env-changed=CARGO_FEATURE_PURE
+[blake3 1.8.7] cargo::rerun-if-env-changed=CARGO_FEATURE_NO_NEON
+[psm 0.1.32] cargo:rustc-link-lib=static=psm_s
+[psm 0.1.32] cargo:rustc-link-search=native=/workspace/imre/target/release/build/psm-6c96dab3b7f8f3a5/out
+[blake3 1.8.7] CC_x86_64-unknown-linux-gnu = None
+[blake3 1.8.7] CC_x86_64_unknown_linux_gnu = None
+[blake3 1.8.7] HOST_CC = None
+[blake3 1.8.7] CC = Some(/usr/bin/cc)
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+[zstd-sys 2.0.16+zstd.1.5.7] CRATE_CC_NO_DEFAULTS = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=CFLAGS
+[zstd-sys 2.0.16+zstd.1.5.7] CFLAGS = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=HOST_CFLAGS
+[zstd-sys 2.0.16+zstd.1.5.7] HOST_CFLAGS = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=CFLAGS_x86_64_unknown_linux_gnu
+[zstd-sys 2.0.16+zstd.1.5.7] CFLAGS_x86_64_unknown_linux_gnu = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=CFLAGS_x86_64-unknown-linux-gnu
+[zstd-sys 2.0.16+zstd.1.5.7] CFLAGS_x86_64-unknown-linux-gnu = None
+[blake3 1.8.7] cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+[liblzma-sys 0.4.9] exit status: 0
+[blake3 1.8.7] CRATE_CC_NO_DEFAULTS = None
+[blake3 1.8.7] CFLAGS = None
+[blake3 1.8.7] HOST_CFLAGS = None
+[blake3 1.8.7] CFLAGS_x86_64_unknown_linux_gnu = None
+[blake3 1.8.7] CFLAGS_x86_64-unknown-linux-gnu = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+[zstd-sys 2.0.16+zstd.1.5.7] CRATE_CC_NO_DEFAULTS = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=CFLAGS
+[zstd-sys 2.0.16+zstd.1.5.7] CFLAGS = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=HOST_CFLAGS
+[zstd-sys 2.0.16+zstd.1.5.7] HOST_CFLAGS = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=CFLAGS_x86_64_unknown_linux_gnu
+[zstd-sys 2.0.16+zstd.1.5.7] CFLAGS_x86_64_unknown_linux_gnu = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=CFLAGS_x86_64-unknown-linux-gnu
+[zstd-sys 2.0.16+zstd.1.5.7] CFLAGS_x86_64-unknown-linux-gnu = None
+[blake3 1.8.7] CC_x86_64-unknown-linux-gnu = None
+[blake3 1.8.7] CC_x86_64_unknown_linux_gnu = None
+[blake3 1.8.7] HOST_CC = None
+[blake3 1.8.7] CC = Some(/usr/bin/cc)
+[blake3 1.8.7] CRATE_CC_NO_DEFAULTS = None
+[blake3 1.8.7] CFLAGS = None
+[blake3 1.8.7] HOST_CFLAGS = None
+[blake3 1.8.7] CFLAGS_x86_64_unknown_linux_gnu = None
+[blake3 1.8.7] CFLAGS_x86_64-unknown-linux-gnu = None
+[liblzma-sys 0.4.9] exit status: 0
+[blake3 1.8.7] cargo::rerun-if-env-changed=CARGO_FEATURE_PREFER_INTRINSICS
+[blake3 1.8.7] cargo::rerun-if-env-changed=CARGO_FEATURE_PURE
+[blake3 1.8.7] cargo::rustc-cfg=blake3_sse2_ffi
+[blake3 1.8.7] cargo::rustc-cfg=blake3_sse41_ffi
+[blake3 1.8.7] cargo::rustc-cfg=blake3_avx2_ffi
+[blake3 1.8.7] CC_FORCE_DISABLE = None
+[blake3 1.8.7] CC_x86_64-unknown-linux-gnu = None
+[blake3 1.8.7] CC_x86_64_unknown_linux_gnu = None
+[blake3 1.8.7] HOST_CC = None
+[blake3 1.8.7] CC = Some(/usr/bin/cc)
+[blake3 1.8.7] cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+[blake3 1.8.7] CRATE_CC_NO_DEFAULTS = None
+[blake3 1.8.7] CRATE_CC_NO_DEFAULTS = None
+[blake3 1.8.7] CFLAGS = None
+[blake3 1.8.7] HOST_CFLAGS = None
+[blake3 1.8.7] CFLAGS_x86_64_unknown_linux_gnu = None
+[blake3 1.8.7] CFLAGS_x86_64-unknown-linux-gnu = None
+[zstd-sys 2.0.16+zstd.1.5.7] exit status: 0
+[blake3 1.8.7] CFLAGS = None
+[blake3 1.8.7] HOST_CFLAGS = None
+[blake3 1.8.7] CFLAGS_x86_64_unknown_linux_gnu = None
+[blake3 1.8.7] CFLAGS_x86_64-unknown-linux-gnu = None
+[liblzma-sys 0.4.9] exit status: 0
+[blake3 1.8.7] exit status: 0
+[blake3 1.8.7] exit status: 0
+[blake3 1.8.7] exit status: 0
+[blake3 1.8.7] CC_FORCE_DISABLE = None
+[blake3 1.8.7] AR_x86_64-unknown-linux-gnu = None
+[blake3 1.8.7] AR_x86_64_unknown_linux_gnu = None
+[blake3 1.8.7] HOST_AR = None
+[blake3 1.8.7] AR = None
+[blake3 1.8.7] ARFLAGS = None
+[blake3 1.8.7] HOST_ARFLAGS = None
+[blake3 1.8.7] ARFLAGS_x86_64_unknown_linux_gnu = None
+[blake3 1.8.7] ARFLAGS_x86_64-unknown-linux-gnu = None
+[blake3 1.8.7] AR_x86_64-unknown-linux-gnu = None
+[blake3 1.8.7] AR_x86_64_unknown_linux_gnu = None
+[blake3 1.8.7] HOST_AR = None
+[blake3 1.8.7] AR = None
+[blake3 1.8.7] ARFLAGS = None
+[blake3 1.8.7] HOST_ARFLAGS = None
+[blake3 1.8.7] ARFLAGS_x86_64_unknown_linux_gnu = None
+[blake3 1.8.7] ARFLAGS_x86_64-unknown-linux-gnu = None
+[blake3 1.8.7] cargo:rustc-link-lib=static=blake3_sse2_sse41_avx2_assembly
+[blake3 1.8.7] cargo:rustc-link-search=native=/workspace/imre/target/release/build/blake3-391bc6c5f4ebf3fb/out
+[blake3 1.8.7] cargo::rerun-if-env-changed=CARGO_FEATURE_PURE
+[blake3 1.8.7] cargo::rerun-if-env-changed=CARGO_FEATURE_PREFER_INTRINSICS
+[blake3 1.8.7] cargo::rustc-cfg=blake3_avx512_ffi
+[blake3 1.8.7] CC_FORCE_DISABLE = None
+[blake3 1.8.7] CC_x86_64-unknown-linux-gnu = None
+[blake3 1.8.7] CC_x86_64_unknown_linux_gnu = None
+[blake3 1.8.7] HOST_CC = None
+[blake3 1.8.7] CC = Some(/usr/bin/cc)
+[blake3 1.8.7] cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+[blake3 1.8.7] CRATE_CC_NO_DEFAULTS = None
+[blake3 1.8.7] CRATE_CC_NO_DEFAULTS = None
+[blake3 1.8.7] CFLAGS = None
+[blake3 1.8.7] HOST_CFLAGS = None
+[blake3 1.8.7] CFLAGS_x86_64_unknown_linux_gnu = None
+[blake3 1.8.7] CFLAGS_x86_64-unknown-linux-gnu = None
+[liblzma-sys 0.4.9] exit status: 0
+[blake3 1.8.7] CFLAGS = None
+[blake3 1.8.7] HOST_CFLAGS = None
+[blake3 1.8.7] CFLAGS_x86_64_unknown_linux_gnu = None
+[blake3 1.8.7] CFLAGS_x86_64-unknown-linux-gnu = None
+[blake3 1.8.7] CC_FORCE_DISABLE = None
+[blake3 1.8.7] AR_x86_64-unknown-linux-gnu = None
+[blake3 1.8.7] AR_x86_64_unknown_linux_gnu = None
+[blake3 1.8.7] HOST_AR = None
+[blake3 1.8.7] AR = None
+[blake3 1.8.7] ARFLAGS = None
+[blake3 1.8.7] HOST_ARFLAGS = None
+[blake3 1.8.7] ARFLAGS_x86_64_unknown_linux_gnu = None
+[blake3 1.8.7] ARFLAGS_x86_64-unknown-linux-gnu = None
+[blake3 1.8.7] AR_x86_64-unknown-linux-gnu = None
+[blake3 1.8.7] AR_x86_64_unknown_linux_gnu = None
+[blake3 1.8.7] HOST_AR = None
+[blake3 1.8.7] AR = None
+[blake3 1.8.7] ARFLAGS = None
+[blake3 1.8.7] HOST_ARFLAGS = None
+[blake3 1.8.7] ARFLAGS_x86_64_unknown_linux_gnu = None
+[blake3 1.8.7] ARFLAGS_x86_64-unknown-linux-gnu = None
+[blake3 1.8.7] cargo:rustc-link-lib=static=blake3_avx512_assembly
+[blake3 1.8.7] cargo:rustc-link-search=native=/workspace/imre/target/release/build/blake3-391bc6c5f4ebf3fb/out
+[blake3 1.8.7] cargo::rerun-if-env-changed=CARGO_FEATURE_NEON
+[blake3 1.8.7] cargo::rerun-if-env-changed=CARGO_FEATURE_NO_NEON
+[blake3 1.8.7] cargo::rerun-if-env-changed=CARGO_FEATURE_PURE
+[blake3 1.8.7] cargo::rerun-if-env-changed=CC
+[blake3 1.8.7] cargo::rerun-if-env-changed=CFLAGS
+[blake3 1.8.7] cargo::rerun-if-changed=c/.gitignore
+[blake3 1.8.7] cargo::rerun-if-changed=c/CMakeLists.txt
+[blake3 1.8.7] cargo::rerun-if-changed=c/CMakePresets.json
+[blake3 1.8.7] cargo::rerun-if-changed=c/Makefile.testing
+[blake3 1.8.7] cargo::rerun-if-changed=c/README.md
+[blake3 1.8.7] cargo::rerun-if-changed=c/blake3-config.cmake.in
+[blake3 1.8.7] cargo::rerun-if-changed=c/blake3.c
+[blake3 1.8.7] cargo::rerun-if-changed=c/blake3.h
+[blake3 1.8.7] cargo::rerun-if-changed=c/blake3_avx2.c
+[blake3 1.8.7] cargo::rerun-if-changed=c/blake3_avx2_x86-64_unix.S
+[blake3 1.8.7] cargo::rerun-if-changed=c/blake3_avx2_x86-64_windows_gnu.S
+[blake3 1.8.7] cargo::rerun-if-changed=c/blake3_avx2_x86-64_windows_msvc.asm
+[blake3 1.8.7] cargo::rerun-if-changed=c/blake3_avx512.c
+[blake3 1.8.7] cargo::rerun-if-changed=c/blake3_avx512_x86-64_unix.S
+[blake3 1.8.7] cargo::rerun-if-changed=c/blake3_avx512_x86-64_windows_gnu.S
+[blake3 1.8.7] cargo::rerun-if-changed=c/blake3_avx512_x86-64_windows_msvc.asm
+[blake3 1.8.7] cargo::rerun-if-changed=c/blake3_dispatch.c
+[blake3 1.8.7] cargo::rerun-if-changed=c/blake3_impl.h
+[blake3 1.8.7] cargo::rerun-if-changed=c/blake3_neon.c
+[blake3 1.8.7] cargo::rerun-if-changed=c/blake3_portable.c
+[blake3 1.8.7] cargo::rerun-if-changed=c/blake3_sse2.c
+[blake3 1.8.7] cargo::rerun-if-changed=c/blake3_sse2_x86-64_unix.S
+[blake3 1.8.7] cargo::rerun-if-changed=c/blake3_sse2_x86-64_windows_gnu.S
+[blake3 1.8.7] cargo::rerun-if-changed=c/blake3_sse2_x86-64_windows_msvc.asm
+[blake3 1.8.7] cargo::rerun-if-changed=c/blake3_sse41.c
+[blake3 1.8.7] cargo::rerun-if-changed=c/blake3_sse41_x86-64_unix.S
+[blake3 1.8.7] cargo::rerun-if-changed=c/blake3_sse41_x86-64_windows_gnu.S
+[blake3 1.8.7] cargo::rerun-if-changed=c/blake3_sse41_x86-64_windows_msvc.asm
+[blake3 1.8.7] cargo::rerun-if-changed=c/blake3_tbb.cpp
+[blake3 1.8.7] cargo::rerun-if-changed=c/cmake
+[blake3 1.8.7] cargo::rerun-if-changed=c/dependencies
+[blake3 1.8.7] cargo::rerun-if-changed=c/example.c
+[blake3 1.8.7] cargo::rerun-if-changed=c/example_tbb.c
+[blake3 1.8.7] cargo::rerun-if-changed=c/libblake3.pc.in
+[blake3 1.8.7] cargo::rerun-if-changed=c/main.c
+[blake3 1.8.7] cargo::rerun-if-changed=c/test.py
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=CC_FORCE_DISABLE
+[bzip2-sys 0.1.13+1.0.8] CC_FORCE_DISABLE = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=CC_x86_64-unknown-linux-gnu
+[bzip2-sys 0.1.13+1.0.8] CC_x86_64-unknown-linux-gnu = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=CC_x86_64_unknown_linux_gnu
+[bzip2-sys 0.1.13+1.0.8] CC_x86_64_unknown_linux_gnu = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=HOST_CC
+[bzip2-sys 0.1.13+1.0.8] HOST_CC = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=CC
+[bzip2-sys 0.1.13+1.0.8] CC = Some(/usr/bin/cc)
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+[liblzma-sys 0.4.9] exit status: 0
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+[bzip2-sys 0.1.13+1.0.8] CRATE_CC_NO_DEFAULTS = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+[bzip2-sys 0.1.13+1.0.8] CRATE_CC_NO_DEFAULTS = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=CFLAGS
+[bzip2-sys 0.1.13+1.0.8] CFLAGS = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=HOST_CFLAGS
+[bzip2-sys 0.1.13+1.0.8] HOST_CFLAGS = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=CFLAGS_x86_64_unknown_linux_gnu
+[bzip2-sys 0.1.13+1.0.8] CFLAGS_x86_64_unknown_linux_gnu = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=CFLAGS_x86_64-unknown-linux-gnu
+[bzip2-sys 0.1.13+1.0.8] CFLAGS_x86_64-unknown-linux-gnu = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=CFLAGS
+[bzip2-sys 0.1.13+1.0.8] CFLAGS = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=HOST_CFLAGS
+[bzip2-sys 0.1.13+1.0.8] HOST_CFLAGS = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=CFLAGS_x86_64_unknown_linux_gnu
+[bzip2-sys 0.1.13+1.0.8] CFLAGS_x86_64_unknown_linux_gnu = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=CFLAGS_x86_64-unknown-linux-gnu
+[bzip2-sys 0.1.13+1.0.8] CFLAGS_x86_64-unknown-linux-gnu = None
+[zstd-sys 2.0.16+zstd.1.5.7] exit status: 0
+[zstd-sys 2.0.16+zstd.1.5.7] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[zstd-sys 2.0.16+zstd.1.5.7] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[bzip2-sys 0.1.13+1.0.8] exit status: 0
+[zstd-sys 2.0.16+zstd.1.5.7] exit status: 0
+[zstd-sys 2.0.16+zstd.1.5.7] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[zstd-sys 2.0.16+zstd.1.5.7] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[bzip2-sys 0.1.13+1.0.8] exit status: 0
+[bzip2-sys 0.1.13+1.0.8] exit status: 0
+[bzip2-sys 0.1.13+1.0.8] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[zstd-sys 2.0.16+zstd.1.5.7] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[zstd-sys 2.0.16+zstd.1.5.7] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[zstd-sys 2.0.16+zstd.1.5.7] exit status: 0
+[bzip2-sys 0.1.13+1.0.8] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[bzip2-sys 0.1.13+1.0.8] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[bzip2-sys 0.1.13+1.0.8] exit status: 0
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=CC_FORCE_DISABLE
+[bzip2-sys 0.1.13+1.0.8] CC_FORCE_DISABLE = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=AR_x86_64-unknown-linux-gnu
+[bzip2-sys 0.1.13+1.0.8] AR_x86_64-unknown-linux-gnu = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=AR_x86_64_unknown_linux_gnu
+[bzip2-sys 0.1.13+1.0.8] AR_x86_64_unknown_linux_gnu = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=HOST_AR
+[bzip2-sys 0.1.13+1.0.8] HOST_AR = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=AR
+[bzip2-sys 0.1.13+1.0.8] AR = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=ARFLAGS
+[bzip2-sys 0.1.13+1.0.8] ARFLAGS = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=HOST_ARFLAGS
+[bzip2-sys 0.1.13+1.0.8] HOST_ARFLAGS = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=ARFLAGS_x86_64_unknown_linux_gnu
+[bzip2-sys 0.1.13+1.0.8] ARFLAGS_x86_64_unknown_linux_gnu = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=ARFLAGS_x86_64-unknown-linux-gnu
+[bzip2-sys 0.1.13+1.0.8] ARFLAGS_x86_64-unknown-linux-gnu = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=AR_x86_64-unknown-linux-gnu
+[bzip2-sys 0.1.13+1.0.8] AR_x86_64-unknown-linux-gnu = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=AR_x86_64_unknown_linux_gnu
+[bzip2-sys 0.1.13+1.0.8] AR_x86_64_unknown_linux_gnu = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=HOST_AR
+[bzip2-sys 0.1.13+1.0.8] HOST_AR = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=AR
+[bzip2-sys 0.1.13+1.0.8] AR = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=ARFLAGS
+[bzip2-sys 0.1.13+1.0.8] ARFLAGS = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=HOST_ARFLAGS
+[bzip2-sys 0.1.13+1.0.8] HOST_ARFLAGS = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=ARFLAGS_x86_64_unknown_linux_gnu
+[bzip2-sys 0.1.13+1.0.8] ARFLAGS_x86_64_unknown_linux_gnu = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rerun-if-env-changed=ARFLAGS_x86_64-unknown-linux-gnu
+[bzip2-sys 0.1.13+1.0.8] ARFLAGS_x86_64-unknown-linux-gnu = None
+[bzip2-sys 0.1.13+1.0.8] cargo:rustc-link-lib=static=bz2
+[bzip2-sys 0.1.13+1.0.8] cargo:rustc-link-search=native=/workspace/imre/target/release/build/bzip2-sys-921d5357198d961d/out/lib
+[bzip2-sys 0.1.13+1.0.8] cargo:root=/workspace/imre/target/release/build/bzip2-sys-921d5357198d961d/out
+[bzip2-sys 0.1.13+1.0.8] cargo:include=/workspace/imre/target/release/build/bzip2-sys-921d5357198d961d/out/include
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[zstd-sys 2.0.16+zstd.1.5.7] exit status: 0
+[zstd-sys 2.0.16+zstd.1.5.7] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[zstd-sys 2.0.16+zstd.1.5.7] exit status: 0
+[zstd-sys 2.0.16+zstd.1.5.7] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] exit status: 0
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=CC_FORCE_DISABLE
+[liblzma-sys 0.4.9] CC_FORCE_DISABLE = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=AR_x86_64-unknown-linux-gnu
+[liblzma-sys 0.4.9] AR_x86_64-unknown-linux-gnu = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=AR_x86_64_unknown_linux_gnu
+[liblzma-sys 0.4.9] AR_x86_64_unknown_linux_gnu = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=HOST_AR
+[liblzma-sys 0.4.9] HOST_AR = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=AR
+[liblzma-sys 0.4.9] AR = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=ARFLAGS
+[liblzma-sys 0.4.9] ARFLAGS = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=HOST_ARFLAGS
+[liblzma-sys 0.4.9] HOST_ARFLAGS = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=ARFLAGS_x86_64_unknown_linux_gnu
+[liblzma-sys 0.4.9] ARFLAGS_x86_64_unknown_linux_gnu = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=ARFLAGS_x86_64-unknown-linux-gnu
+[liblzma-sys 0.4.9] ARFLAGS_x86_64-unknown-linux-gnu = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=AR_x86_64-unknown-linux-gnu
+[liblzma-sys 0.4.9] AR_x86_64-unknown-linux-gnu = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=AR_x86_64_unknown_linux_gnu
+[liblzma-sys 0.4.9] AR_x86_64_unknown_linux_gnu = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=HOST_AR
+[liblzma-sys 0.4.9] HOST_AR = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=AR
+[liblzma-sys 0.4.9] AR = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=ARFLAGS
+[liblzma-sys 0.4.9] ARFLAGS = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=HOST_ARFLAGS
+[liblzma-sys 0.4.9] HOST_ARFLAGS = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=ARFLAGS_x86_64_unknown_linux_gnu
+[liblzma-sys 0.4.9] ARFLAGS_x86_64_unknown_linux_gnu = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=ARFLAGS_x86_64-unknown-linux-gnu
+[liblzma-sys 0.4.9] ARFLAGS_x86_64-unknown-linux-gnu = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=AR_x86_64-unknown-linux-gnu
+[liblzma-sys 0.4.9] AR_x86_64-unknown-linux-gnu = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=AR_x86_64_unknown_linux_gnu
+[liblzma-sys 0.4.9] AR_x86_64_unknown_linux_gnu = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=HOST_AR
+[liblzma-sys 0.4.9] HOST_AR = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=AR
+[liblzma-sys 0.4.9] AR = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=ARFLAGS
+[liblzma-sys 0.4.9] ARFLAGS = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=HOST_ARFLAGS
+[liblzma-sys 0.4.9] HOST_ARFLAGS = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=ARFLAGS_x86_64_unknown_linux_gnu
+[liblzma-sys 0.4.9] ARFLAGS_x86_64_unknown_linux_gnu = None
+[liblzma-sys 0.4.9] cargo:rerun-if-env-changed=ARFLAGS_x86_64-unknown-linux-gnu
+[liblzma-sys 0.4.9] ARFLAGS_x86_64-unknown-linux-gnu = None
+[liblzma-sys 0.4.9] cargo:rustc-link-lib=static=lzma
+[liblzma-sys 0.4.9] cargo:rustc-link-search=native=/workspace/imre/target/release/build/liblzma-sys-3013c6e9e7f2f9c3/out
+[zstd-sys 2.0.16+zstd.1.5.7] exit status: 0
+[zstd-sys 2.0.16+zstd.1.5.7] exit status: 0
+[zstd-sys 2.0.16+zstd.1.5.7] exit status: 0
+[zstd-sys 2.0.16+zstd.1.5.7] exit status: 0
+[zstd-sys 2.0.16+zstd.1.5.7] exit status: 0
+[zstd-sys 2.0.16+zstd.1.5.7] exit status: 0
+[zstd-sys 2.0.16+zstd.1.5.7] exit status: 0
+[zstd-sys 2.0.16+zstd.1.5.7] exit status: 0
+[zstd-sys 2.0.16+zstd.1.5.7] exit status: 0
+[zstd-sys 2.0.16+zstd.1.5.7] exit status: 0
+[zstd-sys 2.0.16+zstd.1.5.7] exit status: 0
+[zstd-sys 2.0.16+zstd.1.5.7] exit status: 0
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=CC_FORCE_DISABLE
+[zstd-sys 2.0.16+zstd.1.5.7] CC_FORCE_DISABLE = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=AR_x86_64-unknown-linux-gnu
+[zstd-sys 2.0.16+zstd.1.5.7] AR_x86_64-unknown-linux-gnu = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=AR_x86_64_unknown_linux_gnu
+[zstd-sys 2.0.16+zstd.1.5.7] AR_x86_64_unknown_linux_gnu = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=HOST_AR
+[zstd-sys 2.0.16+zstd.1.5.7] HOST_AR = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=AR
+[zstd-sys 2.0.16+zstd.1.5.7] AR = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=ARFLAGS
+[zstd-sys 2.0.16+zstd.1.5.7] ARFLAGS = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=HOST_ARFLAGS
+[zstd-sys 2.0.16+zstd.1.5.7] HOST_ARFLAGS = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=ARFLAGS_x86_64_unknown_linux_gnu
+[zstd-sys 2.0.16+zstd.1.5.7] ARFLAGS_x86_64_unknown_linux_gnu = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=ARFLAGS_x86_64-unknown-linux-gnu
+[zstd-sys 2.0.16+zstd.1.5.7] ARFLAGS_x86_64-unknown-linux-gnu = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=AR_x86_64-unknown-linux-gnu
+[zstd-sys 2.0.16+zstd.1.5.7] AR_x86_64-unknown-linux-gnu = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=AR_x86_64_unknown_linux_gnu
+[zstd-sys 2.0.16+zstd.1.5.7] AR_x86_64_unknown_linux_gnu = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=HOST_AR
+[zstd-sys 2.0.16+zstd.1.5.7] HOST_AR = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=AR
+[zstd-sys 2.0.16+zstd.1.5.7] AR = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=ARFLAGS
+[zstd-sys 2.0.16+zstd.1.5.7] ARFLAGS = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=HOST_ARFLAGS
+[zstd-sys 2.0.16+zstd.1.5.7] HOST_ARFLAGS = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=ARFLAGS_x86_64_unknown_linux_gnu
+[zstd-sys 2.0.16+zstd.1.5.7] ARFLAGS_x86_64_unknown_linux_gnu = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rerun-if-env-changed=ARFLAGS_x86_64-unknown-linux-gnu
+[zstd-sys 2.0.16+zstd.1.5.7] ARFLAGS_x86_64-unknown-linux-gnu = None
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rustc-link-lib=static=zstd
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:rustc-link-search=native=/workspace/imre/target/release/build/zstd-sys-b992c6c195263b14/out
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:root=/workspace/imre/target/release/build/zstd-sys-b992c6c195263b14/out
+[zstd-sys 2.0.16+zstd.1.5.7] cargo:include=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zstd-sys-2.0.16+zstd.1.5.7/zstd/lib
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/installed-sources.txt
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/runtime-only-sources.txt
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/_imre_decimal_ratio.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/_pydatetime.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/_pydecimal.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/cmd.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/getpass.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/graphlib.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/netrc.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=../../benchmarks/cpython_stdlib/full/shlex/upstream/Lib/shlex.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/statistics.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/tarfile.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/timeit.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/wave.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/xml/__init__.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/xml/etree/__init__.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/xml/etree/ElementPath.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/xml/etree/ElementTree.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/html/__init__.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/html/entities.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/html/parser.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/_markupbase.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/_pyrepl/__init__.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/_pyrepl/pager.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/bdb.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/compileall.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/filecmp.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=../../benchmarks/cpython_stdlib/full/http/upstream/Lib/http/cookies.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/ipaddress.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/pydoc.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/venv/__init__.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/venv/__main__.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/venv/scripts/common/Activate.ps1
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/venv/scripts/common/activate
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/venv/scripts/common/activate.fish
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/venv/scripts/nt/activate.bat
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/venv/scripts/nt/deactivate.bat
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/venv/scripts/posix/activate.csh
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/xmlrpc/__init__.py
+[imre-compiler 0.1.5] cargo:rerun-if-changed=stdlib/xmlrpc/client.py
+[imre-runtime 0.1.5] cargo:rerun-if-changed=native/errno-symbols.txt
+[imre-runtime 0.1.5] cargo:rerun-if-changed=native/mmap.c
+[imre-runtime 0.1.5] cargo:rerun-if-changed=native/confstr-names.txt
+[imre-runtime 0.1.5] cargo:rerun-if-changed=native/sysconf-names.txt
+[imre-runtime 0.1.5] cargo:rerun-if-changed=native/pathconf-names.txt
+[imre-runtime 0.1.5] cargo:rerun-if-changed=native/ssl_capabilities.c
+[imre-runtime 0.1.5] cargo:rerun-if-changed=native/locale_decode.c
+[imre-runtime 0.1.5] cargo:rerun-if-changed=native/faulthandler.c
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=CC_FORCE_DISABLE
+[imre-runtime 0.1.5] CC_FORCE_DISABLE = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=CC_x86_64-unknown-linux-gnu
+[imre-runtime 0.1.5] CC_x86_64-unknown-linux-gnu = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=CC_x86_64_unknown_linux_gnu
+[imre-runtime 0.1.5] CC_x86_64_unknown_linux_gnu = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=HOST_CC
+[imre-runtime 0.1.5] HOST_CC = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=CC
+[imre-runtime 0.1.5] CC = Some(/usr/bin/cc)
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+[imre-runtime 0.1.5] CRATE_CC_NO_DEFAULTS = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+[imre-runtime 0.1.5] CRATE_CC_NO_DEFAULTS = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=CFLAGS
+[imre-runtime 0.1.5] CFLAGS = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=HOST_CFLAGS
+[imre-runtime 0.1.5] HOST_CFLAGS = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=CFLAGS_x86_64_unknown_linux_gnu
+[imre-runtime 0.1.5] CFLAGS_x86_64_unknown_linux_gnu = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=CFLAGS_x86_64-unknown-linux-gnu
+[imre-runtime 0.1.5] CFLAGS_x86_64-unknown-linux-gnu = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=CFLAGS
+[imre-runtime 0.1.5] CFLAGS = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=HOST_CFLAGS
+[imre-runtime 0.1.5] HOST_CFLAGS = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=CFLAGS_x86_64_unknown_linux_gnu
+[imre-runtime 0.1.5] CFLAGS_x86_64_unknown_linux_gnu = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=CFLAGS_x86_64-unknown-linux-gnu
+[imre-runtime 0.1.5] CFLAGS_x86_64-unknown-linux-gnu = None
+[imre-runtime 0.1.5] exit status: 0
+[imre-runtime 0.1.5] exit status: 0
+[imre-runtime 0.1.5] exit status: 0
+[imre-runtime 0.1.5] exit status: 0
+[imre-runtime 0.1.5] exit status: 0
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=CC_FORCE_DISABLE
+[imre-runtime 0.1.5] CC_FORCE_DISABLE = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=AR_x86_64-unknown-linux-gnu
+[imre-runtime 0.1.5] AR_x86_64-unknown-linux-gnu = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=AR_x86_64_unknown_linux_gnu
+[imre-runtime 0.1.5] AR_x86_64_unknown_linux_gnu = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=HOST_AR
+[imre-runtime 0.1.5] HOST_AR = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=AR
+[imre-runtime 0.1.5] AR = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=ARFLAGS
+[imre-runtime 0.1.5] ARFLAGS = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=HOST_ARFLAGS
+[imre-runtime 0.1.5] HOST_ARFLAGS = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=ARFLAGS_x86_64_unknown_linux_gnu
+[imre-runtime 0.1.5] ARFLAGS_x86_64_unknown_linux_gnu = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=ARFLAGS_x86_64-unknown-linux-gnu
+[imre-runtime 0.1.5] ARFLAGS_x86_64-unknown-linux-gnu = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=AR_x86_64-unknown-linux-gnu
+[imre-runtime 0.1.5] AR_x86_64-unknown-linux-gnu = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=AR_x86_64_unknown_linux_gnu
+[imre-runtime 0.1.5] AR_x86_64_unknown_linux_gnu = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=HOST_AR
+[imre-runtime 0.1.5] HOST_AR = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=AR
+[imre-runtime 0.1.5] AR = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=ARFLAGS
+[imre-runtime 0.1.5] ARFLAGS = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=HOST_ARFLAGS
+[imre-runtime 0.1.5] HOST_ARFLAGS = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=ARFLAGS_x86_64_unknown_linux_gnu
+[imre-runtime 0.1.5] ARFLAGS_x86_64_unknown_linux_gnu = None
+[imre-runtime 0.1.5] cargo:rerun-if-env-changed=ARFLAGS_x86_64-unknown-linux-gnu
+[imre-runtime 0.1.5] ARFLAGS_x86_64-unknown-linux-gnu = None
+[imre-runtime 0.1.5] cargo:rustc-link-lib=static=imre_errno_headers
+[imre-runtime 0.1.5] cargo:rustc-link-search=native=/workspace/imre/target/release/build/imre-runtime-ae5221875d77539c/out
+       Fresh proc-macro2 v1.0.107
+       Fresh jobserver v0.1.35
+       Fresh find-msvc-tools v0.1.14
+       Fresh shlex v2.0.1
+       Fresh quote v1.0.47
+       Fresh cc v1.7.0
+       Fresh syn v3.0.7
+       Fresh libc v0.2.190
+       Fresh proc-macro-utils v0.10.0
+       Fresh allocator-api2 v0.2.21
+       Fresh foldhash v0.2.0
+       Fresh memchr v2.8.3
+       Fresh cfg-if v1.0.5
+       Fresh smallvec v1.16.3
+       Fresh rustversion v1.0.23
+       Fresh manyhow-macros v0.14.0
+       Fresh quote-use-macros v0.9.0
+       Fresh itoa v1.0.18
+       Fresh zmij v1.0.23
+       Fresh manyhow v0.14.0
+       Fresh quote-use v0.9.0
+       Fresh collection_literals v1.0.3
+       Fresh interpolator v0.5.0
+       Fresh castaway v0.2.4
+       Fresh attribute-derive-macro v0.11.0
+       Fresh serde_core v1.0.229
+       Fresh static_assertions v1.1.0
+       Fresh ordermap v1.2.2
+       Fresh attribute-derive v0.11.0
+       Fresh compact_str v0.10.0
+       Fresh thin-vec v0.2.21
+       Fresh get-size-derive2 v0.11.1
+       Fresh syn v2.0.119
+       Fresh get-size2 v0.11.1
+       Fresh crossbeam-utils v0.8.23
+       Fresh heck v0.5.0
+       Fresh zerocopy v0.8.62
+       Fresh getrandom v0.2.17
+       Fresh rand_core v0.6.4
+       Fresh ppv-lite86 v0.2.21
+       Fresh serde_derive v1.0.229
+       Fresh once_cell v1.21.4
+       Fresh scopeguard v1.2.0
+       Fresh bitflags v2.13.2
+       Fresh serde v1.0.229
+       Fresh rand_chacha v0.3.1
+       Fresh crossbeam-epoch v0.9.21
+       Fresh parking_lot_core v0.9.12
+       Fresh crossbeam-deque v0.8.8
+       Fresh rand v0.8.8
+       Fresh lock_api v0.4.14
+       Fresh rayon-core v1.13.0
+       Fresh phf_generator v0.11.3
+       Fresh tracing-core v0.1.36
+       Fresh tracing-attributes v0.1.31
+       Fresh arrayvec v0.7.8
+       Fresh pin-project-lite v0.2.17
+       Fresh tracing v0.1.44
+       Fresh phf_codegen v0.11.3
+       Fresh getopts v0.2.24
+       Fresh portable-atomic v1.15.0
+       Fresh rayon v1.12.0
+       Fresh typeid v1.0.3
+       Fresh parking_lot v0.12.5
+       Fresh crossbeam-queue v0.3.14
+       Fresh is-macro v0.3.8
+       Fresh hashlink v0.12.2
+       Fresh salsa-macros v0.28.5
+       Fresh synstructure v0.14.0
+       Fresh thiserror-impl v2.0.21
+       Fresh unicode-ident v1.0.26
+       Fresh salsa-macro-rules v0.28.5
+       Fresh boxcar v0.2.14
+       Fresh inventory v0.3.25
+       Fresh ryu v1.0.23
+       Fresh intrusive-collections v0.10.3
+       Fresh unicode_names2_generator v1.3.0
+       Fresh salsa v0.28.5
+       Fresh thiserror v2.0.21
+       Fresh ar_archive_writer v0.5.3
+       Fresh siphasher v1.0.4
+       Fresh phf_shared v0.11.3
+       Fresh char_str v0.0.4
+       Fresh zerofrom-derive v0.1.8
+       Fresh phf v0.11.3
+       Fresh zerofrom v0.1.8
+       Fresh ruff_python_ast v0.0.15
+       Dirty psm v0.1.32: the env variable CC changed
+   Compiling psm v0.1.32
+       Fresh yoke-derive v0.8.4
+       Fresh stable_deref_trait v1.2.1
+       Fresh cpufeatures v0.3.1
+       Fresh yoke v0.8.3
+       Fresh unicode_names2 v1.3.0
+       Fresh bstr v1.13.1
+       Fresh aho-corasick v1.1.5
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CFG_FEATURE='' CARGO_CFG_PANIC=unwind CARGO_CFG_TARGET_ABI='' CARGO_CFG_TARGET_ARCH=x86_64 CARGO_CFG_TARGET_ENDIAN=little CARGO_CFG_TARGET_ENV=gnu CARGO_CFG_TARGET_FAMILY=unix CARGO_CFG_TARGET_FEATURE=fxsr,sse,sse2 CARGO_CFG_TARGET_HAS_ATOMIC=16,32,64,8,ptr CARGO_CFG_TARGET_HAS_ATOMIC_PRIMITIVE_ALIGNMENT=16,32,64,8,ptr CARGO_CFG_TARGET_OS=linux CARGO_CFG_TARGET_POINTER_WIDTH=64 CARGO_CFG_TARGET_VENDOR=unknown CARGO_CFG_UNIX='' CARGO_ENCODED_RUSTFLAGS='' CARGO_MANIFEST_DIR=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/psm-0.1.32 CARGO_MANIFEST_PATH=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/psm-0.1.32/Cargo.toml CARGO_PKG_AUTHORS='Simonas Kazlauskas <psm@kazlauskas.me>' CARGO_PKG_DESCRIPTION='Portable Stack Manipulation: stack manipulation and introspection routines' CARGO_PKG_HOMEPAGE='' CARGO_PKG_LICENSE='MIT OR Apache-2.0' CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=psm CARGO_PKG_README=README.mkd CARGO_PKG_REPOSITORY='https://github.com/rust-lang/stacker/' CARGO_PKG_RUST_VERSION=1.88.0 CARGO_PKG_VERSION=0.1.32 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=1 CARGO_PKG_VERSION_PATCH=32 CARGO_PKG_VERSION_PRE='' DEBUG=true HOST=x86_64-unknown-linux-gnu LD_LIBRARY_PATH='/workspace/imre/target/release:/workspace/imre/target/release/deps:/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/lib/rustlib/x86_64-unknown-linux-gnu/lib' NUM_JOBS=4 OPT_LEVEL=3 OUT_DIR=/workspace/imre/target/release/build/psm-6c96dab3b7f8f3a5/out PROFILE=release RUSTC=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc RUSTDOC=rustdoc TARGET=x86_64-unknown-linux-gnu /workspace/imre/target/release/build/psm-ef2ea04927cbd345/build-script-build`
+       Fresh zerovec-derive v0.11.6
+       Fresh ruff_text_size v0.0.15
+       Fresh tinyvec v1.13.3
+       Fresh either v1.19.0
+       Fresh drop_bomb v0.1.5
+       Fresh unicode-normalization v0.1.25
+       Fresh itertools v0.15.0
+       Fresh ruff_source_file v0.0.15
+       Fresh zerovec v0.11.8
+       Fresh displaydoc v0.2.7
+       Fresh pkg-config v0.3.34
+       Fresh rustc-hash v2.1.3
+       Fresh ruff_python_trivia v0.0.15
+       Fresh zlib-rs v0.6.8
+       Fresh rand_core v0.10.1
+       Fresh chacha20 v0.10.2
+       Fresh flate2 v1.1.10
+       Fresh ruff_macros v0.0.15
+       Fresh anyhow v1.0.104
+       Fresh serde_json v1.0.151
+       Fresh ruff_diagnostics v0.0.15
+       Fresh autocfg v1.5.1
+       Fresh rand v0.10.3
+       Fresh tinystr v0.8.4
+       Fresh litemap v0.8.3
+       Fresh hashbrown v0.14.5
+       Fresh unicode-width v0.2.2
+       Fresh anstyle v1.0.14
+       Fresh uuid v1.28.0
+       Fresh equivalent v1.0.2
+       Fresh typenum v1.20.1
+       Fresh writeable v0.6.4
+       Fresh hashbrown v0.17.1
+       Fresh indexmap v2.14.2
+       Fresh hybrid-array v0.4.15
+       Fresh icu_locale_core v2.3.0
+       Fresh ruff_annotate_snippets v0.0.15
+       Fresh ruff_notebook v0.0.15
+       Fresh dashmap v6.2.1
+       Fresh crc32fast v1.5.2
+       Fresh camino v1.2.6
+       Fresh ty_static v0.0.15
+       Fresh zerotrie v0.2.5
+       Fresh potential_utf v0.1.6
+       Fresh ruff_memory_usage v0.0.15
+       Fresh arc-swap v1.9.2
+       Fresh filetime v0.2.29
+       Fresh matchit v0.9.2
+       Fresh pathdiff v0.2.3
+       Fresh utf8_iter v1.0.4
+       Fresh typed-path v0.12.3
+       Fresh dunce v1.0.5
+       Fresh supports-hyperlinks v3.2.0
+       Fresh similar v3.2.0
+       Fresh regex-syntax v0.8.11
+       Fresh zip v8.6.0
+       Fresh regex-automata v0.4.18
+       Fresh icu_collections v2.3.0
+       Fresh icu_provider v2.3.1
+       Fresh icu_properties_data v2.3.0
+       Fresh winnow v1.0.4
+       Fresh crypto-common v0.2.2
+       Fresh toml_parser v1.1.5+spec-1.1.0
+       Fresh icu_properties v2.3.0
+       Fresh block-buffer v0.12.1
+       Fresh toml_datetime v1.1.2+spec-1.1.0
+       Fresh serde_spanned v1.1.2
+       Fresh toml_writer v1.1.3+spec-1.1.0
+       Fresh toml v1.1.8+spec-1.1.0
+       Fresh digest v0.11.3
+       Fresh ruff_python_literal v0.0.15
+       Fresh regex v1.13.1
+       Fresh ruff_python_stdlib v0.0.15
+       Fresh strum_macros v0.28.0
+       Fresh path-slash v0.2.1
+       Fresh strum v0.28.0
+       Fresh num-traits v0.2.19
+       Fresh constant_time_eq v0.4.2
+       Fresh tap v1.0.1
+       Fresh wyz v0.5.1
+       Fresh num-integer v0.1.47
+       Fresh radium v0.7.0
+       Fresh bit-vec v0.8.0
+       Fresh triomphe v0.1.17
+       Fresh colored v3.1.1
+       Fresh funty v2.0.0
+       Fresh linux-raw-sys v0.12.1
+       Fresh bitvec v1.1.1
+       Fresh rustix v1.1.5
+       Dirty imre-ast v0.1.5 (/workspace/imre-public-d26/crates/imre-ast): the env variable CC changed
+   Compiling imre-ast v0.1.5 (/workspace/imre-public-d26/crates/imre-ast)
+       Fresh bit-set v0.8.0
+       Dirty liblzma-sys v0.4.9: the env variable CC changed
+   Compiling liblzma-sys v0.4.9
+       Dirty zstd-sys v2.0.16+zstd.1.5.7: the env variable CC changed
+   Compiling zstd-sys v2.0.16+zstd.1.5.7
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CFG_FEATURE='' CARGO_CFG_PANIC=unwind CARGO_CFG_TARGET_ABI='' CARGO_CFG_TARGET_ARCH=x86_64 CARGO_CFG_TARGET_ENDIAN=little CARGO_CFG_TARGET_ENV=gnu CARGO_CFG_TARGET_FAMILY=unix CARGO_CFG_TARGET_FEATURE=fxsr,sse,sse2 CARGO_CFG_TARGET_HAS_ATOMIC=16,32,64,8,ptr CARGO_CFG_TARGET_HAS_ATOMIC_PRIMITIVE_ALIGNMENT=16,32,64,8,ptr CARGO_CFG_TARGET_OS=linux CARGO_CFG_TARGET_POINTER_WIDTH=64 CARGO_CFG_TARGET_VENDOR=unknown CARGO_CFG_UNIX='' CARGO_ENCODED_RUSTFLAGS='' CARGO_MANIFEST_DIR=/workspace/imre-public-d26/crates/imre-ast CARGO_MANIFEST_PATH=/workspace/imre-public-d26/crates/imre-ast/Cargo.toml CARGO_PKG_AUTHORS='' CARGO_PKG_DESCRIPTION='' CARGO_PKG_HOMEPAGE='' CARGO_PKG_LICENSE='MIT OR Apache-2.0' CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=imre-ast CARGO_PKG_README='' CARGO_PKG_REPOSITORY='https://github.com/viarius-experiments/imre' CARGO_PKG_RUST_VERSION=1.98 CARGO_PKG_VERSION=0.1.5 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=1 CARGO_PKG_VERSION_PATCH=5 CARGO_PKG_VERSION_PRE='' DEBUG=true HOST=x86_64-unknown-linux-gnu LD_LIBRARY_PATH='/workspace/imre/target/release:/workspace/imre/target/release/deps:/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/lib/rustlib/x86_64-unknown-linux-gnu/lib' NUM_JOBS=4 OPT_LEVEL=3 OUT_DIR=/workspace/imre/target/release/build/imre-ast-5a00318f19dfab33/out PROFILE=release RUSTC=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc RUSTDOC=rustdoc TARGET=x86_64-unknown-linux-gnu /workspace/imre/target/release/build/imre-ast-45ca09614c631aba/build-script-build`
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CFG_FEATURE=static CARGO_CFG_PANIC=unwind CARGO_CFG_TARGET_ABI='' CARGO_CFG_TARGET_ARCH=x86_64 CARGO_CFG_TARGET_ENDIAN=little CARGO_CFG_TARGET_ENV=gnu CARGO_CFG_TARGET_FAMILY=unix CARGO_CFG_TARGET_FEATURE=fxsr,sse,sse2 CARGO_CFG_TARGET_HAS_ATOMIC=16,32,64,8,ptr CARGO_CFG_TARGET_HAS_ATOMIC_PRIMITIVE_ALIGNMENT=16,32,64,8,ptr CARGO_CFG_TARGET_OS=linux CARGO_CFG_TARGET_POINTER_WIDTH=64 CARGO_CFG_TARGET_VENDOR=unknown CARGO_CFG_UNIX='' CARGO_ENCODED_RUSTFLAGS='' CARGO_FEATURE_STATIC=1 CARGO_MANIFEST_DIR=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/liblzma-sys-0.4.9 CARGO_MANIFEST_LINKS=lzma CARGO_MANIFEST_PATH=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/liblzma-sys-0.4.9/Cargo.toml CARGO_PKG_AUTHORS='Alex Crichton <alex@alexcrichton.com>:Portable-Network-Archive Developers' CARGO_PKG_DESCRIPTION='Raw bindings to liblzma which contains an implementation of LZMA and xz stream
+encoding/decoding.
+
+High level Rust bindings are available in the `liblzma` crate.
+' CARGO_PKG_HOMEPAGE='https://github.com/portable-network-archive/liblzma-rs' CARGO_PKG_LICENSE='MIT OR Apache-2.0' CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=liblzma-sys CARGO_PKG_README=README.md CARGO_PKG_REPOSITORY='https://github.com/portable-network-archive/liblzma-rs' CARGO_PKG_RUST_VERSION=1.60 CARGO_PKG_VERSION=0.4.9 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=4 CARGO_PKG_VERSION_PATCH=9 CARGO_PKG_VERSION_PRE='' DEBUG=true HOST=x86_64-unknown-linux-gnu LD_LIBRARY_PATH='/workspace/imre/target/release:/workspace/imre/target/release/deps:/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/lib/rustlib/x86_64-unknown-linux-gnu/lib' NUM_JOBS=4 OPT_LEVEL=3 OUT_DIR=/workspace/imre/target/release/build/liblzma-sys-3013c6e9e7f2f9c3/out PROFILE=release RUSTC=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc RUSTDOC=rustdoc TARGET=x86_64-unknown-linux-gnu /workspace/imre/target/release/build/liblzma-sys-0c0458c501177e14/build-script-build`
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CFG_FEATURE=std CARGO_CFG_PANIC=unwind CARGO_CFG_TARGET_ABI='' CARGO_CFG_TARGET_ARCH=x86_64 CARGO_CFG_TARGET_ENDIAN=little CARGO_CFG_TARGET_ENV=gnu CARGO_CFG_TARGET_FAMILY=unix CARGO_CFG_TARGET_FEATURE=fxsr,sse,sse2 CARGO_CFG_TARGET_HAS_ATOMIC=16,32,64,8,ptr CARGO_CFG_TARGET_HAS_ATOMIC_PRIMITIVE_ALIGNMENT=16,32,64,8,ptr CARGO_CFG_TARGET_OS=linux CARGO_CFG_TARGET_POINTER_WIDTH=64 CARGO_CFG_TARGET_VENDOR=unknown CARGO_CFG_UNIX='' CARGO_ENCODED_RUSTFLAGS='' CARGO_FEATURE_STD=1 CARGO_MANIFEST_DIR=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zstd-sys-2.0.16+zstd.1.5.7 CARGO_MANIFEST_LINKS=zstd CARGO_MANIFEST_PATH=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zstd-sys-2.0.16+zstd.1.5.7/Cargo.toml CARGO_PKG_AUTHORS='Alexandre Bury <alexandre.bury@gmail.com>' CARGO_PKG_DESCRIPTION='Low-level bindings for the zstd compression library.' CARGO_PKG_HOMEPAGE='' CARGO_PKG_LICENSE=MIT/Apache-2.0 CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=zstd-sys CARGO_PKG_README=Readme.md CARGO_PKG_REPOSITORY='https://github.com/gyscos/zstd-rs' CARGO_PKG_RUST_VERSION=1.64 CARGO_PKG_VERSION=2.0.16+zstd.1.5.7 CARGO_PKG_VERSION_MAJOR=2 CARGO_PKG_VERSION_MINOR=0 CARGO_PKG_VERSION_PATCH=16 CARGO_PKG_VERSION_PRE='' DEBUG=true HOST=x86_64-unknown-linux-gnu LD_LIBRARY_PATH='/workspace/imre/target/release:/workspace/imre/target/release/deps:/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/lib/rustlib/x86_64-unknown-linux-gnu/lib' NUM_JOBS=4 OPT_LEVEL=3 OUT_DIR=/workspace/imre/target/release/build/zstd-sys-b992c6c195263b14/out PROFILE=release RUSTC=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc RUSTDOC=rustdoc TARGET=x86_64-unknown-linux-gnu /workspace/imre/target/release/build/zstd-sys-101c3ccdea3cad57/build-script-build`
+       Fresh num-bigint v0.4.8
+       Fresh inotify-sys v0.1.8
+       Fresh getrandom v0.3.4
+       Fresh ruff_index v0.0.15
+       Fresh log v0.4.34
+       Fresh same-file v1.0.6
+       Fresh walkdir v2.5.0
+       Fresh mio v1.2.4
+       Dirty blake3 v1.8.7: the env variable CC changed
+   Compiling blake3 v1.8.7
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CFG_FEATURE=default,std CARGO_CFG_PANIC=unwind CARGO_CFG_TARGET_ABI='' CARGO_CFG_TARGET_ARCH=x86_64 CARGO_CFG_TARGET_ENDIAN=little CARGO_CFG_TARGET_ENV=gnu CARGO_CFG_TARGET_FAMILY=unix CARGO_CFG_TARGET_FEATURE=fxsr,sse,sse2 CARGO_CFG_TARGET_HAS_ATOMIC=16,32,64,8,ptr CARGO_CFG_TARGET_HAS_ATOMIC_PRIMITIVE_ALIGNMENT=16,32,64,8,ptr CARGO_CFG_TARGET_OS=linux CARGO_CFG_TARGET_POINTER_WIDTH=64 CARGO_CFG_TARGET_VENDOR=unknown CARGO_CFG_UNIX='' CARGO_ENCODED_RUSTFLAGS='' CARGO_FEATURE_DEFAULT=1 CARGO_FEATURE_STD=1 CARGO_MANIFEST_DIR=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.7 CARGO_MANIFEST_PATH=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.7/Cargo.toml CARGO_PKG_AUTHORS='Jack O'\''Connor <oconnor663@gmail.com>:Samuel Neves' CARGO_PKG_DESCRIPTION='the BLAKE3 hash function' CARGO_PKG_HOMEPAGE='' CARGO_PKG_LICENSE='CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception' CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=blake3 CARGO_PKG_README=README.md CARGO_PKG_REPOSITORY='https://github.com/BLAKE3-team/BLAKE3' CARGO_PKG_RUST_VERSION='' CARGO_PKG_VERSION=1.8.7 CARGO_PKG_VERSION_MAJOR=1 CARGO_PKG_VERSION_MINOR=8 CARGO_PKG_VERSION_PATCH=7 CARGO_PKG_VERSION_PRE='' DEBUG=true HOST=x86_64-unknown-linux-gnu LD_LIBRARY_PATH='/workspace/imre/target/release:/workspace/imre/target/release/deps:/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/lib/rustlib/x86_64-unknown-linux-gnu/lib' NUM_JOBS=4 OPT_LEVEL=3 OUT_DIR=/workspace/imre/target/release/build/blake3-391bc6c5f4ebf3fb/out PROFILE=release RUSTC=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc RUSTDOC=rustdoc TARGET=x86_64-unknown-linux-gnu /workspace/imre/target/release/build/blake3-620f40280e9964c7/build-script-build`
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CRATE_NAME=psm CARGO_MANIFEST_DIR=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/psm-0.1.32 CARGO_MANIFEST_PATH=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/psm-0.1.32/Cargo.toml CARGO_PKG_AUTHORS='Simonas Kazlauskas <psm@kazlauskas.me>' CARGO_PKG_DESCRIPTION='Portable Stack Manipulation: stack manipulation and introspection routines' CARGO_PKG_HOMEPAGE='' CARGO_PKG_LICENSE='MIT OR Apache-2.0' CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=psm CARGO_PKG_README=README.mkd CARGO_PKG_REPOSITORY='https://github.com/rust-lang/stacker/' CARGO_PKG_RUST_VERSION=1.88.0 CARGO_PKG_VERSION=0.1.32 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=1 CARGO_PKG_VERSION_PATCH=32 CARGO_PKG_VERSION_PRE='' LD_LIBRARY_PATH=/workspace/imre/target/release/deps OUT_DIR=/workspace/imre/target/release/build/psm-6c96dab3b7f8f3a5/out /workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc --crate-name psm --edition=2021 /workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/psm-0.1.32/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C opt-level=3 -C embed-bitcode=no -C debuginfo=line-tables-only --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=974d79572f3f001a -C extra-filename=-c9c13f7aabcf6269 --out-dir /workspace/imre/target/release/deps -L dependency=/workspace/imre/target/release/deps --cap-lints warn -L native=/workspace/imre/target/release/build/psm-6c96dab3b7f8f3a5/out -l static=psm_s --cfg asm --cfg link_asm --cfg switchable_stack --check-cfg 'cfg(switchable_stack,asm,link_asm)'`
+       Dirty stacker v0.1.25: info of dependency `psm` changed
+   Compiling stacker v0.1.25
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CRATE_NAME=stacker CARGO_MANIFEST_DIR=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.25 CARGO_MANIFEST_PATH=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.25/Cargo.toml CARGO_PKG_AUTHORS='Alex Crichton <alex@alexcrichton.com>:Simonas Kazlauskas <stacker@kazlauskas.me>' CARGO_PKG_DESCRIPTION='A stack growth library useful when implementing deeply recursive algorithms that
+may accidentally blow the stack.
+' CARGO_PKG_HOMEPAGE='https://github.com/rust-lang/stacker' CARGO_PKG_LICENSE='MIT OR Apache-2.0' CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=stacker CARGO_PKG_README=README.md CARGO_PKG_REPOSITORY='https://github.com/rust-lang/stacker' CARGO_PKG_RUST_VERSION=1.63 CARGO_PKG_VERSION=0.1.25 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=1 CARGO_PKG_VERSION_PATCH=25 CARGO_PKG_VERSION_PRE='' LD_LIBRARY_PATH=/workspace/imre/target/release/deps OUT_DIR=/workspace/imre/target/release/build/stacker-2aa36334b5951aa4/out /workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc --crate-name stacker --edition=2021 /workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.25/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C opt-level=3 -C embed-bitcode=no -C debuginfo=line-tables-only --warn=unexpected_cfgs --check-cfg 'cfg(target_os, values("motor"))' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=d7ec578ce127336c -C extra-filename=-d112bcc50ed3d510 --out-dir /workspace/imre/target/release/deps -L dependency=/workspace/imre/target/release/deps --extern cfg_if=/workspace/imre/target/release/deps/libcfg_if-22d309636d871778.rmeta --extern libc=/workspace/imre/target/release/deps/liblibc-db20f41e6bb50f5b.rmeta --extern psm=/workspace/imre/target/release/deps/libpsm-c9c13f7aabcf6269.rmeta --cap-lints warn -L native=/workspace/imre/target/release/build/psm-6c96dab3b7f8f3a5/out`
+       Dirty ruff_python_parser v0.0.15: info of dependency `stacker` changed
+   Compiling ruff_python_parser v0.0.15
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CRATE_NAME=ruff_python_parser CARGO_MANIFEST_DIR=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ruff_python_parser-0.0.15 CARGO_MANIFEST_PATH=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ruff_python_parser-0.0.15/Cargo.toml CARGO_PKG_AUTHORS='Charlie Marsh <charlie.r.marsh@gmail.com>:RustPython Team' CARGO_PKG_DESCRIPTION='This is an internal component crate of Ruff' CARGO_PKG_HOMEPAGE='https://docs.astral.sh/ruff' CARGO_PKG_LICENSE=MIT CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=ruff_python_parser CARGO_PKG_README=README.md CARGO_PKG_REPOSITORY='https://github.com/astral-sh/ruff' CARGO_PKG_RUST_VERSION=1.96 CARGO_PKG_VERSION=0.0.15 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=0 CARGO_PKG_VERSION_PATCH=15 CARGO_PKG_VERSION_PRE='' LD_LIBRARY_PATH=/workspace/imre/target/release/deps /workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc --crate-name ruff_python_parser --edition=2024 /workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ruff_python_parser-0.0.15/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C opt-level=3 -C embed-bitcode=no -C debuginfo=line-tables-only '--warn=clippy::pedantic' '--warn=clippy::unused_peekable' --warn=unsafe_code --warn=unreachable_pub '--allow=clippy::unnecessary_debug_formatting' --warn=unexpected_cfgs '--allow=clippy::too_many_lines' '--allow=clippy::single_match_else' '--allow=clippy::similar_names' '--warn=clippy::rest_pat_in_fully_bound_structs' '--warn=clippy::redundant_clone' '--warn=clippy::rc_mutex' '--warn=clippy::rc_buffer' '--warn=clippy::print_stdout' '--warn=clippy::print_stderr' '--allow=clippy::needless_raw_string_hashes' '--allow=clippy::needless_continue' '--allow=clippy::must_use_candidate' '--allow=clippy::module_name_repetitions' '--allow=clippy::missing_panics_doc' '--allow=clippy::missing_errors_doc' '--allow=clippy::match_same_arms' '--allow=clippy::map_unwrap_or' '--warn=clippy::iter_over_hash_type' '--allow=clippy::implicit_hasher' '--allow=clippy::ignore_without_reason' '--allow=clippy::if_not_else' '--warn=clippy::get_unwrap' '--warn=clippy::exit' '--warn=clippy::empty_structs_with_brackets' '--warn=clippy::empty_drop' '--allow=clippy::disallowed_methods' '--warn=clippy::debug_assert_with_mut_call' '--warn=clippy::dbg_macro' '--allow=clippy::collapsible_match' '--allow=clippy::collapsible_if' '--allow=clippy::collapsible_else_if' '--allow=clippy::char_lit_as_u8' --check-cfg 'cfg(fuzzing)' --check-cfg 'cfg(codspeed)' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=c1a8a6bf0f1cca61 -C extra-filename=-1c6b5e6fa1548fc9 --out-dir /workspace/imre/target/release/deps -L dependency=/workspace/imre/target/release/deps --extern bitflags=/workspace/imre/target/release/deps/libbitflags-1a6441fd4157894c.rmeta --extern bstr=/workspace/imre/target/release/deps/libbstr-db582e41d76cd36e.rmeta --extern drop_bomb=/workspace/imre/target/release/deps/libdrop_bomb-67f23b432de01523.rmeta --extern get_size2=/workspace/imre/target/release/deps/libget_size2-eb4172adb5303726.rmeta --extern hashbrown=/workspace/imre/target/release/deps/libhashbrown-24e07e80da324c1c.rmeta --extern memchr=/workspace/imre/target/release/deps/libmemchr-1ef24f3e814f7fde.rmeta --extern ruff_python_ast=/workspace/imre/target/release/deps/libruff_python_ast-9cf3cc6ce9330ce4.rmeta --extern ruff_python_trivia=/workspace/imre/target/release/deps/libruff_python_trivia-0d2d02108a7298f9.rmeta --extern ruff_text_size=/workspace/imre/target/release/deps/libruff_text_size-9f7329c6f83694b4.rmeta --extern rustc_hash=/workspace/imre/target/release/deps/librustc_hash-cdfdcdaef7c1044b.rmeta --extern stacker=/workspace/imre/target/release/deps/libstacker-d112bcc50ed3d510.rmeta --extern static_assertions=/workspace/imre/target/release/deps/libstatic_assertions-45154b9ff226a5db.rmeta --extern thin_vec=/workspace/imre/target/release/deps/libthin_vec-fb26e792cfe43945.rmeta --extern unicode_ident=/workspace/imre/target/release/deps/libunicode_ident-293ed02d8341a7f0.rmeta --extern unicode_normalization=/workspace/imre/target/release/deps/libunicode_normalization-8ab1f4badf32e624.rmeta --extern unicode_names2=/workspace/imre/target/release/deps/libunicode_names2-fabfe670541447b5.rmeta --cap-lints warn -L native=/workspace/imre/target/release/build/psm-6c96dab3b7f8f3a5/out`
+       Dirty bzip2-sys v0.1.13+1.0.8: the env variable CC changed
+   Compiling bzip2-sys v0.1.13+1.0.8
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CFG_FEATURE=static CARGO_CFG_PANIC=unwind CARGO_CFG_TARGET_ABI='' CARGO_CFG_TARGET_ARCH=x86_64 CARGO_CFG_TARGET_ENDIAN=little CARGO_CFG_TARGET_ENV=gnu CARGO_CFG_TARGET_FAMILY=unix CARGO_CFG_TARGET_FEATURE=fxsr,sse,sse2 CARGO_CFG_TARGET_HAS_ATOMIC=16,32,64,8,ptr CARGO_CFG_TARGET_HAS_ATOMIC_PRIMITIVE_ALIGNMENT=16,32,64,8,ptr CARGO_CFG_TARGET_OS=linux CARGO_CFG_TARGET_POINTER_WIDTH=64 CARGO_CFG_TARGET_VENDOR=unknown CARGO_CFG_UNIX='' CARGO_ENCODED_RUSTFLAGS='' CARGO_FEATURE_STATIC=1 CARGO_MANIFEST_DIR=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bzip2-sys-0.1.13+1.0.8 CARGO_MANIFEST_LINKS=bzip2 CARGO_MANIFEST_PATH=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bzip2-sys-0.1.13+1.0.8/Cargo.toml CARGO_PKG_AUTHORS='Alex Crichton <alex@alexcrichton.com>' CARGO_PKG_DESCRIPTION='Bindings to libbzip2 for bzip2 compression and decompression exposed as
+Reader/Writer streams.
+' CARGO_PKG_HOMEPAGE='https://github.com/alexcrichton/bzip2-rs' CARGO_PKG_LICENSE=MIT/Apache-2.0 CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=bzip2-sys CARGO_PKG_README='' CARGO_PKG_REPOSITORY='https://github.com/alexcrichton/bzip2-rs' CARGO_PKG_RUST_VERSION='' CARGO_PKG_VERSION=0.1.13+1.0.8 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=1 CARGO_PKG_VERSION_PATCH=13 CARGO_PKG_VERSION_PRE='' DEBUG=true HOST=x86_64-unknown-linux-gnu LD_LIBRARY_PATH='/workspace/imre/target/release:/workspace/imre/target/release/deps:/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/lib/rustlib/x86_64-unknown-linux-gnu/lib' NUM_JOBS=4 OPT_LEVEL=3 OUT_DIR=/workspace/imre/target/release/build/bzip2-sys-921d5357198d961d/out PROFILE=release RUSTC=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc RUSTDOC=rustdoc TARGET=x86_64-unknown-linux-gnu /workspace/imre/target/release/build/bzip2-sys-b365221d2c9c202a/build-script-build`
+       Dirty ruff_db v0.0.15: info of dependency `ruff_python_parser` changed
+   Compiling ruff_db v0.0.15
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CRATE_NAME=ruff_db CARGO_MANIFEST_DIR=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ruff_db-0.0.15 CARGO_MANIFEST_PATH=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ruff_db-0.0.15/Cargo.toml CARGO_PKG_AUTHORS='Charlie Marsh <charlie.r.marsh@gmail.com>' CARGO_PKG_DESCRIPTION='This is an internal component crate of Ruff' CARGO_PKG_HOMEPAGE='https://docs.astral.sh/ruff' CARGO_PKG_LICENSE=MIT CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=ruff_db CARGO_PKG_README=README.md CARGO_PKG_REPOSITORY='https://github.com/astral-sh/ruff' CARGO_PKG_RUST_VERSION=1.96 CARGO_PKG_VERSION=0.0.15 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=0 CARGO_PKG_VERSION_PATCH=15 CARGO_PKG_VERSION_PRE='' LD_LIBRARY_PATH=/workspace/imre/target/release/deps /workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc --crate-name ruff_db --edition=2024 /workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ruff_db-0.0.15/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C opt-level=3 -C embed-bitcode=no -C debuginfo=line-tables-only --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("cache", "ignore", "junit", "os", "ruff_cache", "schemars", "serde", "testing", "tracing-subscriber"))' -C metadata=f74e61b06a630292 -C extra-filename=-38f1ac4fb57562e2 --out-dir /workspace/imre/target/release/deps -L dependency=/workspace/imre/target/release/deps --extern anstyle=/workspace/imre/target/release/deps/libanstyle-0074136476a44e0b.rmeta --extern arc_swap=/workspace/imre/target/release/deps/libarc_swap-9deba8779a0c063e.rmeta --extern camino=/workspace/imre/target/release/deps/libcamino-3b08e4c2892705d1.rmeta --extern compact_str=/workspace/imre/target/release/deps/libcompact_str-e0123d19415f2c98.rmeta --extern dashmap=/workspace/imre/target/release/deps/libdashmap-7bb2a5a017d9fe8e.rmeta --extern dunce=/workspace/imre/target/release/deps/libdunce-4c54098e000aafdd.rmeta --extern filetime=/workspace/imre/target/release/deps/libfiletime-0bf05eca65ef9c4d.rmeta --extern get_size2=/workspace/imre/target/release/deps/libget_size2-eb4172adb5303726.rmeta --extern matchit=/workspace/imre/target/release/deps/libmatchit-28b471fb6287f76e.rmeta --extern path_slash=/workspace/imre/target/release/deps/libpath_slash-2186f6558e094dd3.rmeta --extern pathdiff=/workspace/imre/target/release/deps/libpathdiff-07be86bd125efc36.rmeta --extern annotate_snippets=/workspace/imre/target/release/deps/libannotate_snippets-09ac2937699680f5.rmeta --extern ruff_diagnostics=/workspace/imre/target/release/deps/libruff_diagnostics-0ea301b27b2c8c2e.rmeta --extern ruff_memory_usage=/workspace/imre/target/release/deps/libruff_memory_usage-b53898138d93668c.rmeta --extern ruff_notebook=/workspace/imre/target/release/deps/libruff_notebook-e2f26c14107d29da.rmeta --extern ruff_python_ast=/workspace/imre/target/release/deps/libruff_python_ast-9cf3cc6ce9330ce4.rmeta --extern ruff_python_parser=/workspace/imre/target/release/deps/libruff_python_parser-1c6b5e6fa1548fc9.rmeta --extern ruff_python_trivia=/workspace/imre/target/release/deps/libruff_python_trivia-0d2d02108a7298f9.rmeta --extern ruff_source_file=/workspace/imre/target/release/deps/libruff_source_file-3c9a26d366ed9e80.rmeta --extern ruff_text_size=/workspace/imre/target/release/deps/libruff_text_size-9f7329c6f83694b4.rmeta --extern rustc_hash=/workspace/imre/target/release/deps/librustc_hash-cdfdcdaef7c1044b.rmeta --extern salsa=/workspace/imre/target/release/deps/libsalsa-03ff288e825ea659.rmeta --extern similar=/workspace/imre/target/release/deps/libsimilar-c0fa78f09198f5a4.rmeta --extern supports_hyperlinks=/workspace/imre/target/release/deps/libsupports_hyperlinks-ff98222dc8573342.rmeta --extern thiserror=/workspace/imre/target/release/deps/libthiserror-2251cf2bce1eb9cf.rmeta --extern tracing=/workspace/imre/target/release/deps/libtracing-b31481af425908d3.rmeta --extern ty_static=/workspace/imre/target/release/deps/libty_static-f7a62132f36f59a8.rmeta --extern zip=/workspace/imre/target/release/deps/libzip-8b0f42e4373fdba1.rmeta --cap-lints warn -L native=/workspace/imre/target/release/build/psm-6c96dab3b7f8f3a5/out`
+       Dirty ruff_python_codegen v0.0.15: info of dependency `ruff_python_parser` changed
+   Compiling ruff_python_codegen v0.0.15
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CRATE_NAME=ruff_python_codegen CARGO_MANIFEST_DIR=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ruff_python_codegen-0.0.15 CARGO_MANIFEST_PATH=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ruff_python_codegen-0.0.15/Cargo.toml CARGO_PKG_AUTHORS='Charlie Marsh <charlie.r.marsh@gmail.com>' CARGO_PKG_DESCRIPTION='This is an internal component crate of Ruff' CARGO_PKG_HOMEPAGE='https://docs.astral.sh/ruff' CARGO_PKG_LICENSE=MIT CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=ruff_python_codegen CARGO_PKG_README=README.md CARGO_PKG_REPOSITORY='https://github.com/astral-sh/ruff' CARGO_PKG_RUST_VERSION=1.96 CARGO_PKG_VERSION=0.0.15 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=0 CARGO_PKG_VERSION_PATCH=15 CARGO_PKG_VERSION_PRE='' LD_LIBRARY_PATH=/workspace/imre/target/release/deps /workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc --crate-name ruff_python_codegen --edition=2024 /workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ruff_python_codegen-0.0.15/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C opt-level=3 -C embed-bitcode=no -C debuginfo=line-tables-only '--warn=clippy::pedantic' '--warn=clippy::unused_peekable' --warn=unsafe_code --warn=unreachable_pub '--allow=clippy::unnecessary_debug_formatting' --warn=unexpected_cfgs '--allow=clippy::too_many_lines' '--allow=clippy::single_match_else' '--allow=clippy::similar_names' '--warn=clippy::rest_pat_in_fully_bound_structs' '--warn=clippy::redundant_clone' '--warn=clippy::rc_mutex' '--warn=clippy::rc_buffer' '--warn=clippy::print_stdout' '--warn=clippy::print_stderr' '--allow=clippy::needless_raw_string_hashes' '--allow=clippy::needless_continue' '--allow=clippy::must_use_candidate' '--allow=clippy::module_name_repetitions' '--allow=clippy::missing_panics_doc' '--allow=clippy::missing_errors_doc' '--allow=clippy::match_same_arms' '--allow=clippy::map_unwrap_or' '--warn=clippy::iter_over_hash_type' '--allow=clippy::implicit_hasher' '--allow=clippy::ignore_without_reason' '--allow=clippy::if_not_else' '--warn=clippy::get_unwrap' '--warn=clippy::exit' '--warn=clippy::empty_structs_with_brackets' '--warn=clippy::empty_drop' '--allow=clippy::disallowed_methods' '--warn=clippy::debug_assert_with_mut_call' '--warn=clippy::dbg_macro' '--allow=clippy::collapsible_match' '--allow=clippy::collapsible_if' '--allow=clippy::collapsible_else_if' '--allow=clippy::char_lit_as_u8' --check-cfg 'cfg(fuzzing)' --check-cfg 'cfg(codspeed)' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=0d6ec28e9e3d3f9b -C extra-filename=-68b6e26437380413 --out-dir /workspace/imre/target/release/deps -L dependency=/workspace/imre/target/release/deps --extern ruff_python_ast=/workspace/imre/target/release/deps/libruff_python_ast-9cf3cc6ce9330ce4.rmeta --extern ruff_python_literal=/workspace/imre/target/release/deps/libruff_python_literal-600c41b072b76fc0.rmeta --extern ruff_python_parser=/workspace/imre/target/release/deps/libruff_python_parser-1c6b5e6fa1548fc9.rmeta --extern ruff_source_file=/workspace/imre/target/release/deps/libruff_source_file-3c9a26d366ed9e80.rmeta --extern ruff_text_size=/workspace/imre/target/release/deps/libruff_text_size-9f7329c6f83694b4.rmeta --cap-lints warn -L native=/workspace/imre/target/release/build/psm-6c96dab3b7f8f3a5/out`
+       Dirty ruff_ranged_value v0.0.15: info of dependency `ruff_db` changed
+   Compiling ruff_ranged_value v0.0.15
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CRATE_NAME=ruff_ranged_value CARGO_MANIFEST_DIR=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ruff_ranged_value-0.0.15 CARGO_MANIFEST_PATH=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ruff_ranged_value-0.0.15/Cargo.toml CARGO_PKG_AUTHORS='Charlie Marsh <charlie.r.marsh@gmail.com>' CARGO_PKG_DESCRIPTION='This is an internal component crate of Ruff' CARGO_PKG_HOMEPAGE='https://docs.astral.sh/ruff' CARGO_PKG_LICENSE=MIT CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=ruff_ranged_value CARGO_PKG_README=README.md CARGO_PKG_REPOSITORY='https://github.com/astral-sh/ruff' CARGO_PKG_RUST_VERSION=1.96 CARGO_PKG_VERSION=0.0.15 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=0 CARGO_PKG_VERSION_PATCH=15 CARGO_PKG_VERSION_PRE='' LD_LIBRARY_PATH=/workspace/imre/target/release/deps /workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc --crate-name ruff_ranged_value --edition=2024 /workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ruff_ranged_value-0.0.15/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C opt-level=3 -C embed-bitcode=no -C debuginfo=line-tables-only '--warn=clippy::pedantic' '--warn=clippy::unused_peekable' --warn=unsafe_code --warn=unreachable_pub '--allow=clippy::unnecessary_debug_formatting' --warn=unexpected_cfgs '--allow=clippy::too_many_lines' '--allow=clippy::single_match_else' '--allow=clippy::similar_names' '--warn=clippy::rest_pat_in_fully_bound_structs' '--warn=clippy::redundant_clone' '--warn=clippy::rc_mutex' '--warn=clippy::rc_buffer' '--warn=clippy::print_stdout' '--warn=clippy::print_stderr' '--allow=clippy::needless_raw_string_hashes' '--allow=clippy::needless_continue' '--allow=clippy::must_use_candidate' '--allow=clippy::module_name_repetitions' '--allow=clippy::missing_panics_doc' '--allow=clippy::missing_errors_doc' '--allow=clippy::match_same_arms' '--allow=clippy::map_unwrap_or' '--warn=clippy::iter_over_hash_type' '--allow=clippy::implicit_hasher' '--allow=clippy::ignore_without_reason' '--allow=clippy::if_not_else' '--warn=clippy::get_unwrap' '--warn=clippy::exit' '--warn=clippy::empty_structs_with_brackets' '--warn=clippy::empty_drop' '--allow=clippy::disallowed_methods' '--warn=clippy::debug_assert_with_mut_call' '--warn=clippy::dbg_macro' '--allow=clippy::collapsible_match' '--allow=clippy::collapsible_if' '--allow=clippy::collapsible_else_if' '--allow=clippy::char_lit_as_u8' --check-cfg 'cfg(fuzzing)' --check-cfg 'cfg(codspeed)' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("get-size", "schemars"))' -C metadata=fdce9d55078d813a -C extra-filename=-e3ad612804cbc4b7 --out-dir /workspace/imre/target/release/deps -L dependency=/workspace/imre/target/release/deps --extern ruff_db=/workspace/imre/target/release/deps/libruff_db-38f1ac4fb57562e2.rmeta --extern ruff_python_ast=/workspace/imre/target/release/deps/libruff_python_ast-9cf3cc6ce9330ce4.rmeta --extern ruff_text_size=/workspace/imre/target/release/deps/libruff_text_size-9f7329c6f83694b4.rmeta --extern serde=/workspace/imre/target/release/deps/libserde-0112b154fb42d42b.rmeta --extern toml=/workspace/imre/target/release/deps/libtoml-7547f0f4ab18f842.rmeta --cap-lints warn -L native=/workspace/imre/target/release/build/psm-6c96dab3b7f8f3a5/out`
+       Dirty ty_combine v0.0.15: info of dependency `ruff_db` changed
+   Compiling ty_combine v0.0.15
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CRATE_NAME=ty_combine CARGO_MANIFEST_DIR=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ty_combine-0.0.15 CARGO_MANIFEST_PATH=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ty_combine-0.0.15/Cargo.toml CARGO_PKG_AUTHORS='Charlie Marsh <charlie.r.marsh@gmail.com>' CARGO_PKG_DESCRIPTION='This is an internal component crate of Ruff' CARGO_PKG_HOMEPAGE='https://docs.astral.sh/ruff' CARGO_PKG_LICENSE=MIT CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=ty_combine CARGO_PKG_README=README.md CARGO_PKG_REPOSITORY='https://github.com/astral-sh/ruff' CARGO_PKG_RUST_VERSION=1.96 CARGO_PKG_VERSION=0.0.15 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=0 CARGO_PKG_VERSION_PATCH=15 CARGO_PKG_VERSION_PRE='' LD_LIBRARY_PATH=/workspace/imre/target/release/deps /workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc --crate-name ty_combine --edition=2024 /workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ty_combine-0.0.15/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C opt-level=3 -C embed-bitcode=no -C debuginfo=line-tables-only '--warn=clippy::pedantic' '--warn=clippy::unused_peekable' --warn=unsafe_code --warn=unreachable_pub '--allow=clippy::unnecessary_debug_formatting' --warn=unexpected_cfgs '--allow=clippy::too_many_lines' '--allow=clippy::single_match_else' '--allow=clippy::similar_names' '--warn=clippy::rest_pat_in_fully_bound_structs' '--warn=clippy::redundant_clone' '--warn=clippy::rc_mutex' '--warn=clippy::rc_buffer' '--warn=clippy::print_stdout' '--warn=clippy::print_stderr' '--allow=clippy::needless_raw_string_hashes' '--allow=clippy::needless_continue' '--allow=clippy::must_use_candidate' '--allow=clippy::module_name_repetitions' '--allow=clippy::missing_panics_doc' '--allow=clippy::missing_errors_doc' '--allow=clippy::match_same_arms' '--allow=clippy::map_unwrap_or' '--warn=clippy::iter_over_hash_type' '--allow=clippy::implicit_hasher' '--allow=clippy::ignore_without_reason' '--allow=clippy::if_not_else' '--warn=clippy::get_unwrap' '--warn=clippy::exit' '--warn=clippy::empty_structs_with_brackets' '--warn=clippy::empty_drop' '--allow=clippy::disallowed_methods' '--warn=clippy::debug_assert_with_mut_call' '--warn=clippy::dbg_macro' '--allow=clippy::collapsible_match' '--allow=clippy::collapsible_if' '--allow=clippy::collapsible_else_if' '--allow=clippy::char_lit_as_u8' --check-cfg 'cfg(fuzzing)' --check-cfg 'cfg(codspeed)' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=70c3d20259fc825a -C extra-filename=-c8fc900fd5c10211 --out-dir /workspace/imre/target/release/deps -L dependency=/workspace/imre/target/release/deps --extern ordermap=/workspace/imre/target/release/deps/libordermap-89b88a73f07a65e7.rmeta --extern ruff_db=/workspace/imre/target/release/deps/libruff_db-38f1ac4fb57562e2.rmeta --extern ruff_python_ast=/workspace/imre/target/release/deps/libruff_python_ast-9cf3cc6ce9330ce4.rmeta --extern ruff_ranged_value=/workspace/imre/target/release/deps/libruff_ranged_value-e3ad612804cbc4b7.rmeta --cap-lints warn -L native=/workspace/imre/target/release/build/psm-6c96dab3b7f8f3a5/out`
+       Dirty ty_vendored v0.0.15: info of dependency `ruff_db` changed
+   Compiling ty_vendored v0.0.15
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CRATE_NAME=ty_vendored CARGO_MANIFEST_DIR=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ty_vendored-0.0.15 CARGO_MANIFEST_PATH=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ty_vendored-0.0.15/Cargo.toml CARGO_PKG_AUTHORS='Charlie Marsh <charlie.r.marsh@gmail.com>' CARGO_PKG_DESCRIPTION='This is an internal component crate of Ruff' CARGO_PKG_HOMEPAGE='https://docs.astral.sh/ruff' CARGO_PKG_LICENSE=MIT CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=ty_vendored CARGO_PKG_README=README.md CARGO_PKG_REPOSITORY='https://github.com/astral-sh/ruff' CARGO_PKG_RUST_VERSION=1.96 CARGO_PKG_VERSION=0.0.15 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=0 CARGO_PKG_VERSION_PATCH=15 CARGO_PKG_VERSION_PRE='' LD_LIBRARY_PATH=/workspace/imre/target/release/deps OUT_DIR=/workspace/imre/target/release/build/ty_vendored-e01e7dabff7c6d48/out /workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc --crate-name ty_vendored --edition=2024 /workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ty_vendored-0.0.15/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C opt-level=3 -C embed-bitcode=no -C debuginfo=line-tables-only '--warn=clippy::pedantic' '--warn=clippy::unused_peekable' --warn=unsafe_code --warn=unreachable_pub '--allow=clippy::unnecessary_debug_formatting' --warn=unexpected_cfgs '--allow=clippy::too_many_lines' '--allow=clippy::single_match_else' '--allow=clippy::similar_names' '--warn=clippy::rest_pat_in_fully_bound_structs' '--warn=clippy::redundant_clone' '--warn=clippy::rc_mutex' '--warn=clippy::rc_buffer' '--warn=clippy::print_stdout' '--warn=clippy::print_stderr' '--allow=clippy::needless_raw_string_hashes' '--allow=clippy::needless_continue' '--allow=clippy::must_use_candidate' '--allow=clippy::module_name_repetitions' '--allow=clippy::missing_panics_doc' '--allow=clippy::missing_errors_doc' '--allow=clippy::match_same_arms' '--allow=clippy::map_unwrap_or' '--warn=clippy::iter_over_hash_type' '--allow=clippy::implicit_hasher' '--allow=clippy::ignore_without_reason' '--allow=clippy::if_not_else' '--warn=clippy::get_unwrap' '--warn=clippy::exit' '--warn=clippy::empty_structs_with_brackets' '--warn=clippy::empty_drop' '--allow=clippy::disallowed_methods' '--warn=clippy::debug_assert_with_mut_call' '--warn=clippy::dbg_macro' '--allow=clippy::collapsible_match' '--allow=clippy::collapsible_if' '--allow=clippy::collapsible_else_if' '--allow=clippy::char_lit_as_u8' --check-cfg 'cfg(fuzzing)' --check-cfg 'cfg(codspeed)' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("deflate", "zstd"))' -C metadata=ac36c2814d205ace -C extra-filename=-33633d0672068597 --out-dir /workspace/imre/target/release/deps -L dependency=/workspace/imre/target/release/deps --extern ruff_db=/workspace/imre/target/release/deps/libruff_db-38f1ac4fb57562e2.rmeta --extern static_assertions=/workspace/imre/target/release/deps/libstatic_assertions-45154b9ff226a5db.rmeta --extern zip=/workspace/imre/target/release/deps/libzip-8b0f42e4373fdba1.rmeta --cap-lints warn -L native=/workspace/imre/target/release/build/psm-6c96dab3b7f8f3a5/out`
+       Dirty ty_module_resolver v0.0.15: info of dependency `ruff_db` changed
+   Compiling ty_module_resolver v0.0.15
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CRATE_NAME=ty_module_resolver CARGO_MANIFEST_DIR=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ty_module_resolver-0.0.15 CARGO_MANIFEST_PATH=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ty_module_resolver-0.0.15/Cargo.toml CARGO_PKG_AUTHORS='Charlie Marsh <charlie.r.marsh@gmail.com>' CARGO_PKG_DESCRIPTION='This is an internal component crate of Ruff' CARGO_PKG_HOMEPAGE='https://docs.astral.sh/ruff' CARGO_PKG_LICENSE=MIT CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=ty_module_resolver CARGO_PKG_README=README.md CARGO_PKG_REPOSITORY='https://github.com/astral-sh/ruff' CARGO_PKG_RUST_VERSION=1.96 CARGO_PKG_VERSION=0.0.15 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=0 CARGO_PKG_VERSION_PATCH=15 CARGO_PKG_VERSION_PRE='' LD_LIBRARY_PATH=/workspace/imre/target/release/deps /workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc --crate-name ty_module_resolver --edition=2024 /workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ty_module_resolver-0.0.15/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C opt-level=3 -C embed-bitcode=no -C debuginfo=line-tables-only '--warn=clippy::pedantic' '--warn=clippy::unused_peekable' --warn=unsafe_code --warn=unreachable_pub '--allow=clippy::unnecessary_debug_formatting' --warn=unexpected_cfgs '--allow=clippy::too_many_lines' '--allow=clippy::single_match_else' '--allow=clippy::similar_names' '--warn=clippy::rest_pat_in_fully_bound_structs' '--warn=clippy::redundant_clone' '--warn=clippy::rc_mutex' '--warn=clippy::rc_buffer' '--warn=clippy::print_stdout' '--warn=clippy::print_stderr' '--allow=clippy::needless_raw_string_hashes' '--allow=clippy::needless_continue' '--allow=clippy::must_use_candidate' '--allow=clippy::module_name_repetitions' '--allow=clippy::missing_panics_doc' '--allow=clippy::missing_errors_doc' '--allow=clippy::match_same_arms' '--allow=clippy::map_unwrap_or' '--warn=clippy::iter_over_hash_type' '--allow=clippy::implicit_hasher' '--allow=clippy::ignore_without_reason' '--allow=clippy::if_not_else' '--warn=clippy::get_unwrap' '--warn=clippy::exit' '--warn=clippy::empty_structs_with_brackets' '--warn=clippy::empty_drop' '--allow=clippy::disallowed_methods' '--warn=clippy::debug_assert_with_mut_call' '--warn=clippy::dbg_macro' '--allow=clippy::collapsible_match' '--allow=clippy::collapsible_if' '--allow=clippy::collapsible_else_if' '--allow=clippy::char_lit_as_u8' --check-cfg 'cfg(fuzzing)' --check-cfg 'cfg(codspeed)' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=8809c38f82356d9f -C extra-filename=-ed1663025691d59b --out-dir /workspace/imre/target/release/deps -L dependency=/workspace/imre/target/release/deps --extern anyhow=/workspace/imre/target/release/deps/libanyhow-fa6803bcd27cc9d2.rmeta --extern camino=/workspace/imre/target/release/deps/libcamino-3b08e4c2892705d1.rmeta --extern compact_str=/workspace/imre/target/release/deps/libcompact_str-e0123d19415f2c98.rmeta --extern get_size2=/workspace/imre/target/release/deps/libget_size2-eb4172adb5303726.rmeta --extern itertools=/workspace/imre/target/release/deps/libitertools-c8dd748182fe7173.rmeta --extern memchr=/workspace/imre/target/release/deps/libmemchr-1ef24f3e814f7fde.rmeta --extern ordermap=/workspace/imre/target/release/deps/libordermap-89b88a73f07a65e7.rmeta --extern regex=/workspace/imre/target/release/deps/libregex-46bc484ba16c4a06.rmeta --extern regex_syntax=/workspace/imre/target/release/deps/libregex_syntax-d09798a58e7af88d.rmeta --extern ruff_db=/workspace/imre/target/release/deps/libruff_db-38f1ac4fb57562e2.rmeta --extern ruff_memory_usage=/workspace/imre/target/release/deps/libruff_memory_usage-b53898138d93668c.rmeta --extern ruff_python_ast=/workspace/imre/target/release/deps/libruff_python_ast-9cf3cc6ce9330ce4.rmeta --extern ruff_python_stdlib=/workspace/imre/target/release/deps/libruff_python_stdlib-52c69612c93eb5f7.rmeta --extern rustc_hash=/workspace/imre/target/release/deps/librustc_hash-cdfdcdaef7c1044b.rmeta --extern salsa=/workspace/imre/target/release/deps/libsalsa-03ff288e825ea659.rmeta --extern strum=/workspace/imre/target/release/deps/libstrum-0aee915bd36672a9.rmeta --extern strum_macros=/workspace/imre/target/release/deps/libstrum_macros-ce4e24daa68ffdfb.so --extern thiserror=/workspace/imre/target/release/deps/libthiserror-2251cf2bce1eb9cf.rmeta --extern tracing=/workspace/imre/target/release/deps/libtracing-b31481af425908d3.rmeta --cap-lints warn -L native=/workspace/imre/target/release/build/psm-6c96dab3b7f8f3a5/out`
+       Dirty ty_site_packages v0.0.15: info of dependency `ruff_db` changed
+   Compiling ty_site_packages v0.0.15
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CRATE_NAME=ty_site_packages CARGO_MANIFEST_DIR=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ty_site_packages-0.0.15 CARGO_MANIFEST_PATH=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ty_site_packages-0.0.15/Cargo.toml CARGO_PKG_AUTHORS='Charlie Marsh <charlie.r.marsh@gmail.com>' CARGO_PKG_DESCRIPTION='This is an internal component crate of Ruff' CARGO_PKG_HOMEPAGE='https://docs.astral.sh/ruff' CARGO_PKG_LICENSE=MIT CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=ty_site_packages CARGO_PKG_README=README.md CARGO_PKG_REPOSITORY='https://github.com/astral-sh/ruff' CARGO_PKG_RUST_VERSION=1.96 CARGO_PKG_VERSION=0.0.15 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=0 CARGO_PKG_VERSION_PATCH=15 CARGO_PKG_VERSION_PRE='' LD_LIBRARY_PATH=/workspace/imre/target/release/deps /workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc --crate-name ty_site_packages --edition=2024 /workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ty_site_packages-0.0.15/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C opt-level=3 -C embed-bitcode=no -C debuginfo=line-tables-only '--warn=clippy::pedantic' '--warn=clippy::unused_peekable' --warn=unsafe_code --warn=unreachable_pub '--allow=clippy::unnecessary_debug_formatting' --warn=unexpected_cfgs '--allow=clippy::too_many_lines' '--allow=clippy::single_match_else' '--allow=clippy::similar_names' '--warn=clippy::rest_pat_in_fully_bound_structs' '--warn=clippy::redundant_clone' '--warn=clippy::rc_mutex' '--warn=clippy::rc_buffer' '--warn=clippy::print_stdout' '--warn=clippy::print_stderr' '--allow=clippy::needless_raw_string_hashes' '--allow=clippy::needless_continue' '--allow=clippy::must_use_candidate' '--allow=clippy::module_name_repetitions' '--allow=clippy::missing_panics_doc' '--allow=clippy::missing_errors_doc' '--allow=clippy::match_same_arms' '--allow=clippy::map_unwrap_or' '--warn=clippy::iter_over_hash_type' '--allow=clippy::implicit_hasher' '--allow=clippy::ignore_without_reason' '--allow=clippy::if_not_else' '--warn=clippy::get_unwrap' '--warn=clippy::exit' '--warn=clippy::empty_structs_with_brackets' '--warn=clippy::empty_drop' '--allow=clippy::disallowed_methods' '--warn=clippy::debug_assert_with_mut_call' '--warn=clippy::dbg_macro' '--allow=clippy::collapsible_match' '--allow=clippy::collapsible_if' '--allow=clippy::collapsible_else_if' '--allow=clippy::char_lit_as_u8' --check-cfg 'cfg(fuzzing)' --check-cfg 'cfg(codspeed)' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=ecdc947f70614f4d -C extra-filename=-9593a26384ca7be9 --out-dir /workspace/imre/target/release/deps -L dependency=/workspace/imre/target/release/deps --extern camino=/workspace/imre/target/release/deps/libcamino-3b08e4c2892705d1.rmeta --extern colored=/workspace/imre/target/release/deps/libcolored-bb82750c15042d82.rmeta --extern get_size2=/workspace/imre/target/release/deps/libget_size2-eb4172adb5303726.rmeta --extern indexmap=/workspace/imre/target/release/deps/libindexmap-a994156f43def9dd.rmeta --extern annotate_snippets=/workspace/imre/target/release/deps/libannotate_snippets-09ac2937699680f5.rmeta --extern ruff_db=/workspace/imre/target/release/deps/libruff_db-38f1ac4fb57562e2.rmeta --extern ruff_python_ast=/workspace/imre/target/release/deps/libruff_python_ast-9cf3cc6ce9330ce4.rmeta --extern ruff_python_trivia=/workspace/imre/target/release/deps/libruff_python_trivia-0d2d02108a7298f9.rmeta --extern ruff_source_file=/workspace/imre/target/release/deps/libruff_source_file-3c9a26d366ed9e80.rmeta --extern ruff_text_size=/workspace/imre/target/release/deps/libruff_text_size-9f7329c6f83694b4.rmeta --extern strum=/workspace/imre/target/release/deps/libstrum-0aee915bd36672a9.rmeta --extern strum_macros=/workspace/imre/target/release/deps/libstrum_macros-ce4e24daa68ffdfb.so --extern tracing=/workspace/imre/target/release/deps/libtracing-b31481af425908d3.rmeta --extern ty_static=/workspace/imre/target/release/deps/libty_static-f7a62132f36f59a8.rmeta --cap-lints warn -L native=/workspace/imre/target/release/build/psm-6c96dab3b7f8f3a5/out`
+       Dirty ty_python_core v0.0.15: info of dependency `ty_site_packages` changed
+   Compiling ty_python_core v0.0.15
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CRATE_NAME=ty_python_core CARGO_MANIFEST_DIR=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ty_python_core-0.0.15 CARGO_MANIFEST_PATH=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ty_python_core-0.0.15/Cargo.toml CARGO_PKG_AUTHORS='Charlie Marsh <charlie.r.marsh@gmail.com>' CARGO_PKG_DESCRIPTION='This is an internal component crate of Ruff' CARGO_PKG_HOMEPAGE='https://docs.astral.sh/ruff' CARGO_PKG_LICENSE=MIT CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=ty_python_core CARGO_PKG_README=README.md CARGO_PKG_REPOSITORY='https://github.com/astral-sh/ruff' CARGO_PKG_RUST_VERSION=1.96 CARGO_PKG_VERSION=0.0.15 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=0 CARGO_PKG_VERSION_PATCH=15 CARGO_PKG_VERSION_PRE='' LD_LIBRARY_PATH=/workspace/imre/target/release/deps /workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc --crate-name ty_python_core --edition=2024 /workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ty_python_core-0.0.15/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C opt-level=3 -C embed-bitcode=no -C debuginfo=line-tables-only '--warn=clippy::pedantic' '--warn=clippy::unused_peekable' --warn=unsafe_code --warn=unreachable_pub '--allow=clippy::unnecessary_debug_formatting' --warn=unexpected_cfgs '--allow=clippy::too_many_lines' '--allow=clippy::single_match_else' '--allow=clippy::similar_names' '--warn=clippy::rest_pat_in_fully_bound_structs' '--warn=clippy::redundant_clone' '--warn=clippy::rc_mutex' '--warn=clippy::rc_buffer' '--warn=clippy::print_stdout' '--warn=clippy::print_stderr' '--allow=clippy::needless_raw_string_hashes' '--allow=clippy::needless_continue' '--allow=clippy::must_use_candidate' '--allow=clippy::module_name_repetitions' '--allow=clippy::missing_panics_doc' '--allow=clippy::missing_errors_doc' '--allow=clippy::match_same_arms' '--allow=clippy::map_unwrap_or' '--warn=clippy::iter_over_hash_type' '--allow=clippy::implicit_hasher' '--allow=clippy::ignore_without_reason' '--allow=clippy::if_not_else' '--warn=clippy::get_unwrap' '--warn=clippy::exit' '--warn=clippy::empty_structs_with_brackets' '--warn=clippy::empty_drop' '--allow=clippy::disallowed_methods' '--warn=clippy::debug_assert_with_mut_call' '--warn=clippy::dbg_macro' '--allow=clippy::collapsible_match' '--allow=clippy::collapsible_if' '--allow=clippy::collapsible_else_if' '--allow=clippy::char_lit_as_u8' --check-cfg 'cfg(fuzzing)' --check-cfg 'cfg(codspeed)' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("schemars", "serde", "testing"))' -C metadata=c77b4694f9dc2267 -C extra-filename=-7cfb42f40c3a20b3 --out-dir /workspace/imre/target/release/deps -L dependency=/workspace/imre/target/release/deps --extern bitflags=/workspace/imre/target/release/deps/libbitflags-1a6441fd4157894c.rmeta --extern bitvec=/workspace/imre/target/release/deps/libbitvec-381ee83027412b33.rmeta --extern char_str=/workspace/imre/target/release/deps/libchar_str-fa6e7f5e13aff379.rmeta --extern get_size2=/workspace/imre/target/release/deps/libget_size2-eb4172adb5303726.rmeta --extern hashbrown=/workspace/imre/target/release/deps/libhashbrown-24e07e80da324c1c.rmeta --extern itertools=/workspace/imre/target/release/deps/libitertools-c8dd748182fe7173.rmeta --extern ruff_db=/workspace/imre/target/release/deps/libruff_db-38f1ac4fb57562e2.rmeta --extern ruff_index=/workspace/imre/target/release/deps/libruff_index-9205c85b4957fd93.rmeta --extern ruff_memory_usage=/workspace/imre/target/release/deps/libruff_memory_usage-b53898138d93668c.rmeta --extern ruff_python_ast=/workspace/imre/target/release/deps/libruff_python_ast-9cf3cc6ce9330ce4.rmeta --extern ruff_python_parser=/workspace/imre/target/release/deps/libruff_python_parser-1c6b5e6fa1548fc9.rmeta --extern ruff_text_size=/workspace/imre/target/release/deps/libruff_text_size-9f7329c6f83694b4.rmeta --extern rustc_hash=/workspace/imre/target/release/deps/librustc_hash-cdfdcdaef7c1044b.rmeta --extern salsa=/workspace/imre/target/release/deps/libsalsa-03ff288e825ea659.rmeta --extern smallvec=/workspace/imre/target/release/deps/libsmallvec-8c98f6995c4586cc.rmeta --extern static_assertions=/workspace/imre/target/release/deps/libstatic_assertions-45154b9ff226a5db.rmeta --extern thin_vec=/workspace/imre/target/release/deps/libthin_vec-fb26e792cfe43945.rmeta --extern tracing=/workspace/imre/target/release/deps/libtracing-b31481af425908d3.rmeta --extern ty_combine=/workspace/imre/target/release/deps/libty_combine-c8fc900fd5c10211.rmeta --extern ty_module_resolver=/workspace/imre/target/release/deps/libty_module_resolver-ed1663025691d59b.rmeta --extern ty_site_packages=/workspace/imre/target/release/deps/libty_site_packages-9593a26384ca7be9.rmeta --extern ty_vendored=/workspace/imre/target/release/deps/libty_vendored-33633d0672068597.rmeta --cap-lints warn -L native=/workspace/imre/target/release/build/psm-6c96dab3b7f8f3a5/out`
+       Dirty ruff_python_importer v0.0.15: info of dependency `ruff_python_codegen` changed
+   Compiling ruff_python_importer v0.0.15
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CRATE_NAME=ruff_python_importer CARGO_MANIFEST_DIR=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ruff_python_importer-0.0.15 CARGO_MANIFEST_PATH=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ruff_python_importer-0.0.15/Cargo.toml CARGO_PKG_AUTHORS='Charlie Marsh <charlie.r.marsh@gmail.com>' CARGO_PKG_DESCRIPTION='This is an internal component crate of Ruff' CARGO_PKG_HOMEPAGE='https://docs.astral.sh/ruff' CARGO_PKG_LICENSE=MIT CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=ruff_python_importer CARGO_PKG_README=README.md CARGO_PKG_REPOSITORY='https://github.com/astral-sh/ruff' CARGO_PKG_RUST_VERSION=1.96 CARGO_PKG_VERSION=0.0.15 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=0 CARGO_PKG_VERSION_PATCH=15 CARGO_PKG_VERSION_PRE='' LD_LIBRARY_PATH=/workspace/imre/target/release/deps /workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc --crate-name ruff_python_importer --edition=2024 /workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ruff_python_importer-0.0.15/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C opt-level=3 -C embed-bitcode=no -C debuginfo=line-tables-only '--warn=clippy::pedantic' '--warn=clippy::unused_peekable' --warn=unsafe_code --warn=unreachable_pub '--allow=clippy::unnecessary_debug_formatting' --warn=unexpected_cfgs '--allow=clippy::too_many_lines' '--allow=clippy::single_match_else' '--allow=clippy::similar_names' '--warn=clippy::rest_pat_in_fully_bound_structs' '--warn=clippy::redundant_clone' '--warn=clippy::rc_mutex' '--warn=clippy::rc_buffer' '--warn=clippy::print_stdout' '--warn=clippy::print_stderr' '--allow=clippy::needless_raw_string_hashes' '--allow=clippy::needless_continue' '--allow=clippy::must_use_candidate' '--allow=clippy::module_name_repetitions' '--allow=clippy::missing_panics_doc' '--allow=clippy::missing_errors_doc' '--allow=clippy::match_same_arms' '--allow=clippy::map_unwrap_or' '--warn=clippy::iter_over_hash_type' '--allow=clippy::implicit_hasher' '--allow=clippy::ignore_without_reason' '--allow=clippy::if_not_else' '--warn=clippy::get_unwrap' '--warn=clippy::exit' '--warn=clippy::empty_structs_with_brackets' '--warn=clippy::empty_drop' '--allow=clippy::disallowed_methods' '--warn=clippy::debug_assert_with_mut_call' '--warn=clippy::dbg_macro' '--allow=clippy::collapsible_match' '--allow=clippy::collapsible_if' '--allow=clippy::collapsible_else_if' '--allow=clippy::char_lit_as_u8' --check-cfg 'cfg(fuzzing)' --check-cfg 'cfg(codspeed)' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=af1ea4b0c201bf07 -C extra-filename=-fd7e10cde9d73246 --out-dir /workspace/imre/target/release/deps -L dependency=/workspace/imre/target/release/deps --extern anyhow=/workspace/imre/target/release/deps/libanyhow-fa6803bcd27cc9d2.rmeta --extern ruff_diagnostics=/workspace/imre/target/release/deps/libruff_diagnostics-0ea301b27b2c8c2e.rmeta --extern ruff_python_ast=/workspace/imre/target/release/deps/libruff_python_ast-9cf3cc6ce9330ce4.rmeta --extern ruff_python_codegen=/workspace/imre/target/release/deps/libruff_python_codegen-68b6e26437380413.rmeta --extern ruff_python_trivia=/workspace/imre/target/release/deps/libruff_python_trivia-0d2d02108a7298f9.rmeta --extern ruff_source_file=/workspace/imre/target/release/deps/libruff_source_file-3c9a26d366ed9e80.rmeta --extern ruff_text_size=/workspace/imre/target/release/deps/libruff_text_size-9f7329c6f83694b4.rmeta --cap-lints warn -L native=/workspace/imre/target/release/build/psm-6c96dab3b7f8f3a5/out`
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CRATE_NAME=imre_ast CARGO_MANIFEST_DIR=/workspace/imre-public-d26/crates/imre-ast CARGO_MANIFEST_PATH=/workspace/imre-public-d26/crates/imre-ast/Cargo.toml CARGO_PKG_AUTHORS='' CARGO_PKG_DESCRIPTION='' CARGO_PKG_HOMEPAGE='' CARGO_PKG_LICENSE='MIT OR Apache-2.0' CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=imre-ast CARGO_PKG_README='' CARGO_PKG_REPOSITORY='https://github.com/viarius-experiments/imre' CARGO_PKG_RUST_VERSION=1.98 CARGO_PKG_VERSION=0.1.5 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=1 CARGO_PKG_VERSION_PATCH=5 CARGO_PKG_VERSION_PRE='' LD_LIBRARY_PATH=/workspace/imre/target/release/deps OUT_DIR=/workspace/imre/target/release/build/imre-ast-5a00318f19dfab33/out /workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc --crate-name imre_ast --edition=2024 crates/imre-ast/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C opt-level=3 -C embed-bitcode=no -C debuginfo=line-tables-only --deny=unsafe_op_in_unsafe_fn '--deny=clippy::undocumented_unsafe_blocks' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=0293087bbd0cfe4e -C extra-filename=-aa56bfd6b24820ba --out-dir /workspace/imre/target/release/deps -L dependency=/workspace/imre/target/release/deps --extern compact_str=/workspace/imre/target/release/deps/libcompact_str-e0123d19415f2c98.rmeta --extern indexmap=/workspace/imre/target/release/deps/libindexmap-a994156f43def9dd.rmeta --extern libc=/workspace/imre/target/release/deps/liblibc-db20f41e6bb50f5b.rmeta --extern num_bigint=/workspace/imre/target/release/deps/libnum_bigint-d1048ef1c2c761a9.rmeta --extern num_traits=/workspace/imre/target/release/deps/libnum_traits-0c1ec093ce59b57a.rmeta --extern ruff_python_ast=/workspace/imre/target/release/deps/libruff_python_ast-9cf3cc6ce9330ce4.rmeta --extern ruff_python_codegen=/workspace/imre/target/release/deps/libruff_python_codegen-68b6e26437380413.rmeta --extern ruff_python_literal=/workspace/imre/target/release/deps/libruff_python_literal-600c41b072b76fc0.rmeta --extern ruff_python_parser=/workspace/imre/target/release/deps/libruff_python_parser-1c6b5e6fa1548fc9.rmeta --extern ruff_python_stdlib=/workspace/imre/target/release/deps/libruff_python_stdlib-52c69612c93eb5f7.rmeta --extern ruff_python_trivia=/workspace/imre/target/release/deps/libruff_python_trivia-0d2d02108a7298f9.rmeta --extern ruff_text_size=/workspace/imre/target/release/deps/libruff_text_size-9f7329c6f83694b4.rmeta --extern ryu=/workspace/imre/target/release/deps/libryu-50d03660df88089a.rmeta --extern smallvec=/workspace/imre/target/release/deps/libsmallvec-8c98f6995c4586cc.rmeta --extern stacker=/workspace/imre/target/release/deps/libstacker-d112bcc50ed3d510.rmeta --extern unicode_names2=/workspace/imre/target/release/deps/libunicode_names2-fabfe670541447b5.rmeta -L native=/workspace/imre/target/release/build/psm-6c96dab3b7f8f3a5/out --cfg has_epollexclusive --check-cfg 'cfg(has_epollexclusive)'`
+       Fresh inotify v0.11.5
+       Fresh fancy-regex v0.20.0
+       Fresh archery v1.2.3
+       Dirty imre-regex v0.1.5 (/workspace/imre-public-d26/crates/imre-regex): the file `crates/imre-regex/src/replacement.rs` has changed (1794946244.964610548s, 43m 10s after last build at 1794943654.436084224s)
+   Compiling imre-regex v0.1.5 (/workspace/imre-public-d26/crates/imre-regex)
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CRATE_NAME=imre_regex CARGO_MANIFEST_DIR=/workspace/imre-public-d26/crates/imre-regex CARGO_MANIFEST_PATH=/workspace/imre-public-d26/crates/imre-regex/Cargo.toml CARGO_PKG_AUTHORS='' CARGO_PKG_DESCRIPTION='' CARGO_PKG_HOMEPAGE='' CARGO_PKG_LICENSE='MIT OR Apache-2.0' CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=imre-regex CARGO_PKG_README='' CARGO_PKG_REPOSITORY='https://github.com/viarius-experiments/imre' CARGO_PKG_RUST_VERSION=1.98 CARGO_PKG_VERSION=0.1.5 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=1 CARGO_PKG_VERSION_PATCH=5 CARGO_PKG_VERSION_PRE='' LD_LIBRARY_PATH=/workspace/imre/target/release/deps /workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc --crate-name imre_regex --edition=2024 crates/imre-regex/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C opt-level=3 -C embed-bitcode=no -C debuginfo=line-tables-only --deny=unsafe_op_in_unsafe_fn '--deny=clippy::undocumented_unsafe_blocks' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=4b575751752e8cf9 -C extra-filename=-d19dcf2a394485f8 --out-dir /workspace/imre/target/release/deps -L dependency=/workspace/imre/target/release/deps --extern regex=/workspace/imre/target/release/deps/libregex-46bc484ba16c4a06.rmeta --extern regex_syntax=/workspace/imre/target/release/deps/libregex_syntax-d09798a58e7af88d.rmeta --extern unicode_names2=/workspace/imre/target/release/deps/libunicode_names2-fabfe670541447b5.rmeta`
+       Fresh sha2 v0.11.1
+       Dirty imre-compiler v0.1.5 (/workspace/imre-public-d26/crates/imre-compiler): the file `crates/imre-compiler/stdlib/installed-sources.txt` has changed (1794946244.932713746s, 43m 10s after last build at 1794943654.432084270s)
+   Compiling imre-compiler v0.1.5 (/workspace/imre-public-d26/crates/imre-compiler)
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CRATE_NAME=build_script_build CARGO_MANIFEST_DIR=/workspace/imre-public-d26/crates/imre-compiler CARGO_MANIFEST_PATH=/workspace/imre-public-d26/crates/imre-compiler/Cargo.toml CARGO_PKG_AUTHORS='' CARGO_PKG_DESCRIPTION='' CARGO_PKG_HOMEPAGE='' CARGO_PKG_LICENSE='MIT OR Apache-2.0' CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=imre-compiler CARGO_PKG_README='' CARGO_PKG_REPOSITORY='https://github.com/viarius-experiments/imre' CARGO_PKG_RUST_VERSION=1.98 CARGO_PKG_VERSION=0.1.5 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=1 CARGO_PKG_VERSION_PATCH=5 CARGO_PKG_VERSION_PRE='' CARGO_PRIMARY_PACKAGE=1 LD_LIBRARY_PATH=/workspace/imre/target/release/deps /workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc --crate-name build_script_build --edition=2024 crates/imre-compiler/build.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type bin --emit=dep-info,link -C embed-bitcode=no --deny=unsafe_op_in_unsafe_fn '--deny=clippy::undocumented_unsafe_blocks' -C debug-assertions=off --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("verify-ir"))' -C metadata=295d377317eaea43 -C extra-filename=-877562b684b129de --out-dir /workspace/imre/target/release/build/imre-compiler-877562b684b129de -L dependency=/workspace/imre/target/release/deps --extern zip=/workspace/imre/target/release/deps/libzip-48b337610072f7bd.rlib`
+       Fresh ruff_python_edits v0.0.15
+       Fresh notify-types v2.1.0
+       Fresh csv-core v0.1.13
+       Fresh fastrand v2.5.0
+       Fresh tempfile v3.23.0
+       Fresh csv v1.4.0
+       Fresh notify v8.2.0
+       Dirty ty_python_semantic v0.0.15: info of dependency `ruff_python_codegen` changed
+   Compiling ty_python_semantic v0.0.15
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CRATE_NAME=ty_python_semantic CARGO_MANIFEST_DIR=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ty_python_semantic-0.0.15 CARGO_MANIFEST_PATH=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ty_python_semantic-0.0.15/Cargo.toml CARGO_PKG_AUTHORS='Charlie Marsh <charlie.r.marsh@gmail.com>' CARGO_PKG_DESCRIPTION='This is an internal component crate of Ruff' CARGO_PKG_HOMEPAGE='https://docs.astral.sh/ruff' CARGO_PKG_LICENSE=MIT CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=ty_python_semantic CARGO_PKG_README=README.md CARGO_PKG_REPOSITORY='https://github.com/astral-sh/ruff' CARGO_PKG_RUST_VERSION=1.96 CARGO_PKG_VERSION=0.0.15 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=0 CARGO_PKG_VERSION_PATCH=15 CARGO_PKG_VERSION_PRE='' LD_LIBRARY_PATH=/workspace/imre/target/release/deps /workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc --crate-name ty_python_semantic --edition=2024 /workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ty_python_semantic-0.0.15/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C opt-level=3 -C embed-bitcode=no -C debuginfo=line-tables-only '--warn=clippy::pedantic' '--warn=clippy::unused_peekable' --warn=unsafe_code --warn=unreachable_pub '--allow=clippy::unnecessary_debug_formatting' --warn=unexpected_cfgs '--allow=clippy::too_many_lines' '--allow=clippy::single_match_else' '--allow=clippy::similar_names' '--warn=clippy::rest_pat_in_fully_bound_structs' '--warn=clippy::redundant_clone' '--warn=clippy::rc_mutex' '--warn=clippy::rc_buffer' '--warn=clippy::print_stdout' '--warn=clippy::print_stderr' '--allow=clippy::needless_raw_string_hashes' '--allow=clippy::needless_continue' '--allow=clippy::must_use_candidate' '--allow=clippy::module_name_repetitions' '--allow=clippy::missing_panics_doc' '--allow=clippy::missing_errors_doc' '--allow=clippy::match_same_arms' '--allow=clippy::map_unwrap_or' '--warn=clippy::iter_over_hash_type' '--allow=clippy::implicit_hasher' '--allow=clippy::ignore_without_reason' '--allow=clippy::if_not_else' '--warn=clippy::get_unwrap' '--warn=clippy::exit' '--warn=clippy::empty_structs_with_brackets' '--warn=clippy::empty_drop' '--allow=clippy::disallowed_methods' '--warn=clippy::debug_assert_with_mut_call' '--warn=clippy::dbg_macro' '--allow=clippy::collapsible_match' '--allow=clippy::collapsible_if' '--allow=clippy::collapsible_else_if' '--allow=clippy::char_lit_as_u8' --check-cfg 'cfg(fuzzing)' --check-cfg 'cfg(codspeed)' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("schemars", "serde", "testing"))' -C metadata=7ed083b9ced783ff -C extra-filename=-449248b5b5816578 --out-dir /workspace/imre/target/release/deps -L dependency=/workspace/imre/target/release/deps --extern bitflags=/workspace/imre/target/release/deps/libbitflags-1a6441fd4157894c.rmeta --extern char_str=/workspace/imre/target/release/deps/libchar_str-fa6e7f5e13aff379.rmeta --extern compact_str=/workspace/imre/target/release/deps/libcompact_str-e0123d19415f2c98.rmeta --extern drop_bomb=/workspace/imre/target/release/deps/libdrop_bomb-67f23b432de01523.rmeta --extern get_size2=/workspace/imre/target/release/deps/libget_size2-eb4172adb5303726.rmeta --extern indexmap=/workspace/imre/target/release/deps/libindexmap-a994156f43def9dd.rmeta --extern itertools=/workspace/imre/target/release/deps/libitertools-c8dd748182fe7173.rmeta --extern memchr=/workspace/imre/target/release/deps/libmemchr-1ef24f3e814f7fde.rmeta --extern ordermap=/workspace/imre/target/release/deps/libordermap-89b88a73f07a65e7.rmeta --extern rayon=/workspace/imre/target/release/deps/librayon-81e15b2643793d25.rmeta --extern ruff_db=/workspace/imre/target/release/deps/libruff_db-38f1ac4fb57562e2.rmeta --extern ruff_diagnostics=/workspace/imre/target/release/deps/libruff_diagnostics-0ea301b27b2c8c2e.rmeta --extern ruff_index=/workspace/imre/target/release/deps/libruff_index-9205c85b4957fd93.rmeta --extern ruff_macros=/workspace/imre/target/release/deps/libruff_macros-dd72e9f68ce542ce.so --extern ruff_memory_usage=/workspace/imre/target/release/deps/libruff_memory_usage-b53898138d93668c.rmeta --extern ruff_python_ast=/workspace/imre/target/release/deps/libruff_python_ast-9cf3cc6ce9330ce4.rmeta --extern ruff_python_codegen=/workspace/imre/target/release/deps/libruff_python_codegen-68b6e26437380413.rmeta --extern ruff_python_edits=/workspace/imre/target/release/deps/libruff_python_edits-34d7017a69ad5827.rmeta --extern ruff_python_importer=/workspace/imre/target/release/deps/libruff_python_importer-fd7e10cde9d73246.rmeta --extern ruff_python_literal=/workspace/imre/target/release/deps/libruff_python_literal-600c41b072b76fc0.rmeta --extern ruff_python_parser=/workspace/imre/target/release/deps/libruff_python_parser-1c6b5e6fa1548fc9.rmeta --extern ruff_python_stdlib=/workspace/imre/target/release/deps/libruff_python_stdlib-52c69612c93eb5f7.rmeta --extern ruff_python_trivia=/workspace/imre/target/release/deps/libruff_python_trivia-0d2d02108a7298f9.rmeta --extern ruff_source_file=/workspace/imre/target/release/deps/libruff_source_file-3c9a26d366ed9e80.rmeta --extern ruff_text_size=/workspace/imre/target/release/deps/libruff_text_size-9f7329c6f83694b4.rmeta --extern rustc_hash=/workspace/imre/target/release/deps/librustc_hash-cdfdcdaef7c1044b.rmeta --extern salsa=/workspace/imre/target/release/deps/libsalsa-03ff288e825ea659.rmeta --extern smallvec=/workspace/imre/target/release/deps/libsmallvec-8c98f6995c4586cc.rmeta --extern static_assertions=/workspace/imre/target/release/deps/libstatic_assertions-45154b9ff226a5db.rmeta --extern strum=/workspace/imre/target/release/deps/libstrum-0aee915bd36672a9.rmeta --extern strum_macros=/workspace/imre/target/release/deps/libstrum_macros-ce4e24daa68ffdfb.so --extern thiserror=/workspace/imre/target/release/deps/libthiserror-2251cf2bce1eb9cf.rmeta --extern tracing=/workspace/imre/target/release/deps/libtracing-b31481af425908d3.rmeta --extern ty_module_resolver=/workspace/imre/target/release/deps/libty_module_resolver-ed1663025691d59b.rmeta --extern ty_python_core=/workspace/imre/target/release/deps/libty_python_core-7cfb42f40c3a20b3.rmeta --extern ty_site_packages=/workspace/imre/target/release/deps/libty_site_packages-9593a26384ca7be9.rmeta --extern ty_static=/workspace/imre/target/release/deps/libty_static-f7a62132f36f59a8.rmeta --cap-lints warn -L native=/workspace/imre/target/release/build/psm-6c96dab3b7f8f3a5/out`
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CRATE_NAME=zstd_sys CARGO_MANIFEST_DIR=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zstd-sys-2.0.16+zstd.1.5.7 CARGO_MANIFEST_PATH=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zstd-sys-2.0.16+zstd.1.5.7/Cargo.toml CARGO_PKG_AUTHORS='Alexandre Bury <alexandre.bury@gmail.com>' CARGO_PKG_DESCRIPTION='Low-level bindings for the zstd compression library.' CARGO_PKG_HOMEPAGE='' CARGO_PKG_LICENSE=MIT/Apache-2.0 CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=zstd-sys CARGO_PKG_README=Readme.md CARGO_PKG_REPOSITORY='https://github.com/gyscos/zstd-rs' CARGO_PKG_RUST_VERSION=1.64 CARGO_PKG_VERSION=2.0.16+zstd.1.5.7 CARGO_PKG_VERSION_MAJOR=2 CARGO_PKG_VERSION_MINOR=0 CARGO_PKG_VERSION_PATCH=16 CARGO_PKG_VERSION_PRE='' LD_LIBRARY_PATH=/workspace/imre/target/release/deps OUT_DIR=/workspace/imre/target/release/build/zstd-sys-b992c6c195263b14/out /workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc --crate-name zstd_sys --edition=2018 /workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zstd-sys-2.0.16+zstd.1.5.7/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C opt-level=3 -C embed-bitcode=no -C debuginfo=line-tables-only --allow=non_upper_case_globals --cfg 'feature="std"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("bindgen", "debug", "default", "experimental", "fat-lto", "legacy", "no_asm", "no_wasm_shim", "non-cargo", "pkg-config", "seekable", "std", "thin", "thin-lto", "zdict_builder", "zstdmt"))' -C metadata=4cdf24deb57b6823 -C extra-filename=-6d3ef6ff84cdb016 --out-dir /workspace/imre/target/release/deps -L dependency=/workspace/imre/target/release/deps --cap-lints warn -L native=/workspace/imre/target/release/build/zstd-sys-b992c6c195263b14/out -l static=zstd`
+       Dirty zstd-safe v7.2.4: info of dependency `zstd-sys` changed
+   Compiling zstd-safe v7.2.4
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CFG_FEATURE=std CARGO_CFG_PANIC=unwind CARGO_CFG_TARGET_ABI='' CARGO_CFG_TARGET_ARCH=x86_64 CARGO_CFG_TARGET_ENDIAN=little CARGO_CFG_TARGET_ENV=gnu CARGO_CFG_TARGET_FAMILY=unix CARGO_CFG_TARGET_FEATURE=fxsr,sse,sse2 CARGO_CFG_TARGET_HAS_ATOMIC=16,32,64,8,ptr CARGO_CFG_TARGET_HAS_ATOMIC_PRIMITIVE_ALIGNMENT=16,32,64,8,ptr CARGO_CFG_TARGET_OS=linux CARGO_CFG_TARGET_POINTER_WIDTH=64 CARGO_CFG_TARGET_VENDOR=unknown CARGO_CFG_UNIX='' CARGO_ENCODED_RUSTFLAGS='' CARGO_FEATURE_STD=1 CARGO_MANIFEST_DIR=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zstd-safe-7.2.4 CARGO_MANIFEST_PATH=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zstd-safe-7.2.4/Cargo.toml CARGO_PKG_AUTHORS='Alexandre Bury <alexandre.bury@gmail.com>' CARGO_PKG_DESCRIPTION='Safe low-level bindings for the zstd compression library.' CARGO_PKG_HOMEPAGE='' CARGO_PKG_LICENSE='MIT OR Apache-2.0' CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=zstd-safe CARGO_PKG_README=Readme.md CARGO_PKG_REPOSITORY='https://github.com/gyscos/zstd-rs' CARGO_PKG_RUST_VERSION=1.64 CARGO_PKG_VERSION=7.2.4 CARGO_PKG_VERSION_MAJOR=7 CARGO_PKG_VERSION_MINOR=2 CARGO_PKG_VERSION_PATCH=4 CARGO_PKG_VERSION_PRE='' DEBUG=true DEP_ZSTD_INCLUDE=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zstd-sys-2.0.16+zstd.1.5.7/zstd/lib DEP_ZSTD_ROOT=/workspace/imre/target/release/build/zstd-sys-b992c6c195263b14/out HOST=x86_64-unknown-linux-gnu LD_LIBRARY_PATH='/workspace/imre/target/release:/workspace/imre/target/release/deps:/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/lib/rustlib/x86_64-unknown-linux-gnu/lib' NUM_JOBS=4 OPT_LEVEL=3 OUT_DIR=/workspace/imre/target/release/build/zstd-safe-494c07315546fa42/out PROFILE=release RUSTC=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc RUSTDOC=rustdoc TARGET=x86_64-unknown-linux-gnu /workspace/imre/target/release/build/zstd-safe-1635436e67556ad9/build-script-build`
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CFG_FEATURE='' CARGO_CFG_PANIC=unwind CARGO_CFG_TARGET_ABI='' CARGO_CFG_TARGET_ARCH=x86_64 CARGO_CFG_TARGET_ENDIAN=little CARGO_CFG_TARGET_ENV=gnu CARGO_CFG_TARGET_FAMILY=unix CARGO_CFG_TARGET_FEATURE=fxsr,sse,sse2 CARGO_CFG_TARGET_HAS_ATOMIC=16,32,64,8,ptr CARGO_CFG_TARGET_HAS_ATOMIC_PRIMITIVE_ALIGNMENT=16,32,64,8,ptr CARGO_CFG_TARGET_OS=linux CARGO_CFG_TARGET_POINTER_WIDTH=64 CARGO_CFG_TARGET_VENDOR=unknown CARGO_CFG_UNIX='' CARGO_ENCODED_RUSTFLAGS='' CARGO_MANIFEST_DIR=/workspace/imre-public-d26/crates/imre-compiler CARGO_MANIFEST_PATH=/workspace/imre-public-d26/crates/imre-compiler/Cargo.toml CARGO_PKG_AUTHORS='' CARGO_PKG_DESCRIPTION='' CARGO_PKG_HOMEPAGE='' CARGO_PKG_LICENSE='MIT OR Apache-2.0' CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=imre-compiler CARGO_PKG_README='' CARGO_PKG_REPOSITORY='https://github.com/viarius-experiments/imre' CARGO_PKG_RUST_VERSION=1.98 CARGO_PKG_VERSION=0.1.5 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=1 CARGO_PKG_VERSION_PATCH=5 CARGO_PKG_VERSION_PRE='' DEBUG=true HOST=x86_64-unknown-linux-gnu LD_LIBRARY_PATH='/workspace/imre/target/release:/workspace/imre/target/release/deps:/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/lib/rustlib/x86_64-unknown-linux-gnu/lib' NUM_JOBS=4 OPT_LEVEL=3 OUT_DIR=/workspace/imre/target/release/build/imre-compiler-75360ea7104a41b4/out PROFILE=release RUSTC=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc RUSTDOC=rustdoc TARGET=x86_64-unknown-linux-gnu /workspace/imre/target/release/build/imre-compiler-877562b684b129de/build-script-build`
+       Fresh rpds v1.2.1
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CRATE_NAME=liblzma_sys CARGO_MANIFEST_DIR=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/liblzma-sys-0.4.9 CARGO_MANIFEST_PATH=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/liblzma-sys-0.4.9/Cargo.toml CARGO_PKG_AUTHORS='Alex Crichton <alex@alexcrichton.com>:Portable-Network-Archive Developers' CARGO_PKG_DESCRIPTION='Raw bindings to liblzma which contains an implementation of LZMA and xz stream
+encoding/decoding.
+
+High level Rust bindings are available in the `liblzma` crate.
+' CARGO_PKG_HOMEPAGE='https://github.com/portable-network-archive/liblzma-rs' CARGO_PKG_LICENSE='MIT OR Apache-2.0' CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=liblzma-sys CARGO_PKG_README=README.md CARGO_PKG_REPOSITORY='https://github.com/portable-network-archive/liblzma-rs' CARGO_PKG_RUST_VERSION=1.60 CARGO_PKG_VERSION=0.4.9 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=4 CARGO_PKG_VERSION_PATCH=9 CARGO_PKG_VERSION_PRE='' LD_LIBRARY_PATH=/workspace/imre/target/release/deps OUT_DIR=/workspace/imre/target/release/build/liblzma-sys-3013c6e9e7f2f9c3/out /workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc --crate-name liblzma_sys --edition=2021 /workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/liblzma-sys-0.4.9/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C opt-level=3 -C embed-bitcode=no -C debuginfo=line-tables-only --cfg 'feature="static"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("bindgen", "default", "fat-lto", "parallel", "static", "thin-lto", "uncheck_liblzma_version", "wasm"))' -C metadata=b976b563f56408ae -C extra-filename=-8be2860b36f63ae9 --out-dir /workspace/imre/target/release/deps -L dependency=/workspace/imre/target/release/deps --extern libc=/workspace/imre/target/release/deps/liblibc-db20f41e6bb50f5b.rmeta --cap-lints warn -L native=/workspace/imre/target/release/build/liblzma-sys-3013c6e9e7f2f9c3/out -l static=lzma`
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CRATE_NAME=blake3 CARGO_MANIFEST_DIR=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.7 CARGO_MANIFEST_PATH=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.7/Cargo.toml CARGO_PKG_AUTHORS='Jack O'\''Connor <oconnor663@gmail.com>:Samuel Neves' CARGO_PKG_DESCRIPTION='the BLAKE3 hash function' CARGO_PKG_HOMEPAGE='' CARGO_PKG_LICENSE='CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception' CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=blake3 CARGO_PKG_README=README.md CARGO_PKG_REPOSITORY='https://github.com/BLAKE3-team/BLAKE3' CARGO_PKG_RUST_VERSION='' CARGO_PKG_VERSION=1.8.7 CARGO_PKG_VERSION_MAJOR=1 CARGO_PKG_VERSION_MINOR=8 CARGO_PKG_VERSION_PATCH=7 CARGO_PKG_VERSION_PRE='' LD_LIBRARY_PATH=/workspace/imre/target/release/deps OUT_DIR=/workspace/imre/target/release/build/blake3-391bc6c5f4ebf3fb/out /workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc --crate-name blake3 --edition=2024 /workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/blake3-1.8.7/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C opt-level=3 -C embed-bitcode=no -C debuginfo=line-tables-only --cfg 'feature="default"' --cfg 'feature="std"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("default", "digest", "mmap", "neon", "no_avx2", "no_avx512", "no_neon", "no_sse2", "no_sse41", "prefer_intrinsics", "pure", "rayon", "serde", "std", "traits-preview", "wasm32_simd", "zeroize"))' -C metadata=ddc96d8ae2d61ecb -C extra-filename=-cc79720cd26611b0 --out-dir /workspace/imre/target/release/deps -L dependency=/workspace/imre/target/release/deps --extern arrayvec=/workspace/imre/target/release/deps/libarrayvec-3fc3e228746e8c24.rmeta --extern cfg_if=/workspace/imre/target/release/deps/libcfg_if-22d309636d871778.rmeta --extern constant_time_eq=/workspace/imre/target/release/deps/libconstant_time_eq-28cf19db805c406b.rmeta --extern cpufeatures=/workspace/imre/target/release/deps/libcpufeatures-6cb489c93ed5bcce.rmeta --cap-lints warn -L native=/workspace/imre/target/release/build/blake3-391bc6c5f4ebf3fb/out -L native=/workspace/imre/target/release/build/blake3-391bc6c5f4ebf3fb/out -l static=blake3_sse2_sse41_avx2_assembly -l static=blake3_avx512_assembly --cfg blake3_sse2_ffi --cfg blake3_sse41_ffi --cfg blake3_avx2_ffi --cfg blake3_avx512_ffi --check-cfg 'cfg(blake3_sse2_ffi, values(none()))' --check-cfg 'cfg(blake3_sse2_rust, values(none()))' --check-cfg 'cfg(blake3_sse41_ffi, values(none()))' --check-cfg 'cfg(blake3_sse41_rust, values(none()))' --check-cfg 'cfg(blake3_avx2_ffi, values(none()))' --check-cfg 'cfg(blake3_avx2_rust, values(none()))' --check-cfg 'cfg(blake3_avx512_ffi, values(none()))' --check-cfg 'cfg(blake3_neon, values(none()))' --check-cfg 'cfg(blake3_wasm32_simd, values(none()))'`
+       Fresh object v0.39.1
+       Dirty imre-runtime v0.1.5 (/workspace/imre-public-d26/crates/imre-runtime): the file `crates/imre-runtime/native/confstr-names.txt` has changed (1794946244.966594064s, 39m 59s after last build at 1794943845.965826251s)
+   Compiling imre-runtime v0.1.5 (/workspace/imre-public-d26/crates/imre-runtime)
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CRATE_NAME=build_script_build CARGO_MANIFEST_DIR=/workspace/imre-public-d26/crates/imre-runtime CARGO_MANIFEST_PATH=/workspace/imre-public-d26/crates/imre-runtime/Cargo.toml CARGO_PKG_AUTHORS='' CARGO_PKG_DESCRIPTION='' CARGO_PKG_HOMEPAGE='' CARGO_PKG_LICENSE='MIT OR Apache-2.0' CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=imre-runtime CARGO_PKG_README='' CARGO_PKG_REPOSITORY='https://github.com/viarius-experiments/imre' CARGO_PKG_RUST_VERSION=1.98 CARGO_PKG_VERSION=0.1.5 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=1 CARGO_PKG_VERSION_PATCH=5 CARGO_PKG_VERSION_PRE='' CARGO_PRIMARY_PACKAGE=1 LD_LIBRARY_PATH=/workspace/imre/target/release/deps /workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc --crate-name build_script_build --edition=2024 crates/imre-runtime/build.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type bin --emit=dep-info,link -C embed-bitcode=no --deny=unsafe_op_in_unsafe_fn '--deny=clippy::undocumented_unsafe_blocks' -C debug-assertions=off --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=5087d2fc1151bd86 -C extra-filename=-012e2ebba159d9cf --out-dir /workspace/imre/target/release/build/imre-runtime-012e2ebba159d9cf -L dependency=/workspace/imre/target/release/deps --extern cc=/workspace/imre/target/release/deps/libcc-1b102508929ec2cd.rlib --extern regex_syntax=/workspace/imre/target/release/deps/libregex_syntax-f7545e11bb19291d.rlib`
+       Fresh keccak v0.2.2
+       Fresh sha3 v0.11.0
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CFG_FEATURE='' CARGO_CFG_PANIC=unwind CARGO_CFG_TARGET_ABI='' CARGO_CFG_TARGET_ARCH=x86_64 CARGO_CFG_TARGET_ENDIAN=little CARGO_CFG_TARGET_ENV=gnu CARGO_CFG_TARGET_FAMILY=unix CARGO_CFG_TARGET_FEATURE=fxsr,sse,sse2 CARGO_CFG_TARGET_HAS_ATOMIC=16,32,64,8,ptr CARGO_CFG_TARGET_HAS_ATOMIC_PRIMITIVE_ALIGNMENT=16,32,64,8,ptr CARGO_CFG_TARGET_OS=linux CARGO_CFG_TARGET_POINTER_WIDTH=64 CARGO_CFG_TARGET_VENDOR=unknown CARGO_CFG_UNIX='' CARGO_ENCODED_RUSTFLAGS='' CARGO_MANIFEST_DIR=/workspace/imre-public-d26/crates/imre-runtime CARGO_MANIFEST_PATH=/workspace/imre-public-d26/crates/imre-runtime/Cargo.toml CARGO_PKG_AUTHORS='' CARGO_PKG_DESCRIPTION='' CARGO_PKG_HOMEPAGE='' CARGO_PKG_LICENSE='MIT OR Apache-2.0' CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=imre-runtime CARGO_PKG_README='' CARGO_PKG_REPOSITORY='https://github.com/viarius-experiments/imre' CARGO_PKG_RUST_VERSION=1.98 CARGO_PKG_VERSION=0.1.5 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=1 CARGO_PKG_VERSION_PATCH=5 CARGO_PKG_VERSION_PRE='' DEBUG=true DEP_BZIP2_INCLUDE=/workspace/imre/target/release/build/bzip2-sys-921d5357198d961d/out/include DEP_BZIP2_ROOT=/workspace/imre/target/release/build/bzip2-sys-921d5357198d961d/out DEP_LZMA_INCLUDE=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/liblzma-sys-0.4.9/xz/src/liblzma/api DEP_LZMA_ROOT=/workspace/imre/target/release/build/liblzma-sys-3013c6e9e7f2f9c3/out HOST=x86_64-unknown-linux-gnu LD_LIBRARY_PATH='/workspace/imre/target/release:/workspace/imre/target/release/deps:/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/lib/rustlib/x86_64-unknown-linux-gnu/lib' NUM_JOBS=4 OPT_LEVEL=3 OUT_DIR=/workspace/imre/target/release/build/imre-runtime-ae5221875d77539c/out PROFILE=release RUSTC=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc RUSTDOC=rustdoc TARGET=x86_64-unknown-linux-gnu /workspace/imre/target/release/build/imre-runtime-012e2ebba159d9cf/build-script-build`
+       Dirty liblzma v0.4.9: info of dependency `liblzma-sys` changed
+   Compiling liblzma v0.4.9
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CRATE_NAME=liblzma CARGO_MANIFEST_DIR=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/liblzma-0.4.9 CARGO_MANIFEST_PATH=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/liblzma-0.4.9/Cargo.toml CARGO_PKG_AUTHORS='Alex Crichton <alex@alexcrichton.com>:Portable-Network-Archive Developers' CARGO_PKG_DESCRIPTION='Rust bindings to liblzma providing Read/Write streams as well as low-level
+in-memory encoding/decoding. forked from xz2.
+' CARGO_PKG_HOMEPAGE='https://github.com/portable-network-archive/liblzma-rs' CARGO_PKG_LICENSE='MIT OR Apache-2.0' CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=liblzma CARGO_PKG_README=README.md CARGO_PKG_REPOSITORY='https://github.com/portable-network-archive/liblzma-rs' CARGO_PKG_RUST_VERSION=1.60 CARGO_PKG_VERSION=0.4.9 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=4 CARGO_PKG_VERSION_PATCH=9 CARGO_PKG_VERSION_PRE='' LD_LIBRARY_PATH=/workspace/imre/target/release/deps /workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc --crate-name liblzma --edition=2021 /workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/liblzma-0.4.9/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C opt-level=3 -C embed-bitcode=no -C debuginfo=line-tables-only --cfg 'feature="static"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("bindgen", "default", "fat-lto", "parallel", "static", "thin-lto", "uncheck_liblzma_version", "wasm"))' -C metadata=cbb1c5dc68916421 -C extra-filename=-1ec64f06d09efde6 --out-dir /workspace/imre/target/release/deps -L dependency=/workspace/imre/target/release/deps --extern liblzma_sys=/workspace/imre/target/release/deps/libliblzma_sys-8be2860b36f63ae9.rmeta --cap-lints warn -L native=/workspace/imre/target/release/build/liblzma-sys-3013c6e9e7f2f9c3/out`
+       Fresh corosensei v0.3.4
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CRATE_NAME=zstd_safe CARGO_MANIFEST_DIR=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zstd-safe-7.2.4 CARGO_MANIFEST_PATH=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zstd-safe-7.2.4/Cargo.toml CARGO_PKG_AUTHORS='Alexandre Bury <alexandre.bury@gmail.com>' CARGO_PKG_DESCRIPTION='Safe low-level bindings for the zstd compression library.' CARGO_PKG_HOMEPAGE='' CARGO_PKG_LICENSE='MIT OR Apache-2.0' CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=zstd-safe CARGO_PKG_README=Readme.md CARGO_PKG_REPOSITORY='https://github.com/gyscos/zstd-rs' CARGO_PKG_RUST_VERSION=1.64 CARGO_PKG_VERSION=7.2.4 CARGO_PKG_VERSION_MAJOR=7 CARGO_PKG_VERSION_MINOR=2 CARGO_PKG_VERSION_PATCH=4 CARGO_PKG_VERSION_PRE='' LD_LIBRARY_PATH=/workspace/imre/target/release/deps OUT_DIR=/workspace/imre/target/release/build/zstd-safe-494c07315546fa42/out /workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc --crate-name zstd_safe --edition=2018 /workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zstd-safe-7.2.4/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C opt-level=3 -C embed-bitcode=no -C debuginfo=line-tables-only --allow=non_upper_case_globals --cfg 'feature="std"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("arrays", "bindgen", "debug", "default", "doc-cfg", "experimental", "fat-lto", "legacy", "no_asm", "pkg-config", "seekable", "std", "thin", "thin-lto", "zdict_builder", "zstdmt"))' -C metadata=a426740131cecdda -C extra-filename=-e7d8c87facebf420 --out-dir /workspace/imre/target/release/deps -L dependency=/workspace/imre/target/release/deps --extern zstd_sys=/workspace/imre/target/release/deps/libzstd_sys-6d3ef6ff84cdb016.rmeta --cap-lints warn -L native=/workspace/imre/target/release/build/zstd-sys-b992c6c195263b14/out`
+       Fresh unicode-case-mapping v1.0.0
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CRATE_NAME=bzip2_sys CARGO_MANIFEST_DIR=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bzip2-sys-0.1.13+1.0.8 CARGO_MANIFEST_PATH=/workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bzip2-sys-0.1.13+1.0.8/Cargo.toml CARGO_PKG_AUTHORS='Alex Crichton <alex@alexcrichton.com>' CARGO_PKG_DESCRIPTION='Bindings to libbzip2 for bzip2 compression and decompression exposed as
+Reader/Writer streams.
+' CARGO_PKG_HOMEPAGE='https://github.com/alexcrichton/bzip2-rs' CARGO_PKG_LICENSE=MIT/Apache-2.0 CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=bzip2-sys CARGO_PKG_README='' CARGO_PKG_REPOSITORY='https://github.com/alexcrichton/bzip2-rs' CARGO_PKG_RUST_VERSION='' CARGO_PKG_VERSION=0.1.13+1.0.8 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=1 CARGO_PKG_VERSION_PATCH=13 CARGO_PKG_VERSION_PRE='' LD_LIBRARY_PATH=/workspace/imre/target/release/deps OUT_DIR=/workspace/imre/target/release/build/bzip2-sys-921d5357198d961d/out /workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc --crate-name bzip2_sys --edition=2015 /workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bzip2-sys-0.1.13+1.0.8/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C opt-level=3 -C embed-bitcode=no -C debuginfo=line-tables-only --cfg 'feature="static"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("__disabled", "static"))' -C metadata=77f2731573223e39 -C extra-filename=-53e5bb1aa2503521 --out-dir /workspace/imre/target/release/deps -L dependency=/workspace/imre/target/release/deps --cap-lints warn -L native=/workspace/imre/target/release/build/bzip2-sys-921d5357198d961d/out/lib -l static=bz2`
+warning: `extern` declarations without an explicit ABI are deprecated
+  --> /workspace/.toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bzip2-sys-0.1.13+1.0.8/lib.rs:51:9
+   |
+51 |           extern {
+   |           ^^^^^^ help: explicitly specify the "C" ABI: `extern "C"`
+...
+57 | / abi_compat! {
+58 | |     pub fn BZ2_bzCompressInit(stream: *mut bz_stream,
+59 | |                               blockSize100k: c_int,
+60 | |                               verbosity: c_int,
+...  |
+68 | |     pub fn BZ2_bzDecompressEnd(stream: *mut bz_stream) -> c_int,
+69 | | }
+   | |_- in this macro invocation
+   |
+   = note: `#[warn(missing_abi)]` on by default
+   = note: this warning originates in the macro `abi_compat` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: `bzip2-sys` (lib) generated 1 warning
+       Fresh blake2s_simd v1.0.5
+       Fresh blake2b_simd v1.0.5
+       Fresh md-5 v0.11.0
+       Fresh sha1 v0.11.0
+       Fresh errno v0.3.14
+       Fresh lz4_flex v0.14.0
+       Fresh base64 v0.22.1
+       Fresh glidesort v0.1.2
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CRATE_NAME=imre_runtime CARGO_MANIFEST_DIR=/workspace/imre-public-d26/crates/imre-runtime CARGO_MANIFEST_PATH=/workspace/imre-public-d26/crates/imre-runtime/Cargo.toml CARGO_PKG_AUTHORS='' CARGO_PKG_DESCRIPTION='' CARGO_PKG_HOMEPAGE='' CARGO_PKG_LICENSE='MIT OR Apache-2.0' CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=imre-runtime CARGO_PKG_README='' CARGO_PKG_REPOSITORY='https://github.com/viarius-experiments/imre' CARGO_PKG_RUST_VERSION=1.98 CARGO_PKG_VERSION=0.1.5 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=1 CARGO_PKG_VERSION_PATCH=5 CARGO_PKG_VERSION_PRE='' CARGO_PRIMARY_PACKAGE=1 LD_LIBRARY_PATH=/workspace/imre/target/release/deps OUT_DIR=/workspace/imre/target/release/build/imre-runtime-ae5221875d77539c/out /workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc --crate-name imre_runtime --edition=2024 crates/imre-runtime/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type rlib --crate-type staticlib --emit=dep-info,link -C opt-level=3 -C embed-bitcode=no -C debuginfo=line-tables-only --deny=unsafe_op_in_unsafe_fn '--deny=clippy::undocumented_unsafe_blocks' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=d1907223ebd4ba33 -C extra-filename=-6fc919f7b09461c1 --out-dir /workspace/imre/target/release/deps -L dependency=/workspace/imre/target/release/deps --extern allocator_api2=/workspace/imre/target/release/deps/liballocator_api2-9fe438af87b14f0e.rlib --extern base64=/workspace/imre/target/release/deps/libbase64-c5867c256cb809d2.rlib --extern blake2b_simd=/workspace/imre/target/release/deps/libblake2b_simd-ee05574cd42530b8.rlib --extern blake2s_simd=/workspace/imre/target/release/deps/libblake2s_simd-95cb9f5b48fc69d3.rlib --extern bzip2_sys=/workspace/imre/target/release/deps/libbzip2_sys-53e5bb1aa2503521.rlib --extern compact_str=/workspace/imre/target/release/deps/libcompact_str-e0123d19415f2c98.rlib --extern constant_time_eq=/workspace/imre/target/release/deps/libconstant_time_eq-28cf19db805c406b.rlib --extern corosensei=/workspace/imre/target/release/deps/libcorosensei-66fec7360211f8d4.rlib --extern errno=/workspace/imre/target/release/deps/liberrno-582ab1892d2803be.rlib --extern fancy_regex=/workspace/imre/target/release/deps/libfancy_regex-1cb18bf0eb15c3ea.rlib --extern flate2=/workspace/imre/target/release/deps/libflate2-a1f5dc6a663a3680.rlib --extern getrandom=/workspace/imre/target/release/deps/libgetrandom-550a8a76f546f248.rlib --extern glidesort=/workspace/imre/target/release/deps/libglidesort-1f8f3871ebf059f1.rlib --extern hashbrown=/workspace/imre/target/release/deps/libhashbrown-24e07e80da324c1c.rlib --extern icu_properties=/workspace/imre/target/release/deps/libicu_properties-08571f1cdc6b9c45.rlib --extern imre_ast=/workspace/imre/target/release/deps/libimre_ast-aa56bfd6b24820ba.rlib --extern imre_regex=/workspace/imre/target/release/deps/libimre_regex-d19dcf2a394485f8.rlib --extern indexmap=/workspace/imre/target/release/deps/libindexmap-a994156f43def9dd.rlib --extern itoa=/workspace/imre/target/release/deps/libitoa-d4a696b5ac675f36.rlib --extern libc=/workspace/imre/target/release/deps/liblibc-db20f41e6bb50f5b.rlib --extern liblzma=/workspace/imre/target/release/deps/libliblzma-1ec64f06d09efde6.rlib --extern liblzma_sys=/workspace/imre/target/release/deps/libliblzma_sys-8be2860b36f63ae9.rlib --extern linux_raw_sys=/workspace/imre/target/release/deps/liblinux_raw_sys-da506e08ba773ac8.rlib --extern lz4_flex=/workspace/imre/target/release/deps/liblz4_flex-1d8bd36ff9a5d167.rlib --extern md5=/workspace/imre/target/release/deps/libmd5-c857ed0f506c7cf3.rlib --extern memchr=/workspace/imre/target/release/deps/libmemchr-1ef24f3e814f7fde.rlib --extern num_bigint=/workspace/imre/target/release/deps/libnum_bigint-d1048ef1c2c761a9.rlib --extern num_integer=/workspace/imre/target/release/deps/libnum_integer-1fb25c5f94fae511.rlib --extern num_traits=/workspace/imre/target/release/deps/libnum_traits-0c1ec093ce59b57a.rlib --extern regex_automata=/workspace/imre/target/release/deps/libregex_automata-ec9ff9b9a82a35ec.rlib --extern regex_syntax=/workspace/imre/target/release/deps/libregex_syntax-d09798a58e7af88d.rlib --extern ruff_python_ast=/workspace/imre/target/release/deps/libruff_python_ast-9cf3cc6ce9330ce4.rlib --extern ruff_python_literal=/workspace/imre/target/release/deps/libruff_python_literal-600c41b072b76fc0.rlib --extern ruff_python_parser=/workspace/imre/target/release/deps/libruff_python_parser-1c6b5e6fa1548fc9.rlib --extern ruff_python_stdlib=/workspace/imre/target/release/deps/libruff_python_stdlib-52c69612c93eb5f7.rlib --extern ruff_text_size=/workspace/imre/target/release/deps/libruff_text_size-9f7329c6f83694b4.rlib --extern rustix=/workspace/imre/target/release/deps/librustix-49eb529a4df86939.rlib --extern serde=/workspace/imre/target/release/deps/libserde-0112b154fb42d42b.rlib --extern serde_json=/workspace/imre/target/release/deps/libserde_json-88e544b25640c8de.rlib --extern sha1=/workspace/imre/target/release/deps/libsha1-ee8eb1bb85beb1eb.rlib --extern sha2=/workspace/imre/target/release/deps/libsha2-4201b61397a6dffc.rlib --extern sha3=/workspace/imre/target/release/deps/libsha3-b88d77f62ee5287d.rlib --extern siphasher=/workspace/imre/target/release/deps/libsiphasher-883329254371ba26.rlib --extern smallvec=/workspace/imre/target/release/deps/libsmallvec-8c98f6995c4586cc.rlib --extern stacker=/workspace/imre/target/release/deps/libstacker-d112bcc50ed3d510.rlib --extern toml=/workspace/imre/target/release/deps/libtoml-7547f0f4ab18f842.rlib --extern toml_datetime=/workspace/imre/target/release/deps/libtoml_datetime-d0cb3af0adb21504.rlib --extern toml_parser=/workspace/imre/target/release/deps/libtoml_parser-f166ea7fe7d4e049.rlib --extern triomphe=/workspace/imre/target/release/deps/libtriomphe-c70948c7d440ebd3.rlib --extern unicode_case_mapping=/workspace/imre/target/release/deps/libunicode_case_mapping-0b369200e5099397.rlib --extern unicode_normalization=/workspace/imre/target/release/deps/libunicode_normalization-8ab1f4badf32e624.rlib --extern unicode_names2=/workspace/imre/target/release/deps/libunicode_names2-fabfe670541447b5.rlib --extern zlib_rs=/workspace/imre/target/release/deps/libzlib_rs-bdba63e9a634ecca.rlib --extern zstd_safe=/workspace/imre/target/release/deps/libzstd_safe-e7d8c87facebf420.rlib -L native=/workspace/imre/target/release/build/imre-runtime-ae5221875d77539c/out -L native=/workspace/imre/target/release/build/bzip2-sys-921d5357198d961d/out/lib -L native=/workspace/imre/target/release/build/psm-6c96dab3b7f8f3a5/out -L native=/workspace/imre/target/release/build/liblzma-sys-3013c6e9e7f2f9c3/out -L native=/workspace/imre/target/release/build/zstd-sys-b992c6c195263b14/out -l static=imre_errno_headers`
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_CRATE_NAME=imre_compiler CARGO_MANIFEST_DIR=/workspace/imre-public-d26/crates/imre-compiler CARGO_MANIFEST_PATH=/workspace/imre-public-d26/crates/imre-compiler/Cargo.toml CARGO_PKG_AUTHORS='' CARGO_PKG_DESCRIPTION='' CARGO_PKG_HOMEPAGE='' CARGO_PKG_LICENSE='MIT OR Apache-2.0' CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=imre-compiler CARGO_PKG_README='' CARGO_PKG_REPOSITORY='https://github.com/viarius-experiments/imre' CARGO_PKG_RUST_VERSION=1.98 CARGO_PKG_VERSION=0.1.5 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=1 CARGO_PKG_VERSION_PATCH=5 CARGO_PKG_VERSION_PRE='' CARGO_PRIMARY_PACKAGE=1 LD_LIBRARY_PATH=/workspace/imre/target/release/deps OUT_DIR=/workspace/imre/target/release/build/imre-compiler-75360ea7104a41b4/out /workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc --crate-name imre_compiler --edition=2024 crates/imre-compiler/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C opt-level=3 -C embed-bitcode=no -C debuginfo=line-tables-only --deny=unsafe_op_in_unsafe_fn '--deny=clippy::undocumented_unsafe_blocks' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("verify-ir"))' -C metadata=551af7fb1237136f -C extra-filename=-89c32fe8a677d1f0 --out-dir /workspace/imre/target/release/deps -L dependency=/workspace/imre/target/release/deps --extern blake3=/workspace/imre/target/release/deps/libblake3-cc79720cd26611b0.rmeta --extern csv=/workspace/imre/target/release/deps/libcsv-9238a5745789f905.rmeta --extern fancy_regex=/workspace/imre/target/release/deps/libfancy_regex-1cb18bf0eb15c3ea.rmeta --extern imre_ast=/workspace/imre/target/release/deps/libimre_ast-aa56bfd6b24820ba.rmeta --extern imre_regex=/workspace/imre/target/release/deps/libimre_regex-d19dcf2a394485f8.rmeta --extern indexmap=/workspace/imre/target/release/deps/libindexmap-a994156f43def9dd.rmeta --extern libc=/workspace/imre/target/release/deps/liblibc-db20f41e6bb50f5b.rmeta --extern notify=/workspace/imre/target/release/deps/libnotify-d8fcb0d1c5eb4740.rmeta --extern num_bigint=/workspace/imre/target/release/deps/libnum_bigint-d1048ef1c2c761a9.rmeta --extern object=/workspace/imre/target/release/deps/libobject-0a375307a51be8c1.rmeta --extern regex=/workspace/imre/target/release/deps/libregex-46bc484ba16c4a06.rmeta --extern rpds=/workspace/imre/target/release/deps/librpds-4457549af04c0b30.rmeta --extern ruff_db=/workspace/imre/target/release/deps/libruff_db-38f1ac4fb57562e2.rmeta --extern ruff_python_ast=/workspace/imre/target/release/deps/libruff_python_ast-9cf3cc6ce9330ce4.rmeta --extern ruff_python_codegen=/workspace/imre/target/release/deps/libruff_python_codegen-68b6e26437380413.rmeta --extern ruff_python_parser=/workspace/imre/target/release/deps/libruff_python_parser-1c6b5e6fa1548fc9.rmeta --extern ruff_python_stdlib=/workspace/imre/target/release/deps/libruff_python_stdlib-52c69612c93eb5f7.rmeta --extern ruff_python_trivia=/workspace/imre/target/release/deps/libruff_python_trivia-0d2d02108a7298f9.rmeta --extern ruff_source_file=/workspace/imre/target/release/deps/libruff_source_file-3c9a26d366ed9e80.rmeta --extern ruff_text_size=/workspace/imre/target/release/deps/libruff_text_size-9f7329c6f83694b4.rmeta --extern rustix=/workspace/imre/target/release/deps/librustix-49eb529a4df86939.rmeta --extern salsa=/workspace/imre/target/release/deps/libsalsa-03ff288e825ea659.rmeta --extern salsa_macro_rules=/workspace/imre/target/release/deps/libsalsa_macro_rules-aa55a8f0c7204200.rmeta --extern same_file=/workspace/imre/target/release/deps/libsame_file-ea6637c98e74b18d.rmeta --extern serde=/workspace/imre/target/release/deps/libserde-0112b154fb42d42b.rmeta --extern serde_json=/workspace/imre/target/release/deps/libserde_json-88e544b25640c8de.rmeta --extern sha2=/workspace/imre/target/release/deps/libsha2-4201b61397a6dffc.rmeta --extern stacker=/workspace/imre/target/release/deps/libstacker-d112bcc50ed3d510.rmeta --extern tempfile=/workspace/imre/target/release/deps/libtempfile-28ca9820ea7edc03.rmeta --extern ty_module_resolver=/workspace/imre/target/release/deps/libty_module_resolver-ed1663025691d59b.rmeta --extern ty_python_core=/workspace/imre/target/release/deps/libty_python_core-7cfb42f40c3a20b3.rmeta --extern ty_python_semantic=/workspace/imre/target/release/deps/libty_python_semantic-449248b5b5816578.rmeta --extern ty_site_packages=/workspace/imre/target/release/deps/libty_site_packages-9593a26384ca7be9.rmeta --extern ty_vendored=/workspace/imre/target/release/deps/libty_vendored-33633d0672068597.rmeta --extern zip=/workspace/imre/target/release/deps/libzip-8b0f42e4373fdba1.rmeta -L native=/workspace/imre/target/release/build/blake3-391bc6c5f4ebf3fb/out -L native=/workspace/imre/target/release/build/blake3-391bc6c5f4ebf3fb/out -L native=/workspace/imre/target/release/build/psm-6c96dab3b7f8f3a5/out`
+     Running `CARGO=/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo CARGO_BIN_NAME=imre CARGO_CRATE_NAME=imre CARGO_MANIFEST_DIR=/workspace/imre-public-d26/crates/imre-compiler CARGO_MANIFEST_PATH=/workspace/imre-public-d26/crates/imre-compiler/Cargo.toml CARGO_PKG_AUTHORS='' CARGO_PKG_DESCRIPTION='' CARGO_PKG_HOMEPAGE='' CARGO_PKG_LICENSE='MIT OR Apache-2.0' CARGO_PKG_LICENSE_FILE='' CARGO_PKG_NAME=imre-compiler CARGO_PKG_README='' CARGO_PKG_REPOSITORY='https://github.com/viarius-experiments/imre' CARGO_PKG_RUST_VERSION=1.98 CARGO_PKG_VERSION=0.1.5 CARGO_PKG_VERSION_MAJOR=0 CARGO_PKG_VERSION_MINOR=1 CARGO_PKG_VERSION_PATCH=5 CARGO_PKG_VERSION_PRE='' CARGO_PRIMARY_PACKAGE=1 LD_LIBRARY_PATH=/workspace/imre/target/release/deps OUT_DIR=/workspace/imre/target/release/build/imre-compiler-75360ea7104a41b4/out /workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc --crate-name imre --edition=2024 crates/imre-compiler/src/main.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type bin --emit=dep-info,link -C opt-level=3 -C embed-bitcode=no -C debuginfo=line-tables-only --deny=unsafe_op_in_unsafe_fn '--deny=clippy::undocumented_unsafe_blocks' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("verify-ir"))' -C metadata=d6f60b4ca39a0174 -C extra-filename=-d729238f315ff8c1 --out-dir /workspace/imre/target/release/deps -L dependency=/workspace/imre/target/release/deps --extern blake3=/workspace/imre/target/release/deps/libblake3-cc79720cd26611b0.rlib --extern csv=/workspace/imre/target/release/deps/libcsv-9238a5745789f905.rlib --extern fancy_regex=/workspace/imre/target/release/deps/libfancy_regex-1cb18bf0eb15c3ea.rlib --extern imre_ast=/workspace/imre/target/release/deps/libimre_ast-aa56bfd6b24820ba.rlib --extern imre_compiler=/workspace/imre/target/release/deps/libimre_compiler-89c32fe8a677d1f0.rlib --extern imre_regex=/workspace/imre/target/release/deps/libimre_regex-d19dcf2a394485f8.rlib --extern indexmap=/workspace/imre/target/release/deps/libindexmap-a994156f43def9dd.rlib --extern libc=/workspace/imre/target/release/deps/liblibc-db20f41e6bb50f5b.rlib --extern notify=/workspace/imre/target/release/deps/libnotify-d8fcb0d1c5eb4740.rlib --extern num_bigint=/workspace/imre/target/release/deps/libnum_bigint-d1048ef1c2c761a9.rlib --extern object=/workspace/imre/target/release/deps/libobject-0a375307a51be8c1.rlib --extern regex=/workspace/imre/target/release/deps/libregex-46bc484ba16c4a06.rlib --extern rpds=/workspace/imre/target/release/deps/librpds-4457549af04c0b30.rlib --extern ruff_db=/workspace/imre/target/release/deps/libruff_db-38f1ac4fb57562e2.rlib --extern ruff_python_ast=/workspace/imre/target/release/deps/libruff_python_ast-9cf3cc6ce9330ce4.rlib --extern ruff_python_codegen=/workspace/imre/target/release/deps/libruff_python_codegen-68b6e26437380413.rlib --extern ruff_python_parser=/workspace/imre/target/release/deps/libruff_python_parser-1c6b5e6fa1548fc9.rlib --extern ruff_python_stdlib=/workspace/imre/target/release/deps/libruff_python_stdlib-52c69612c93eb5f7.rlib --extern ruff_python_trivia=/workspace/imre/target/release/deps/libruff_python_trivia-0d2d02108a7298f9.rlib --extern ruff_source_file=/workspace/imre/target/release/deps/libruff_source_file-3c9a26d366ed9e80.rlib --extern ruff_text_size=/workspace/imre/target/release/deps/libruff_text_size-9f7329c6f83694b4.rlib --extern rustix=/workspace/imre/target/release/deps/librustix-49eb529a4df86939.rlib --extern salsa=/workspace/imre/target/release/deps/libsalsa-03ff288e825ea659.rlib --extern salsa_macro_rules=/workspace/imre/target/release/deps/libsalsa_macro_rules-aa55a8f0c7204200.rlib --extern same_file=/workspace/imre/target/release/deps/libsame_file-ea6637c98e74b18d.rlib --extern serde=/workspace/imre/target/release/deps/libserde-0112b154fb42d42b.rlib --extern serde_json=/workspace/imre/target/release/deps/libserde_json-88e544b25640c8de.rlib --extern sha2=/workspace/imre/target/release/deps/libsha2-4201b61397a6dffc.rlib --extern stacker=/workspace/imre/target/release/deps/libstacker-d112bcc50ed3d510.rlib --extern tempfile=/workspace/imre/target/release/deps/libtempfile-28ca9820ea7edc03.rlib --extern ty_module_resolver=/workspace/imre/target/release/deps/libty_module_resolver-ed1663025691d59b.rlib --extern ty_python_core=/workspace/imre/target/release/deps/libty_python_core-7cfb42f40c3a20b3.rlib --extern ty_python_semantic=/workspace/imre/target/release/deps/libty_python_semantic-449248b5b5816578.rlib --extern ty_site_packages=/workspace/imre/target/release/deps/libty_site_packages-9593a26384ca7be9.rlib --extern ty_vendored=/workspace/imre/target/release/deps/libty_vendored-33633d0672068597.rlib --extern zip=/workspace/imre/target/release/deps/libzip-8b0f42e4373fdba1.rlib -L native=/workspace/imre/target/release/build/blake3-391bc6c5f4ebf3fb/out -L native=/workspace/imre/target/release/build/blake3-391bc6c5f4ebf3fb/out -L native=/workspace/imre/target/release/build/psm-6c96dab3b7f8f3a5/out`
+    Finished `release` profile [optimized + debuginfo] target(s) in 6m 57s

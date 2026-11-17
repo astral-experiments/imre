@@ -1,0 +1,25 @@
+"""Resume the completed d26 Cargo build; never invokes Cargo."""
+from pathlib import Path
+import hashlib,json,os,shutil,subprocess,sys,traceback
+HERE=Path('/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_replay');sys.path.insert(0,str(HERE));import produce as p;v=p.v
+base=HERE.parent;old=base/'native_d26_v2';out=base/'native_d26_v3';scratch=Path('/workspace/practical-d26-scratch-retry');src=Path('/workspace/imre-public-d26');target=Path('/workspace/imre/target');revision='d26f19448c70c00039c305f105a85c215f820577';pin='eacb0ab16a828c35dd3c86ed627d188fcedad8c7';policy_path='benchmarks/supplemental/practical_workloads/fixture_policy_v1/policy.json';python=Path('/workspace/fixture-policy-private/bin/python3.14');clang=Path('/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang').resolve();cargo=Path('/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo').resolve();rustc=cargo.with_name('rustc');cli=target/'release/imre';runtime=target/'release/libimre_runtime.a';probe=scratch/'raw_control_probe';supervisor=scratch/'supervisor'
+assert not out.exists()
+assert v.sha(cli)=='3ba8589edc6db18ace7eed2ddf3480c5214e4090418a5bcc54d563c4e4bbb087' and v.sha(runtime)=='84a459c2c3dc56120954c29188d095fdcd6fb4d73f3ff8d39229860cd92ca0c3'
+assert v.sha(scratch/'as-built/produce.py')=='cf1d0a00e789446870712670fabec4c6e12890571b6bbed3dd6e7a9705b8bd37' and v.sha(scratch/'as-built/validate_native.py')=='0db84e41ac44073ec4154c6bdf05f8dfd6cbb2fc227fd40e4394293d4a1ee507'
+assert v.git(src,'rev-parse','HEAD').decode().strip()==revision and v.git(src,'status','--porcelain','--untracked-files=all')==b''
+spec=pin+':'+policy_path;data=v.git(base.parents[2],'show',spec);assert v.raw.sha(data)=='1e6049866e848aa52e04d886ef833604d6d4a785cc2286700d047385aa7df8ce';reviewed=v.decode_policy(data)
+os.umask(0o077);out.mkdir();shutil.copy2(old/'build.log',out/'build.log');shutil.copytree(old/'evidence/identity',out/'evidence/identity');env={'CARGO_HOME':'/workspace/.toolchains/cargo','RUSTUP_HOME':'/workspace/.toolchains/rustup','PATH':'/usr/bin:/bin','HOME':'/workspace','RUSTC':str(rustc),'CC':'/usr/bin/cc','TMPDIR':str(scratch/'tmp')}
+b={'pin':revision,'tree':(out/'evidence/identity/tree.raw').read_text().strip(),'compiler':str(cli),'runtime':str(runtime),'cargo':str(cargo),'rustc':str(rustc),'clang':str(clang),'cargo_cc_invocation':'/usr/bin/cc','cargo_cc':str(Path('/usr/bin/cc').resolve()),'python_fixture':str(python.resolve()),'probe':str(probe),'supervisor':str(supervisor),'producer':str(HERE/'produce.py'),'validator':str(HERE/'validate_native.py'),'capture_controller':str(Path(__file__).resolve()),'as_built_producer':str(scratch/'as-built/produce.py'),'as_built_validator':str(scratch/'as-built/validate_native.py'),'fixture_policy':{'commit':pin,'path':policy_path,'blob':'a2aac2f74a0dce1b3f8ef0395d7e1ccb6080fc47','sha256':v.raw.sha(data)},'tmpdir':str(scratch/'tmp'),'manifest_path':str(out/'evidence/build.json'),'cargo_build':{'cwd':str(src),'argv':[str(cargo),'build','--offline','--release','--locked','-vv','-p','imre-compiler','-p','imre-runtime','--target-dir',str(target)],'exit_code':0,'log_sha256':v.sha(out/'build.log'),'environment':env},'depfiles':{}}
+keys=('compiler','runtime','cargo','rustc','clang','cargo_cc','python_fixture','probe','supervisor','producer','validator','capture_controller','as_built_producer','as_built_validator');artifacts=[]
+for key in keys:b[key+'_sha256']=v.sha(b[key]);artifacts.append(b[key])
+for key,artifact in [('compiler',cli),('runtime',runtime)]:dep=out/'evidence/identity'/(key+'.d');b['depfiles'][key]={'path':str(artifact.with_suffix('.d')),'sha256':v.sha(dep)}
+p.write(out/'evidence/build.json',b);artifacts.append(b['manifest_path']);print('RESUMED saved CLI/runtime; beginning cases',flush=True)
+for case,s in v.load(p.STOCK/'sources.json').items():
+ ref=v.load(p.STOCK/'references'/case/'reference.json')
+ for tier in ('O0','O3'):
+  try:
+   p.tier(out,scratch,b,case,tier,s,ref,env,artifacts,reviewed)
+   receipt=v.load(out/'evidence'/case/tier/'receipt.json');print('CASE',case,tier,receipt['status'],receipt.get('reason',''),flush=True)
+  except Exception as e:
+   print('CASE',case,tier,'capture_error',repr(e),flush=True);traceback.print_exc()
+(out/'evidence/identity/artifacts.sha256').write_bytes(subprocess.check_output(['sha256sum',*artifacts]));print('COMPLETE artifact identity',v.sha(out/'evidence/identity/artifacts.sha256'),flush=True)

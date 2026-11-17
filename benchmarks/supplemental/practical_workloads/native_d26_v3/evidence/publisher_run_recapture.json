@@ -1,0 +1,52 @@
+{
+  "bytecode_after": 0,
+  "bytecode_before": 0,
+  "controller": "/workspace/practical-d26-scratch-retry/recapture_publishers.py",
+  "controller_sha256": "6e23eb37ca8d334ac70d181ec4ece8d9247eff94317965a9625d6d620f0c8eb8",
+  "producer": "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_replay/produce.py",
+  "producer_sha256": "cf1d0a00e789446870712670fabec4c6e12890571b6bbed3dd6e7a9705b8bd37",
+  "python_identity": {
+    "argv": [
+      "/workspace/fixture-policy-private/bin/python3.14",
+      "-I",
+      "-B",
+      "-c",
+      "import json,sys; print(json.dumps({\"executable\":sys.executable,\"prefix\":sys.prefix},sort_keys=True))"
+    ],
+    "exit_code": 0,
+    "stdout_sha256": "592965c0dbce14ebd212fb28940254dfdb8de5c07d49fa287da16492d96337c6"
+  },
+  "runs": {
+    "ruff-publisher-O0": {
+      "bytecode_after": 0,
+      "image_sha256": "baa49c337502835dd91af14b3c3621c4be07e916d3b1df601b28b3cc8a327e7d",
+      "status": "observed_exact",
+      "trace_sha256": "dd7c878dc75a77b21a7e0150afe348449d8400c1262df432772080d56b6931ae",
+      "withdrawal_validation": "forbidden descendant Python/archive/libpython probe"
+    },
+    "ruff-publisher-O3": {
+      "bytecode_after": 0,
+      "image_sha256": "34ee2a00180c9d2f64ac908ab3a867c625a1a480a932844a81294a9e33530296",
+      "status": "observed_exact",
+      "trace_sha256": "15f0c12eca2f74bc6042ff702e2f2884c6003e91917172c26b19d1d28c3ab22b",
+      "withdrawal_validation": "forbidden descendant Python/archive/libpython probe"
+    },
+    "uv-publisher-O0": {
+      "bytecode_after": 0,
+      "image_sha256": "2b2fac4806424e985434e9cbe545e34be0ddb248ceddb4720f6e924f6c28432f",
+      "status": "observed_exact",
+      "trace_sha256": "3da812ccbe77c3b049f1dab13d706caa3262e577f4525fe2835921b3b517ac00",
+      "withdrawal_validation": "forbidden descendant Python/archive/libpython probe"
+    },
+    "uv-publisher-O3": {
+      "bytecode_after": 0,
+      "image_sha256": "c9f6d73ba20c227b222c3c4c0125881afd4e13129444d91722b26cfff91f5632",
+      "status": "observed_exact",
+      "trace_sha256": "0d7f0ec6155d6976ca79f979cc7d943da8e9e67b585f96117d325daa3b1dddcf",
+      "withdrawal_validation": "forbidden descendant Python/archive/libpython probe"
+    }
+  },
+  "stdlib_source_count": 25,
+  "validator": "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_replay/validate_native.py",
+  "validator_sha256": "0db84e41ac44073ec4154c6bdf05f8dfd6cbb2fc227fd40e4394293d4a1ee507"
+}

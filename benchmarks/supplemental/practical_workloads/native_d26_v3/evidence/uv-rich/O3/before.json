@@ -1,0 +1,19 @@
+[
+  {
+    "kind": "directory",
+    "mode": "0o700",
+    "path": "home"
+  },
+  {
+    "kind": "directory",
+    "mode": "0o700",
+    "path": "scripts"
+  },
+  {
+    "bytes": 297,
+    "kind": "file",
+    "mode": "0o644",
+    "path": "scripts/uv-run-remote-script-test.py",
+    "sha256": "a479935e4c75c1b31dcd4805b50464ffa8a37e7240acb7c6457a2e4033ae21b0"
+  }
+]

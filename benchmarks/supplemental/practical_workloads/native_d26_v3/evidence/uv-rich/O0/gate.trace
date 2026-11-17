@@ -1,0 +1,32 @@
+18083 execve("/workspace/practical-d26-scratch-retry/raw_control_probe", ["/workspace/practical-d26-scratch-retry/raw_control_probe", "gate", "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.exe.gate", "/workspace/imre/target/release/imre", "build", "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0/scripts/uv-run-remote-script-test.py", "--module-root", "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", "--no-cache", "--opt-level", "0", "--runtime", "/workspace/imre/target/release/libimre_runtime.a", "--clang", "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang", "--extension-path", "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0-external/fixtures/rich-imports.zip", "-o", "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.exe.gate"], 0x7ffdc97453d0 /* 7 vars */) = 0
+18083 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+18083 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+18083 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.exe.gate", 0x7ffc9868e0f0, 0) = -1 ENOENT (No such file or directory)
+18083 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7f21ca898a10) = 18084
+18083 wait4(18084,  <unfinished ...>
+18084 execve("/workspace/imre/target/release/imre", ["/workspace/imre/target/release/imre", "build", "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0/scripts/uv-run-remote-script-test.py", "--module-root", "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", "--no-cache", "--opt-level", "0", "--runtime", "/workspace/imre/target/release/libimre_runtime.a", "--clang", "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang", "--extension-path", "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0-external/fixtures/rich-imports.zip", "-o", "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.exe.gate"], 0x7ffc9868e438 /* 7 vars */) = 0
+18084 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+18084 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3
+18084 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3
+18084 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+18084 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3
+18084 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0-external/fixtures/rich-imports.zip", O_RDONLY|O_CLOEXEC) = 3
+18084 openat2(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0/scripts/uv-run-remote-script-test.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+18084 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0-external/fixtures/rich-imports.zip", O_RDONLY|O_CLOEXEC) = 3
+18084 openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 4
+18084 openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 4
+18084 openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 4
+18084 openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 4
+18084 openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 4
+18084 openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 4
+18084 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 4
+18084 openat2(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0/architecture_control.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 4
+18084 openat2(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0/scripts/uv-run-remote-script-test.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+18084 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0-external/fixtures/rich-imports.zip", O_RDONLY|O_CLOEXEC) = 3
+18084 openat2(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0/architecture_control.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 4
+18084 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 4
+18084 exit_group(1)                     = ?
+18083 <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 1}], 0, NULL) = 18084
+18083 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=18084, si_uid=1000, si_status=1, si_utime=41 /* 0.41 s */, si_stime=16 /* 0.16 s */} ---
+18083 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.exe.gate", 0x7ffc9868e0f0, 0) = -1 ENOENT (No such file or directory)
+18083 exit_group(0)                     = ?

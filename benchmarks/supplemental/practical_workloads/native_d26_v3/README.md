@@ -1,0 +1,7 @@
+# d26 practical workload stage
+
+This stage is uncredited (`strict_credit: 0`). It contains eight selected prospective observations; it does not change historical84 or canonical3. The selected artifact identity SHA256 is `ceafa0a7da1c1b1694f81229055380fc97e16f60ee8b04f505b1f094ce30e0bd`. The source-side activation is `../activations/d26f19448c70c00039c305f105a85c215f820577.json`.
+
+The compiler depfile binds 776 raw-byte-exact tracked inputs, three tracked `text eol=crlf` checkout transforms, and two separately bound generated outputs. The runtime binds 599 raw-byte-exact tracked inputs and five separately bound generated outputs. `evidence/depfile_crlf_proof.json` records raw and canonical digests, Git blob OIDs, attributes, and the deterministic conversion. `controls/check_depfile_crlf.py` verifies that conversion without accepting arbitrary clean filters. The unchanged archived audit controller used Git clean-filter canonical identity for its earlier count. The CRLF proof is a retrospective post-capture derivation, not a contemporaneous measurement. Exact original 7b capture manifests and activation are preserved under `evidence/capture_checkpoint_7b18276/`; `evidence/capture_checkpoint_custody.json` binds that original identity chain separately from the revised activation.
+
+The raw traces omit mutation syscalls such as symlink and unlink, and do not establish directory visibility or adversarial immutability.
