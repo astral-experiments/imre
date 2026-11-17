@@ -132,7 +132,7 @@ Scripts: **0 of 84 original commands have receipts**, **0 verified paired passes
 
 The [stdlib report](docs/stdlib.md) lists every frozen family, including those not run.
 
-A paired pass requires the same original to pass stock, O0 and O3; script passes also require exact exit, stdout, stderr and effect comparisons. Skips, omissions, unsupported diagnostics, exclusions, timeouts and non-stock successes never count. Historical credits come from the [frozen mixed-revision ledger](benchmarks/cpython_stdlib/full/frozen-stock-intersection-8818.tsv) and are separate from the pinned result. [Receipts and replay instructions](benchmarks/compatibility/README.md).
+A paired pass requires the same original to pass stock, O0 and O3; script passes also require independently anchored frozen preimages and reference observations, plus exact exit, stdout, stderr and effect comparisons. Skips, omissions, unsupported diagnostics, exclusions, timeouts and non-stock successes never count. Historical credits come from the [frozen mixed-revision ledger](benchmarks/cpython_stdlib/full/frozen-stock-intersection-8818.tsv) and are separate from the pinned result. [Receipts and replay instructions](benchmarks/compatibility/README.md).
 <!-- compatibility-scorecard:end -->
 
 ### Historical whole-suite runs (mixed revisions)

@@ -67,11 +67,15 @@
               "$ref": "#/$defs/scriptRun"
             }
           }
+        },
+        "fixture_provenance": {
+          "$ref": "#/$defs/fixtureProvenance"
         }
       },
       "required": [
         "normalized_invocation",
-        "comparisons"
+        "comparisons",
+        "fixture_provenance"
       ]
     }
   ],
@@ -161,6 +165,36 @@
         },
         "effects_manifest": {
           "type": "string"
+        },
+        "stdout": {
+          "type": "string"
+        },
+        "stdout_base64": {
+          "type": "string",
+          "contentEncoding": "base64"
+        },
+        "stdout_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "stderr": {
+          "type": "string"
+        },
+        "stderr_base64": {
+          "type": "string",
+          "contentEncoding": "base64"
+        },
+        "stderr_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "effects_manifest_base64": {
+          "type": "string",
+          "contentEncoding": "base64"
+        },
+        "effects_manifest_path": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "allOf": [
@@ -206,8 +240,66 @@
               "exit_code",
               "stdout_sha256",
               "stderr_sha256",
-              "effects_sha256",
-              "effects_manifest"
+              "effects_sha256"
+            ],
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "stdout"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "stdout_base64"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "stdout_path"
+                    ]
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "stderr"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "stderr_base64"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "stderr_path"
+                    ]
+                  }
+                ]
+              },
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "effects_manifest"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "effects_manifest_base64"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "effects_manifest_path"
+                    ]
+                  }
+                ]
+              }
             ]
           }
         }
@@ -386,6 +478,97 @@
           "type": "boolean"
         }
       }
+    },
+    "fixtureProvenance": {
+      "type": "object",
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "exact_frozen",
+            "reconstructed",
+            "unknown"
+          ]
+        },
+        "preimages": {
+          "type": "object",
+          "properties": {
+            "stock": {
+              "type": "object",
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "O0": {
+              "type": "object",
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "O3": {
+              "type": "object",
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "exact_frozen"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "preimages"
+            ],
+            "properties": {
+              "preimages": {
+                "required": [
+                  "stock",
+                  "O0",
+                  "O3"
+                ]
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }

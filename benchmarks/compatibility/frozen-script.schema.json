@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "imre.compatibility.frozen-script.v1",
+  "title": "Independently reviewed frozen original-command anchor",
+  "type": "object",
+  "required": [
+    "schema",
+    "id",
+    "source",
+    "normalized_invocation",
+    "evidence"
+  ],
+  "properties": {
+    "schema": {
+      "const": "imre.compatibility.frozen-script.v1"
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "repo",
+        "commit",
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "repo": {
+          "type": "string"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "git_blob": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        }
+      }
+    },
+    "normalized_invocation": {
+      "type": "object",
+      "required": [
+        "cwd",
+        "argv",
+        "env"
+      ],
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "argv": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "required": [
+        "locator",
+        "raw_sha256"
+      ],
+      "properties": {
+        "locator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "raw": {
+          "type": "string"
+        },
+        "raw_base64": {
+          "type": "string",
+          "contentEncoding": "base64"
+        },
+        "raw_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "raw_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "raw"
+          ]
+        },
+        {
+          "required": [
+            "raw_base64"
+          ]
+        },
+        {
+          "required": [
+            "raw_path"
+          ]
+        }
+      ]
+    }
+  }
+}
