@@ -1,0 +1,17 @@
+IMRE_UNITTEST {"event": "collection", "count": 5}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_default.TestCDefault.test_default"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_default.TestCDefault.test_ordereddict"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_default.TestPyDefault.test_bad_default"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_default.TestPyDefault.test_default"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_default.TestPyDefault.test_ordereddict"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_default.TestCDefault.test_default"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_default.TestCDefault.test_default", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_default.TestCDefault.test_ordereddict"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_default.TestCDefault.test_ordereddict", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_default.TestPyDefault.test_bad_default"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_default.TestPyDefault.test_bad_default", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_default.TestPyDefault.test_default"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_default.TestPyDefault.test_default", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_default.TestPyDefault.test_ordereddict"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_default.TestPyDefault.test_ordereddict", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "summary", "run": 5, "successful": true}
