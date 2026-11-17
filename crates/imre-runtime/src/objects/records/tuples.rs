@@ -202,19 +202,20 @@ pub unsafe extern "C" fn imre_tuple_len(tuple: *const usize) -> usize {
     Int::from_usize(unsafe { descriptor(tuple) }.length).into_raw()
 }
 
-/// Borrow the flat tagged words of an exact homogeneous integer tuple.
+/// Borrow the flat tagged words of a homogeneous native tuple-compatible record.
 ///
 /// # Safety
-/// The caller roots an initialized exact tuple whose every field is a canonical integer.
+/// The caller roots an initialized native tuple or namedtuple record whose every visible field
+/// is a canonical integer and whose descriptor length matches the initialized payload.
 unsafe fn int_tuple_fields<'a>(tuple: *const usize) -> &'a [Int] {
     // SAFETY: integer record fields have the same transparent word layout as Int.
     unsafe { std::slice::from_raw_parts(tuple.cast::<Int>(), descriptor(tuple).length) }
 }
 
-/// Find the left insertion point in an exact integer tuple.
+/// Find the left insertion point in a native integer tuple-compatible record.
 ///
 /// # Safety
-/// The caller roots the homogeneous tuple and the canonical integer needle.
+/// The caller roots the homogeneous tuple-compatible record and the canonical integer needle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_tuple_bisect_left(tuple: *const usize, needle: usize) -> usize {
     // SAFETY: exact integer comparison neither invokes user code nor mutates the rooted tuple.
@@ -223,10 +224,10 @@ pub unsafe extern "C" fn imre_tuple_bisect_left(tuple: *const usize, needle: usi
     (index << 1) | 1
 }
 
-/// Find the right insertion point in an exact integer tuple.
+/// Find the right insertion point in a native integer tuple-compatible record.
 ///
 /// # Safety
-/// The caller roots the homogeneous tuple and the canonical integer needle.
+/// The caller roots the homogeneous tuple-compatible record and the canonical integer needle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_tuple_bisect_right(tuple: *const usize, needle: usize) -> usize {
     // SAFETY: exact integer comparison neither invokes user code nor mutates the rooted tuple.
@@ -254,10 +255,10 @@ unsafe fn tuple_bisect_bounds<const LEFT: bool>(
     }
 }
 
-/// Search a bounded exact integer tuple using the left insertion rule.
+/// Search a bounded native integer tuple-compatible record using the left insertion rule.
 ///
 /// # Safety
-/// The caller roots the homogeneous tuple and all three canonical integer words.
+/// The caller roots the homogeneous tuple-compatible record and all three canonical integer words.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_tuple_bisect_left_bounds(
     tuple: *const usize,
@@ -272,10 +273,10 @@ pub unsafe extern "C" fn imre_tuple_bisect_left_bounds(
     )
 }
 
-/// Search a bounded exact integer tuple using the right insertion rule.
+/// Search a bounded native integer tuple-compatible record using the right insertion rule.
 ///
 /// # Safety
-/// The caller roots the homogeneous tuple and all three canonical integer words.
+/// The caller roots the homogeneous tuple-compatible record and all three canonical integer words.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_tuple_bisect_right_bounds(
     tuple: *const usize,
