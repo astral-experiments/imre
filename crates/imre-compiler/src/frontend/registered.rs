@@ -479,8 +479,7 @@ pub(super) fn retain_generator(
 }
 
 /// Check queued declarations through the same independent source checker used during inference.
-pub(super) fn finish_source_checks(graph: &mut SourceGraph, mut checks: SourceChecks) -> bool {
-    let mut retry_fixed = false;
+pub(super) fn finish_source_checks(graph: &SourceGraph, mut checks: SourceChecks) {
     for ((module, range), source) in checks
         .solved
         .take()
@@ -488,7 +487,6 @@ pub(super) fn finish_source_checks(graph: &mut SourceGraph, mut checks: SourceCh
         .flat_map(std::cell::RefCell::into_inner)
     {
         if !checks.accepts(graph, module, range) {
-            retry_fixed |= matches!(source, SourceFrame::ReplacesFixed);
             graph.defer_registered_function(
                 module,
                 range.start(),
@@ -502,7 +500,6 @@ pub(super) fn finish_source_checks(graph: &mut SourceGraph, mut checks: SourceCh
     for &owner in &checks.unresolved {
         let _ = retain_generator(graph, owner, &checks);
     }
-    retry_fixed
 }
 
 pub(super) fn function_source(graph: &SourceGraph, id: ModuleId) -> RegisteredSource<'_> {
@@ -602,7 +599,7 @@ pub(super) fn place_checked_definition(
         locals: frame.locals.clone(),
         body: Vec::new(),
     };
-    placement.place(original.graph, &inference.source_checks);
+    placement.place(original.graph);
     Some(Ok((LoweredBody { function, facts }, HashMap::new())))
 }
 
@@ -610,41 +607,23 @@ pub(super) struct CheckedPlacement {
     module: ModuleId,
     range: TextRange,
     frame: RegisteredFunction,
-    check_source: bool,
 }
 
 impl CheckedPlacement {
-    pub(super) fn retain_for_launch(
-        self,
-        graph: &SourceGraph,
-        checks: &SourceChecks,
-        final_definition: bool,
-    ) -> bool {
-        if !self.check_source || checks.accepts(graph, self.module, self.range) {
-            let start = self.range.start();
-            let publish = if final_definition
-                && matches!(self.frame.inputs, FrameInputs::Protocol { .. })
-                && !graph.has_registered_function(self.module, start)
-            {
-                SourceGraph::register_function
-            } else {
-                SourceGraph::retain_lexical_function
-            };
-            publish(graph, self.module, start, self.frame);
-            true
+    pub(super) fn retain_for_launch(self, graph: &SourceGraph, final_definition: bool) {
+        let start = self.range.start();
+        let publish = if final_definition
+            && matches!(self.frame.inputs, FrameInputs::Protocol { .. })
+            && !graph.has_registered_function(self.module, start)
+        {
+            SourceGraph::register_function
         } else {
-            false
-        }
+            SourceGraph::retain_lexical_function
+        };
+        publish(graph, self.module, start, self.frame);
     }
 
-    pub(super) fn place(self, graph: &SourceGraph, checks: &SourceChecks) {
-        if self.check_source
-            && let Some(solved) = &checks.solved
-        {
-            solved
-                .borrow_mut()
-                .insert((self.module, self.range), SourceFrame::ReplacesFixed);
-        }
+    pub(super) fn place(self, graph: &SourceGraph) {
         graph.register_function(self.module, self.range.start(), self.frame);
     }
 }
@@ -665,7 +644,7 @@ pub(super) fn prepare_checked_definition(
         return Ok(None);
     }
     // A settled signature can use the source check that already owns this module.
-    let deferred = checks.solved.as_ref().filter(|_| contract.is_none());
+    let provisional = checks.solved.as_ref().filter(|_| contract.is_none());
     let helpers = Helpers::new(inference.len());
     let values = ModuleValues::default();
     let mut checker = Checker::new(
@@ -688,7 +667,7 @@ pub(super) fn prepare_checked_definition(
         checker.inference = original.inference;
         if live {
             checker.frame_arguments = original.frame_arguments;
-        } else if deferred.is_some() || original.frame_arguments == FrameArguments::Pending {
+        } else if provisional.is_some() || original.frame_arguments == FrameArguments::Pending {
             // A provisional launch frame still needs to bind live arguments after admission.
             checker.frame_arguments = FrameArguments::Pending;
         }
@@ -724,10 +703,7 @@ pub(super) fn prepare_checked_definition(
     let Some((facts, frame)) = placed else {
         return Ok(None);
     };
-    if deferred.is_none()
-        && contract.is_none()
-        && !checks.accepts(graph, module, definition.range())
-    {
+    if contract.is_none() && !checks.accepts(graph, module, definition.range()) {
         return Ok(None);
     }
     let erased = frame.function.returns == Type::PythonObject
@@ -737,7 +713,6 @@ pub(super) fn prepare_checked_definition(
         module,
         range: definition.range(),
         frame,
-        check_source: deferred.is_some(),
     };
     if erased && let ReturnCheck::AfterFixed(after_fixed) = result {
         *after_fixed = Some(placement);
@@ -816,8 +791,6 @@ fn checked_definition(
 pub(super) enum SourceFrame {
     Fixed,
     Registered,
-    /// This body also supplied the result of checking the original definition.
-    ReplacesFixed,
 }
 
 /// A registered body can supply an unresolved calling convention only if its other

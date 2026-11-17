@@ -1364,7 +1364,7 @@ impl Inference {
                     else {
                         return Ok(false);
                     };
-                    placement.place(graph, &self.source_checks);
+                    placement.place(graph);
                     Ok(true)
                 };
                 let mut lexical = None;
@@ -1415,7 +1415,7 @@ impl Inference {
                                 .filter(|(body, _)| body.calls.is_empty() && !body.cannot_return)
                                 .is_some_and(|(body, placement)| {
                                     if body.python_call_result {
-                                        placement.place(graph, &self.source_checks);
+                                        placement.place(graph);
                                         true
                                     } else {
                                         lexical = Some(placement);
@@ -1805,7 +1805,7 @@ impl Inference {
                     {
                         for (id, placement) in checked_callers {
                             checked_bodies.insert(id);
-                            placement.place(graph, &self.source_checks);
+                            placement.place(graph);
                         }
                     }
                     break fixed_dependencies;
@@ -2019,7 +2019,7 @@ impl Inference {
             }
             match body {
                 PreparedBody::Python(frame) if !graph.registered_startup => {
-                    frame.retain_for_launch(graph, &self.source_checks, false);
+                    frame.retain_for_launch(graph, false);
                 }
                 body => {
                     local_returns.insert(id, body);

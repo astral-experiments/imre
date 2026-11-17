@@ -704,10 +704,7 @@ pub(crate) fn lower_with_caller_cache(
         if let Some(lowered) = lowered.transpose()
             && key_reprs.len() == before
         {
-            if registered::finish_source_checks(graph, checks) {
-                // The cached refusal makes this definition use its original checked body.
-                continue;
-            }
+            registered::finish_source_checks(graph, checks);
             return lowered;
         }
         // Only the typed subscript knows the key's class. Include its missing
@@ -1818,7 +1815,7 @@ fn lower_graph(
                 },
             ) {
                 Ok(Some((_, placement))) => {
-                    placement.place(graph, &inference.source_checks);
+                    placement.place(graph);
                     continue;
                 }
                 Err(failure) if !failure.is_representation() => {
@@ -1952,13 +1949,8 @@ fn lower_graph(
                             registered::ReturnCheck::Declared,
                         )
                         .ok()??;
-                        frame
-                            .retain_for_launch(
-                                graph,
-                                &inference.source_checks,
-                                independent && !facts.needs_fixed_callee,
-                            )
-                            .then_some(facts.calls)
+                        frame.retain_for_launch(graph, independent && !facts.needs_fixed_callee);
+                        Some(facts.calls)
                     };
                     let collect_calls = recovering
                         && !graph.has_registered_function(*module_id, definition.start());
@@ -2857,9 +2849,9 @@ fn lower_function(
         }
     };
     if failure.is_none()
-        && let (Some(frame), Some(inference)) = (after_fixed, placement)
+        && let Some(frame) = after_fixed
     {
-        frame.retain_for_launch(checker.graph, &inference.source_checks, true);
+        frame.retain_for_launch(checker.graph, true);
     }
     let mut source = None;
     if let Some(names) = registered_locals {
@@ -17141,7 +17133,7 @@ print(get_indent("  source"))
         graph.registered_startup = true;
         graph.session.use_registered_body_rules();
         let (_, checks) = super::lower_current(&graph, None, None, true);
-        assert!(!super::registered::finish_source_checks(&mut graph, checks));
+        super::registered::finish_source_checks(&mut graph, checks);
     }
 
     #[test]
