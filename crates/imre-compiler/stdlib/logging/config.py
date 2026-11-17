@@ -105,6 +105,29 @@ def _resolve(name):
             found = getattr(found, n)
     return found
 
+def _resolve_handler(name):
+    """Look up a handler in logging, or resolve an absolute qualified name."""
+    namespace = vars(logging)
+    if name in namespace:
+        return namespace[name]
+    if name.split('.', 1)[0] in namespace:
+        name = 'logging.' + name
+    return _resolve(name)
+
+
+def _literal_config_value(text, section, option):
+    """Read fileConfig data without executing configuration expressions."""
+    from ast import literal_eval
+
+    try:
+        return literal_eval(text)
+    except ValueError as exc:
+        raise ValueError(
+            f'{section}.{option} requires Python literal data; '
+            'rewrite dynamic values using dictConfig'
+        ) from exc
+
+
 def _strip_spaces(alist):
     return map(str.strip, alist)
 
@@ -129,7 +152,7 @@ def _create_formatters(cp):
             c = _resolve(class_name)
 
         if defaults is not None:
-            defaults = eval(defaults, vars(logging))
+            defaults = _literal_config_value(defaults, sectname, "defaults")
             f = c(fs, dfs, stl, defaults=defaults)
         else:
             f = c(fs, dfs, stl)
@@ -148,16 +171,11 @@ def _install_handlers(cp, formatters):
     fixups = [] #for inter-handler references
     for hand in hlist:
         section = cp["handler_%s" % hand]
-        klass = section["class"]
+        klass = _resolve_handler(section["class"])
         fmt = section.get("formatter", "")
-        try:
-            klass = eval(klass, vars(logging))
-        except (AttributeError, NameError):
-            klass = _resolve(klass)
-        args = section.get("args", '()')
-        args = eval(args, vars(logging))
-        kwargs = section.get("kwargs", '{}')
-        kwargs = eval(kwargs, vars(logging))
+        sectname = "handler_%s" % hand
+        args = _literal_config_value(section.get("args", '()'), sectname, "args")
+        kwargs = _literal_config_value(section.get("kwargs", '{}'), sectname, "kwargs")
         h = klass(*args, **kwargs)
         h.name = hand
         if "level" in section:

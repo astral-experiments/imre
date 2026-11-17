@@ -1024,6 +1024,44 @@ struct SourceInfo<'a> {
     text: Cow<'a, str>,
 }
 
+#[cfg(test)]
+thread_local! {
+    static EVAL_PREPARATIONS: std::cell::RefCell<Option<(String, Vec<i32>)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// One checked literal expression, prepared with its source unit's Python optimization.
+pub(crate) struct PreparedEval {
+    text: String,
+    body: crate::frontend::AnnotationBody<Box<SourceInfo<'static>>>,
+}
+
+impl PreparedEval {
+    /// Parse and check one expression using the optimization of its owning source unit.
+    pub(crate) fn new(text: &str, optimization: i32) -> Result<Self, String> {
+        #[cfg(test)]
+        EVAL_PREPARATIONS.with_borrow_mut(|tracked| {
+            if let Some((target, modes)) = tracked
+                && target == text
+            {
+                modes.push(optimization);
+            }
+        });
+        crate::analysis::check_source_complexity(text).map_err(str::to_owned)?;
+        let parsed = ruff_python_parser::parse_expression(text)
+            .map_err(|error| format!("SyntaxError: {error}"))?;
+        let body = PreparedBody::prepare_annotation(text, &parsed, optimization)
+            .ok_or_else(|| "cannot compile this eval expression ahead of time".to_owned())?;
+        Ok(Self {
+            text: text.to_owned(),
+            body,
+        })
+    }
+
+    pub(super) fn text(&self) -> &str {
+        &self.text
+    }
+}
+
 impl SourceInfo<'_> {
     fn literal_diagnostic(&self, site: TextSize, reason: &str) -> String {
         crate::frontend::phase::Diagnostic::at(&self.text, &TextRange::empty(site), reason)
@@ -1323,7 +1361,7 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
         for child in children {
             let path = match &child {
                 LiteralBody::Suite(child) => child.file.as_deref(),
-                LiteralBody::Expression(_) => None,
+                LiteralBody::Expression(_, _) => None,
             };
             let file = match path {
                 Some(path) => output.data(path.as_os_str().as_encoded_bytes()),
@@ -1346,15 +1384,17 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
                         false,
                     )
                 }
-                LiteralBody::Expression(text) => {
-                    crate::analysis::check_source_complexity(text).ok()?;
-                    let parsed = ruff_python_parser::parse_expression(text).ok()?;
-                    let body = PreparedBody::prepare_annotation(
-                        text,
-                        &parsed,
-                        self.source.python_optimization,
-                    )?;
-                    let code = body.emit(output, self.source.unit, &file);
+                LiteralBody::Expression(text, checked) => {
+                    let fallback;
+                    let checked = match checked {
+                        Some(checked) => checked,
+                        None => {
+                            fallback =
+                                PreparedEval::new(text, self.source.python_optimization).ok()?;
+                            &fallback
+                        }
+                    };
+                    let code = checked.body.emit(output, self.source.unit, &file);
                     (code, text, self.source.future_flags, true)
                 }
             };
@@ -1837,6 +1877,64 @@ mod tests {
     use super::*;
     use crate::frontend::{FrameArguments, NamedBody};
     use crate::llvm::registered::permanent;
+
+    #[test]
+    fn selected_eval_uses_one_entry_from_the_optimized_source_unit() {
+        let directory = tempfile::tempdir().unwrap();
+        let entry = directory.path().join("main.py");
+        let text = "__debug__";
+        std::fs::write(
+            &entry,
+            format!("builtin_eval = eval\neval = builtin_eval\nprint(eval({text:?}))\n"),
+        )
+        .unwrap();
+        let options = crate::CompileOptions {
+            script_startup: Some((
+                crate::CommandFlags {
+                    optimize: 1,
+                    ..Default::default()
+                },
+                "imre".into(),
+            )),
+            ..Default::default()
+        };
+        EVAL_PREPARATIONS.with_borrow_mut(|tracked| *tracked = Some((text.to_owned(), Vec::new())));
+        let result = crate::compile_file(&entry, None, &options);
+        let modes = EVAL_PREPARATIONS.with_borrow_mut(|tracked| tracked.take().unwrap().1);
+        result.unwrap();
+        assert_eq!(
+            modes,
+            [1],
+            "checking and emission must share the unit's one optimized entry"
+        );
+
+        let large = vec!["1"; 129].join("+");
+        std::fs::write(&entry, format!("import sys\nbuiltin_eval = eval\ndef custom(text): return text\nif len(sys.argv) > 1:\n    eval = builtin_eval\nelse:\n    eval = custom\nprint(eval({large:?}))\n")).unwrap();
+        let error = crate::check_file(&entry, None).unwrap_err();
+        assert!(
+            error.contains("main.py:8:12") && error.contains("builtins.eval entry"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn mixed_eval_exec_union_rejects_in_either_branch_order() {
+        let directory = tempfile::tempdir().unwrap();
+        let entry = directory.path().join("main.py");
+        for (first, second) in [
+            ("builtin_eval", "builtin_exec"),
+            ("builtin_exec", "builtin_eval"),
+        ] {
+            std::fs::write(&entry, format!("import sys\nbuiltin_eval = eval\nbuiltin_exec = exec\nif len(sys.argv) > 1:\n    eval = {first}\nelse:\n    eval = {second}\neval(\"print(42)\")\n")).unwrap();
+            let error = crate::check_file(&entry, None).unwrap_err();
+            assert!(
+                error.contains("main.py:8:1")
+                    && error.contains("both builtins.eval and builtins.exec")
+                    && error.contains("separate the branches"),
+                "{error}"
+            );
+        }
+    }
 
     #[test]
     fn ordinary_doctest_suites_place_owned_inputs_and_keep_the_fixed_runner() {

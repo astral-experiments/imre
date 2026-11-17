@@ -71,6 +71,24 @@ impl ExecutionIntrinsic {
         }
     }
 
+    /// Detect a callable that can select both builtin execution modes. A single
+    /// literal site cannot own both an expression entry and a suite entry.
+    fn mixed_modes(model: &SemanticModel<'_>, expression: &Expr) -> bool {
+        let Some(Type::Union(union)) = expression.inferred_type(model) else {
+            return false;
+        };
+        let mut exec = false;
+        let mut eval = false;
+        for ty in union.elements(model.db()) {
+            match Self::from_type(model, *ty) {
+                Some(Self::Exec) => exec = true,
+                Some(Self::Eval) => eval = true,
+                None => {}
+            }
+        }
+        exec && eval
+    }
+
     pub(super) fn escape_message(self) -> String {
         format!(
             "this argument may select builtins.{} and the consumer can execute unlinked source. Pass a named Python function, or select one from a table of functions.",
@@ -168,6 +186,7 @@ struct Escape<'a, 'db> {
     session: &'db Session,
     open_providers: &'a [File],
     linked_exec: Option<&'a std::collections::HashSet<TextRange>>,
+    literal_unit: Option<crate::dynamic::literal::LiteralUnit<'a>>,
     path: &'a Path,
     first: Option<ExecutionRequirement>,
     captured: FunctionImports,
@@ -842,6 +861,35 @@ impl<'a> Escape<'a, '_> {
         if self.first.is_some() {
             return;
         }
+        if source_callable.is_some() && ExecutionIntrinsic::mixed_modes(self.model, &call.func) {
+            self.first = Some(self.required(
+                SourceCallable::SelectedBuiltin,
+                call.func.range(),
+                "this callable may select both builtins.eval and builtins.exec, which require different compiled source entries; call eval or exec directly, or separate the branches".to_owned(),
+            ));
+            return;
+        }
+        if source_callable == Some(SourceCallable::Builtin(ExecutionIntrinsic::Eval))
+            && call
+                .func
+                .as_name_expr()
+                .is_some_and(|name| name.id == "eval")
+            && let Some(Expr::StringLiteral(literal)) = call.arguments.args.first()
+            && let Some(unit) = self.literal_unit
+        {
+            let outer = ruff_db::source::source_text(self.model.db(), self.model.file());
+            let result = crate::frontend::exec_literal_text(literal, outer.as_str())
+                .map_err(str::to_owned)
+                .and_then(|text| unit.prepare_eval(call.range(), text));
+            if let Err(reason) = result {
+                self.first = Some(self.required(
+                    SourceCallable::Builtin(ExecutionIntrinsic::Eval),
+                    literal.range(),
+                    format!("cannot prepare a checked builtins.eval entry: {reason}"),
+                ));
+                return;
+            }
+        }
         if let Some(source_callable) = source_callable
             && let Some(operand) = call.arguments.args.first()
             && !(source_callable == SourceCallable::Builtin(ExecutionIntrinsic::Eval)
@@ -1357,6 +1405,7 @@ impl Session {
             session: self,
             open_providers: &[],
             linked_exec: None,
+            literal_unit: None,
             path,
             first: None,
             captured: Default::default(),
@@ -1477,7 +1526,7 @@ impl Session {
         sources: impl Iterator<Item = (usize, &'a std::path::Path)> + Clone,
     ) -> Result<(), String> {
         self.check_execution_with_imports(
-            sources.map(|(id, path)| (id, path, false, None)),
+            sources.map(|(id, path)| (id, path, false, None, None)),
             CapturedImports::default(),
         )
     }
@@ -1490,15 +1539,16 @@ impl Session {
                 &'a Path,
                 bool,
                 Option<&'a std::collections::HashSet<TextRange>>,
+                Option<crate::dynamic::literal::LiteralUnit<'a>>,
             ),
         > + Clone,
         mut captures: CapturedImports,
     ) -> Result<(), String> {
         let open_providers: Vec<_> = sources
             .clone()
-            .filter_map(|(id, _, open, _)| open.then_some(self.files[id]))
+            .filter_map(|(id, _, open, _, _)| open.then_some(self.files[id]))
             .collect();
-        for (index, path, _, linked_exec) in sources {
+        for (index, path, _, linked_exec, literal_unit) in sources {
             let file = self.files[index];
             if path.extension().is_some_and(|extension| extension == "pyi") {
                 continue;
@@ -1509,6 +1559,7 @@ impl Session {
             let mut visitor = self.execution_visitor(path, &parsed, &model);
             visitor.open_providers = &open_providers;
             visitor.linked_exec = linked_exec;
+            visitor.literal_unit = literal_unit;
             let mut body = parsed.suite().as_slice();
             if let Some(imports) = captures.remove(&index) {
                 if let Some(stop) = imports.stop {

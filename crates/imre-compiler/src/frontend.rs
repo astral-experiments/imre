@@ -1666,7 +1666,7 @@ fn lower_graph(
                                 crate::analysis::EagerDisplays::Excluded,
                                 |_| true,
                                 |_| false,
-                                |name| fields.contains(name),
+                                |field| field.is_some_and(|name| fields.contains(name)),
                             )
                         }) =>
                 {

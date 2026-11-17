@@ -8,7 +8,7 @@ use ruff_python_ast::visitor::Visitor;
 use ruff_text_size::{TextRange, TextSize};
 
 use super::Imports;
-use super::emit::{ModuleOrigin, PreparedBody};
+use super::emit::{ModuleOrigin, PreparedBody, PreparedEval};
 use crate::analysis::Session;
 use crate::frontend::module_source::ParsedModule;
 
@@ -30,7 +30,7 @@ pub(crate) struct LiteralCandidate {
 /// The selected source is either a prepared suite or a checked literal expression.
 pub(super) enum LiteralBody<'a> {
     Suite(&'a PreparedLiteral),
-    Expression(&'a str),
+    Expression(&'a str, Option<&'a PreparedEval>),
 }
 
 pub(super) struct PreparedLiteral {
@@ -42,9 +42,45 @@ pub(super) struct PreparedLiteral {
 
 /// One source slot's checked operands. Different modules named "<string>" have
 /// independent tables, and a live rebinding still receives the original string.
+enum LiteralEntry {
+    Suites(Vec<PreparedLiteral>),
+    Expression(PreparedEval),
+}
+
 #[derive(Default)]
 pub(crate) struct LiteralSites {
-    sites: HashMap<TextRange, Result<Vec<PreparedLiteral>, (TextSize, String)>>,
+    sites: HashMap<TextRange, Result<LiteralEntry, (TextSize, String)>>,
+}
+
+/// The source unit's literal records and actual Python optimization during checking.
+#[derive(Clone, Copy)]
+pub(crate) struct LiteralUnit<'a> {
+    pub(crate) sites: &'a std::cell::RefCell<BTreeMap<usize, LiteralSites>>,
+    pub(crate) unit: usize,
+    pub(crate) optimization: i32,
+}
+
+impl LiteralUnit<'_> {
+    /// Prepare a selected eval expression once without displacing a suite or refusal.
+    pub(crate) fn prepare_eval(self, site: TextRange, text: &str) -> Result<(), String> {
+        let mut units = self.sites.borrow_mut();
+        let sites = &mut units.entry(self.unit).or_default().sites;
+        if let Some(existing) = sites.get(&site) {
+            return match existing {
+                Ok(LiteralEntry::Expression(entry)) if entry.text() == text => Ok(()),
+                Ok(LiteralEntry::Expression(_)) => {
+                    Err("literal source changed during checking".into())
+                }
+                Ok(LiteralEntry::Suites(_)) => {
+                    Err("this site already owns a compiled source suite".into())
+                }
+                Err((_, reason)) => Err(reason.clone()),
+            };
+        }
+        let entry = PreparedEval::new(text, self.optimization)?;
+        sites.insert(site, Ok(LiteralEntry::Expression(entry)));
+        Ok(())
+    }
 }
 
 impl LiteralSites {
@@ -54,25 +90,28 @@ impl LiteralSites {
         site: TextRange,
         expression: Option<&'a str>,
     ) -> Option<Result<impl Iterator<Item = LiteralBody<'a>>, (TextSize, &'a str)>> {
-        let (suites, expression) = match self.sites.get(&site) {
-            Some(Ok(suites)) => (suites.as_slice(), None),
+        let (suites, expression, checked) = match self.sites.get(&site) {
+            Some(Ok(LiteralEntry::Suites(suites))) => (suites.as_slice(), None, None),
+            Some(Ok(LiteralEntry::Expression(entry))) => {
+                let text = expression.filter(|text| *text == entry.text())?;
+                (&[][..], Some(text), Some(entry))
+            }
             Some(Err((operand, reason))) => return Some(Err((*operand, reason.as_str()))),
-            None => (&[][..], Some(expression?)),
+            None => (&[][..], Some(expression?), None),
         };
-        Some(Ok(suites
-            .iter()
-            .map(LiteralBody::Suite)
-            .chain(expression.map(LiteralBody::Expression))))
+        Some(Ok(suites.iter().map(LiteralBody::Suite).chain(
+            expression.map(|text| LiteralBody::Expression(text, checked)),
+        )))
     }
 
     fn insert(&mut self, site: LiteralSite, body: Result<PreparedLiteral, String>) {
         match body {
             Ok(mut body) => {
                 body.file = site.file;
-                if let Ok(bodies) = self
+                if let Ok(LiteralEntry::Suites(bodies)) = self
                     .sites
                     .entry(site.call)
-                    .or_insert_with(|| Ok(Vec::new()))
+                    .or_insert_with(|| Ok(LiteralEntry::Suites(Vec::new())))
                 {
                     bodies.push(body);
                 }
@@ -285,5 +324,45 @@ impl LiteralForest {
             self.table(node.parent).insert(node.site, module);
         }
         self.roots
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eval_preserves_an_existing_suite_or_refusal() {
+        let units = std::cell::RefCell::new(BTreeMap::new());
+        let site = TextRange::new(0.into(), 1.into());
+        let unit = LiteralUnit {
+            sites: &units,
+            unit: 0,
+            optimization: 0,
+        };
+        units
+            .borrow_mut()
+            .entry(0)
+            .or_default()
+            .sites
+            .insert(site, Ok(LiteralEntry::Suites(Vec::new())));
+        assert!(unit.prepare_eval(site, "1").is_err());
+        assert!(matches!(
+            units.borrow()[&0].sites.get(&site),
+            Some(Ok(LiteralEntry::Suites(_)))
+        ));
+        units
+            .borrow_mut()
+            .get_mut(&0)
+            .unwrap()
+            .sites
+            .insert(site, Err((0.into(), "original refusal".into())));
+        assert_eq!(
+            unit.prepare_eval(site, "1").unwrap_err(),
+            "original refusal"
+        );
+        assert!(
+            matches!(units.borrow()[&0].sites.get(&site), Some(Err((_, reason))) if reason == "original refusal")
+        );
     }
 }

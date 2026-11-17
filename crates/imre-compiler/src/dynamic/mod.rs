@@ -1106,6 +1106,7 @@ pub(crate) enum EntryStart<'a> {
 pub(crate) struct RegisteredSource<'a> {
     pub(crate) has_open_exec: bool,
     pub(crate) linked_exec: Option<&'a HashSet<TextRange>>,
+    pub(crate) literal_unit: Option<literal::LiteralUnit<'a>>,
     pub(crate) unit: Option<usize>,
     /// The first application initializer and its selected startup predecessor, if any.
     pub(crate) initial: Option<EntryStart<'a>>,
@@ -1156,6 +1157,7 @@ impl<'a> RegisteredSource<'a> {
         Self {
             has_open_exec: false,
             linked_exec: None,
+            literal_unit: None,
             unit: None,
             name,
             path,
@@ -2843,20 +2845,21 @@ pub(crate) fn compile(
     }
     drop(wheel_records);
     // A nested literal belongs to the same source slot as its outermost caller.
-    let literal_sites = syntax.as_ref().map_or_else(Default::default, |session| {
-        literals
-            .forest
-            .finish(session, python_optimization, |unit| {
-                let (name, path, _) = if unit < sources.len() {
-                    &sources[unit]
-                } else {
-                    &builtins[unit - sources.len()]
-                };
-                registrations
-                    .provider_origin(unit, path.starts_with(bundled_root))
-                    .is_some_and(|origin| origin.python_annotations(name))
-            })
-    });
+    let literal_sites =
+        std::cell::RefCell::new(syntax.as_ref().map_or_else(Default::default, |session| {
+            literals
+                .forest
+                .finish(session, python_optimization, |unit| {
+                    let (name, path, _) = if unit < sources.len() {
+                        &sources[unit]
+                    } else {
+                        &builtins[unit - sources.len()]
+                    };
+                    registrations
+                        .provider_origin(unit, path.starts_with(bundled_root))
+                        .is_some_and(|origin| origin.python_annotations(name))
+                })
+        }));
     let sdk_runpy = sources
         .iter()
         .any(|(name, path, _)| name == "runpy" && path.starts_with(bundled_root))
@@ -2924,6 +2927,11 @@ pub(crate) fn compile(
             }
             registration.has_open_exec = literals.open_exec.contains(&id);
             registration.linked_exec = literals.linked_exec.get(&id);
+            registration.literal_unit = Some(literal::LiteralUnit {
+                sites: &literal_sites,
+                unit: id,
+                optimization: python_optimization,
+            });
             registration.unit = output.is_some().then_some(id);
             registration.declares_signatures = application;
             if application && let Some(graph) = checked_graph {
@@ -3204,7 +3212,7 @@ pub(crate) fn compile(
             entry_source: file_source,
             entry,
             initializers,
-            literal_sites,
+            literal_sites: literal_sites.into_inner(),
             scanned_modules,
             shipped_checks,
         },

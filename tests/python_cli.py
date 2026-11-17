@@ -5316,6 +5316,7 @@ for name in ("md4", "ripemd160"):
             "boxed_argparse.py",
             "boxed_getopt.py",
             "boxed_logging_config.py",
+            "boxed_logging_fileconfig.py",
             "boxed_logging.py",
             "boxed_logging_manager.py",
             "boxed_logging_formatter.py",
@@ -5583,6 +5584,9 @@ for name in ("md4", "ripemd160"):
                 compare("-IB", "-c", imports)
             else:
                 compare("-IB", "-c", imports + "arithmetic.current()")
+            if fixture == "boxed_logging_fileconfig.py":
+                child = run(imre, "-IB", "-c", imports + "arithmetic.dynamic()")
+                assert child.returncode == 0, child.stderr
             if fixture == "boxed_generator_delegation.py":
                 named = root / fixture
                 named.write_text(plugin.read_text() + "\ncurrent()")
