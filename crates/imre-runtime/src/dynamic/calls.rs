@@ -2215,11 +2215,12 @@ impl Context {
             Value::Native(symbol) => BuiltinDescriptor::lookup(symbol)
                 .filter(|slot| slot.class() == "wrapper_descriptor")
                 .map(|slot| slot.name),
-            Value::IoMethod {
-                name: name @ ("__init__" | "__repr__" | "__iter__" | "__next__" | "__del__"),
-                ..
+            value @ Value::IoMethod { name, .. }
+                if value.intrinsic_type_name() == Some("wrapper_descriptor") =>
+            {
+                Some(*name)
             }
-            | Value::HeapTypeMethod {
+            Value::HeapTypeMethod {
                 name,
                 slot_wrapper: true,
                 ..
