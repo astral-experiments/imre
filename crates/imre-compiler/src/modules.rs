@@ -4857,7 +4857,10 @@ fn stdlib_symbol(
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum EntryImportFailure {
+    /// The Python entry itself needs the narrow ordered-import fallback.
     AfterStatement,
+    /// A project dependency requires registered execution of its ordered imports.
+    DependencyAfterStatement,
     MissingModule,
     ZipImport,
     RuntimeProvider,
@@ -5536,8 +5539,16 @@ impl<'a> Loader<'a> {
                                     || self.partial_source(id) && matches!(stmt, ast::Stmt::Expr(_))
                             });
                         if is_entry || !simple && !ordered {
-                            self.import_failure =
-                                is_entry.then_some(EntryImportFailure::AfterStatement);
+                            self.import_failure = if is_entry {
+                                Some(EntryImportFailure::AfterStatement)
+                            } else if module.is_program_source()
+                                && parsed.has_no_syntax_errors()
+                                && self.session.has_valid_semantic_syntax(id)
+                            {
+                                Some(EntryImportFailure::DependencyAfterStatement)
+                            } else {
+                                None
+                            };
                             return Err(self.modules[id].error(
                                 statement,
                                 "imports must precede executable module statements",
