@@ -907,6 +907,9 @@ fn ratio(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     let Some(b) = ctx.plain_instance_field(receiver, "b") else {
         return Ok(None);
     };
+    if !unobserved_checkpoints(ctx) {
+        return Ok(None);
+    }
     let length = match (ctx.heap.get(a), ctx.heap.get(b)) {
         (Value::Str(a), Value::Str(b)) if a.is_ascii() && b.is_ascii() => {
             let Some(length) = a
@@ -927,9 +930,6 @@ fn ratio(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
         let Some(matches) = block_sum(ctx, current) else {
             return Ok(None);
         };
-        if !unobserved_checkpoints(ctx) {
-            return Ok(None);
-        }
         matches
     } else {
         // The getter's own guards do not need to reject __getitem__: ratio does.
