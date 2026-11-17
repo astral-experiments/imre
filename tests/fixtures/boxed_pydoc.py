@@ -1,4 +1,5 @@
 import inspect
+import io
 import pydoc
 import types
 
@@ -13,6 +14,18 @@ def route_label(route, width=4):
 
 
 def current():
+    output = io.StringIO()
+    help = pydoc.Helper(output=output)
+    for request, heading in (
+        ('True', 'Help on bool object:'),
+        ('False', 'Help on bool object:'),
+        ('None', 'Help on NoneType object:'),
+        ('str', 'Help on class str in module builtins:'),
+    ):
+        output.seek(0)
+        output.truncate()
+        help(request)
+        assert output.getvalue().splitlines()[0] == heading
     assert pydoc.locate(__name__ + ".DispatchWindow") is DispatchWindow
     function = pydoc.locate(__name__ + ".route_label")
     assert function is route_label
