@@ -2584,6 +2584,7 @@ pub unsafe extern "C" fn imre_list_len(list: *const List) -> usize {
 pub unsafe extern "C" fn imre_list_bisect_left(list: *const List, needle: usize) -> usize {
     // SAFETY: the caller roots both inputs, and integer comparison cannot mutate this list.
     let needle = unsafe { Int::borrow(needle) };
+    // SAFETY: this rooted list is borrowed only while comparing exact integers without callbacks.
     let index = unsafe {
         (&*list)
             .0
@@ -2600,6 +2601,7 @@ pub unsafe extern "C" fn imre_list_bisect_left(list: *const List, needle: usize)
 pub unsafe extern "C" fn imre_list_bisect_right(list: *const List, needle: usize) -> usize {
     // SAFETY: the caller roots both inputs, and integer comparison cannot mutate this list.
     let needle = unsafe { Int::borrow(needle) };
+    // SAFETY: this rooted list is borrowed only while comparing exact integers without callbacks.
     let index = unsafe {
         (&*list)
             .0
