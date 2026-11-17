@@ -1,0 +1,50 @@
+36774 execve("/workspace/scratch/json-strict-8571/probe", ["/workspace/scratch/json-strict-8571/probe", "gate", "/workspace/scratch/json-strict-8571/images/backend-gate.exe", "/workspace/imre/target/release/imre", "build", "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/positive_launcher.py", "--module-root", "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend", "--extension-path", "/workspace/scratch/imre-cpython-test-fixtures/Lib", "--no-cache", "--quiet", "--opt-level", "0", "--runtime", "/workspace/imre/target/release/libimre_runtime.a", "--clang", "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang", "-o", "/workspace/scratch/json-strict-8571/images/backend-gate.exe"], 0x7fffa32d8378 /* 7 vars */) = 0
+36774 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+36774 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+36774 newfstatat(AT_FDCWD, "/workspace/scratch/json-strict-8571/images/backend-gate.exe", 0x7ffdccce0780, 0) = -1 ENOENT (No such file or directory)
+36774 wait4(36775,  <unfinished ...>
+36775 execve("/workspace/imre/target/release/imre", ["/workspace/imre/target/release/imre", "build", "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/positive_launcher.py", "--module-root", "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend", "--extension-path", "/workspace/scratch/imre-cpython-test-fixtures/Lib", "--no-cache", "--quiet", "--opt-level", "0", "--runtime", "/workspace/imre/target/release/libimre_runtime.a", "--clang", "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang", "-o", "/workspace/scratch/json-strict-8571/images/backend-gate.exe"], 0x7ffdccce0ad0 /* 7 vars */) = 0
+36775 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+36775 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3
+36775 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3
+36775 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+36775 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3
+36775 openat2(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/positive_launcher.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+36775 openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3
+36775 openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3
+36775 openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3
+36775 openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3
+36775 openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3
+36775 openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3
+36775 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3
+36775 openat2(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/bad_status.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+36775 openat2(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/__init__.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+36775 openat2(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/__init__.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+36775 openat2(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_decode.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+36775 openat2(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_default.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+36775 openat2(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_dump.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+36775 openat2(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_encode_basestring_ascii.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+36775 openat2(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_enum.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+36775 openat2(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_fail.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+36775 openat2(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_float.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+36775 openat2(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_indent.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+36775 openat2(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_pass1.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+36775 openat2(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_pass2.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+36775 openat2(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_pass3.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+36775 openat2(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_recursion.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+36775 openat2(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_scanstring.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+36775 openat2(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_separators.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+36775 openat2(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_speedups.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+36775 openat2(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_tool.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+36775 openat2(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_unicode.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+36775 openat2(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/__init__.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+36775 openat2(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/import_helper.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+36775 openat2(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/os_helper.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+36775 openat2(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+36775 openat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+36775 openat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+36775 exit_group(1)                     = ?
+36774 <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 1}], 0, NULL) = 36775
+36774 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=36775, si_uid=1000, si_status=1, si_utime=17 /* 0.17 s */, si_stime=14 /* 0.14 s */} ---
+36774 newfstatat(AT_FDCWD, "/workspace/scratch/json-strict-8571/images/backend-gate.exe", 0x7ffdccce0780, 0) = -1 ENOENT (No such file or directory)
+36774 exit_group(0)                     = ?

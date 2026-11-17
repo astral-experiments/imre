@@ -1,0 +1,14 @@
+IMRE_UNITTEST {"event": "collection", "count": 4}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.TestPyTest.test_pyjson"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.TestCTest.test_cjson"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.TestPyTest.test_pyjson"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.TestCTest.test_cjson"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.TestPyTest.test_pyjson"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.TestPyTest.test_pyjson", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.TestCTest.test_cjson"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.TestCTest.test_cjson", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.TestPyTest.test_pyjson"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.TestPyTest.test_pyjson", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.TestCTest.test_cjson"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.TestCTest.test_cjson", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "summary", "run": 4, "successful": true}
