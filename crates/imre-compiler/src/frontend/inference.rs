@@ -94,7 +94,7 @@ impl Checker<'_> {
         if let Some(ty) = self.graph.session.scalar_type(self.module, insertion.value) {
             return Some(ty);
         }
-        if !set || self.graph.layout_hint.get() == crate::modules::LayoutHint::Disabled {
+        if !set {
             return None;
         }
         let for_loop = insertion.for_loop?;
@@ -113,30 +113,129 @@ impl Checker<'_> {
         {
             return None;
         }
-        // Only follow consecutive direct writes to the original set. A call,
-        // alias, exit or another suite ends the straight-line evidence.
-        let mut suite = later.iter().filter(|stmt| !stmt.is_pass_stmt());
-        if for_loop.orelse.is_empty()
-            && !assigned.contains(name)
-            && matches!(suite.next(), Some(ast::Stmt::For(stmt)) if std::ptr::eq(stmt, for_loop))
-        {
-            for stmt in suite {
-                let Some(value) = insertion_operand(stmt, name, "add")
-                    .and_then(|value| calls::scalar_literal(value, self.source).ok())
-                else {
-                    break;
-                };
-                if value.ty != element {
-                    return None;
+        (!assigned.contains(name)
+            && self.local_set_storage(name, element, for_loop, item.id.as_str(), later))
+        .then_some(element)
+    }
+
+    /// Select iteration-derived native storage only when the fresh set cannot escape
+    /// or receive an incompatible value. Unrecognized calls can capture the local,
+    /// so they require ordinary storage even when the set is not a direct argument.
+    ///
+    /// ```python
+    /// values = set()
+    /// for char in text:
+    ///     values.add(char)
+    /// return sorted(values)
+    /// ```
+    fn local_set_storage(
+        &self,
+        name: &str,
+        element: Type,
+        insertion_loop: &ast::StmtFor,
+        item: &str,
+        later: &[ast::Stmt],
+    ) -> bool {
+        struct Uses<'checker, 'graph, 'ast> {
+            checker: &'checker Checker<'graph>,
+            name: &'checker str,
+            element: Type,
+            insertion_loop: &'ast ast::StmtFor,
+            item: &'checker str,
+            in_insertion_loop: bool,
+            safe: bool,
+        }
+
+        impl Uses<'_, '_, '_> {
+            fn owner(&self, value: &ast::Expr) -> bool {
+                value
+                    .as_name_expr()
+                    .is_some_and(|name| name.id == self.name)
+            }
+
+            fn fits(&self, value: &ast::Expr) -> bool {
+                self.in_insertion_loop
+                    && value
+                        .as_name_expr()
+                        .is_some_and(|name| name.id == self.item)
+                    || self
+                        .checker
+                        .graph
+                        .session
+                        .scalar_type(self.checker.module, value)
+                        == Some(self.element)
+            }
+        }
+
+        impl<'ast> Visitor<'ast> for Uses<'_, '_, 'ast> {
+            fn visit_stmt(&mut self, stmt: &'ast ast::Stmt) {
+                if !self.safe {
+                    return;
+                }
+                if let ast::Stmt::For(loop_) = stmt
+                    && std::ptr::eq(loop_, self.insertion_loop)
+                {
+                    self.visit_expr(&loop_.iter);
+                    self.in_insertion_loop = true;
+                    self.visit_body(&loop_.body);
+                    self.in_insertion_loop = false;
+                    self.visit_body(&loop_.orelse);
+                } else {
+                    walk_stmt(self, stmt);
+                }
+            }
+
+            fn visit_expr(&mut self, expr: &'ast ast::Expr) {
+                if !self.safe {
+                    return;
+                }
+                match expr {
+                    ast::Expr::Call(call) => {
+                        if let ast::Expr::Attribute(attr) = &*call.func
+                            && self.owner(&attr.value)
+                            && matches!(attr.attr.as_str(), "add" | "discard")
+                            && let [value] = call.arguments.args.as_ref()
+                            && call.arguments.keywords.is_empty()
+                            && self.fits(value)
+                        {
+                            self.visit_expr(value);
+                        } else if let [value] = call.arguments.args.as_ref()
+                            && self.owner(value)
+                            && call.arguments.keywords.is_empty()
+                            && ["len", "sorted", "list", "tuple"]
+                                .iter()
+                                .any(|builtin| self.checker.unshadowed_builtin(&call.func, builtin))
+                        {
+                            // These builtins read the set without exposing it to Python code.
+                        } else {
+                            self.safe = false;
+                        }
+                    }
+                    ast::Expr::Compare(compare)
+                        if compare.ops.len() == 1
+                            && matches!(compare.ops[0], ast::CmpOp::In | ast::CmpOp::NotIn)
+                            && self.owner(&compare.operands[1])
+                            && self.fits(&compare.operands[0]) =>
+                    {
+                        self.visit_expr(&compare.operands[0]);
+                    }
+                    ast::Expr::Name(name) if name.id == self.name => self.safe = false,
+                    _ => ruff_python_ast::visitor::walk_expr(self, expr),
                 }
             }
         }
-        // Later uses may need heterogeneous storage. A failed native attempt
-        // must recover the ordinary diagnostics and object fallback for set().
-        self.graph
-            .layout_hint
-            .set(crate::modules::LayoutHint::Applied);
-        Some(element)
+
+        let mut uses = Uses {
+            checker: self,
+            name,
+            element,
+            insertion_loop,
+            item,
+            in_insertion_loop: false,
+            safe: true,
+        };
+        uses.visit_body(later);
+        uses.safe
     }
 
     /// A later direct call can supply the same Callable context as an inline lambda.
