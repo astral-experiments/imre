@@ -4602,9 +4602,14 @@ print(globals()["label"](2.0, True))
                 guarded = run(imre, "run", failed_shutdown, "--quiet", "--", certdata, timeout=600)
                 assert guarded.returncode == 0, guarded.stderr
                 object_io = fixtures / "ssl_object_io.py"
+                # Client authentication needs two more pinned CPython test certificates.
+                object_certdata = root / "ssl_object_certdata"
+                shutil.copytree(certdata, object_certdata)
+                for name in ("keycert4.pem", "pycacert.pem"):
+                    shutil.copy2(fixtures / "ssl_certdata" / name, object_certdata / name)
                 compare(
-                    "-IB", object_io, certdata,
-                    native_args=("run", object_io, "--quiet", "--", certdata), native_timeout=600,
+                    "-IB", object_io, object_certdata,
+                    native_args=("run", object_io, "--quiet", "--", object_certdata), native_timeout=600,
                 )
                 cert_chain = fixtures / "ssl_cert_chain.py"
                 compare(
