@@ -2069,6 +2069,11 @@ impl Value {
                 slot_wrapper: true, ..
             } => "wrapper_descriptor",
             Self::HeapTypeMethod { .. } => "method_descriptor",
+            Self::IoMethod {
+                name: "__init__" | "__repr__" | "__iter__" | "__next__" | "__del__",
+                ..
+            } => "wrapper_descriptor",
+            Self::IoMethod { .. } => "method_descriptor",
             Self::Zip { .. } => "zip",
             Self::Array(_) => "array.array",
             Self::Bytes(_) => "bytes",
