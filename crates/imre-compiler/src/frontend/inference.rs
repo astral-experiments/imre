@@ -158,16 +158,7 @@ impl Checker<'_> {
             }
 
             fn fits(&self, value: &ast::Expr) -> bool {
-                self.in_insertion_loop
-                    && value
-                        .as_name_expr()
-                        .is_some_and(|name| name.id == self.item)
-                    || self
-                        .checker
-                        .graph
-                        .session
-                        .scalar_type(self.checker.module, value)
-                        == Some(self.element)
+                self.exact_scalar(value) == Some(self.element)
             }
 
             /// A native scalar or intrinsic result cannot dispatch an overloaded
@@ -215,6 +206,41 @@ impl Checker<'_> {
                             .scalar_type(self.checker.module, value)
                             .and_then(scalar)
                     }
+                    ast::Expr::UnaryOp(unary) if self.exact_scalar(&unary.operand).is_some() => {
+                        self.checker
+                            .graph
+                            .session
+                            .scalar_type(self.checker.module, value)
+                            .and_then(scalar)
+                    }
+                    ast::Expr::Compare(compare)
+                        if compare.ops.len() == 1
+                            && matches!(compare.ops[0], ast::CmpOp::In | ast::CmpOp::NotIn)
+                            && self.owner(&compare.operands[1])
+                            && self.fits(&compare.operands[0]) =>
+                    {
+                        Some(Type::Bool)
+                    }
+                    ast::Expr::Compare(compare)
+                        if compare
+                            .operands
+                            .iter()
+                            .all(|operand| self.exact_scalar(operand).is_some()) =>
+                    {
+                        Some(Type::Bool)
+                    }
+                    ast::Expr::BoolOp(boolean)
+                        if boolean
+                            .values
+                            .iter()
+                            .all(|operand| self.exact_scalar(operand).is_some()) =>
+                    {
+                        self.checker
+                            .graph
+                            .session
+                            .scalar_type(self.checker.module, value)
+                            .and_then(scalar)
+                    }
                     _ => None,
                 }
             }
@@ -252,13 +278,7 @@ impl Checker<'_> {
                                 .iter()
                                 .filter_map(|clause| clause.test.as_ref()),
                         ) {
-                            if self
-                                .checker
-                                .graph
-                                .session
-                                .scalar_type(self.checker.module, test)
-                                .is_none()
-                            {
+                            if self.exact_scalar(test).is_none() {
                                 self.safe = false;
                                 return;
                             }
@@ -311,6 +331,19 @@ impl Checker<'_> {
                     ast::Expr::BinOp(binary) if self.exact_scalar(expr).is_some() => {
                         self.visit_expr(&binary.left);
                         self.visit_expr(&binary.right);
+                    }
+                    ast::Expr::Compare(compare) if self.exact_scalar(expr).is_some() => {
+                        for operand in &compare.operands {
+                            self.visit_expr(operand);
+                        }
+                    }
+                    ast::Expr::UnaryOp(unary) if self.exact_scalar(expr).is_some() => {
+                        self.visit_expr(&unary.operand);
+                    }
+                    ast::Expr::BoolOp(boolean) if self.exact_scalar(expr).is_some() => {
+                        for operand in &boolean.values {
+                            self.visit_expr(operand);
+                        }
                     }
                     ast::Expr::Name(name) => self.safe &= name.id != self.name,
                     ast::Expr::NumberLiteral(_)

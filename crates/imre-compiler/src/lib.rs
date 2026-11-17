@@ -2266,6 +2266,10 @@ print("result", call(b=2, a=1))
             ("    values.add(1)\n    return len(values)", false),
             ("    values.add('z')\n    return len(values)", true),
             ("    return len(values) + 1", true),
+            ("    return len(values) == 1", true),
+            ("    return -len(values)", true),
+            ("    return not len(values)", true),
+            ("    return len(values) == 1 and True", true),
             (
                 "    else:\n        return len(values)\n    values.add(1)",
                 false,
