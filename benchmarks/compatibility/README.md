@@ -39,6 +39,26 @@ python3 benchmarks/compatibility/replay_stdlib.py \
 
 The runner verifies the upstream Git blob and exact interpreter version, runs the intact FILE once per tier with its full original fixture tree available via `PYTHONPATH`. For Imre it stages the complete, unchanged `Lib/test` tree under a root containing only `test`, so upstream copies of `unittest` and other stdlib modules do not shadow Imre’s shipped stdlib, saves raw stdout/stderr and exact invocations under `evidence/FAMILY`, and writes individual IDs with occurrences. Use `--source Lib/test/...` for package layouts and `--include-module NAME` for explicitly registered fixtures. A build failure records not run, never pass. A suite timeout keeps only completed individual results; unreported originals remain not run. The runner deliberately fails on output it cannot parse or a mismatched unittest total. For multi-file families, coordinate unique evidence/output paths and merge by `(family, id, occurrence)`; do not overwrite a family receipt file or silently shrink its raw denominator.
 
+## Finite unittest launcher on current main
+
+When the runpy entry cannot link its `exec` body, generate a launcher from an explicit ordered list of test modules. For a package, list its leaf modules in stock discovery order and compare the resulting inventory with stock package discovery. The generated file contains ordinary literal imports and uses `TestLoader.loadTestsFromModule`, `TestSuite`, and `TestResult`; it does not implement a module-name resolver.
+
+```sh
+python3 benchmarks/compatibility/generate_unittest_runner.py \
+  --module test.test_fnmatch \
+  --module test.test_tomllib.test_data \
+  --module test.test_tomllib.test_error \
+  --module test.test_tomllib.test_misc --output /tmp/finite_runner.py
+"$imre" build /tmp/finite_runner.py --module-root /tmp --extension-path "$root" \
+  --no-cache --opt-level 0 --runtime "$runtime" --clang "$clang" -o /tmp/finite_runner
+PYTHONPATH="$root" PYTHONDONTWRITEBYTECODE=1 \
+  python3 benchmarks/compatibility/collect_unittest_results.py --timeout 180 \
+  --output /tmp/originals.json --stdout /tmp/originals.stdout --stderr /tmp/originals.stderr \
+  -- /tmp/finite_runner
+```
+
+The capture utility records the collected IDs and occurrence numbers, each completed outcome, fixture errors and subtest skips. If the process times out during an original, that original is marked `timeout`; later originals remain `not_run`. Raw streams, process status, timeout and stream hashes are retained. An exit before collection cannot create original credit. This experiment is at current main, outside the scorecard's fixed Imre cohort; do not add its observations to the pinned scorecard without a matching replay and architectural controls.
+
 ## Script shards
 
 Use one record per **original command**, not one per file or diagnostic. Give `id` a globally unique stable command identifier. `source` is the original repository URL, full commit, repository-relative path, and SHA-256 of that source file. `normalized_invocation` records stable cwd, argv and environment with documented placeholders; each run also records its exact argv and evidence. Stock must be exact 3.14.5. Record exact exit, raw stdout/stderr and a raw JSON effects manifest with verified SHA-256 digests. Compare each dimension against stock as `exact`, `different` or `not_checked`. Strict paired credit also requires independently reviewed frozen fixture and reference provenance, as described below; current triple agreement alone is insufficient. Commands without receipts remain not run.
