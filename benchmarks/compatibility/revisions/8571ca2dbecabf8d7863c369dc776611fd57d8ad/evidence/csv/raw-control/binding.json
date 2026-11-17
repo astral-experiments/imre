@@ -1,0 +1,690 @@
+{
+  "schema": "imre.compatibility.raw-control.v1",
+  "family": "csv",
+  "cohorts": {
+    "finite-native": {
+      "platform": {
+        "os": "linux",
+        "arch": "x86_64",
+        "release": "6.18.57"
+      },
+      "probe": "/workspace/scratch/raw-control-probe",
+      "artifacts": {
+        "run": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/run.json",
+        "gate": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/gate.json",
+        "positive_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/launcher.py",
+        "negative_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/gate.launcher.py",
+        "poison": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/gate_control_csv.py",
+        "stock_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/launcher.py",
+        "stock_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/stock.stderr",
+        "head": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/head.raw",
+        "clean": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/clean.raw",
+        "cargo": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/cargo.raw",
+        "identities": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/identity.raw",
+        "platform": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/platform.raw",
+        "stock_version": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/stock_version.raw",
+        "gate_files": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/gate-files.raw",
+        "positive_hash": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/positive.raw",
+        "restored": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/restored.raw",
+        "gate_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/gate.trace",
+        "gate_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/gate.stderr",
+        "gate_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/gate.stdout",
+        "probe_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe.c",
+        "probe_build": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/probe-build.raw",
+        "collector": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/collect_raw_controls.py",
+        "O0_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/O0.stderr",
+        "O0_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/O0.stderr",
+        "O0_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/O0.stdout",
+        "O0_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/O0.trace",
+        "O0_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/O0.readelf.stdout",
+        "O3_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/O3.stderr",
+        "O3_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/O3.stderr",
+        "O3_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/O3.stdout",
+        "O3_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/O3.trace",
+        "O3_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/O3.readelf.stdout"
+      }
+    }
+  },
+  "originals": [
+    {
+      "id": "test.test_csv.KeyOrderingTest.test_ordered_dict_reader",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.KeyOrderingTest.test_ordering_for_the_dict_reader_and_writer",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.MiscTestCase.test__all__",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.MiscTestCase.test_disallow_instantiation",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.MiscTestCase.test_lazy_import",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.MiscTestCase.test_subclassable",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestArrayWrites.test_char_write",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestArrayWrites.test_double_write",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestArrayWrites.test_float_write",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestArrayWrites.test_int_write",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectExcel.test_blankline",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectExcel.test_dubious_quote",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectExcel.test_empty_fields",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectExcel.test_inline_quote",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectExcel.test_inline_quotes",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectExcel.test_lone_quote",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectExcel.test_newlines",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectExcel.test_null",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectExcel.test_quote_and_quote",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectExcel.test_quote_fieldsep",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectExcel.test_quoted",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectExcel.test_quoted_nl",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectExcel.test_quoted_quote",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectExcel.test_quoted_quotes",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectExcel.test_quotes",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectExcel.test_quotes_and_more",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectExcel.test_simple",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectExcel.test_simple_writer",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectExcel.test_single",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectExcel.test_single_quoted_quote",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectExcel.test_single_writer",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectExcel.test_singlequoted",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectExcel.test_singlequoted_left_empty",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectExcel.test_singlequoted_right_empty",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectExcel.test_space_and_quote",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectRegistry.test_copy",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectRegistry.test_dialect_apply",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectRegistry.test_incomplete_dialect",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectRegistry.test_pickle",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectRegistry.test_register_kwargs",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectRegistry.test_register_kwargs_override",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectRegistry.test_registry",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectRegistry.test_registry_badargs",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectRegistry.test_space_dialect",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectUnix.test_simple_reader",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectUnix.test_simple_writer",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectValidity.test_delimiter",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectValidity.test_escapechar",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectValidity.test_invalid_chars",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectValidity.test_lineterminator",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDialectValidity.test_quoting",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDictFields.test_dict_reader_fieldnames_accepts_iter",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDictFields.test_dict_reader_fieldnames_accepts_list",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDictFields.test_dict_reader_fieldnames_is_optional",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDictFields.test_dict_reader_set_fieldnames",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDictFields.test_dict_writer_fieldnames_accepts_list",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDictFields.test_dict_writer_fieldnames_rejects_iter",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDictFields.test_read_dict_fieldnames_chain",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDictFields.test_read_dict_fieldnames_from_file",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDictFields.test_read_dict_fields",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDictFields.test_read_dict_no_fieldnames",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDictFields.test_read_long",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDictFields.test_read_long_with_rest",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDictFields.test_read_long_with_rest_no_fieldnames",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDictFields.test_read_multi",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDictFields.test_read_semi_sep",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDictFields.test_read_short",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDictFields.test_read_with_blanks",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDictFields.test_typo_in_extrasaction_raises_error",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDictFields.test_write_field_not_in_field_names_ignore",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDictFields.test_write_field_not_in_field_names_raise",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDictFields.test_write_fields_not_in_fieldnames",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDictFields.test_write_multiple_dict_rows",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDictFields.test_write_no_fields",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDictFields.test_write_simple_dict",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestDictFields.test_writeheader_return_value",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestEscapedExcel.test_escape_fieldsep",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestEscapedExcel.test_read_escape_fieldsep",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestLeaks.test_create_read",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestLeaks.test_create_write",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestLeaks.test_read",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestLeaks.test_write",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestQuotedEscapedExcel.test_read_escape_fieldsep",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestQuotedEscapedExcel.test_write_escape_fieldsep",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestSniffer.test_delimiters",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestSniffer.test_doublequote",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestSniffer.test_guess_quote_and_delimiter",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestSniffer.test_has_header",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestSniffer.test_has_header_checks_20_rows",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestSniffer.test_has_header_regex_special_delimiter",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestSniffer.test_has_header_strings",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestSniffer.test_issue43625",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestSniffer.test_sniff",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestUnicode.test_unicode_read",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.TestUnicode.test_unicode_write",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_read_bigfield",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_read_delimiter",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_read_eof",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_read_eol",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_read_escape",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_read_linenum",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_read_nul",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_read_oddinputs",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_read_quoting",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_read_skipinitialspace",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_read_space_delimiter",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_reader_arg_valid",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_reader_attrs",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_reader_dialect_attrs",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_reader_kw_attrs",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_reader_reentrant_iterator",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_roundtrip_escaped_unquoted_newlines",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_roundtrip_quoteed_newlines",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_write_arg_valid",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_write_bigfield",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_write_empty_fields",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_write_empty_fields_space_delimiter",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_write_escape",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_write_iterable",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_write_lineterminator",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_write_quoting",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_writer_arg_valid",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_writer_attrs",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_writer_dialect_attrs",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_writer_kw_attrs",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_writerows",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_writerows_errors",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_csv.Test_Csv.test_writerows_with_none",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    }
+  ]
+}

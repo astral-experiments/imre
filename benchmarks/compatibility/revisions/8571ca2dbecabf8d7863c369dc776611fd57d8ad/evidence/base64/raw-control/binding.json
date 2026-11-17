@@ -1,0 +1,255 @@
+{
+  "schema": "imre.compatibility.raw-control.v1",
+  "family": "base64",
+  "cohorts": {
+    "finite-native": {
+      "platform": {
+        "os": "linux",
+        "arch": "x86_64",
+        "release": "6.18.57"
+      },
+      "probe": "/workspace/scratch/raw-control-probe",
+      "artifacts": {
+        "run": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/run.json",
+        "gate": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/gate.json",
+        "positive_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/launcher.py",
+        "negative_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/gate.launcher.py",
+        "poison": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/gate_control_base64.py",
+        "stock_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/stock.launcher.py",
+        "stock_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/stock.stderr",
+        "head": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/head.raw",
+        "clean": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/clean.raw",
+        "cargo": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/cargo.raw",
+        "identities": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/identity.raw",
+        "platform": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/platform.raw",
+        "stock_version": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/stock_version.raw",
+        "gate_files": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/gate-files.raw",
+        "positive_hash": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/positive.raw",
+        "restored": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/restored.raw",
+        "gate_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/gate.trace",
+        "gate_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/gate.stderr",
+        "gate_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/gate.stdout",
+        "probe_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe.c",
+        "probe_build": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/probe-build.raw",
+        "collector": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/collect_raw_controls.py",
+        "O0_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/O0.stderr",
+        "O0_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/O0.stderr",
+        "O0_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/O0.stdout",
+        "O0_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/O0.trace",
+        "O0_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/O0.readelf.stdout",
+        "O3_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/O3.stderr",
+        "O3_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/O3.stderr",
+        "O3_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/O3.stdout",
+        "O3_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/O3.trace",
+        "O3_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/O3.readelf.stdout"
+      }
+    }
+  },
+  "originals": [
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_ErrorHeritage",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_RFC4648_test_cases",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_a85_padding",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_a85decode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_a85decode_errors",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_a85encode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_b16decode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_b16encode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_b32decode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_b32decode_casefold",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_b32decode_error",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_b32decode_map01",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_b32encode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_b32hexdecode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_b32hexdecode_error",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_b32hexdecode_other_types",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_b32hexencode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_b32hexencode_other_types",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_b64decode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_b64decode_altchars",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_b64decode_invalid_chars",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_b64decode_padding_error",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_b64encode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_b85_padding",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_b85decode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_b85decode_errors",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_b85encode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_decode_nonascii_str",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_z85decode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_z85decode_errors",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.BaseXYTestCase.test_z85encode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.LazyImportTest.test_lazy_import",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.LegacyBase64TestCase.test_decode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.LegacyBase64TestCase.test_decodebytes",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.LegacyBase64TestCase.test_encode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.LegacyBase64TestCase.test_encodebytes",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.TestMain.test_decode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.TestMain.test_encode_file",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.TestMain.test_encode_from_stdin",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.TestMain.test_prints_usage_with_help_flag",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_base64.TestMain.test_prints_usage_with_invalid_flag",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    }
+  ]
+}

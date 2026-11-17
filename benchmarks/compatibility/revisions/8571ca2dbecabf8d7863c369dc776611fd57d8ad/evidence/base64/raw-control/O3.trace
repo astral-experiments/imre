@@ -1,0 +1,164 @@
+22657 execve("/workspace/scratch/raw-control-probe", ["/workspace/scratch/raw-control-probe", "withdraw", "/workspace/scratch/refresh-8571-fixtures/Lib/test", "/workspace/scratch/refresh-8571-fixtures/Lib/test.raw-control-stash", "/workspace/scratch/refresh-8571-fixtures/Lib/test/test_base64.py", "/workspace/scratch/refresh-8571-images/base64-O3.exe"], 0x7ffcc0a309e8 /* 78 vars */) = 0
+22657 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+22657 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+22657 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib/test/test_base64.py", {st_mode=S_IFREG|0600, st_size=41510, ...}, 0) = 0
+22657 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib/test.raw-control-stash", 0x7ffc0e8335f0, 0) = -1 ENOENT (No such file or directory)
+22657 rename("/workspace/scratch/refresh-8571-fixtures/Lib/test", "/workspace/scratch/refresh-8571-fixtures/Lib/test.raw-control-stash") = 0
+22657 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib/test", 0x7ffc0e8335f0, 0) = -1 ENOENT (No such file or directory)
+22657 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib/test/test_base64.py", 0x7ffc0e8335f0, 0) = -1 ENOENT (No such file or directory)
+22657 wait4(22658,  <unfinished ...>
+22658 execve("/workspace/scratch/refresh-8571-images/base64-O3.exe", ["/workspace/scratch/refresh-8571-images/base64-O3.exe"], 0x7ffc0e8338d0 /* 78 vars */) = 0
+22658 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+22658 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3
+22658 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3
+22658 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+22658 openat(AT_FDCWD, "/usr/lib/locale/locale-archive", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+22658 openat(AT_FDCWD, "/usr/share/locale/locale.alias", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+22658 openat(AT_FDCWD, "/usr/lib/locale/C.UTF-8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+22658 openat(AT_FDCWD, "/usr/lib/locale/C.utf8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = 3
+22658 openat(AT_FDCWD, "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache", O_RDONLY|O_CLOEXEC) = 3
+22658 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 open("/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 open("/workspace/scratch/refresh-8571-fixtures/Lib", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 openat(AT_FDCWD, "/workspace/scratch/refresh-8571-images/base64-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3
+22658 openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 openat(AT_FDCWD, "/etc/localtime", O_RDONLY|O_CLOEXEC) = 3
+22658 openat(AT_FDCWD, "/workspace/scratch/refresh-8571-images/base64-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 openat(AT_FDCWD, "/workspace/scratch/refresh-8571-images/base64-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib/test", 0x7fffdd452d88, 0) = -1 ENOENT (No such file or directory)
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre/target/release/Modules/Setup", 0x7fffdd44a088, 0) = -1 ENOENT (No such file or directory)
+22658 newfstatat(AT_FDCWD, "/workspace/imre/target/release/Modules/Setup.local", 0x7fffdd44a088, 0) = -1 ENOENT (No such file or directory)
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib/test/support", 0x7fffdd44c9d8, 0) = -1 ENOENT (No such file or directory)
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib/test/support", 0x7fffdd44c9d8, 0) = -1 ENOENT (No such file or directory)
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 openat(AT_FDCWD, "/workspace/scratch/refresh-8571-images/base64-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib/test/support", 0x7fffdd449008, 0) = -1 ENOENT (No such file or directory)
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 openat(AT_FDCWD, "/workspace/scratch/refresh-8571-images/base64-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+22658 openat(AT_FDCWD, "/workspace/scratch/refresh-8571-images/base64-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22658 openat(AT_FDCWD, "/workspace/scratch/refresh-8571-images/base64-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+22658 exit_group(0)                     = ?
+22657 <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 22658
+22657 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22658, si_uid=1000, si_status=0, si_utime=374 /* 3.74 s */, si_stime=3 /* 0.03 s */} ---
+22657 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib/test", 0x7ffc0e8335f0, 0) = -1 ENOENT (No such file or directory)
+22657 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib/test/test_base64.py", 0x7ffc0e8335f0, 0) = -1 ENOENT (No such file or directory)
+22657 rename("/workspace/scratch/refresh-8571-fixtures/Lib/test.raw-control-stash", "/workspace/scratch/refresh-8571-fixtures/Lib/test") = 0
+22657 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib/test/test_base64.py", {st_mode=S_IFREG|0600, st_size=41510, ...}, 0) = 0
+22657 exit_group(0)                     = ?

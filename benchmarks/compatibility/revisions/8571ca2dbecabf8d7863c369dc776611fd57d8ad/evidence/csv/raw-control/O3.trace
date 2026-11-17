@@ -1,0 +1,422 @@
+22620 execve("/workspace/scratch/raw-control-probe", ["/workspace/scratch/raw-control-probe", "withdraw", "/workspace/scratch/refresh-8571-fixtures/Lib/test", "/workspace/scratch/refresh-8571-fixtures/Lib/test.raw-control-stash", "/workspace/scratch/refresh-8571-fixtures/Lib/test/test_csv.py", "/workspace/scratch/refresh-8571-images/csv-O3.exe"], 0x7ffda2448f38 /* 78 vars */) = 0
+22620 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+22620 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+22620 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib/test/test_csv.py", {st_mode=S_IFREG|0600, st_size=68870, ...}, 0) = 0
+22620 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib/test.raw-control-stash", 0x7ffed7a59ef0, 0) = -1 ENOENT (No such file or directory)
+22620 rename("/workspace/scratch/refresh-8571-fixtures/Lib/test", "/workspace/scratch/refresh-8571-fixtures/Lib/test.raw-control-stash") = 0
+22620 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib/test", 0x7ffed7a59ef0, 0) = -1 ENOENT (No such file or directory)
+22620 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib/test/test_csv.py", 0x7ffed7a59ef0, 0) = -1 ENOENT (No such file or directory)
+22620 wait4(22621,  <unfinished ...>
+22621 execve("/workspace/scratch/refresh-8571-images/csv-O3.exe", ["/workspace/scratch/refresh-8571-images/csv-O3.exe"], 0x7ffed7a5a1d0 /* 78 vars */) = 0
+22621 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+22621 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3
+22621 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3
+22621 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+22621 openat(AT_FDCWD, "/usr/lib/locale/locale-archive", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+22621 openat(AT_FDCWD, "/usr/share/locale/locale.alias", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+22621 openat(AT_FDCWD, "/usr/lib/locale/C.UTF-8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+22621 openat(AT_FDCWD, "/usr/lib/locale/C.utf8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = 3
+22621 openat(AT_FDCWD, "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache", O_RDONLY|O_CLOEXEC) = 3
+22621 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 open("/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 open("/workspace/scratch/refresh-8571-fixtures/Lib", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 openat(AT_FDCWD, "/workspace/scratch/refresh-8571-images/csv-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3
+22621 openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 openat(AT_FDCWD, "/etc/localtime", O_RDONLY|O_CLOEXEC) = 3
+22621 openat(AT_FDCWD, "/workspace/scratch/refresh-8571-images/csv-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 openat(AT_FDCWD, "/workspace/scratch/refresh-8571-images/csv-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib/test", 0x7ffd33d755a8, 0) = -1 ENOENT (No such file or directory)
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 openat(AT_FDCWD, "/workspace/scratch/refresh-8571-images/csv-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+22621 openat(AT_FDCWD, "/workspace/scratch/refresh-8571-images/csv-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 openat(AT_FDCWD, "/workspace/scratch/refresh-8571-images/csv-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+22621 newfstatat(AT_FDCWD, "/workspace/imre/target/release/Modules/Setup", 0x7ffd33d69e58, 0) = -1 ENOENT (No such file or directory)
+22621 newfstatat(AT_FDCWD, "/workspace/imre/target/release/Modules/Setup.local", 0x7ffd33d69e58, 0) = -1 ENOENT (No such file or directory)
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib/test/support", 0x7ffd33d6f1b8, 0) = -1 ENOENT (No such file or directory)
+22621 openat(AT_FDCWD, "/workspace/scratch/refresh-8571-images/csv-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+22621 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib/test/support", 0x7ffd33d6b818, 0) = -1 ENOENT (No such file or directory)
+22621 openat(AT_FDCWD, "/tmp/ofny7624", O_RDWR|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 openat(AT_FDCWD, "/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+22621 exit_group(0)                     = ?
+22620 <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 22621
+22620 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22621, si_uid=1000, si_status=0, si_utime=366 /* 3.66 s */, si_stime=13 /* 0.13 s */} ---
+22620 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib/test", 0x7ffed7a59ef0, 0) = -1 ENOENT (No such file or directory)
+22620 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib/test/test_csv.py", 0x7ffed7a59ef0, 0) = -1 ENOENT (No such file or directory)
+22620 rename("/workspace/scratch/refresh-8571-fixtures/Lib/test.raw-control-stash", "/workspace/scratch/refresh-8571-fixtures/Lib/test") = 0
+22620 newfstatat(AT_FDCWD, "/workspace/scratch/refresh-8571-fixtures/Lib/test/test_csv.py", {st_mode=S_IFREG|0600, st_size=68870, ...}, 0) = 0
+22620 exit_group(0)                     = ?
