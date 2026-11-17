@@ -717,15 +717,6 @@ fn object_fallback(
                 return Ok(());
             }
             let replaced = registrations.filter(|r| !r.provider_sources.is_empty());
-            let body_checks = graph.registered_source_errors.borrow();
-            // A clean body check covers the fallback lints on the original bindings.
-            // Replacing a dependency also changes the contract of its callers.
-            let checked_source = |id: usize| {
-                !incremental
-                    && replaced.is_none()
-                    && graph.modules[id].checks_source_contracts()
-                    && body_checks.get(&id).is_some_and(Vec::is_empty)
-            };
             let (skipped, overloads) = graph.diagnostic_scopes();
             let entry = &graph.modules[graph.entry];
             let all_calls = !matches!(requested, analysis::FallbackCalls::None)
@@ -747,7 +738,7 @@ fn object_fallback(
                 analysis::FallbackCalls::All
             } else if check_class_import {
                 analysis::FallbackCalls::NamedFunctions
-            } else if !checked_source(graph.entry) && entry.has_entry_guard() {
+            } else if entry.has_entry_guard() {
                 analysis::FallbackCalls::Entry(graph.entry)
             } else {
                 analysis::FallbackCalls::None
@@ -759,10 +750,8 @@ fn object_fallback(
                     checked_calls,
                     // A replaced adapter is an import dependency. Its checked spans
                     // and layout errors belong to the original fixed source.
-                    (0..graph.modules.len()).filter(|id| {
-                        !checked_source(*id)
-                            && replaced.is_none_or(|r| !r.provider_sources.contains_key(id))
-                    }),
+                    (0..graph.modules.len())
+                        .filter(|id| replaced.is_none_or(|r| !r.provider_sources.contains_key(id))),
                     checked_file.then_some(&graph.modules),
                     replaced.is_none().then_some(refusal.as_ref()).flatten(),
                 )
@@ -779,6 +768,13 @@ fn object_fallback(
     let check = |mut checked_graph: Option<&mut modules::SourceGraph>,
                  entry_requests_objects,
                  registered: Option<dynamic::RegisteredSources<'_>>| {
+        // A capability refusal may select an object representation, but cannot prove
+        // the first-party declarations. Check them before admitting or emitting it.
+        if let Some(graph) = checked_graph.as_deref()
+            && let Some(contract) = &graph.source_contract
+        {
+            contract.original(graph).clone()?;
+        }
         check_returns(
             checked_graph.as_deref_mut(),
             entry_requests_objects,
@@ -1321,6 +1317,8 @@ fn checked_lower_with(
                     .cache
                     .check_scopes(session, &graph.inputs, skipped, &overloads)?;
             } else {
+                // Successful native lowering already checked its exact representations;
+                // a ty-clean body can still avoid repeating the remaining ty rules here.
                 let registered = graph.registered_source_errors.borrow();
                 let remaining = (0..graph.modules.len()).filter(|id| {
                     !graph.modules[*id].checks_source_contracts()
@@ -1339,7 +1337,7 @@ fn checked_lower_with(
                 &graph.inputs,
             )
             .and_then(|owner| {
-                owner.closed_program_errors(&graph.modules, skipped, &overloads, native, None)
+                owner.closed_program_errors(&graph.modules, skipped, &overloads, native)
             });
         // An inapplicable object representation cannot replace a native source or ABI
         // diagnostic. A real registration checks this result before emitting its body.
