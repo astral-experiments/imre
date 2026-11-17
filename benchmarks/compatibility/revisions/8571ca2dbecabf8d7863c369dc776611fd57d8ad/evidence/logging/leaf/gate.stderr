@@ -1,0 +1,2 @@
+ Compiling /workspace/scratch/8571-refresh/logging/leaf/poisoned_launcher.py (-O0)
+/workspace/scratch/8571-refresh/logging/leaf/leaf_poison.py:1:15: Imre: expected int, got bool; annotations are enforced contracts

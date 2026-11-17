@@ -1,0 +1,23 @@
+{
+  "argv": [
+    "/workspace/scratch/8571-refresh/logging/leaf/O0.exe",
+    "-v",
+    "BufferingFormatterTest.test_default"
+  ],
+  "cwd": "/workspace/scratch/8571-refresh/logging/leaf",
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "IMREFLAGS": "--opt-level 0",
+    "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+  },
+  "timeout_seconds": 30,
+  "exit_code": 0,
+  "timed_out": false,
+  "elapsed_seconds": 1.209,
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "5c99d08cc8d5f275949de57c0172fa7c0fe45c35ffc1bb4f64ec393bed1513c7"
+}

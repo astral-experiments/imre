@@ -1,0 +1,279 @@
+ Compiling /workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_logging.py (-O0)
+error[invalid-argument-type]: Argument to bound method `TestCase.skipTest` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_logging.py:1901:27
+     |
+1899 |         # The log message sent to the SocketHandler is properly received.
+1900 |         if self.server_exception:
+1901 |             self.skipTest(self.server_exception)
+     |                           ^^^^^^^^^^^^^^^^^^^^^ Expected `str`, found `OSError & ~AlwaysFalsy`
+1902 |         logger = logging.getLogger("tcp")
+1903 |         logger.error("spam")
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:214:9
+    |
+212 |         raise self.failureException(msg)
+213 |
+214 |     def skipTest(self, reason: str) -> None:
+    |         ^^^^^^^^       ----------- Parameter declared here
+215 |         raise SkipTest(reason)
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.skipTest` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_logging.py:1911:27
+     |
+1909 |     def test_noserver(self):
+1910 |         if self.server_exception:
+1911 |             self.skipTest(self.server_exception)
+     |                           ^^^^^^^^^^^^^^^^^^^^^ Expected `str`, found `OSError & ~AlwaysFalsy`
+1912 |         # Avoid timing-related failures due to SocketHandler's own hard-wired
+1913 |         # one-second timeout on socket.create_connection() (issue #16264).
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:214:9
+    |
+212 |         raise self.failureException(msg)
+213 |
+214 |     def skipTest(self, reason: str) -> None:
+    |         ^^^^^^^^       ----------- Parameter declared here
+215 |         raise SkipTest(reason)
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertGreater` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_logging.py:1924:28
+     |
+1922 |         self.root_logger.error('Never sent, either')
+1923 |         now = time.time()
+1924 |         self.assertGreater(self.sock_hdlr.retryTime, now)
+     |                            ^^^^^^^^^^^^^^^^^^^^^^^^ Expected `int`, found `None | float`
+1925 |         time.sleep(self.sock_hdlr.retryTime - now + 0.001)
+1926 |         self.root_logger.error('Nor this')
+     |
+info: element `None` of union `None | int | float*` is not assignable to `int`
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:274:9
+    |
+272 |             self.fail(self._formatMessage(msg, f"{a!r} not less than or equal to {b!r}"))
+273 |
+274 |     def assertGreater(self, a: int, b: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^       ------ Parameter declared here
+275 |         if not a > b:
+276 |             self.fail(self._formatMessage(msg, f"{a!r} not greater than {b!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertGreater` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_logging.py:1924:54
+     |
+1922 |         self.root_logger.error('Never sent, either')
+1923 |         now = time.time()
+1924 |         self.assertGreater(self.sock_hdlr.retryTime, now)
+     |                                                      ^^^ Expected `int`, found `float`
+1925 |         time.sleep(self.sock_hdlr.retryTime - now + 0.001)
+1926 |         self.root_logger.error('Nor this')
+     |
+info: element `float*` of union `int | float*` is not assignable to `int`
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:274:9
+    |
+272 |             self.fail(self._formatMessage(msg, f"{a!r} not less than or equal to {b!r}"))
+273 |
+274 |     def assertGreater(self, a: int, b: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^               ------ Parameter declared here
+275 |         if not a > b:
+276 |             self.fail(self._formatMessage(msg, f"{a!r} not greater than {b!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.skipTest` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_logging.py:2000:27
+     |
+1998 |         # The log message sent to the DatagramHandler is properly received.
+1999 |         if self.server_exception:
+2000 |             self.skipTest(self.server_exception)
+     |                           ^^^^^^^^^^^^^^^^^^^^^ Expected `str`, found `OSError & ~AlwaysFalsy`
+2001 |         logger = logging.getLogger("udp")
+2002 |         logger.error("spam")
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:214:9
+    |
+212 |         raise self.failureException(msg)
+213 |
+214 |     def skipTest(self, reason: str) -> None:
+    |         ^^^^^^^^       ----------- Parameter declared here
+215 |         raise SkipTest(reason)
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.skipTest` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_logging.py:2075:27
+     |
+2073 |     def test_output(self):
+2074 |         if self.server_exception:
+2075 |             self.skipTest(self.server_exception)
+     |                           ^^^^^^^^^^^^^^^^^^^^^ Expected `str`, found `OSError & ~AlwaysFalsy`
+2076 |         # The log message sent to the SysLogHandler is properly received.
+2077 |         logger = logging.getLogger("slh")
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:214:9
+    |
+212 |         raise self.failureException(msg)
+213 |
+214 |     def skipTest(self, reason: str) -> None:
+    |         ^^^^^^^^       ----------- Parameter declared here
+215 |         raise SkipTest(reason)
+    |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_logging.py:2100:6
+     |
+2098 |         self.assertEqual(self.log_output, b'<11>sp\xc3\xa4m\x00')
+2099 |
+2100 |     @patch('socket.socket')
+     |      ^^^^^^^^^^^^^^^^^^^^^^
+2101 |     def test_tcp_timeout(self, mock_socket):
+2102 |         instance_mock_sock = mock_socket.return_value
+     |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_logging.py:4019:6
+     |
+4017 |     @threading_helper.requires_working_threading()
+4018 |     @support.requires_subprocess()
+4019 |     @patch("multiprocessing.Manager")
+     |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+4020 |     def test_config_queue_handler_does_not_create_multiprocessing_manager(self, manager):
+4021 |         # gh-120868, gh-121723, gh-124653
+     |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_logging.py:4040:6
+     |
+4038 |                 manager.assert_not_called()
+4039 |
+4040 |     @patch("multiprocessing.Manager")
+     |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+4041 |     def test_config_queue_handler_invalid_config_does_not_create_multiprocessing_manager(self, manager):
+4042 |         # gh-120868, gh-121723
+     |
+
+
+error[no-matching-overload]: No overload of bound method `TestCase.assertIn` matches arguments
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_logging.py:4522:17
+     |
+4521 |                   expected = [[], [logging.handlers.QueueListener._sentinel]]
+4522 | /                 self.assertIn(items, expected,
+4523 | |                               'Found unexpected messages in queue: %s' % (
+4524 | |                                     [m.msg if isinstance(m, logging.LogRecord)
+4525 | |                                      else m for m in items]))
+     | |_____________________________________________________________^
+4526 |
+4527 |           def test_calls_task_done_after_stop(self):
+     |
+info: First overload defined here
+   --> <imre stdlib>/unittest/__init__.py:466:9
+    |
+465 |       if TYPE_CHECKING:
+466 | /         @overload
+467 | |         def assertIn(self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None: ...
+    | |_________________________________________________________________________________________________________________________^ First overload defined here
+468 |           @overload
+469 |           def assertIn(self, member: int, container: list[int], msg: str | None = None) -> None: ...
+    |
+info: Possible overloads for bound method `assertIn`:
+info:   (self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None
+info:   (self, member: int, container: list[int], msg: str | None = None) -> None
+info:   (self, member: object, container: Mapping[int, str], msg: str | None = None) -> None
+info: Overload implementation defined here
+   --> <imre stdlib>/unittest/__init__.py:472:13
+    |
+470 |         @overload
+471 |         def assertIn(self, member: object, container: typing.Mapping[int, str], msg: str | None = None) -> None: ...
+472 |         def assertIn(self, member: object, container: object, msg: str | None = None) -> None: ...
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+473 |     else:
+474 |         def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None:
+    |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_logging.py:4853:18
+     |
+4851 |         )
+4852 |         for ns, want in tests:
+4853 |             with patch('time.time_ns') as patched_ns:
+     |                  ^^^^^^^^^^^^^^^^^^^^^
+4854 |                 patched_ns.return_value = ns
+4855 |                 record = logging.makeLogRecord({'msg': 'test'})
+     |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/import_helper.py:290:12
+    |
+288 |     # memory.
+289 |     from unittest import mock
+290 |     return mock.patch('os.register_at_fork', create=True)(func)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+error[unknown-argument]: Argument `certfile` does not match any known parameter of `TCPServer.__init__`
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/http/server.py:1345:50
+     |
+1344 |     if tls_cert:
+1345 |         server = ServerClass(addr, HandlerClass, certfile=tls_cert,
+     |                                                  ^^^^^^^^^^^^^^^^^
+1346 |                              keyfile=tls_key, password=tls_password)
+1347 |     else:
+     |
+info: Union variant `bound method ThreadingHTTPServer.__init__(server_address, RequestHandlerClass, bind_and_activate=True) -> Unknown` is incompatible with this call site
+info: Attempted to call union type `Unknown | <class 'ThreadingHTTPServer'>`
+
+
+error[unknown-argument]: Argument `keyfile` does not match any known parameter of `TCPServer.__init__`
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/http/server.py:1346:30
+     |
+1344 |     if tls_cert:
+1345 |         server = ServerClass(addr, HandlerClass, certfile=tls_cert,
+1346 |                              keyfile=tls_key, password=tls_password)
+     |                              ^^^^^^^^^^^^^^^
+1347 |     else:
+1348 |         server = ServerClass(addr, HandlerClass)
+     |
+info: Union variant `bound method ThreadingHTTPServer.__init__(server_address, RequestHandlerClass, bind_and_activate=True) -> Unknown` is incompatible with this call site
+info: Attempted to call union type `Unknown | <class 'ThreadingHTTPServer'>`
+
+
+error[unknown-argument]: Argument `password` does not match any known parameter of `TCPServer.__init__`
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/http/server.py:1346:47
+     |
+1344 |     if tls_cert:
+1345 |         server = ServerClass(addr, HandlerClass, certfile=tls_cert,
+1346 |                              keyfile=tls_key, password=tls_password)
+     |                                               ^^^^^^^^^^^^^^^^^^^^^
+1347 |     else:
+1348 |         server = ServerClass(addr, HandlerClass)
+     |
+info: Union variant `bound method ThreadingHTTPServer.__init__(server_address, RequestHandlerClass, bind_and_activate=True) -> Unknown` is incompatible with this call site
+info: Attempted to call union type `Unknown | <class 'ThreadingHTTPServer'>`
+
+
+error[invalid-argument-type]: Method `__getitem__` of type `Overload[(key: SupportsIndex | tuple[SupportsIndex, ...], /) -> int, (key: slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None], /) -> memoryview[int]]` cannot be called with key of type `slice[Literal[0], str | int | (Unknown & ~None), None]` on object of type `memoryview[int]`
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/http/client.py:526:21
+    |
+524 |             if len(b) > self.length:
+525 |                 # clip the read to the "end of response"
+526 |                 b = memoryview(b)[0:self.length]
+    |                     ^^^^^^^^^^^^^
+527 |
+528 |         # we do not use _safe_read() here because this may be a .will_close
+    |
+
+
