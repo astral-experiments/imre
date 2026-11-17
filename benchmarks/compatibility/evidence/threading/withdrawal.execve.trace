@@ -1,0 +1,2 @@
+7363  execve("/workspace/scratch/threading-positive-withdrawal.exe", ["/workspace/scratch/threading-pos"..., "-v", "test.test_threading.BarrierTests"...], 0x7ffcb20bcc88 /* 79 vars */) = 0
+7363  +++ exited with 0 +++

@@ -19,8 +19,8 @@
   "stock_inventory": 228,
   "unique_id_occurrences": 228,
   "repeated_occurrences": [],
-  "paired": 90,
-  "accepted_reasoned_omissions": 0,
+  "paired": 0,
+  "accepted_reasoned_omissions": 90,
   "outcomes": {
     "stock": {
       "pass": 220,
@@ -53,5 +53,8 @@
     }
   },
   "timeout_accounting": "A suite or selector timeout is an invocation event. Only completed per-original verdicts are credited; originals with no reported verdict remain not_run, not individual timeout or pass.",
-  "jsonl_sha256": "e7defbf8a92472a8f6dee4e33e7261a029911b514ed58d72eb05e73a3d872961"
+  "jsonl_sha256": "5d9b893bf4bd23445607c9cbcd8c65313b30775f7567f92e90efbbf7a366e55c",
+  "observed_all_pass": 90,
+  "architecture_control_passed": false,
+  "source_withdrawal_probe_passed": true
 }

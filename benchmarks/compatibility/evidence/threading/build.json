@@ -71,5 +71,7 @@
     "discovery_method": "unittest.defaultTestLoader.loadTestsFromName(\"test.test_threading\"); recursively enumerate TestCase.id() under exact stock Python with PYTHONPATH set to pinned CPython Lib",
     "observed_stock_positive": 220
   },
-  "native_child_toolchain_path_prefix": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin"
+  "native_child_toolchain_path_prefix": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin",
+  "architecture_control": "control.json",
+  "source_withdrawal_probe": "withdrawal.json"
 }

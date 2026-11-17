@@ -1553,7 +1553,7 @@
       "skip": 15
     }
   },
-  "paired": 90,
+  "paired": 0,
   "raw": 228,
   "stock_inventory": 228,
   "recovery_selection": {
@@ -1602,5 +1602,9 @@
       "test.test_threading.ThreadingExceptionTests.test_start_thread_again"
     ],
     "timeout_seconds": 5
-  }
+  },
+  "observed_all_pass": 90,
+  "accepted_reasoned_omissions": 90,
+  "architecture_control": "benchmarks/compatibility/evidence/threading/control.json",
+  "source_withdrawal_probe": "benchmarks/compatibility/evidence/threading/withdrawal.json"
 }
