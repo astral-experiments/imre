@@ -888,7 +888,13 @@ def summary():
             elif entry and entry.get('staged_receipt'):
                 _, originals = activated_stdlib_path(staged, entry)
                 active = {(r['id'],r['occurrence']) for r in grouped[name]}
-                require(len(originals) == row['originals'], f'{name}: partial staged shard does not cover frozen denominator')
+                staged_originals = entry.get('staged_originals', row['originals'])
+                require(type(staged_originals) is int and 0 < staged_originals <= row['originals']
+                        and len(originals) == staged_originals, f'{name}: partial staged shard does not cover frozen denominator or declared staged count')
+                if staged_originals < row['originals']:
+                    catalog = {key[1:] for key in canonical_originals('stdlib') if key[0] == name}
+                    require(len(catalog) == row['originals'] and set(originals) <= catalog,
+                            f'{name}: sparse stage differs from complete canonical original catalog')
                 require(active <= set(originals), f'{name}: verified subset exceeds staged identities')
                 pending = [r for key,r in originals.items() if key not in active]
                 row['pending'] = len(pending)

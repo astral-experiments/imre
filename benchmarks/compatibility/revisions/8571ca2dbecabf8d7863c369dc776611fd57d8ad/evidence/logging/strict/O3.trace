@@ -1,0 +1,355 @@
+10204 execve("/workspace/scratch/logging-strict-8571/raw-control-probe", ["/workspace/scratch/logging-strict-8571/raw-control-probe", "withdraw", "/workspace/scratch/glob-logging-8571/fixtures/Lib/test", "/workspace/scratch/glob-logging-8571/fixtures/Lib/test.raw-control-stash", "/workspace/scratch/glob-logging-8571/fixtures/Lib/test/test_logging.py", "/workspace/scratch/logging-strict-8571/O3.exe"], 0x7ffc3136c758 /* 81 vars */) = 0
+10204 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+10204 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+10204 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib/test/test_logging.py", {st_mode=S_IFREG|0600, st_size=269251, ...}, 0) = 0
+10204 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib/test.raw-control-stash", 0x7ffef88a6b70, 0) = -1 ENOENT (No such file or directory)
+10204 rename("/workspace/scratch/glob-logging-8571/fixtures/Lib/test", "/workspace/scratch/glob-logging-8571/fixtures/Lib/test.raw-control-stash") = 0
+10204 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib/test", 0x7ffef88a6b70, 0) = -1 ENOENT (No such file or directory)
+10204 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib/test/test_logging.py", 0x7ffef88a6b70, 0) = -1 ENOENT (No such file or directory)
+10204 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/launcher.py", {st_mode=S_IFREG|0600, st_size=3173, ...}, 0) = 0
+10204 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/launcher.py.raw-control-stash", 0x7ffef88a6ac0, 0) = -1 ENOENT (No such file or directory)
+10204 rename("/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/launcher.py", "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/launcher.py.raw-control-stash") = 0
+10204 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/launcher.py", 0x7ffef88a6ac0, 0) = -1 ENOENT (No such file or directory)
+10204 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/stock.source.zip", {st_mode=S_IFREG|0600, st_size=47989, ...}, 0) = 0
+10204 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/stock.source.zip.raw-control-stash", 0x7ffef88a6ac0, 0) = -1 ENOENT (No such file or directory)
+10204 rename("/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/stock.source.zip", "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/stock.source.zip.raw-control-stash") = 0
+10204 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/stock.source.zip", 0x7ffef88a6ac0, 0) = -1 ENOENT (No such file or directory)
+10204 wait4(10205,  <unfinished ...>
+10205 execve("/workspace/scratch/logging-strict-8571/O3.exe", ["/workspace/scratch/logging-strict-8571/O3.exe"], 0x7ffef88a8e70 /* 81 vars */) = 0
+10205 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+10205 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3
+10205 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3
+10205 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+10205 openat(AT_FDCWD, "/usr/lib/locale/locale-archive", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10205 openat(AT_FDCWD, "/usr/share/locale/locale.alias", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10205 openat(AT_FDCWD, "/usr/lib/locale/C.UTF-8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10205 openat(AT_FDCWD, "/usr/lib/locale/C.utf8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = 3
+10205 openat(AT_FDCWD, "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache", O_RDONLY|O_CLOEXEC) = 3
+10205 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 open("/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 open("/workspace/scratch/glob-logging-8571/fixtures/Lib", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 openat(AT_FDCWD, "/workspace/scratch/logging-strict-8571/O3.exe", O_RDONLY|O_CLOEXEC) = 3
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3
+10205 openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 openat(AT_FDCWD, "/etc/localtime", O_RDONLY|O_CLOEXEC) = 3
+10205 openat(AT_FDCWD, "/workspace/scratch/logging-strict-8571/O3.exe", O_RDONLY|O_CLOEXEC) = 3
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 openat(AT_FDCWD, "/workspace/scratch/logging-strict-8571/O3.exe", O_RDONLY|O_CLOEXEC) = 3
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib/test", 0x7ffdd579e678, 0) = -1 ENOENT (No such file or directory)
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 openat(AT_FDCWD, "/workspace/scratch/logging-strict-8571/O3.exe", O_RDONLY|O_CLOEXEC) = 3
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 openat(AT_FDCWD, "/workspace/scratch/logging-strict-8571/O3.exe", O_RDONLY|O_CLOEXEC) = 3
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 openat(AT_FDCWD, "/workspace/scratch/logging-strict-8571/O3.exe", O_RDONLY|O_CLOEXEC) = 3
+10205 openat(AT_FDCWD, "/workspace/scratch/logging-strict-8571/O3.exe", O_RDONLY|O_CLOEXEC) = 3
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 openat(AT_FDCWD, "/workspace/scratch/logging-strict-8571/O3.exe", O_RDONLY|O_CLOEXEC) = 3
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-target-8571/release/Modules/Setup", 0x7ffdd5795838, 0) = -1 ENOENT (No such file or directory)
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-target-8571/release/Modules/Setup.local", 0x7ffdd5795838, 0) = -1 ENOENT (No such file or directory)
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib/test/support", 0x7ffdd579ab98, 0) = -1 ENOENT (No such file or directory)
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 openat(AT_FDCWD, "/workspace/scratch/logging-strict-8571/O3.exe", O_RDONLY|O_CLOEXEC) = 3
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib/test/support", 0x7ffdd57971c8, 0) = -1 ENOENT (No such file or directory)
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib/test/support", 0x7ffdd5793828, 0) = -1 ENOENT (No such file or directory)
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib/test/support", 0x7ffdd5798188, 0) = -1 ENOENT (No such file or directory)
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib/test/support", 0x7ffdd5798188, 0) = -1 ENOENT (No such file or directory)
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib/test/support", 0x7ffdd5798188, 0) = -1 ENOENT (No such file or directory)
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib/test/support", 0x7ffdd5798188, 0) = -1 ENOENT (No such file or directory)
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib/test/support", 0x7ffdd5798188, 0) = -1 ENOENT (No such file or directory)
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 openat(AT_FDCWD, "/workspace/scratch/logging-strict-8571/O3.exe", O_RDONLY|O_CLOEXEC) = 3
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib/test/support", 0x7ffdd5791da8, 0) = -1 ENOENT (No such file or directory)
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 openat(AT_FDCWD, "/workspace/scratch/logging-strict-8571/O3.exe", O_RDONLY|O_CLOEXEC) = 3
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib/test/support", 0x7ffdd579ab98, 0) = -1 ENOENT (No such file or directory)
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 openat(AT_FDCWD, "/workspace/scratch/logging-strict-8571/O3.exe", O_RDONLY|O_CLOEXEC) = 3
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 openat(AT_FDCWD, "/workspace/scratch/logging-strict-8571/O3.exe", O_RDONLY|O_CLOEXEC) = 3
+10205 openat(AT_FDCWD, "/workspace/scratch/logging-strict-8571/O3.exe", O_RDONLY|O_CLOEXEC) = 3
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+10205 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libssl.so.3", O_RDONLY|O_CLOEXEC) = 3
+10205 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libcrypto.so.3", O_RDONLY|O_CLOEXEC) = 3
+10205 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libz.so.1", O_RDONLY|O_CLOEXEC) = 3
+10205 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libzstd.so.1", O_RDONLY|O_CLOEXEC) = 3
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 openat(AT_FDCWD, "/workspace/scratch/logging-strict-8571/O3.exe", O_RDONLY|O_CLOEXEC) = 3
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 openat(AT_FDCWD, "/workspace/scratch/logging-strict-8571/O3.exe", O_RDONLY|O_CLOEXEC) = 3
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+10205 openat(AT_FDCWD, "/workspace/scratch/logging-strict-8571/O3.exe", O_RDONLY|O_CLOEXEC) = 3
+10205 openat(AT_FDCWD, "/usr/lib/locale/C.UTF-8/LC_IDENTIFICATION", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10205 openat(AT_FDCWD, "/usr/lib/locale/C.utf8/LC_IDENTIFICATION", O_RDONLY|O_CLOEXEC) = 3
+10205 openat(AT_FDCWD, "/usr/lib/locale/C.UTF-8/LC_MEASUREMENT", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10205 openat(AT_FDCWD, "/usr/lib/locale/C.utf8/LC_MEASUREMENT", O_RDONLY|O_CLOEXEC) = 3
+10205 openat(AT_FDCWD, "/usr/lib/locale/C.UTF-8/LC_TELEPHONE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10205 openat(AT_FDCWD, "/usr/lib/locale/C.utf8/LC_TELEPHONE", O_RDONLY|O_CLOEXEC) = 3
+10205 openat(AT_FDCWD, "/usr/lib/locale/C.UTF-8/LC_ADDRESS", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10205 openat(AT_FDCWD, "/usr/lib/locale/C.utf8/LC_ADDRESS", O_RDONLY|O_CLOEXEC) = 3
+10205 openat(AT_FDCWD, "/usr/lib/locale/C.UTF-8/LC_NAME", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10205 openat(AT_FDCWD, "/usr/lib/locale/C.utf8/LC_NAME", O_RDONLY|O_CLOEXEC) = 3
+10205 openat(AT_FDCWD, "/usr/lib/locale/C.UTF-8/LC_PAPER", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10205 openat(AT_FDCWD, "/usr/lib/locale/C.utf8/LC_PAPER", O_RDONLY|O_CLOEXEC) = 3
+10205 openat(AT_FDCWD, "/usr/lib/locale/C.UTF-8/LC_MESSAGES", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10205 openat(AT_FDCWD, "/usr/lib/locale/C.utf8/LC_MESSAGES", O_RDONLY|O_CLOEXEC) = 3
+10205 openat(AT_FDCWD, "/usr/lib/locale/C.utf8/LC_MESSAGES/SYS_LC_MESSAGES", O_RDONLY|O_CLOEXEC) = 3
+10205 openat(AT_FDCWD, "/usr/lib/locale/C.UTF-8/LC_MONETARY", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10205 openat(AT_FDCWD, "/usr/lib/locale/C.utf8/LC_MONETARY", O_RDONLY|O_CLOEXEC) = 3
+10205 openat(AT_FDCWD, "/usr/lib/locale/C.UTF-8/LC_COLLATE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10205 openat(AT_FDCWD, "/usr/lib/locale/C.utf8/LC_COLLATE", O_RDONLY|O_CLOEXEC) = 3
+10205 openat(AT_FDCWD, "/usr/lib/locale/C.UTF-8/LC_TIME", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10205 openat(AT_FDCWD, "/usr/lib/locale/C.utf8/LC_TIME", O_RDONLY|O_CLOEXEC) = 3
+10205 openat(AT_FDCWD, "/usr/lib/locale/C.UTF-8/LC_NUMERIC", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+10205 openat(AT_FDCWD, "/usr/lib/locale/C.utf8/LC_NUMERIC", O_RDONLY|O_CLOEXEC) = 3
+10205 exit_group(0)                     = ?
+10204 <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 10205
+10204 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=10205, si_uid=1000, si_status=0, si_utime=236 /* 2.36 s */, si_stime=7 /* 0.07 s */} ---
+10204 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib/test", 0x7ffef88a6b70, 0) = -1 ENOENT (No such file or directory)
+10204 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib/test/test_logging.py", 0x7ffef88a6b70, 0) = -1 ENOENT (No such file or directory)
+10204 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/stock.source.zip", 0x7ffef88a6ac0, 0) = -1 ENOENT (No such file or directory)
+10204 rename("/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/stock.source.zip.raw-control-stash", "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/stock.source.zip") = 0
+10204 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/stock.source.zip", {st_mode=S_IFREG|0600, st_size=47989, ...}, 0) = 0
+10204 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/launcher.py", 0x7ffef88a6ac0, 0) = -1 ENOENT (No such file or directory)
+10204 rename("/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/launcher.py.raw-control-stash", "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/launcher.py") = 0
+10204 newfstatat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/launcher.py", {st_mode=S_IFREG|0600, st_size=3173, ...}, 0) = 0
+10204 rename("/workspace/scratch/glob-logging-8571/fixtures/Lib/test.raw-control-stash", "/workspace/scratch/glob-logging-8571/fixtures/Lib/test") = 0
+10204 newfstatat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib/test/test_logging.py", {st_mode=S_IFREG|0600, st_size=269251, ...}, 0) = 0
+10204 exit_group(0)                     = ?

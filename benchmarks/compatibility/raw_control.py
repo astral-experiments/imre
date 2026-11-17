@@ -5,6 +5,7 @@ raw process/file traces and independently anchored original result events.
 """
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import posixpath
@@ -120,7 +121,25 @@ def trace_gate(text, command, probe, poison_path, diagnostic, require):
     require(poison_path in diagnostic and re.search(r'expected\s+int,\s*got\s+bool', diagnostic), 'missing imported int/bool diagnostic')
 
 
-def trace_withdraw(api, text, image, probe, tree, stash, leaf, cwd, require):
+def trace_direct_gate(text, command, probe, diagnostic, require):
+    lines = text.splitlines(); first, target = execs(lines, require)
+    out = command[command.index('-o') + 1]
+    require(first[2:] == (probe, [probe, 'gate', out, *command]) and target[2:] == (command[0], command),
+            'raw direct gate invocation differs')
+    before = stat(lines, first[1], out, True, first[0] + 1)
+    require(before < target[0] and any(
+        (m := OPEN.match(line)) and line.startswith(target[1] + ' ') and json.loads(m[1]) == command[2]
+        and re.search(r'= [0-9]+$', line) for line in lines[target[0]+1:]), 'direct gate did not open launcher')
+    m = re.search(rf'^{target[1]}\s+exit_group\(([1-9][0-9]*)\)', text, re.M)
+    require(m is not None, 'direct gate compiler did not exit nonzero')
+    waited = exits(lines, first[1], target[1], int(m[1]), target[0])
+    after = stat(lines, first[1], out, True, waited + 1)
+    find(lines, rf'^{first[1]}\s+exit_group\(0\)', after + 1)
+    require(command[2] in diagnostic and re.search(r'expected\s+int,\s*got\s+bool', diagnostic),
+            'missing direct int/bool diagnostic')
+
+
+def trace_withdraw(api, text, image, probe, tree, stash, leaf, cwd, require, extra_sources=()):
     """Allow only ENOENT withdrawn-path probes; never allow Python probes or child execs."""
     from posixpath import normpath
     lines = text.splitlines()
@@ -139,14 +158,33 @@ def trace_withdraw(api, text, image, probe, tree, stash, leaf, cwd, require):
     restored = find(lines, rf'^{first[1]}\s+rename\({re.escape(json.dumps(stash))}, {re.escape(json.dumps(tree))}\) = 0$', b+1)
     exists = stat(lines, first[1], leaf, False, restored+1)
     find(lines, rf'^{first[1]}\s+exit_group\(0\)', exists+1)
+    hide = stat(lines, first[1], leaf, True, mv+1)
+    for source in extra_sources:
+        source_stash = source + '.raw-control-stash'
+        present = stat(lines, first[1], source, False, hide+1)
+        absent_stash = stat(lines, first[1], source_stash, True, present+1)
+        moved = find(lines, rf'^{first[1]}\s+rename\({re.escape(json.dumps(source))}, {re.escape(json.dumps(source_stash))}\) = 0$', absent_stash+1)
+        hide = stat(lines, first[1], source, True, moved+1)
+        require(hide < target[0], 'extra source was not withdrawn before native exec')
+    show = b
+    for source in reversed(extra_sources):
+        source_stash = source + '.raw-control-stash'
+        missing = stat(lines, first[1], source, True, show+1)
+        moved = find(lines, rf'^{first[1]}\s+rename\({re.escape(json.dumps(source_stash))}, {re.escape(json.dumps(source))}\) = 0$', missing+1)
+        show = stat(lines, first[1], source, False, moved+1)
+        require(show < restored, 'extra source was not restored after native exec')
     require(isinstance(cwd, str) and Path(cwd).is_absolute(), 'native cwd missing')
     stem = Path(leaf).stem.lower()
+    extra_paths = {Path(p) for source in extra_sources for p in (source, source+'.raw-control-stash')}
+    launcher_stem = Path(extra_sources[0]).stem.lower() if extra_sources else None
     for line in lines[target[0]:waited+1]:
         # A successful io_uring setup would permit unobserved asynchronous opens.
         require(not re.search(r'\bio_uring_setup\(.*= [0-9]+$', line), 'native io_uring may hide file access')
         m = OPEN.match(line) or re.match(r'^\d+\s+newfstatat\(.*?("(?:[^"\\]|\\.)*")', line)
         if m:
-            path = json.loads(m[1])
+            try: path = ast.literal_eval(m[1])
+            except (ValueError, SyntaxError): require(False, "invalid traced path")
+            require(isinstance(path, str), "invalid traced path")
             folded = path.lower()
             name = Path(path).name.lower()
             python_probe = 'libpython' in folded or any(part.startswith('python') for part in Path(folded).parts)
@@ -157,7 +195,10 @@ def trace_withdraw(api, text, image, probe, tree, stash, leaf, cwd, require):
                 or (name.startswith(stem+'.') and name.endswith(('.pyc', '.pyo')))
                 or resolved.is_relative_to(Path(tree))
                 or resolved.is_relative_to(Path(stash))
-                or Path(stash).name in Path(path).parts)
+                or Path(stash).name in Path(path).parts
+                or resolved in extra_paths
+                or (launcher_stem and (name in {launcher_stem+'.pyc',launcher_stem+'.pyo'}
+                    or name.startswith(launcher_stem+'.') and name.endswith(('.pyc','.pyo')))))
             # Only an explicit ENOENT proves this withdrawn path was absent.
             require(not withdrawn or re.search(r'\) = -1 ENOENT(?: \([^)]*\))?$', line),
                     'native opened CPython, libpython, withdrawn source or matching bytecode')
@@ -166,6 +207,9 @@ def trace_withdraw(api, text, image, probe, tree, stash, leaf, cwd, require):
         cached = path.parent.name == '__pycache__' and name.startswith(stem+'.') and path.suffix in {'.pyc','.pyo'}
         forbidden = (path.is_relative_to(Path(tree)) or path.is_relative_to(Path(stash))
                      or name in {stem+'.py',stem+'.pyc',stem+'.pyo'} or cached
+                     or path in extra_paths
+                     or (launcher_stem and (name in {launcher_stem+'.pyc',launcher_stem+'.pyo'}
+                         or name.startswith(launcher_stem+'.') and name.endswith(('.pyc','.pyo'))))
                      or 'libpython' in str(path).lower() or name.startswith('python'))
         require(not forbidden, 'native opened CPython, libpython, withdrawn source or matching bytecode')
 
@@ -325,6 +369,20 @@ def adapt(api, family, locator, digest, source_json, activation_digest, cohort):
         and "'-s','512'" in collector, 'raw trace collection lacks syscall or descendant coverage')
     trace_gate(text('gate_trace'),command,probe,poison_path,text('gate_stderr'),require)
     require(data('gate_stdout')==b'', 'unexpected gate stdout')
+    extra_sources = ()
+    if binding.get('strict_source_control') == 'direct-and-withdraw-v1':
+        direct = obj('direct_command'); direct_cmd = direct.get('command')
+        require(isinstance(direct_cmd, list) and api.comparable_build(direct_cmd) == api.comparable_build(command)
+                and direct.get('supervisor_exit') == 0 and direct.get('image_exists') is False,
+                'direct gate does not match the positive build')
+        direct_launcher = data('direct_launcher')
+        require(positive.count(b'import unittest\n') == 1 and direct_launcher ==
+                positive.replace(b'import unittest\n', b'import unittest\n\nstatus: int = True\n', 1)
+                and sha_lines(text('direct_files')) == {direct_cmd[2]:sha(direct_launcher),poison_path:sha(poison)}
+                and data('direct_stdout') == b'', 'direct poison launcher delta or identity differs')
+        trace_direct_gate(text('direct_trace'),direct_cmd,probe,text('direct_stderr'),require)
+        extra_sources = (command[2], str(Path(command[2]).parent / file('stock_source').name))
+        require(binding.get('withdraw_sources') == list(extra_sources) and sha_lines(text('extra_restored')) == {extra_sources[0]:sha(positive),extra_sources[1]:sha(data('stock_source'))}, 'withdrawn launcher/source archive or restoration digest differs')
     inventories = {}
     paths = {}
     for tier in api.TIERS:
@@ -352,7 +410,13 @@ def adapt(api, family, locator, digest, source_json, activation_digest, cohort):
             and sums.get(image)==meta.get('image_sha256')
             and bool(api.HEX64.fullmatch(sums.get(image,''))), tier+' saved native launcher/build identity differs')
         require(data(tier+'_withdraw_stderr')==raw.read_bytes() and data(tier+'_withdraw_stdout')==b'', tier+' withdrawn raw outcomes differ from baseline')
-        trace_withdraw(api,text(tier+'_trace'),image,probe,tree,stash,leaf,meta.get('cwd'),require)
+        if extra_sources:
+            hidden = meta.get('withdrawal',{}).get('environment',{})
+            require(hidden.get('PATH') == str(Path(api.option(command,'--clang')).parent)
+                    and hidden.get('IMRE_WITHDRAW_LAUNCHER') == extra_sources[0]
+                    and hidden.get('IMRE_WITHDRAW_ARCHIVE') == extra_sources[1],
+                    tier+' external Python path or withdrawn source configuration differs')
+        trace_withdraw(api,text(tier+'_trace'),image,probe,tree,stash,leaf,meta.get('cwd'),require,extra_sources)
         elf = meta.get('withdrawal',{}).get('readelf',{})
         elfraw = data(tier+'_readelf')
         require(elf.get('argv')==['readelf','-d',image]

@@ -1,0 +1,35 @@
+{
+  "command": [
+    "/workspace/scratch/imre-target-8571/release/imre",
+    "build",
+    "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/launcher.py",
+    "--module-root",
+    "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict",
+    "--extension-path",
+    "/workspace/scratch/glob-logging-8571/fixtures/Lib",
+    "--no-cache",
+    "--quiet",
+    "--opt-level",
+    "0",
+    "--runtime",
+    "/workspace/scratch/imre-target-8571/release/libimre_runtime.a",
+    "--clang",
+    "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+    "--include-module",
+    "test.test_logging",
+    "-o",
+    "/workspace/scratch/logging-strict-8571/direct.exe"
+  ],
+  "environment": {
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+    "TMPDIR": "/workspace/scratch/logging-strict-8571/tmp",
+    "PYTHONPATH": "/workspace/scratch/glob-logging-8571/fixtures/Lib",
+    "IMRE_PYTHON": "/workspace/scratch/imre-target-8571/release/imre",
+    "IMREFLAGS": "--opt-level 0"
+  },
+  "supervisor_exit": 0,
+  "image_exists": false
+}

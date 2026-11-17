@@ -1,0 +1,22 @@
+{
+  "argv": [
+    "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "-B",
+    "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/stock-all-launcher.py"
+  ],
+  "cwd": "/workspace/scratch/logging-strict-8571/empty",
+  "environment": {
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+    "TMPDIR": "/workspace/scratch/logging-strict-8571/tmp",
+    "PYTHONPATH": "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib"
+  },
+  "timeout_seconds": 180,
+  "seconds": 0.77,
+  "exit_code": 0,
+  "timed_out": false,
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "29b898fe77e7a126752621d86d7d23be929a1bb51f513e80923b41b3ec780161"
+}
