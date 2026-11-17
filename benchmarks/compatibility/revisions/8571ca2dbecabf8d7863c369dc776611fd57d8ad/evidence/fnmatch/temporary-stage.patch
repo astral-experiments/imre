@@ -1,0 +1,42 @@
+--- public/scorecard.py
++++ temporary-stage/scorecard.py
+@@ -12,9 +12,9 @@
+ from functools import lru_cache
+ from pathlib import Path
+ 
+-HERE = Path(__file__).resolve().parent
+-ROOT = HERE.parents[1]
+-COHORT = json.loads((HERE / "cohort.json").read_text())
++HERE = Path('/workspace/imre-fnmatch-8571/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad')
++ROOT = Path('/workspace/imre-fnmatch-8571')
++COHORT = json.loads((Path(__file__).resolve().parent / "cohort.json").read_text())
+ SCHEMA = "imre.compatibility.v1"
+ OUTCOMES = {"pass", "fail", "error", "skip", "timeout", "not_run", "omitted"}
+ TIERS = ("stock", "O0", "O3")
+--- public/replay_stdlib.py
++++ temporary-stage/replay_stdlib.py
+@@ -108,7 +108,13 @@
+             elif not has_summary: meta["reason"] = "suite exited before reporting a unittest summary"
+             elif len(result) != len(originals): meta["reason"] = "suite did not report this original"
+         all_runs[tier] = meta; observations[tier] = result
+-        if binary.exists(): binary.unlink()
++        if binary.exists():
++            saved = Path('/workspace/scratch/fnmatch-8571-images') / f"{tier}.exe"
++            shutil.copy2(binary, saved)
++            meta["saved_image"] = str(saved)
++            with saved.open("rb") as stream:
++                meta["executable_sha256"] = hashlib.file_digest(stream, "sha256").hexdigest()
++            binary.unlink()
+     rel = evidence.relative_to(ROOT).as_posix()
+     records = []
+     for test_id, occurrence, _, _ in originals:
+--- public/cohort.json
++++ temporary-stage/cohort.json
+@@ -1,6 +1,6 @@
+ {
+   "schema": "imre.compatibility.cohort.v1",
+-  "imre_revision": "49f0dc2ef78b82692e333252faf71b4fc7730949",
++  "imre_revision": "8571ca2dbecabf8d7863c369dc776611fd57d8ad",
+   "cpython_version": "3.14.5",
+   "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+   "historical_families": "benchmarks/cpython_stdlib/full/frozen-stock-intersection-8818.tsv",

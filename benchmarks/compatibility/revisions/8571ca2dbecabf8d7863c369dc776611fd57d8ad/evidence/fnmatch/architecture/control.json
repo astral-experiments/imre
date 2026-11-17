@@ -1,0 +1,176 @@
+{
+  "imre_revision": "8571ca2dbecabf8d7863c369dc776611fd57d8ad",
+  "launcher": "Lib/test/test_fnmatch.py (direct FILE entry)",
+  "poison_source": "status: int = True\n",
+  "poison_sha256": "14841721c7b84f57d26a6a38a53827c683daf10930b9f297cfc15335bd1257b5",
+  "positive_launcher_sha256": "b6218bf75e1920ca273339589b88e522969184dc02eefe5272e1798fa7cc2f0c",
+  "poisoned_launcher_sha256": "601ecc9bb806888fc1ab4562be65ece08e0ef87f205f6fb69f9591f9527c763a",
+  "launcher_change": "insert import fnmatch_poison after the module docstring; otherwise unchanged original launcher",
+  "saved_images_copied_before_runner_cleanup": true,
+  "standalone_build": {
+    "argv": [
+      "/workspace/imre/target/release/imre",
+      "build",
+      "/workspace/scratch/fnmatch-8571-poison/fnmatch_poison.py",
+      "--module-root",
+      "/workspace/scratch/fnmatch-8571-poison",
+      "--no-cache",
+      "--opt-level",
+      "0",
+      "--runtime",
+      "/workspace/imre/target/release/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "-o",
+      "/workspace/scratch/fnmatch-8571-poison/bare-build.exe"
+    ],
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/fnmatch-8571-poison",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "TMPDIR": "/workspace/scratch/imre-tmp"
+    },
+    "timeout_seconds": 60,
+    "exit_code": 1,
+    "executable_exists": false,
+    "expected_diagnostic_present": true,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "3d6461c62344fc6b8a1b3285d0c14e17004077825ba17f36a7a040980929649a",
+    "negative_control_passed": true
+  },
+  "small_import_build": {
+    "argv": [
+      "/workspace/imre/target/release/imre",
+      "build",
+      "/workspace/scratch/fnmatch-8571-poison/import_only.py",
+      "--module-root",
+      "/workspace/scratch/fnmatch-8571-poison",
+      "--no-cache",
+      "--opt-level",
+      "0",
+      "--runtime",
+      "/workspace/imre/target/release/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "-o",
+      "/workspace/scratch/fnmatch-8571-poison/import-build.exe"
+    ],
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/fnmatch-8571-poison",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "TMPDIR": "/workspace/scratch/imre-tmp"
+    },
+    "timeout_seconds": 60,
+    "exit_code": 1,
+    "executable_exists": false,
+    "expected_diagnostic_present": true,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "0de196715a95fba3df8d23f2f6604338ad64467aa32a70401d11344e73c8695e",
+    "negative_control_passed": true
+  },
+  "graph_build": {
+    "argv": [
+      "/workspace/imre/target/release/imre",
+      "build",
+      "/workspace/scratch/fnmatch-8571-poison/test/test_fnmatch.py",
+      "--module-root",
+      "/workspace/scratch/fnmatch-8571-poison",
+      "--no-cache",
+      "--opt-level",
+      "0",
+      "--runtime",
+      "/workspace/imre/target/release/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "-o",
+      "/workspace/scratch/fnmatch-8571-poison/O0.poison-build.exe"
+    ],
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/fnmatch-8571-poison",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "TMPDIR": "/workspace/scratch/imre-tmp"
+    },
+    "timeout_seconds": 120,
+    "exit_code": 1,
+    "executable_exists": false,
+    "expected_diagnostic_present": true,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "935d1a93b86396cebcdc159e452a1cacb80aa0c82ac2f7777de3d7595b450f63",
+    "negative_control_passed": true
+  },
+  "required_negative_control_passed": true,
+  "withdrawal": {
+    "source_path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_fnmatch.py",
+    "source_absent_during_runs": true,
+    "matching_bytecode_absent": true,
+    "matching_bytecode_removed_count": 0,
+    "source_sha256_before": "b6218bf75e1920ca273339589b88e522969184dc02eefe5272e1798fa7cc2f0c",
+    "source_sha256_restored": "b6218bf75e1920ca273339589b88e522969184dc02eefe5272e1798fa7cc2f0c",
+    "runs": {
+      "O0": {
+        "argv": [
+          "strace",
+          "-f",
+          "-e",
+          "trace=execve,execveat",
+          "-o",
+          "/workspace/imre-fnmatch-8571/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/fnmatch/architecture/O0.withdrawn.execve",
+          "/workspace/scratch/fnmatch-8571-images/O0.exe",
+          "-v"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch/imre-tmp"
+        },
+        "timeout_seconds": 60,
+        "exit_code": 0,
+        "image_sha256": "c4909e325e20c464f989f38a5b161ede76c15b2da1cb0b31d55880e774b84e3c",
+        "image_matches_saved_baseline_hash": true,
+        "completed_originals": 24,
+        "exact_id_occurrence_outcome_sequence_matches_baseline": true,
+        "exec_calls": [
+          "6286  execve(\"/workspace/scratch/fnmatch-8571-images/O0.exe\", [\"/workspace/scratch/fnmatch-8571-\"..., \"-v\"], 0x7fff7028db40 /* 76 vars */) = 0"
+        ],
+        "additional_exec_calls": [],
+        "ldd_exit_code": 0,
+        "linked_libpython": false,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "fd7ed75acbeb01a26f7e1f5828a7dbfeeb6cdffef5a1aa34ba9702e956d12b55",
+        "trace_sha256": "f1859f9c88d0f9ae5b0c000018b56d57a37ccd34d3e42cce5cef868221ca5f7a"
+      },
+      "O3": {
+        "argv": [
+          "strace",
+          "-f",
+          "-e",
+          "trace=execve,execveat",
+          "-o",
+          "/workspace/imre-fnmatch-8571/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/fnmatch/architecture/O3.withdrawn.execve",
+          "/workspace/scratch/fnmatch-8571-images/O3.exe",
+          "-v"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch/imre-tmp"
+        },
+        "timeout_seconds": 60,
+        "exit_code": 0,
+        "image_sha256": "c083f7bff07945e8fd8002445936b47cfe25e51289a9dcdd2faca30605c6e1a8",
+        "image_matches_saved_baseline_hash": true,
+        "completed_originals": 24,
+        "exact_id_occurrence_outcome_sequence_matches_baseline": true,
+        "exec_calls": [
+          "6297  execve(\"/workspace/scratch/fnmatch-8571-images/O3.exe\", [\"/workspace/scratch/fnmatch-8571-\"..., \"-v\"], 0x7ffef12bf9d0 /* 76 vars */) = 0"
+        ],
+        "additional_exec_calls": [],
+        "ldd_exit_code": 0,
+        "linked_libpython": false,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "fdc27f25c3ec5905b060e713d153b1c4ffe5d14270429c58d1c603694d67e023",
+        "trace_sha256": "97dd7f5ed81da6e901a928e2d44cb71ad2f6e438f2381d98808a31e457cc4b1a"
+      }
+    }
+  },
+  "all_controls_passed": true
+}

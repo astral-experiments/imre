@@ -1,0 +1,2 @@
+6286  execve("/workspace/scratch/fnmatch-8571-images/O0.exe", ["/workspace/scratch/fnmatch-8571-"..., "-v"], 0x7fff7028db40 /* 76 vars */) = 0
+6286  +++ exited with 0 +++
