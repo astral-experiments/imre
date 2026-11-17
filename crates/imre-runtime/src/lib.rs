@@ -2588,7 +2588,7 @@ pub unsafe extern "C" fn imre_list_bisect_left(list: *const List, needle: usize)
     let index = unsafe {
         (&*list)
             .0
-            .with(|values| values.partition_point(|value| value.cmp(&needle).is_lt()))
+            .with(|values| bisect_ints::<true>(values, &needle))
     };
     (index << 1) | 1
 }
@@ -2605,9 +2605,28 @@ pub unsafe extern "C" fn imre_list_bisect_right(list: *const List, needle: usize
     let index = unsafe {
         (&*list)
             .0
-            .with(|values| values.partition_point(|value| !value.cmp(&needle).is_gt()))
+            .with(|values| bisect_ints::<false>(values, &needle))
     };
     (index << 1) | 1
+}
+
+fn bisect_ints<const LEFT: bool>(values: &[Int], needle: &Int) -> usize {
+    let mut low = 0;
+    let mut high = values.len();
+    while low < high {
+        let mid = low + (high - low) / 2;
+        let comparison = values[mid].cmp(needle);
+        if if LEFT {
+            comparison.is_lt()
+        } else {
+            !comparison.is_gt()
+        } {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    low
 }
 
 /// Sums an exact integer list and an already-evaluated starting value.
@@ -2919,6 +2938,16 @@ pub extern "C" fn imre_range_step_zero() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn integer_bisect_preserves_python_midpoints_for_unsorted_inputs() {
+        let values: Vec<_> = [0, 0, 0, 1, 0]
+            .into_iter()
+            .map(|n| Int::small(n).unwrap())
+            .collect();
+        assert_eq!(bisect_ints::<true>(&values, &Int::small(1).unwrap()), 5);
+        assert_eq!(bisect_ints::<false>(&values, &Int::small(0).unwrap()), 5);
+    }
+
     #[test]
     fn cached_decimal_fields_preserve_whitespace_split_and_integer_values() {
         for width in 1..=10 {
