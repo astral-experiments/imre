@@ -1,0 +1,38 @@
+8469  execve("/workspace/scratch/raw-control-probe", ["/workspace/scratch/raw-control-probe", "gate", "/workspace/scratch/dataclasses-857-images/gate.exe", "/workspace/imre/target/release/imre", "build", "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses/launcher.py", "--module-root", "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", "--extension-path", "/workspace/scratch/dataclasses-857-fixtures/Lib", "--no-cache", "--quiet", "--opt-level", "0", "--runtime", "/workspace/imre/target/release/libimre_runtime.a", "--clang", "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang", "--include-module", "test.test_dataclasses", "--include-module", "test.test_dataclasses.dataclass_module_1", "--include-module", "test.test_dataclasses.dataclass_module_1_str", "--include-module", "test.test_dataclasses.dataclass_module_2", "--include-module", "test.test_dataclasses.dataclass_module_2_str", "--include-module", "test.test_dataclasses.dataclass_textanno", "-o", "/workspace/scratch/dataclasses-857-images/gate.exe"], 0x7fff37592cb8 /* 78 vars */) = 0
+8469  openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+8469  openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+8469  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-images/gate.exe", 0x7ffe21bda600, 0) = -1 ENOENT (No such file or directory)
+8469  wait4(8470,  <unfinished ...>
+8470  execve("/workspace/imre/target/release/imre", ["/workspace/imre/target/release/imre", "build", "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses/launcher.py", "--module-root", "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", "--extension-path", "/workspace/scratch/dataclasses-857-fixtures/Lib", "--no-cache", "--quiet", "--opt-level", "0", "--runtime", "/workspace/imre/target/release/libimre_runtime.a", "--clang", "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang", "--include-module", "test.test_dataclasses", "--include-module", "test.test_dataclasses.dataclass_module_1", "--include-module", "test.test_dataclasses.dataclass_module_1_str", "--include-module", "test.test_dataclasses.dataclass_module_2", "--include-module", "test.test_dataclasses.dataclass_module_2_str", "--include-module", "test.test_dataclasses.dataclass_textanno", "-o", "/workspace/scratch/dataclasses-857-images/gate.exe"], 0x7ffe21bda9b0 /* 78 vars */) = 0
+8470  openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+8470  openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3
+8470  openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3
+8470  openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+8470  openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3
+8470  openat2(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses/launcher.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+8470  openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3
+8470  openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3
+8470  openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3
+8470  openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3
+8470  openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3
+8470  openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3
+8470  openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3
+8470  openat2(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses/gate_control_dataclasses.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+8470  openat2(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/__init__.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+8470  openat2(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/__init__.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+8470  openat2(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/dataclass_module_1.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+8470  openat2(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/dataclass_module_1_str.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+8470  openat2(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/dataclass_module_2.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+8470  openat2(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/dataclass_module_2_str.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+8470  openat2(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/dataclass_textanno.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+8470  openat2(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/support/__init__.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+8470  openat2(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/support/import_helper.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+8470  openat2(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/support/os_helper.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+8470  openat2(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib/test/support/script_helper.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+8470  openat(AT_FDCWD, "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+8470  openat(AT_FDCWD, "/workspace/scratch/dataclasses-857-fixtures/Lib", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+8470  exit_group(1)                     = ?
+8469  <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 1}], 0, NULL) = 8470
+8469  --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=8470, si_uid=1000, si_status=1, si_utime=25 /* 0.25 s */, si_stime=15 /* 0.15 s */} ---
+8469  newfstatat(AT_FDCWD, "/workspace/scratch/dataclasses-857-images/gate.exe", 0x7ffe21bda600, 0) = -1 ENOENT (No such file or directory)
+8469  exit_group(0)                     = ?
