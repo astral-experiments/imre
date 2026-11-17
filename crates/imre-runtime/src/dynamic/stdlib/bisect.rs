@@ -176,9 +176,11 @@ pub(super) fn call(
                 )
             })?;
             crate::signed_index(&index).ok_or_else(|| {
+                let actual = ctx.type_name(n);
+                let actual = &actual[..actual.floor_char_boundary(200)];
                 Error::new(
                     "OverflowError",
-                    "Python int too large to convert to C ssize_t",
+                    format!("cannot fit '{actual}' into an index-sized integer"),
                 )
             })? as i64
         }

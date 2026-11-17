@@ -980,6 +980,20 @@ ACCEPTED = {
             "print(right(values, 2, hi=-1), right.__module__)\n"
         ),
     },
+    "bisect_generic_bound_index_errors": {
+        "main.py": (
+            "from bisect import bisect_left\n"
+            "class Index:\n"
+            "    def __index__(self):\n"
+            "        print('index')\n"
+            "        return 2**100\n"
+            "for bound in (2**100, Index()):\n"
+            "    try:\n"
+            "        bisect_left((1, 2, 3), 2, hi=bound)\n"
+            "    except OverflowError as error:\n"
+            "        print(type(error).__name__, str(error))\n"
+        ),
+    },
     "definition_after_execution": {"main.py": ORDERED_DEFINITIONS, "helper.py": HELPER},
     "class_after_execution": {
         "main.py": (

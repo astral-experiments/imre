@@ -2142,6 +2142,9 @@ pub(crate) enum Builtin {
     BisectIntList {
         left: bool,
     },
+    BisectIntListBounds {
+        left: bool,
+    },
     StringListContains,
     StringTupleContains,
     StructListContains,
