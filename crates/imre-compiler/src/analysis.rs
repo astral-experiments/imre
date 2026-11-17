@@ -178,6 +178,7 @@ pub(crate) struct Session {
     hint_reads: Cell<usize>,
     /// Explicit checks can report conversions that executables perform at runtime.
     pub(crate) explicit_check: bool,
+    python_optimization: i32,
 }
 
 /// The fixed checker's declaration proof can be consumed by more than one
@@ -823,6 +824,7 @@ pub(crate) fn check_registered_project<'a>(
                 .any(|winner| winner.matches_bundled_source(path))
         }),
     )?;
+    session.python_optimization = sources.clone().next().map_or(0, |s| s.python_optimization);
     let mut paths = Vec::with_capacity(capacity);
     for (path, source) in declarations {
         session.register_file(path, source, crate::SourceKind::File)?;
@@ -1985,6 +1987,7 @@ impl Session {
             extension_roots: extension_roots.to_vec(),
             hint_reads: Cell::new(0),
             explicit_check: false,
+            python_optimization: 0,
         })
     }
 

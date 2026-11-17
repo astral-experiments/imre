@@ -1027,6 +1027,23 @@ struct SourceInfo<'a> {
     text: Cow<'a, str>,
 }
 
+/// Prepare the exact checked entry used for a literal builtin eval expression.
+fn prepare_eval_literal(
+    text: &str,
+    optimization: i32,
+) -> Result<crate::frontend::AnnotationBody<Box<SourceInfo<'static>>>, String> {
+    crate::analysis::check_source_complexity(text).map_err(str::to_owned)?;
+    let parsed = ruff_python_parser::parse_expression(text)
+        .map_err(|error| format!("SyntaxError: {error}"))?;
+    PreparedBody::prepare_annotation(text, &parsed, optimization)
+        .ok_or_else(|| "cannot compile this eval expression ahead of time".to_owned())
+}
+
+/// Check the same expression-entry preparation used by emission.
+pub(crate) fn check_eval_literal(text: &str, optimization: i32) -> Result<(), String> {
+    prepare_eval_literal(text, optimization).map(drop)
+}
+
 struct EvalLiteral {
     text: String,
     body: crate::frontend::AnnotationBody<Box<SourceInfo<'static>>>,
@@ -1059,10 +1076,7 @@ impl<'a> Visitor<'a> for EvalLiterals {
                 .as_name_expr()
                 .is_some_and(|name| name.id == "eval")
             && let Some(ast::Expr::StringLiteral(literal)) = call.arguments.args.first()
-            && crate::analysis::check_source_complexity(literal.value.to_str()).is_ok()
-            && let Ok(parsed) = ruff_python_parser::parse_expression(literal.value.to_str())
-            && let Some(body) =
-                PreparedBody::prepare_annotation(literal.value.to_str(), &parsed, self.optimization)
+            && let Ok(body) = prepare_eval_literal(literal.value.to_str(), self.optimization)
         {
             self.sites.insert(
                 call.range(),

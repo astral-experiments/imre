@@ -183,6 +183,27 @@ fn object_fallback_checks_unique_parameter_reassignments() {
 }
 
 #[test]
+fn rebound_builtin_eval_requires_a_checked_literal_entry() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    let prefix = "builtin_eval = eval\neval = builtin_eval\n";
+    for text in ["1 +".to_owned(), vec!["1"; 129].join("+")] {
+        fs::write(&entry, format!("{prefix}print(eval({text:?}))\n")).unwrap();
+        let error = crate::check_file(&entry, None).unwrap_err();
+        assert!(error.contains("main.py:3:12"), "{error}");
+        assert!(error.contains("checked builtins.eval entry"), "{error}");
+    }
+    fs::write(&entry, format!("{prefix}print(eval(\"1 + 2\"))\n")).unwrap();
+    crate::check_file(&entry, None).unwrap();
+    fs::write(
+        &entry,
+        "def eval(text): return text\nprint(eval(\"1 +\"))\n",
+    )
+    .unwrap();
+    crate::check_file(&entry, None).unwrap();
+}
+
+#[test]
 fn heterogeneous_unannotated_lists_use_object_storage_without_erasing_contracts() {
     let project = tempdir().unwrap();
     let main = project.path().join("main.py");

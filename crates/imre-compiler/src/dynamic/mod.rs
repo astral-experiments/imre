@@ -1,7 +1,7 @@
 //! Collects Python source modules from explicit startup search paths for native lowering.
 
 mod emit;
-pub(crate) use emit::Prompt;
+pub(crate) use emit::{Prompt, check_eval_literal};
 mod import_module;
 
 pub(crate) use import_module::bundled_module_source;
@@ -1106,6 +1106,7 @@ pub(crate) enum EntryStart<'a> {
 pub(crate) struct RegisteredSource<'a> {
     pub(crate) has_open_exec: bool,
     pub(crate) linked_exec: Option<&'a HashSet<TextRange>>,
+    pub(crate) python_optimization: i32,
     pub(crate) unit: Option<usize>,
     /// The first application initializer and its selected startup predecessor, if any.
     pub(crate) initial: Option<EntryStart<'a>>,
@@ -1156,6 +1157,7 @@ impl<'a> RegisteredSource<'a> {
         Self {
             has_open_exec: false,
             linked_exec: None,
+            python_optimization: 0,
             unit: None,
             name,
             path,
@@ -2924,6 +2926,7 @@ pub(crate) fn compile(
             }
             registration.has_open_exec = literals.open_exec.contains(&id);
             registration.linked_exec = literals.linked_exec.get(&id);
+            registration.python_optimization = python_optimization;
             registration.unit = output.is_some().then_some(id);
             registration.declares_signatures = application;
             if application && let Some(graph) = checked_graph {
