@@ -1,0 +1,157 @@
+test_additive (__main__.CTokenizeTest.test_additive) ... ok
+test_async (__main__.CTokenizeTest.test_async) ... ok
+test_comparison (__main__.CTokenizeTest.test_comparison) ... ok
+test_continuation_lines_indentation (__main__.CTokenizeTest.test_continuation_lines_indentation) ... ok
+test_encoding (__main__.CTokenizeTest.test_encoding) ... ok
+test_float (__main__.CTokenizeTest.test_float) ... ok
+test_function (__main__.CTokenizeTest.test_function) ... ok
+test_int (__main__.CTokenizeTest.test_int) ... ok
+test_invalid_syntax (__main__.CTokenizeTest.test_invalid_syntax) ... ok
+test_max_indent (__main__.CTokenizeTest.test_max_indent) ... ok
+test_method (__main__.CTokenizeTest.test_method) ... ok
+test_multiplicative (__main__.CTokenizeTest.test_multiplicative) ... ok
+test_selector (__main__.CTokenizeTest.test_selector) ... ok
+test_string (__main__.CTokenizeTest.test_string) ... ok
+test_tabs (__main__.CTokenizeTest.test_tabs) ... ok
+test_unary (__main__.CTokenizeTest.test_unary) ... ok
+test_unicode (__main__.CTokenizeTest.test_unicode) ... ok
+test_newline_at_the_end_of_buffer (__main__.CTokenizerBufferTests.test_newline_at_the_end_of_buffer) ... ok
+test_exact_flag (__main__.CommandLineTest.test_exact_flag) ... ok
+test_invocation (__main__.CommandLineTest.test_invocation) ... ok
+test_without_flag (__main__.CommandLineTest.test_without_flag) ... ok
+test_additive (__main__.GenerateTokensTest.test_additive) ... ok
+test_async (__main__.GenerateTokensTest.test_async) ... ok
+test_basic (__main__.GenerateTokensTest.test_basic) ... ok
+test_closing_parenthesis_from_different_line (__main__.GenerateTokensTest.test_closing_parenthesis_from_different_line) ... ok
+test_comparison (__main__.GenerateTokensTest.test_comparison) ... ok
+test_float (__main__.GenerateTokensTest.test_float) ... ok
+test_function (__main__.GenerateTokensTest.test_function) ... ok
+test_implicit_newline (__main__.GenerateTokensTest.test_implicit_newline) ... ok
+test_int (__main__.GenerateTokensTest.test_int) ... ok
+test_invalid_readline (__main__.GenerateTokensTest.test_invalid_readline) ... ok
+test_long (__main__.GenerateTokensTest.test_long) ... ok
+test_method (__main__.GenerateTokensTest.test_method) ... ok
+test_multiline_non_ascii_fstring (__main__.GenerateTokensTest.test_multiline_non_ascii_fstring) ... ok
+test_multiline_non_ascii_fstring_with_expr (__main__.GenerateTokensTest.test_multiline_non_ascii_fstring_with_expr) ... ok
+test_multiplicative (__main__.GenerateTokensTest.test_multiplicative) ... ok
+test_newline_after_parenthesized_block_with_comment (__main__.GenerateTokensTest.test_newline_after_parenthesized_block_with_comment) ... ok
+test_non_ascii_identifiers (__main__.GenerateTokensTest.test_non_ascii_identifiers) ... ok
+test_selector (__main__.GenerateTokensTest.test_selector) ... ok
+test_shift (__main__.GenerateTokensTest.test_shift) ... ok
+test_string (__main__.GenerateTokensTest.test_string) ... ok
+test_tabs (__main__.GenerateTokensTest.test_tabs) ... ok
+test_unary (__main__.GenerateTokensTest.test_unary) ... ok
+test_underscore_literals (__main__.GenerateTokensTest.test_underscore_literals) ... ok
+test_unicode (__main__.GenerateTokensTest.test_unicode) ... ok
+test_number_followed_by_name (__main__.InvalidPythonTests.test_number_followed_by_name) ... ok
+test_number_starting_with_zero (__main__.InvalidPythonTests.test_number_starting_with_zero) ... ok
+test_prefixes (__main__.StringPrefixTest.test_prefixes) ... ERROR
+test_bom_no_cookie (__main__.TestDetectEncoding.test_bom_no_cookie) ... ok
+test_bom_no_cookie_first_line_error (__main__.TestDetectEncoding.test_bom_no_cookie_first_line_error) ... ok
+test_bom_no_cookie_second_line_error (__main__.TestDetectEncoding.test_bom_no_cookie_second_line_error) ... ok
+test_cookie_first_line_no_bom (__main__.TestDetectEncoding.test_cookie_first_line_no_bom) ... ok
+test_cookie_second_line_empty_first_line (__main__.TestDetectEncoding.test_cookie_second_line_empty_first_line) ... ok
+test_cookie_second_line_no_bom (__main__.TestDetectEncoding.test_cookie_second_line_no_bom) ... ok
+test_cookie_second_line_noncommented_first_line (__main__.TestDetectEncoding.test_cookie_second_line_noncommented_first_line) ... ok
+test_cookie_third_line (__main__.TestDetectEncoding.test_cookie_third_line) ... ok
+test_double_coding_line (__main__.TestDetectEncoding.test_double_coding_line) ... ok
+test_double_coding_same_line (__main__.TestDetectEncoding.test_double_coding_same_line) ... ok
+test_double_coding_utf8 (__main__.TestDetectEncoding.test_double_coding_utf8) ... ok
+test_false_encoding (__main__.TestDetectEncoding.test_false_encoding) ... ok
+test_filename_in_exception (__main__.TestDetectEncoding.test_filename_in_exception) ... ok
+test_first_non_utf8_coding_line (__main__.TestDetectEncoding.test_first_non_utf8_coding_line) ... ok
+test_first_utf8_coding_line_error (__main__.TestDetectEncoding.test_first_utf8_coding_line_error) ... ok
+test_latin1_normalization (__main__.TestDetectEncoding.test_latin1_normalization) ... ok
+test_matched_bom_and_cookie_first_line (__main__.TestDetectEncoding.test_matched_bom_and_cookie_first_line) ... ok
+test_matched_bom_and_cookie_second_line (__main__.TestDetectEncoding.test_matched_bom_and_cookie_second_line) ... ok
+test_mismatched_bom_and_cookie_first_line_raises_syntaxerror (__main__.TestDetectEncoding.test_mismatched_bom_and_cookie_first_line_raises_syntaxerror) ... ok
+test_mismatched_bom_and_cookie_second_line_raises_syntaxerror (__main__.TestDetectEncoding.test_mismatched_bom_and_cookie_second_line_raises_syntaxerror) ... ok
+test_no_bom_no_encoding_cookie (__main__.TestDetectEncoding.test_no_bom_no_encoding_cookie) ... ok
+test_no_bom_no_encoding_cookie_first_line_error (__main__.TestDetectEncoding.test_no_bom_no_encoding_cookie_first_line_error) ... ok
+test_no_bom_no_encoding_cookie_second_line_error (__main__.TestDetectEncoding.test_no_bom_no_encoding_cookie_second_line_error) ... ok
+test_non_utf8_shebang (__main__.TestDetectEncoding.test_non_utf8_shebang) ... ok
+test_nul_in_first_coding_line (__main__.TestDetectEncoding.test_nul_in_first_coding_line) ... ok
+test_nul_in_second_coding_line (__main__.TestDetectEncoding.test_nul_in_second_coding_line) ... ok
+test_open (__main__.TestDetectEncoding.test_open) ... ok
+test_open_error (__main__.TestDetectEncoding.test_open_error) ... ok
+test_second_non_utf8_coding_line (__main__.TestDetectEncoding.test_second_non_utf8_coding_line) ... ok
+test_second_utf8_coding_line_error (__main__.TestDetectEncoding.test_second_utf8_coding_line_error) ... ok
+test_short_files (__main__.TestDetectEncoding.test_short_files) ... ok
+test_syntaxerror_latin1 (__main__.TestDetectEncoding.test_syntaxerror_latin1) ... ok
+test_utf8_normalization (__main__.TestDetectEncoding.test_utf8_normalization) ... ok
+test_utf8_shebang_error (__main__.TestDetectEncoding.test_utf8_shebang_error) ... ok
+test___all__ (__main__.TestMisc.test___all__) ... ok
+test_decistmt (__main__.TestMisc.test_decistmt) ... ERROR
+test_backslash_continuation (__main__.TestRoundtrip.test_backslash_continuation) ... ok
+test_continuation (__main__.TestRoundtrip.test_continuation) ... ok
+test_indentation_semantics_retained (__main__.TestRoundtrip.test_indentation_semantics_retained)
+Ensure that although whitespace might be mutated in a roundtrip, ... ok
+test_roundtrip (__main__.TestRoundtrip.test_roundtrip) ... ok
+test_string_concatenation (__main__.TestRoundtrip.test_string_concatenation) ... ok
+test_comment_at_the_end_of_the_source_without_newline (__main__.TestTokenize.test_comment_at_the_end_of_the_source_without_newline) ... ok
+test_exact_type (__main__.TestTokenize.test_exact_type) ... ok
+test_invalid_character_in_fstring_middle (__main__.TestTokenize.test_invalid_character_in_fstring_middle) ... ok
+test_newline_and_space_at_the_end_of_the_source_without_newline (__main__.TestTokenize.test_newline_and_space_at_the_end_of_the_source_without_newline) ... ok
+test_oneline_defs (__main__.TestTokenize.test_oneline_defs) ... ok
+test_pathological_trailing_whitespace (__main__.TestTokenize.test_pathological_trailing_whitespace) ... ok
+test_tokenize (__main__.TestTokenize.test_tokenize) ... ok
+test_bad_coding_cookie (__main__.TestTokenizerAdheresToPep0263.test_bad_coding_cookie) ... ok
+test_latin1_coding_cookie_and_utf8_bom (__main__.TestTokenizerAdheresToPep0263.test_latin1_coding_cookie_and_utf8_bom)
+As per PEP 0263, if a file starts with a utf-8 BOM signature, the only ... ok
+test_no_coding_cookie_and_utf8_bom (__main__.TestTokenizerAdheresToPep0263.test_no_coding_cookie_and_utf8_bom) ... ok
+test_utf8_coding_cookie_and_no_utf8_bom (__main__.TestTokenizerAdheresToPep0263.test_utf8_coding_cookie_and_no_utf8_bom) ... ok
+test_utf8_coding_cookie_and_utf8_bom (__main__.TestTokenizerAdheresToPep0263.test_utf8_coding_cookie_and_utf8_bom) ... ok
+test__tokenize_decodes_with_specified_encoding (__main__.Test_Tokenize.test__tokenize_decodes_with_specified_encoding) ... ok
+test_additive (__main__.TokenizeTest.test_additive) ... ok
+test_async (__main__.TokenizeTest.test_async) ... ok
+test_basic (__main__.TokenizeTest.test_basic) ... ok
+test_closing_parenthesis_from_different_line (__main__.TokenizeTest.test_closing_parenthesis_from_different_line) ... ok
+test_comparison (__main__.TokenizeTest.test_comparison) ... ok
+test_float (__main__.TokenizeTest.test_float) ... ok
+test_function (__main__.TokenizeTest.test_function) ... ok
+test_implicit_newline (__main__.TokenizeTest.test_implicit_newline) ... ok
+test_int (__main__.TokenizeTest.test_int) ... ok
+test_invalid_readline (__main__.TokenizeTest.test_invalid_readline) ... ok
+test_long (__main__.TokenizeTest.test_long) ... ok
+test_method (__main__.TokenizeTest.test_method) ... ok
+test_multiline_non_ascii_fstring (__main__.TokenizeTest.test_multiline_non_ascii_fstring) ... ok
+test_multiline_non_ascii_fstring_with_expr (__main__.TokenizeTest.test_multiline_non_ascii_fstring_with_expr) ... ok
+test_multiplicative (__main__.TokenizeTest.test_multiplicative) ... ok
+test_newline_after_parenthesized_block_with_comment (__main__.TokenizeTest.test_newline_after_parenthesized_block_with_comment) ... ok
+test_non_ascii_identifiers (__main__.TokenizeTest.test_non_ascii_identifiers) ... ok
+test_selector (__main__.TokenizeTest.test_selector) ... ok
+test_shift (__main__.TokenizeTest.test_shift) ... ok
+test_string (__main__.TokenizeTest.test_string) ... ok
+test_tabs (__main__.TokenizeTest.test_tabs) ... ok
+test_unary (__main__.TokenizeTest.test_unary) ... ok
+test_underscore_literals (__main__.TokenizeTest.test_underscore_literals) ... ok
+test_unicode (__main__.TokenizeTest.test_unicode) ... ok
+test_backslash_continuation (__main__.UntokenizeTest.test_backslash_continuation) ... ok
+test_bad_input_order (__main__.UntokenizeTest.test_bad_input_order) ... ok
+test_iter_compat (__main__.UntokenizeTest.test_iter_compat) ... ok
+
+======================================================================
+ERROR: test_prefixes (__main__.StringPrefixTest.test_prefixes)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_tokenize.py", line 3476, in test_prefixes
+    self.assertEqual(defined_prefixes, self.determine_valid_prefixes())
+                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_tokenize.py", line 3423, in determine_valid_prefixes
+    eval(f'{letter}""')
+    ~~~~^^^^^^^^^^^^^^^
+NotImplementedError: no compiled Python body for <module> (<string>:1)
+
+======================================================================
+ERROR: test_decistmt (__main__.TestMisc.test_decistmt)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_tokenize.py", line 1275, in test_decistmt
+    self.assertRegex(repr(eval(s)), '-3.2171603427[0-9]*e-0+7')
+                          ~~~~^^^
+NotImplementedError: no compiled Python body for <module> (<string>:1)
+
+----------------------------------------------------------------------
+Ran 129 tests in 25.551s
+
+FAILED (errors=2)
