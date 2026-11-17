@@ -3533,13 +3533,12 @@ impl Session {
             FallbackCalls::All | FallbackCalls::DecoratorFactories => FileChecks::FallbackCalls,
             FallbackCalls::FunctionBodies => FileChecks::FunctionBodyCalls,
             FallbackCalls::NamedFunctions => FileChecks::NamedFunctionCalls,
-            FallbackCalls::None | FallbackCalls::Entry(_) if checked_modules.is_some() => {
+            FallbackCalls::None | FallbackCalls::Entry(_) => {
+                debug_assert!(checked_modules.is_some());
                 FileChecks::NamedFunctionCalls
             }
-            FallbackCalls::None | FallbackCalls::Entry(_) => FileChecks::FallbackReturns,
         };
         self.set_fallback_rules(
-            checks != FileChecks::FallbackReturns,
             matches!(calls, FallbackCalls::DecoratorFactories),
             checked_modules.is_some(),
         );
@@ -3556,26 +3555,14 @@ impl Session {
             FallbackCalls::Entry(id) => Some(id),
             _ => None,
         };
-        let probe_modules = checked_modules.filter(|_| {
-            matches!(
-                checks,
-                FileChecks::FallbackReturns | FileChecks::NamedFunctionCalls
-            )
-        });
+        let probe_modules = checked_modules.filter(|_| checks == FileChecks::NamedFunctionCalls);
         let probes = roots.filter_map(|id| {
             let guards = &probe_modules?[id].optional_imports;
             (Some(id) != entry && !guards.is_empty()).then_some((id, Some(guards)))
         });
         // An entry guard owns calls throughout its entry. A deferred import owns
         // only calls inside its try statement, whose operands fixed lowering skipped.
-        let mut owners = entry
-            .map(|id| (id, None))
-            .into_iter()
-            .chain(probes)
-            .peekable();
-        if checks == FileChecks::FallbackReturns && owners.peek().is_some() {
-            self.set_fallback_rules(true, false, checked_modules.is_some());
-        }
+        let owners = entry.map(|id| (id, None)).into_iter().chain(probes);
         let mut errors = Vec::new();
         for (id, guards) in owners {
             let checked = CheckedFile::new(
@@ -3606,26 +3593,12 @@ impl Session {
         Ok(())
     }
 
-    fn set_fallback_rules(
-        &mut self,
-        scoped_builtin: bool,
-        check_callees: bool,
-        checked_file: bool,
-    ) {
+    fn set_fallback_rules(&mut self, check_callees: bool, checked_file: bool) {
         let mut rules = RuleSelection::default();
-        let arguments = if scoped_builtin {
-            CALL_ARGUMENT_RULES
-        } else {
-            &[]
-        };
         let callee = check_callees.then_some("call-non-callable");
         for name in ["invalid-return-type"]
             .into_iter()
-            .chain(arguments.iter().copied())
-            .chain(
-                (self.explicit_check && checked_file && !scoped_builtin)
-                    .then_some("no-matching-overload"),
-            )
+            .chain(CALL_ARGUMENT_RULES.iter().copied())
             .chain(callee)
             .chain(checked_file.then_some("invalid-assignment"))
         {
@@ -4112,7 +4085,6 @@ struct DeclaredSignatures<'db> {
 enum FileChecks {
     Full,
     DeclaredSignatures,
-    FallbackReturns,
     FunctionBodyCalls,
     NamedFunctionCalls,
     FallbackCalls,
@@ -5310,8 +5282,7 @@ fn runtime_argument(
     let root = AnyNodeRef::from(parsed.syntax());
     let local_calls = matches!(
         checks,
-        FileChecks::FallbackReturns
-            | FileChecks::FunctionBodyCalls
+        FileChecks::FunctionBodyCalls
             | FileChecks::NamedFunctionCalls
             | FileChecks::DeclaredSignatures
     );
@@ -5341,9 +5312,6 @@ fn runtime_argument(
         && crate::frontend::literal_replace_mismatch(call)
     {
         return false;
-    }
-    if checks == FileChecks::FallbackReturns {
-        return true;
     }
     let model = SemanticModel::new(db, file);
     let callee = std::cell::LazyCell::new(|| call.func.inferred_type(&model));
