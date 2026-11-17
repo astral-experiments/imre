@@ -1,0 +1,48 @@
+test_1530559 (__main__.StructTest.test_1530559) ... ok
+test_705836 (__main__.StructTest.test_705836) ... ok
+test_Struct_reinitialization (__main__.StructTest.test_Struct_reinitialization) ... ok
+test__sizeof__ (__main__.StructTest.test__sizeof__) ... ok
+test__struct_reference_cycle_cleaned_up (__main__.StructTest.test__struct_reference_cycle_cleaned_up) ... ok
+test__struct_types_immutable (__main__.StructTest.test__struct_types_immutable) ... ok
+test_bool (__main__.StructTest.test_bool) ... ok
+test_boundary_error_message (__main__.StructTest.test_boundary_error_message) ... ok
+test_boundary_error_message_with_large_offset (__main__.StructTest.test_boundary_error_message_with_large_offset) ... ok
+test_boundary_error_message_with_negative_offset (__main__.StructTest.test_boundary_error_message_with_negative_offset) ... ok
+test_c_complex_round_trip (__main__.StructTest.test_c_complex_round_trip) ... ok
+test_calcsize (__main__.StructTest.test_calcsize) ... ok
+test_consistence (__main__.StructTest.test_consistence) ... ok
+test_count_overflow (__main__.StructTest.test_count_overflow) ... ok
+test_endian_table_init_subinterpreters (__main__.StructTest.test_endian_table_init_subinterpreters) ... ok
+test_float_round_trip (__main__.StructTest.test_float_round_trip) ... ok
+test_format_attr (__main__.StructTest.test_format_attr) ... ok
+test_integers (__main__.StructTest.test_integers) ... ok
+test_isbigendian (__main__.StructTest.test_isbigendian) ... ok
+test_issue29802 (__main__.StructTest.test_issue29802) ... ok
+test_issue35714 (__main__.StructTest.test_issue35714) ... ok
+test_issue98248 (__main__.StructTest.test_issue98248) ... ok
+test_issue98248_error_propagation (__main__.StructTest.test_issue98248_error_propagation) ... ok
+test_nN_code (__main__.StructTest.test_nN_code) ... ok
+test_new_features (__main__.StructTest.test_new_features) ... ok
+test_operations_on_half_initialized_Struct (__main__.StructTest.test_operations_on_half_initialized_Struct) ... ok
+test_p_code (__main__.StructTest.test_p_code) ... ok
+test_pack_into (__main__.StructTest.test_pack_into) ... ok
+test_pack_into_fn (__main__.StructTest.test_pack_into_fn) ... ok
+test_repr (__main__.StructTest.test_repr) ... ok
+test_struct_cleans_up_at_runtime_shutdown (__main__.StructTest.test_struct_cleans_up_at_runtime_shutdown) ... ok
+test_struct_subclass_instantiation (__main__.StructTest.test_struct_subclass_instantiation) ... ok
+test_trailing_counter (__main__.StructTest.test_trailing_counter) ... ok
+test_transitiveness (__main__.StructTest.test_transitiveness) ... ok
+test_unpack_from (__main__.StructTest.test_unpack_from) ... ok
+test_unpack_with_buffer (__main__.StructTest.test_unpack_with_buffer) ... ok
+test_arbitrary_buffer (__main__.UnpackIteratorTest.test_arbitrary_buffer) ... ok
+test_construct (__main__.UnpackIteratorTest.test_construct) ... ok
+test_half_float (__main__.UnpackIteratorTest.test_half_float) ... ok
+test_iterate (__main__.UnpackIteratorTest.test_iterate) ... ok
+test_length_hint (__main__.UnpackIteratorTest.test_length_hint) ... ok
+test_module_func (__main__.UnpackIteratorTest.test_module_func) ... ok
+test_uninstantiable (__main__.UnpackIteratorTest.test_uninstantiable) ... ok
+
+----------------------------------------------------------------------
+Ran 43 tests in 0.499s
+
+OK
