@@ -1,6 +1,21 @@
-use super::{Context, Error, Id, Result, Value};
+use super::{Context, Error, Id, NONE, Result, Value};
 
 impl Context {
+    /// Disable fresh imports before Python finalizers run during interpreter shutdown.
+    /// Modules already present in `sys.modules` remain available to their callers.
+    ///
+    /// ```python
+    /// def __del__(self):
+    ///     assert sys.meta_path is None
+    /// ```
+    pub(super) fn disable_shutdown_imports(&mut self) {
+        if let Some(sys) = self.threads.system_module
+            && let Value::Module { scope, .. } = *self.heap.get(sys)
+        {
+            self.bind(scope, "meta_path", NONE);
+        }
+    }
+
     /// Release the interpreter's reference to the script before collecting its globals.
     /// Functions and classes can keep the namespace in a cycle. The normal collector
     /// clears weak references and calls the finalizers while that namespace is intact.

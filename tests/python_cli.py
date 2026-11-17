@@ -2576,7 +2576,9 @@ def main():
             "with open(__file__, 'rb') as closed: closed.read(1)\n"
             "f = open(__file__, 'r+b')\n"
         )
-        for args in (("-Wd", "-c", f"f = open({str(resource)!r})"), ("-Wd", resource)):
+        for args in (("-Wd", "-c", f"f = open({str(resource)!r})"),
+                     ("-Wd", "-c", f"import tracemalloc; f = open({str(resource)!r})"),
+                     ("-Wd", resource)):
             expected = run(sys.executable, *args)
             actual = run(imre, *args, timeout=300)
             assert expected.returncode == actual.returncode == 0

@@ -1532,6 +1532,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     ctx.interpreter
         .finalizing
         .store(true, std::sync::atomic::Ordering::Release);
+    ctx.disable_shutdown_imports();
     ctx.heap.discarded_shutdown_write = Some(false);
     ctx.heap.release_temporaries_since(mark);
     if let Err(error) = ctx.release_main_at_shutdown() {
