@@ -29,7 +29,7 @@ pub(super) fn longest_ascii(
         left,
         right,
         bounds,
-        !positions.is_empty(),
+        positions,
         |byte| &positions[offsets[byte as usize]..offsets[byte as usize + 1]],
         |byte| junk[byte as usize],
     )
@@ -49,7 +49,7 @@ pub(super) fn longest_unicode(
         left,
         right,
         bounds,
-        !positions.is_empty(),
+        positions,
         |symbol| match keys.binary_search(&symbol) {
             Ok(i) => &positions[offsets[i]..offsets[i + 1]],
             Err(_) => &[],
@@ -62,7 +62,7 @@ fn longest_indexed<'p, T: Copy + Eq>(
     left: &[T],
     right: &[T],
     bounds: (usize, usize, usize, usize),
-    has_positions: bool,
+    positions: &[usize],
     hits: impl Fn(T) -> &'p [usize],
     is_junk: impl Fn(T) -> bool,
 ) -> Result<(usize, usize, usize)> {
@@ -71,64 +71,46 @@ fn longest_indexed<'p, T: Copy + Eq>(
     let width = bhi - blo;
     let maximum = (ahi - alo).min(width);
     let mut best = (alo, blo, 0);
-    if maximum != 0 && has_positions {
-        let mut previous = zeroed_words(width)?;
-        let mut current = zeroed_words(width)?;
-        let length_bits = usize::BITS - maximum.leading_zeros();
-        let packed = length_bits < usize::BITS
-            && ahi - alo <= usize::MAX.checked_shr(length_bits).unwrap_or(0);
-
-        if packed {
-            // Pack the row number above the match length. This avoids clearing
-            // a complete row for every character while using only two arrays.
-            let length_mask = (1usize << length_bits) - 1;
-            for (row, &byte) in left[alo..ahi].iter().enumerate() {
-                let epoch = row + 1;
-                for &j in hits(byte) {
-                    if j < blo {
-                        continue;
-                    }
-                    if j >= bhi {
-                        break;
-                    }
-                    let word = if j > blo { previous[j - blo - 1] } else { 0 };
-                    let prior = if word >> length_bits == epoch - 1 {
-                        word & length_mask
-                    } else {
-                        0
-                    };
-                    let length = prior + 1;
-                    current[j - blo] = (epoch << length_bits) | length;
-                    if length > best.2 {
-                        best = (alo + row + 1 - length, j + 1 - length, length);
-                    }
-                }
-                std::mem::swap(&mut previous, &mut current);
+    if maximum != 0 && !positions.is_empty() {
+        if width > positions.len().saturating_mul(4) {
+            // A short left sequence can visit only a few distant positions
+            // within a very long right sequence. Allocate by anchor count,
+            // rather than by the full right-hand width, in that case.
+            let mut coordinates = Vec::new();
+            coordinates
+                .try_reserve_exact(positions.len())
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            coordinates.extend(positions.iter().copied().filter(|j| *j >= blo && *j < bhi));
+            coordinates.sort_unstable();
+            coordinates.dedup();
+            if !coordinates.is_empty() {
+                search_anchors(
+                    left,
+                    bounds,
+                    maximum,
+                    coordinates.len(),
+                    &hits,
+                    |j| {
+                        let slot = coordinates.binary_search(&j).unwrap();
+                        let predecessor = slot.checked_sub(1).filter(|&i| coordinates[i] == j - 1);
+                        (slot, predecessor)
+                    },
+                    &mut best,
+                )?;
             }
         } else {
-            // Extremely large bounds may not leave enough bits for the row
-            // number. Keep the same two arrays and clear only in this case.
-            for (row, &byte) in left[alo..ahi].iter().enumerate() {
-                current.fill(0);
-                for &j in hits(byte) {
-                    if j < blo {
-                        continue;
-                    }
-                    if j >= bhi {
-                        break;
-                    }
-                    let length = if j > blo {
-                        previous[j - blo - 1] + 1
-                    } else {
-                        1
-                    };
-                    current[j - blo] = length;
-                    if length > best.2 {
-                        best = (alo + row + 1 - length, j + 1 - length, length);
-                    }
-                }
-                std::mem::swap(&mut previous, &mut current);
-            }
+            search_anchors(
+                left,
+                bounds,
+                maximum,
+                width,
+                &hits,
+                |j| {
+                    let slot = j - blo;
+                    (slot, slot.checked_sub(1))
+                },
+                &mut best,
+            )?;
         }
     }
 
@@ -153,6 +135,76 @@ fn longest_indexed<'p, T: Copy + Eq>(
         }
     }
     Ok(best)
+}
+
+/// Run the two-row dynamic program in dense or compressed coordinate space.
+fn search_anchors<'p, T: Copy>(
+    left: &[T],
+    bounds: (usize, usize, usize, usize),
+    maximum: usize,
+    slots: usize,
+    hits: &impl Fn(T) -> &'p [usize],
+    slot_for: impl Fn(usize) -> (usize, Option<usize>),
+    best: &mut (usize, usize, usize),
+) -> Result<()> {
+    let (alo, ahi, blo, bhi) = bounds;
+    let mut previous = zeroed_words(slots)?;
+    let mut current = zeroed_words(slots)?;
+    let length_bits = usize::BITS - maximum.leading_zeros();
+    let packed =
+        length_bits < usize::BITS && ahi - alo <= usize::MAX.checked_shr(length_bits).unwrap_or(0);
+
+    if packed {
+        // Pack the row number above the match length. This avoids clearing
+        // a complete row for every character while using only two arrays.
+        let length_mask = (1usize << length_bits) - 1;
+        for (row, &byte) in left[alo..ahi].iter().enumerate() {
+            let epoch = row + 1;
+            for &j in hits(byte) {
+                if j < blo {
+                    continue;
+                }
+                if j >= bhi {
+                    break;
+                }
+                let (slot, predecessor) = slot_for(j);
+                let word = predecessor.map_or(0, |i| previous[i]);
+                let prior = if word >> length_bits == epoch - 1 {
+                    word & length_mask
+                } else {
+                    0
+                };
+                let length = prior + 1;
+                current[slot] = (epoch << length_bits) | length;
+                if length > best.2 {
+                    *best = (alo + row + 1 - length, j + 1 - length, length);
+                }
+            }
+            std::mem::swap(&mut previous, &mut current);
+        }
+    } else {
+        // Extremely large bounds may not leave enough bits for the row
+        // number. Keep the same two arrays and clear only in this case.
+        for (row, &byte) in left[alo..ahi].iter().enumerate() {
+            current.fill(0);
+            for &j in hits(byte) {
+                if j < blo {
+                    continue;
+                }
+                if j >= bhi {
+                    break;
+                }
+                let (slot, predecessor) = slot_for(j);
+                let length = predecessor.map_or(1, |i| previous[i] + 1);
+                current[slot] = length;
+                if length > best.2 {
+                    *best = (alo + row + 1 - length, j + 1 - length, length);
+                }
+            }
+            std::mem::swap(&mut previous, &mut current);
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -202,6 +254,37 @@ mod tests {
         assert_eq!(
             longest_unicode(&left, &right, (0, 3, 0, 3), &['Ω'], &[0, 1], &[0], &['é']).unwrap(),
             (0, 0, 2)
+        );
+    }
+
+    #[test]
+    fn sparse_distant_positions_keep_predecessors_and_list_order() {
+        let right = vec![b'Z'; 1024];
+        let (offsets, positions) = one_list(b'x', &[100, 101, 101, 400]);
+        assert_eq!(
+            longest_ascii(
+                b"xx",
+                &right,
+                (0, 2, 0, right.len()),
+                &offsets,
+                &positions,
+                &[false; 256]
+            )
+            .unwrap(),
+            (0, 100, 2)
+        );
+        let (offsets, positions) = one_list(b'x', &[800, 100, 101]);
+        assert_eq!(
+            longest_ascii(
+                b"xx",
+                &right,
+                (0, 2, 0, 500),
+                &offsets,
+                &positions,
+                &[false; 256]
+            )
+            .unwrap(),
+            (0, 0, 0)
         );
     }
 }
