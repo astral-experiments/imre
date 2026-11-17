@@ -1,0 +1,10 @@
+{
+  "finite_runner": {
+    "source": "finite_unittest.py",
+    "sha256": "0963fce03d52011f876b196ddd4e1c618bce3a2356827432ba1490fafc21c2bb",
+    "behavior": "Invoke the shipped unittest CLI with module=None. Declare each selected test suite and dynamically discovered child module with --include-module."
+  },
+  "official_runpy_attempt": "benchmarks/compatibility/evidence/tomllib/runpy-attempt/O0.build.stderr",
+  "reason": "The SUITE_RUNNER.md runpy entry is rejected at the pinned revision for its dynamic exec(code, run_globals). The two-line finite entry avoids that unsupported launcher while leaving upstream tests and full fixtures unchanged. Smaller collections modules also use their unchanged original FILE entry where feasible.",
+  "fixtures": "The full test tree from the hash-verified pinned CPython source archive is staged under /workspace/scratch/imre-cpython-test-fixtures/Lib/test."
+}

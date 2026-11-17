@@ -1,0 +1,48 @@
+test_roundtrip (__main__.TestRoundtrip.test_roundtrip) ... ok
+test_string_concatenation (__main__.TestRoundtrip.test_string_concatenation) ... ok
+test_comment_at_the_end_of_the_source_without_newline (__main__.TestTokenize.test_comment_at_the_end_of_the_source_without_newline) ... ok
+test_exact_type (__main__.TestTokenize.test_exact_type) ... ok
+test_invalid_character_in_fstring_middle (__main__.TestTokenize.test_invalid_character_in_fstring_middle) ... ok
+test_newline_and_space_at_the_end_of_the_source_without_newline (__main__.TestTokenize.test_newline_and_space_at_the_end_of_the_source_without_newline) ... ok
+test_oneline_defs (__main__.TestTokenize.test_oneline_defs) ... ok
+test_pathological_trailing_whitespace (__main__.TestTokenize.test_pathological_trailing_whitespace) ... ok
+test_tokenize (__main__.TestTokenize.test_tokenize) ... ok
+test_bad_coding_cookie (__main__.TestTokenizerAdheresToPep0263.test_bad_coding_cookie) ... ok
+test_latin1_coding_cookie_and_utf8_bom (__main__.TestTokenizerAdheresToPep0263.test_latin1_coding_cookie_and_utf8_bom)
+As per PEP 0263, if a file starts with a utf-8 BOM signature, the only ... ok
+test_no_coding_cookie_and_utf8_bom (__main__.TestTokenizerAdheresToPep0263.test_no_coding_cookie_and_utf8_bom) ... ok
+test_utf8_coding_cookie_and_no_utf8_bom (__main__.TestTokenizerAdheresToPep0263.test_utf8_coding_cookie_and_no_utf8_bom) ... ok
+test_utf8_coding_cookie_and_utf8_bom (__main__.TestTokenizerAdheresToPep0263.test_utf8_coding_cookie_and_utf8_bom) ... ok
+test__tokenize_decodes_with_specified_encoding (__main__.Test_Tokenize.test__tokenize_decodes_with_specified_encoding) ... ok
+test_additive (__main__.TokenizeTest.test_additive) ... ok
+test_async (__main__.TokenizeTest.test_async) ... ok
+test_basic (__main__.TokenizeTest.test_basic) ... ok
+test_closing_parenthesis_from_different_line (__main__.TokenizeTest.test_closing_parenthesis_from_different_line) ... ok
+test_comparison (__main__.TokenizeTest.test_comparison) ... ok
+test_float (__main__.TokenizeTest.test_float) ... ok
+test_function (__main__.TokenizeTest.test_function) ... ok
+test_implicit_newline (__main__.TokenizeTest.test_implicit_newline) ... ok
+test_int (__main__.TokenizeTest.test_int) ... ok
+test_invalid_readline (__main__.TokenizeTest.test_invalid_readline) ... ok
+test_long (__main__.TokenizeTest.test_long) ... ok
+test_method (__main__.TokenizeTest.test_method) ... ok
+test_multiline_non_ascii_fstring (__main__.TokenizeTest.test_multiline_non_ascii_fstring) ... ok
+test_multiline_non_ascii_fstring_with_expr (__main__.TokenizeTest.test_multiline_non_ascii_fstring_with_expr) ... ok
+test_multiplicative (__main__.TokenizeTest.test_multiplicative) ... ok
+test_newline_after_parenthesized_block_with_comment (__main__.TokenizeTest.test_newline_after_parenthesized_block_with_comment) ... ok
+test_non_ascii_identifiers (__main__.TokenizeTest.test_non_ascii_identifiers) ... ok
+test_selector (__main__.TokenizeTest.test_selector) ... ok
+test_shift (__main__.TokenizeTest.test_shift) ... ok
+test_string (__main__.TokenizeTest.test_string) ... ok
+test_tabs (__main__.TokenizeTest.test_tabs) ... ok
+test_unary (__main__.TokenizeTest.test_unary) ... ok
+test_underscore_literals (__main__.TokenizeTest.test_underscore_literals) ... ok
+test_unicode (__main__.TokenizeTest.test_unicode) ... ok
+test_backslash_continuation (__main__.UntokenizeTest.test_backslash_continuation) ... ok
+test_bad_input_order (__main__.UntokenizeTest.test_bad_input_order) ... ok
+test_iter_compat (__main__.UntokenizeTest.test_iter_compat) ... ok
+
+----------------------------------------------------------------------
+Ran 42 tests in 4.047s
+
+OK
