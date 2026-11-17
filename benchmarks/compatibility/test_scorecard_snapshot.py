@@ -101,14 +101,13 @@ class SnapshotTests(unittest.TestCase):
         r = self.receipt(); r["runs"]["O3"]["toolchain"]["runtime_revision"] = "0" * 40
         with self.assertRaisesRegex(ValueError, "compiler/runtime revision"): self.validate(r)
 
-    def test_observed_triple_needs_control_to_earn_credit(self):
+    def test_row_v1_booleans_cannot_earn_credit(self):
         r = self.receipt(); self.validate(r); row = {"originals": 1}; scorecard.summarize_family(row, [r]); self.assertEqual((row["observed"], row["paired"]), (1, 0))
-        r["paired"] = True
-        with self.assertRaisesRegex(ValueError, "passing launcher control"): self.validate(r)
-        r["launcher_control"] = self.control(r); self.validate(r)
-        r["launcher_control"] = self.control(r, passed=False)
-        with self.assertRaisesRegex(ValueError, "passing launcher control"): self.validate(r)
+        r["launcher_control"] = self.control(r); r["paired"] = True
+        with patch.object(scorecard, "activation_entry", return_value={"adapter":"row-v1"}):
+            with self.assertRaisesRegex(ValueError, "row-v1 credited pairs are unsupported"): self.validate(r)
         r["paired"] = False; self.validate(r)
+        r["launcher_control"] = self.control(r, passed=False); self.validate(r)
         r["omission_reason"] = "accepted failed control"
         with self.assertRaisesRegex(ValueError, "canonical policy omission"): self.validate(r)
 
@@ -172,6 +171,19 @@ class PublishedShardTests(unittest.TestCase):
         self.clear(); missing = copy.deepcopy(self.activation); entry = missing["families"]["pathlib"]; entry["sources"]["gate"] = gate + ".missing"; entry["files"][gate + ".missing"] = "0" * 64
         with patch.object(scorecard, "snapshot_activation", return_value=missing):
             with self.assertRaisesRegex(ValueError, "missing"): self.validate(self.row("pathlib"))
+
+    def test_pathlib_requires_exact_positive_source_and_poison_hash(self):
+        altered = copy.deepcopy(self.activation); del altered["families"]["pathlib"]["sources"]["positive_launcher"]
+        with patch.object(scorecard, "snapshot_activation", return_value=altered):
+            with self.assertRaisesRegex(ValueError, "missing bound positive_launcher"): self.validate(self.row("pathlib"))
+        self.clear(); original = scorecard.artifact_json
+        def changed(path):
+            obj = original(path)
+            if path.name == "gate.json":
+                obj = copy.deepcopy(obj); obj["control"]["launcher_negative_sha256"] = "1" * 64
+            return obj
+        with patch.object(scorecard, "artifact_json", side_effect=changed):
+            with self.assertRaisesRegex(ValueError, "poisoned launcher or import binding"): self.validate(self.row("pathlib"))
 
     def test_wrong_runtime(self):
         original = scorecard.artifact_json

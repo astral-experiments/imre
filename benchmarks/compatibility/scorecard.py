@@ -447,7 +447,7 @@ def validate_trace(path, digest, image):
 
 
 @lru_cache(maxsize=None)
-def adapt_pathlib(root, revision, source_path, source_sha):
+def adapt_pathlib(root, revision, source_path, source_sha, source_blob):
     family = "pathlib"; directory = root / "evidence" / family
     gate_path, run_path = bound_source(family, "gate"), bound_source(family, "run")
     require(bound_source(family, "toolchain") == gate_path and bound_source(family, "withdrawal") == run_path, "pathlib toolchain/withdrawal bindings differ")
@@ -458,7 +458,10 @@ def adapt_pathlib(root, revision, source_path, source_sha):
     argv = control.get("argv"); compiler, runtime = argv[0], runtime_argument(argv); matched_build(argv, "O0", compiler, runtime)
     poison = bound_source(family, "poison_source"); checked_file(poison, control.get("control_module_sha256"))
     module = Path(control.get("control_module", "")).stem
-    require(poison.read_bytes() == b"status: int = True\n" and module and control.get("transformation") == f"prepend import {module} followed by newline to the exact positive launcher at the same path" and control.get("positive_launcher_sha256") == source_sha == control.get("restored_launcher_sha256") and bool(HEX64.fullmatch(control.get("launcher_negative_sha256", ""))) and control["launcher_negative_sha256"] != source_sha and control.get("launcher") == argv[2], "pathlib poisoned launcher or import binding differs")
+    positive = bound_source(family, "positive_launcher"); stat = positive.stat()
+    require(source_digests(positive, stat.st_mtime_ns, stat.st_size) == (source_sha, source_blob), "pathlib positive launcher SHA256 or Git blob differs from canonical CPython source")
+    negative_sha = hashlib.sha256(f"import {module}\n".encode() + positive.read_bytes()).hexdigest()
+    require(poison.read_bytes() == b"status: int = True\n" and module and control.get("transformation") == f"prepend import {module} followed by newline to the exact positive launcher at the same path" and control.get("positive_launcher_sha256") == source_sha == control.get("restored_launcher_sha256") and control.get("launcher_negative_sha256") == negative_sha and control.get("launcher") == argv[2], "pathlib poisoned launcher or import binding differs")
     gate_diagnostic(directory / "gate.stderr", control.get("stderr_sha256"), control.get("exit_code"), control.get("timed_out"), control.get("image_exists"))
     w = run.get("withdrawal", {})
     require(w.get("test_root_absent") is True and w.get("restored_by_hash") is True and w.get("leaf_sha256_before") == source_sha == w.get("leaf_sha256_after") and w.get("sources_before") == w.get("sources_after") and w.get("sources_before", {}).get("files", 0) > 0, "pathlib source/bytecode tree withdrawal missing")
@@ -515,7 +518,7 @@ def validate_activated_family_record(r, eligible, check, entry):
     adapter = entry.get("adapter"); source = r["source"]; family = r["family"]; d = DATA_ROOT / "evidence" / family
     if adapter == "shared-family-v1": return validate_family_artifact_record(r, eligible, check)
     if adapter == "pathlib-leaf-v1":
-        manifest = adapt_pathlib(DATA_ROOT, COHORT["imre_revision"], source["path"], source["sha256"]); stock = manifest["stock"]
+        manifest = adapt_pathlib(DATA_ROOT, COHORT["imre_revision"], source["path"], source["sha256"], source["git_blob"]); stock = manifest["stock"]
         for tier in ("O0", "O3"):
             run = r["runs"][tier]; meta = manifest["tiers"][tier]
             check(run.get("argv") == meta["baseline"].get("argv") and run.get("evidence", "").split("#L")[0] == (d / f"{tier}.baseline.stderr").relative_to(ROOT).as_posix(), f"{tier} pathlib receipt run differs")
@@ -566,7 +569,7 @@ def validate_snapshot_record(r, kind, eligible, check):
         control_passed = validate_launcher_control(r)
         check(control_passed or not omission, "failed launcher control cannot be an accepted policy omission")
     check(type(r.get("paired")) is bool, "paired must be boolean")
-    if r["paired"]: check(bool(eligible) and control_passed, "credited snapshot pair requires an eligible triple and passing launcher control")
+    if r["paired"]: check(False, "row-v1 credited pairs are unsupported until raw saved-image proof has a validated schema")
     elif eligible: check(isinstance(r.get("credit_reason"), str) and bool(r["credit_reason"]), "uncredited observed intersection needs a credit reason")
     if kind == "script":
         for tier, run in r["runs"].items():
