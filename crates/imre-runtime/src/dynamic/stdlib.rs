@@ -18,6 +18,7 @@ pub(super) mod codecs;
 mod contextvars;
 mod csv;
 pub(super) mod datetime;
+mod difflib;
 mod email;
 pub(super) mod faulthandler;
 #[cfg(target_os = "linux")]

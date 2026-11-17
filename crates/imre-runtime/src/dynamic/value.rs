@@ -6829,6 +6829,14 @@ impl Heap {
         self.descriptor_owners.len() + self.ordinary_finalizers.len()
     }
 
+    /// Check a bounded set of strongly rooted owners without learning or retaining a root path.
+    pub(super) fn finalizers_within(&self, roots: &[Id]) -> bool {
+        self.descriptor_owners
+            .iter()
+            .chain(&self.ordinary_finalizers)
+            .all(|owner| roots.contains(owner))
+    }
+
     /// Recheck unbound writers after control flow discards temporary roots.
     pub fn release_unbound_finalizers(&mut self) {
         self.check_finalizers_next_statement |= self.has_unbound_finalizer(NONE);

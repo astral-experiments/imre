@@ -1220,7 +1220,19 @@ impl SourceMap<'_> {
                 }
             }
         }
-        function.frame.finish_callable(start)
+        let accelerator = (self.bundled && self.path == Path::new("<imre stdlib>/difflib.py"))
+            .then_some(prefix.name)
+            .and_then(|name| match name {
+                "SequenceMatcher.__chain_b" => Some("imre_dyn_difflib_chain_b"),
+                "SequenceMatcher.find_longest_match" => Some("imre_dyn_difflib_find_longest"),
+                _ => None,
+            });
+        match accelerator {
+            Some(accelerator) => function
+                .frame
+                .finish_callable_with_accelerator(start, Some(accelerator)),
+            None => function.frame.finish_callable(start),
+        }
     }
 }
 

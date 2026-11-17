@@ -243,8 +243,32 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         self.finish(true)
     }
 
-    pub(crate) fn finish_callable(mut self, start: Option<TextSize>) -> String {
+    pub(crate) fn finish_callable(self, start: Option<TextSize>) -> String {
+        self.finish_callable_with_accelerator(start, None)
+    }
+
+    /// Enter an authenticated source function through a native attempt, retaining its source body as fallback.
+    pub(crate) fn finish_callable_with_accelerator(
+        mut self,
+        start: Option<TextSize>,
+        accelerator: Option<&str>,
+    ) -> String {
         let entry = self.finish(false);
+        let entry = if let Some(accelerator) = accelerator {
+            let wrapper = self.output.code_symbol("code_accel", self.id);
+            let offset = self.output.functions.len();
+            write_definition(
+                &mut self.output.functions,
+                format_args!("internal i64 {wrapper}(ptr %ctx, i64 %scope)"),
+                |unit| {
+                    writeln!(unit, "entry:\n  %result = call i64 @{accelerator}(ptr %ctx, i64 %scope, ptr {entry})\n  ret i64 %result").unwrap();
+                },
+            );
+            self.output.place_function(offset);
+            wrapper
+        } else {
+            entry
+        };
         let Some(start) = start else { return entry };
         // Python definitions keep distinct addresses even if LLVM merges their bodies.
         let site = self.output.code_symbol("code_site", self.id);
