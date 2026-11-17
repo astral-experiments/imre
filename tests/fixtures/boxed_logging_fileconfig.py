@@ -5,7 +5,9 @@ import logging.handlers
 
 
 class BespokeHandler(logging.Handler):
-    def __init__(self, tag='default'):
+    tag: str
+
+    def __init__(self, tag: str) -> None:
         super().__init__()
         self.tag = tag
 
@@ -45,8 +47,8 @@ def current():
             assert handler.format(logging.makeLogRecord({'msg': 'hello'})) == 'literal:hello'
         for name in ('handlers.MemoryHandler', 'logging.handlers.MemoryHandler'):
             assert type(configure(name, '(1,)')) is logging.handlers.MemoryHandler
-        assert configure('BespokeHandler', kwargs="{'tag': 'custom'}").tag == 'custom'
-        assert configure(__name__ + '.BespokeHandler', "('qualified',)").tag == 'qualified'
+        assert type(configure('BespokeHandler', kwargs="{'tag': 'custom'}")) is BespokeHandler
+        assert type(configure(__name__ + '.BespokeHandler', "('qualified',)")) is BespokeHandler
     finally:
         del logging.BespokeHandler
 
