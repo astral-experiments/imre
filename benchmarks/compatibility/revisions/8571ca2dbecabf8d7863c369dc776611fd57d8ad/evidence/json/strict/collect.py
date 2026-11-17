@@ -14,7 +14,7 @@ def trace(d,label,args,env,cwd=None):
  argv=['strace','-f','-qq','-s','512','-e','trace=execve,execveat,open,openat,openat2,creat,io_uring_setup,newfstatat,rename,wait4,exit_group','-o',str(d/f'{label}.trace'),PROBE,*args];p,sec=cmd(argv,env,cwd);(d/f'{label}.stderr').write_bytes(p.stderr);(d/f'{label}.stdout').write_bytes(p.stdout);return p,sec
 
 def cohort(name,rows):
- d=OUT/name;d.mkdir(exist_ok=True);source=rows[0]['source'];assert all(r['source']==source and r['occurrence']==1 for r in rows);module='.'.join(pathlib.Path(source['path']).with_suffix('').parts[1:]);module=module.removesuffix('.__init__');ids=[r['id']for r in rows];base=generate([module]);selection='''def select_originals(source, target, wanted):
+ d=OUT/name;d.mkdir(exist_ok=True);source=rows[0]['source'];assert all(r['source']==source for r in rows);assert name=='backend' or all(r['occurrence']==1 for r in rows);module='.'.join(pathlib.Path(source['path']).with_suffix('').parts[1:]);module=module.removesuffix('.__init__');ids=[r['id']for r in rows];base=(SNAP/'evidence/json/positive_launcher.py').read_text() if name=='backend' else generate([module]);selection='''def select_originals(source, target, wanted):
     for original in source:
         if isinstance(original, unittest.TestSuite):
             select_originals(original, target, wanted)

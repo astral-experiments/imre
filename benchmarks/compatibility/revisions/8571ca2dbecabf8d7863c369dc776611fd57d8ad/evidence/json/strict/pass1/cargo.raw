@@ -1,0 +1,5 @@
+   Compiling imre-ast v0.1.5 (/workspace/imre-build-8571/crates/imre-ast)
+   Compiling imre-regex v0.1.5 (/workspace/imre-build-8571/crates/imre-regex)
+   Compiling imre-compiler v0.1.5 (/workspace/imre-build-8571/crates/imre-compiler)
+   Compiling imre-runtime v0.1.5 (/workspace/imre-build-8571/crates/imre-runtime)
+    Finished `release` profile [optimized + debuginfo] target(s) in 5m 12s
