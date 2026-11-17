@@ -1,0 +1,134 @@
+{
+  "case": "ty-readme",
+  "evidence": {
+    "effects.normalized.json": {
+      "bytes": 322,
+      "path": "effects.normalized.json",
+      "sha256": "493682f3b87a39b89114e11b8ff9a59cdcabb6727a2a0c6076791f172d6cf4b4"
+    },
+    "raw/README.md": {
+      "bytes": 5755,
+      "path": "raw/README.md",
+      "sha256": "ea831c09eb6dc99d10dc36f8ba3f4002bec3765b04d2d9d7fac4b117bbe43d2f"
+    },
+    "raw/after.json": {
+      "bytes": 707,
+      "path": "raw/after.json",
+      "sha256": "8cdbdf270e12f9b8a67a1f83d9331aaf1c5335f2ca4534665d47822659d05b6d"
+    },
+    "raw/before.json": {
+      "bytes": 707,
+      "path": "raw/before.json",
+      "sha256": "63b593bfc3409136f7faa523692cc3a2c1c40bf3e313260a5c28a5cc7418e264"
+    },
+    "raw/invocation.json": {
+      "bytes": 807,
+      "path": "raw/invocation.json",
+      "sha256": "fa20f2681f8bb60a597cc5c4c92807af99989e179acb6e367a45c898eb01468f"
+    },
+    "raw/processes.jsonl": {
+      "bytes": 0,
+      "path": "raw/processes.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "raw/registry.jsonl": {
+      "bytes": 0,
+      "path": "raw/registry.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "raw/stderr": {
+      "bytes": 0,
+      "path": "raw/stderr",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "raw/stdout": {
+      "bytes": 0,
+      "path": "raw/stdout",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "raw/wait.json": {
+      "bytes": 43,
+      "path": "raw/wait.json",
+      "sha256": "ac3e0602f1590968085f79df3e078d9f081c074cdbf1d48826ebaf2bf641419b"
+    }
+  },
+  "fixture": {
+    "before": "raw/before.json",
+    "external_inputs": [
+      {
+        "bytes": 32359056,
+        "path": "$PYTHON",
+        "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+      }
+    ],
+    "project_inputs": [
+      {
+        "bytes": 5610,
+        "commit": "d4e4bf90906c7677049bc3a29d1735de7d22052d",
+        "git_blob": "ac9a0b09776b84e515a40e91fab9fc69edf6afca",
+        "path": "README.md",
+        "repo": "https://github.com/astral-sh/ty",
+        "sha256": "8da93511cec1298648c345618960559c7dec67504b9132c1b9aee9a841e9fe08",
+        "vendored": "fixtures/ty/README.md"
+      },
+      {
+        "bytes": 3747,
+        "commit": "d4e4bf90906c7677049bc3a29d1735de7d22052d",
+        "git_blob": "6837294b6c81d781a9d818eab03a78c8a51b6430",
+        "path": "dist-workspace.toml",
+        "repo": "https://github.com/astral-sh/ty",
+        "sha256": "4365f9472da1296912e1e9794629da0dae15635ecf4c05fcf3d3d5b58fece0f5",
+        "vendored": "fixtures/ty/dist-workspace.toml"
+      }
+    ]
+  },
+  "invocation": {
+    "argv": [
+      "$PYTHON",
+      "-B",
+      "scripts/transform_readme.py"
+    ],
+    "cwd": "$WORK",
+    "env": {
+      "HOME": "$WORK/home",
+      "LANG": "C.UTF-8",
+      "LC_ALL": "C.UTF-8",
+      "PATH": "/usr/bin",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONHASHSEED": "0",
+      "PYTHONNOUSERSITE": "1",
+      "TZ": "UTC"
+    }
+  },
+  "observation": {
+    "effects": "effects.normalized.json",
+    "exit_code": 0,
+    "stderr": "raw/stderr",
+    "stdout": "raw/stdout"
+  },
+  "schema": "prospective-stock-reference-v1",
+  "scope": "supplemental-stock-only",
+  "source": {
+    "bytes": 2641,
+    "commit": "d4e4bf90906c7677049bc3a29d1735de7d22052d",
+    "git_blob": "4b20727cd3b38ef011b9f779a706d977089c487a",
+    "path": "scripts/transform_readme.py",
+    "repo": "https://github.com/astral-sh/ty",
+    "sha256": "d6a13d50218b55e3b73587974e8357b9bc68b7c364d8bb10d04708fec5e2d64f",
+    "vendored": "sources/ty/scripts/transform_readme.py"
+  },
+  "tool": {
+    "executable_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+    "implementation": "CPython",
+    "kernel": "6.18.57",
+    "libc": [
+      "glibc",
+      "2.41"
+    ],
+    "machine": "x86_64",
+    "soabi": "cpython-314-x86_64-linux-gnu",
+    "system": "Linux",
+    "version": "3.14.5",
+    "version_verbose": "3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]"
+  }
+}

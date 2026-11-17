@@ -58,7 +58,7 @@ def check_fact(p,f):
 
 def main():
     schema=load(ROOT/'reference.schema.json');sources=load(ROOT/'sources.json');deps=load(ROOT/'dependencies.json');members=load(ROOT/'fixtures/rich-members.json')
-    require(set(sources)=={'ruff-publisher','uv-publisher','uv-rich'},'unexpected corpus inventory')
+    require(set(sources)=={'ruff-publisher','uv-publisher','uv-rich','ty-readme'},'unexpected corpus inventory')
     for case,s in sources.items():
         b=safe(ROOT,s['vendored']).read_bytes();require(len(b)==s['bytes'] and sha(b)==s['sha256'] and blob(b)==s['git_blob'],f'{case}: source object')
     with zipfile.ZipFile(ROOT/'fixtures/rich-imports.zip') as z:
@@ -81,7 +81,14 @@ def main():
             if f['path']=='$PYTHON':require(f['sha256']==ref['tool']['executable_sha256'],'Python tool identity')
             else:check_fact(safe(ROOT,f['path'].removeprefix('$CORPUS/')),f)
         before=load(raw/'before.json');after=load(raw/'after.json');orig={x['path']:x for x in before};final={x['path']:x for x in after}
-        require(len(orig)==len(before) and len(final)==len(after),'duplicate fixture path');require(set(orig)=={'home','scripts',source['path']},'complete initial work tree')
+        require(len(orig)==len(before) and len(final)==len(after),'duplicate fixture path')
+        inputs=ref['fixture'].get('project_inputs',[])
+        if case=='ty-readme':require(inputs==load(ROOT/'ty-inputs.json') and len(inputs)==2,'ty project input catalog')
+        else:require(not inputs,'unexpected project inputs')
+        require(set(orig)=={'home','scripts',source['path']}|{x['path'] for x in inputs},'complete initial work tree')
+        for item in inputs:
+            b=safe(ROOT,item['vendored']).read_bytes();require(item['repo']==source['repo'] and item['commit']==source['commit'] and len(b)==item['bytes'] and sha(b)==item['sha256'] and blob(b)==item['git_blob'],'project input object')
+            require(orig[item['path']]['sha256']==item['sha256'] and orig[item['path']]['bytes']==item['bytes'],'project input preimage')
         require(orig[source['path']]['sha256']==source['sha256'] and orig[source['path']]['bytes']==source['bytes'],'source preimage')
         changes={'created':[x for p,x in final.items() if p not in orig],'deleted':[x for p,x in orig.items() if p not in final],'modified':[x for p,x in final.items() if p in orig and x!=orig[p]]}
         events=[json.loads(l) for l in (raw/'registry.jsonl').read_bytes().splitlines()];procs=[json.loads(l) for l in (raw/'processes.jsonl').read_bytes().splitlines()];effects={'registry':events,'processes':procs,'files':changes}
@@ -93,6 +100,10 @@ def main():
             require(set(final)-set(orig)=={'cargo.log','published.txt'},'publisher write set')
             require(sha((raw/'processes.jsonl').read_bytes())==final['cargo.log']['sha256'],'process journal effect')
             require(sha((raw/'published.txt').read_bytes())==final['published.txt']['sha256'],'publish marker effect')
+        elif case=='ty-readme':
+            require(not events and not procs and not changes['created'] and not changes['deleted'] and [x['path'] for x in changes['modified']]==['README.md'],'ty write set')
+            require(sha((raw/'README.md').read_bytes())==final['README.md']['sha256'],'ty output effect')
+            require((raw/'stdout').read_bytes()==b'','ty unexpectedly wrote stdout')
         else:require(not events and not procs and not any(changes.values()),'Rich unexpectedly had effects')
         require(ref['observation']['exit_code']==0 and (raw/'stderr').read_bytes()==b'','stock failure')
     print(f"validated {len(sources)} supplemental stock references, {len(members['members'])} Rich source members; no workload executed")

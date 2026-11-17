@@ -25,5 +25,14 @@
     "sha256": "a479935e4c75c1b31dcd4805b50464ffa8a37e7240acb7c6457a2e4033ae21b0",
     "bytes": 297,
     "vendored": "sources/uv/scripts/uv-run-remote-script-test.py"
+  },
+  "ty-readme": {
+    "repo": "https://github.com/astral-sh/ty",
+    "commit": "d4e4bf90906c7677049bc3a29d1735de7d22052d",
+    "path": "scripts/transform_readme.py",
+    "git_blob": "4b20727cd3b38ef011b9f779a706d977089c487a",
+    "sha256": "d6a13d50218b55e3b73587974e8357b9bc68b7c364d8bb10d04708fec5e2d64f",
+    "bytes": 2641,
+    "vendored": "sources/ty/scripts/transform_readme.py"
   }
 }

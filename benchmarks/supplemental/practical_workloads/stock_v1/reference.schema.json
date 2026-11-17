@@ -50,6 +50,13 @@
           "items": {
             "$ref": "#/$defs/fact"
           }
+        },
+        "project_inputs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/source"
+          }
         }
       }
     },

@@ -1,5 +1,6 @@
 """Freeze fresh stock-only CPython observations; refuse to overwrite a reference."""
 from __future__ import annotations
+import argparse
 import hashlib
 import http.server
 import json
@@ -70,6 +71,9 @@ def freeze(case: str) -> None:
     with tempfile.TemporaryDirectory(prefix="stock-reference-", dir="/workspace/scratch") as temp:
         work=Path(temp); (work/"scripts").mkdir(mode=0o755); (work/"home").mkdir(mode=0o755)
         entry=work/source["path"]; shutil.copyfile(ROOT/source["vendored"],entry); entry.chmod(0o644)
+        project_inputs=json.loads((ROOT/"ty-inputs.json").read_text()) if case=="ty-readme" else []
+        for item in project_inputs:
+            target=work/item["path"]; shutil.copyfile(ROOT/item["vendored"],target); target.chmod(0o644)
         roles={"$WORK": str(work), "$CORPUS": str(ROOT), "$PYTHON": sys.executable}
         env={"HOME":str(work/"home"),"LANG":"C.UTF-8","LC_ALL":"C.UTF-8","PATH":"/usr/bin",
              "PYTHONDONTWRITEBYTECODE":"1","PYTHONHASHSEED":"0","PYTHONNOUSERSITE":"1","TZ":"UTC"}
@@ -84,7 +88,7 @@ def freeze(case: str) -> None:
             env.update({"CARGO_LOG":str(work/"cargo.log"),"NO_PROXY":"127.0.0.1"})
             stub=ROOT/"fixtures/cargo_stub.py"; external.append(file_fact(stub,"$CORPUS/fixtures/cargo_stub.py"))
             argv += ["--api-url",origin+"/api/v1","--cargo",sys.executable,str(stub),"--no-verify"]
-        else:
+        elif case=="uv-rich":
             bundle=ROOT/"fixtures/rich-imports.zip"; external.append(file_fact(bundle,"$CORPUS/fixtures/rich-imports.zip"))
             env.update({"PYTHONPATH":str(bundle),"TERM":"dumb","NO_COLOR":"1","COLUMNS":"80"}); argv.append("Ruff")
         before=inventory(work)
@@ -98,6 +102,7 @@ def freeze(case: str) -> None:
         registry="".join(json.dumps(x,sort_keys=True)+"\n" for x in Registry.events).encode(); (raw/"registry.jsonl").write_bytes(registry)
         processes=(work/"cargo.log").read_bytes() if (work/"cargo.log").exists() else b""; (raw/"processes.jsonl").write_bytes(processes)
         if (work/"published.txt").exists(): shutil.copyfile(work/"published.txt",raw/"published.txt")
+        if case=="ty-readme": shutil.copyfile(work/"README.md",raw/"README.md")
         original={x["path"]:x for x in before}; final={x["path"]:x for x in after}
         changes={"created":[x for p,x in final.items() if p not in original],"deleted":[x for p,x in original.items() if p not in final],"modified":[x for p,x in final.items() if p in original and x!=original[p]]}
         effects={"registry":Registry.events,"processes":[json.loads(x) for x in processes.splitlines()],"files":changes}
@@ -112,11 +117,13 @@ def freeze(case: str) -> None:
         ref={"schema":"prospective-stock-reference-v1","case":case,"scope":"supplemental-stock-only","source":source,
              "invocation":normalize(invocation,roles),"tool":tool,"fixture":{"before":"raw/before.json","external_inputs":external},
              "observation":{"exit_code":result.returncode,"stdout":"raw/stdout","stderr":"raw/stderr","effects":"effects.normalized.json"},"evidence":evidence}
+        if project_inputs: ref["fixture"]["project_inputs"]=project_inputs
         write_json(out/"reference.json",ref)
         print(case,result.returncode,len(result.stdout),len(result.stderr),len(Registry.events),flush=True)
 
 def main():
     if sys.version_info[:3] != (3,14,5) or platform.python_implementation()!="CPython" or platform.system()!="Linux":
         raise SystemExit("capture requires CPython 3.14.5 on Linux")
-    for case in SOURCES: freeze(case)
+    parser=argparse.ArgumentParser(); parser.add_argument("--case",choices=SOURCES,action="append"); args=parser.parse_args()
+    for case in args.case or SOURCES: freeze(case)
 if __name__=="__main__":main()
