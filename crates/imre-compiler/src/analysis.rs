@@ -3866,6 +3866,7 @@ impl Session {
         module: usize,
         path: &Path,
         skipped: &[TextRange],
+        checked: &[CheckedDiagnostic],
         errors: &mut Vec<(TextSize, String)>,
     ) {
         use ty_python_core::{definition::DefinitionKind, scope::NodeWithScopeKind};
@@ -3917,6 +3918,7 @@ impl Session {
                 };
                 if index.is_in_type_checking_block(scope, value.range())
                     || skipped.iter().any(|r| r.contains_range(value.range()))
+                    || checked.contains(&CheckedDiagnostic::FrameScalarStore(value.range()))
                 {
                     continue;
                 }
@@ -4070,6 +4072,7 @@ impl Session {
                 index,
                 path,
                 skipped.map_or(&[], |ranges| ranges[index].as_slice()),
+                overloads.get(index).map_or(&[], Vec::as_slice),
                 &mut dormant,
             );
             if !declarations.parameters(&self.db).is_empty() {
@@ -4516,6 +4519,7 @@ const CALL_ARGUMENT_RULES: &[&str] = &[
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum CheckedDiagnostic {
     AbstractClassCall(TextRange),
+    FrameScalarStore(TextRange),
     UnboundLocalRead(TextRange),
     Decorator(TextRange),
     RuntimeOverload(TextRange),
@@ -4542,6 +4546,7 @@ impl CheckedDiagnostic {
     pub(crate) fn sort_key(self) -> (TextSize, TextSize, u8) {
         let (range, kind) = match self {
             Self::AbstractClassCall(range) => (range, 9),
+            Self::FrameScalarStore(range) => (range, 17),
             Self::UnboundLocalRead(range) => (range, 10),
             Self::Decorator(range) => (range, 0),
             Self::OptionalLockContext(range) => (range, 7),
@@ -4571,6 +4576,7 @@ impl CheckedDiagnostic {
             Self::AbstractClassCall(call) | Self::CallableKey(call) => {
                 diagnostic == "call-non-callable" && call == range
             }
+            Self::FrameScalarStore(value) => diagnostic == "invalid-assignment" && value == range,
             Self::UnboundLocalRead(read) => diagnostic == "unresolved-reference" && read == range,
             Self::Decorator(decorator) => {
                 diagnostic == "no-matching-overload" && decorator.contains_range(range)

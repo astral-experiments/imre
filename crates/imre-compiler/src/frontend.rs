@@ -2347,7 +2347,28 @@ fn lower_graph(
         return Ok(Some(registered));
     }
     if !can_transfer_frames && !graph.has_object_constructor_fallback.get() {
-        completed.frames = Vec::new();
+        // An uncalled class can still place its module's original checked bodies.
+        // Keep those sites without retaining frames in unrelated imported modules.
+        let frame_modules: HashSet<_> = classes
+            .declarations
+            .definitions
+            .iter()
+            .map(|class| class.definition.module)
+            .chain(
+                classes
+                    .declarations
+                    .registered_classes
+                    .iter()
+                    .map(|class| class.module),
+            )
+            .collect();
+        if frame_modules.is_empty() {
+            completed.frames = Vec::new();
+        } else {
+            completed
+                .frames
+                .retain(|(slot, _, _)| frame_modules.contains(&owners[*slot]));
+        }
     }
     let mut functions = completed.functions;
     // Checkpoints above refer to the source operations. Insert native startup
@@ -5357,6 +5378,9 @@ impl<'a> Checker<'a> {
                             == Some(expected)
                     {
                         let checked = registered::checked_local_scalar(Some(expected), value);
+                        checker
+                            .graph
+                            .checked_frame_scalar_store(checker.module, site.range());
                         return Ok(Expr {
                             ty: expected,
                             ..checked

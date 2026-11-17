@@ -3928,6 +3928,12 @@ impl SourceGraph {
             .push(CheckedDiagnostic::UnboundLocalRead(read));
     }
 
+    /// The frontend bound this scalar store to a checked reaching frame-local write.
+    pub(crate) fn checked_frame_scalar_store(&self, module: ModuleId, value: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::FrameScalarStore(value));
+    }
+
     /// Native construction raises TypeError at this abstract class call.
     pub(crate) fn checked_abstract_class_call(&self, module: ModuleId, call: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]

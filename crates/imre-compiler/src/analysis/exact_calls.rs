@@ -39,7 +39,7 @@ impl Session {
             declarations,
             skipped,
             unreachable: ty_python_semantic::types::ide_support::unreachable_ranges(db, source)
-                .into_iter()
+                .iter()
                 .map(|r| r.range)
                 .collect(),
             ty_errors,
@@ -86,7 +86,7 @@ impl Calls<'_, '_> {
 
     /// Return whether the call has a uniquely selected, fully bound source convention.
     /// Supplied operands are visited and checked in the shared binder's evaluation order.
-    fn check_call<'ast>(&mut self, call: &'ast ExprCall) -> bool {
+    fn check_call(&mut self, call: &ExprCall) -> bool {
         let db = &self.session.db;
         let Some(name) = call.func.as_name_expr() else {
             return false;
