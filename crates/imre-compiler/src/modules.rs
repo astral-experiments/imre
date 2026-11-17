@@ -3197,10 +3197,15 @@ impl SourceModule {
                 return Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(export)));
             }
         }
-        if self.is_bundled("pkgutil") && name == "resolve_name" {
-            return Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
-                "pkgutil.resolve_name",
-            )));
+        if self.is_bundled("pkgutil") {
+            let export = match name {
+                "get_data" => Some("pkgutil.get_data"),
+                "resolve_name" => Some("pkgutil.resolve_name"),
+                _ => None,
+            };
+            if let Some(export) = export {
+                return Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(export)));
+            }
         }
         if self.is_bundled("platform") && name == "win32_is_iot" {
             return Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(

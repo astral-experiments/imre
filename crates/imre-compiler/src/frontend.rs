@@ -13914,6 +13914,30 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::CachedProperty)) => {
                 return Err(self.object_runtime_export("functools.cached_property", call));
             }
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name @ "pkgutil.get_data"))) => {
+                let params = [
+                    parameter("package", Type::Str, None),
+                    parameter("resource", Type::Str, None),
+                ];
+                let args = self.arguments(call, &params, None)?;
+                let result = self.types.optional(Type::Bytes);
+                let failure = self.scoped_builtin_error(name, call);
+                if !self.missing_operation(&failure) {
+                    return Err(failure);
+                }
+                if self.inference.is_none()
+                    && self.registered.is_none()
+                    && (self.module_scope || self.fixed_sites.is_none())
+                {
+                    return Ok(Expr {
+                        ty: result,
+                        kind: ExprKind::Builtin(Builtin::UnrepresentedCall, vec![]),
+                    });
+                }
+                let mut value = self.call_import_with_operands(call, args.values)?;
+                value.ty = result;
+                return Ok(value);
+            }
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
                 name @ ("bisect.bisect_left" | "bisect.bisect_right"),
             ))) => {
