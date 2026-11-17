@@ -1,0 +1,29 @@
+{
+  "package": "test.test_json",
+  "prefix_occurrences": 2,
+  "prefix_original_ids": [
+    "json",
+    "json.encoder.JSONEncoder.encode",
+    "test.test_json.TestPyTest.test_pyjson",
+    "test.test_json.TestCTest.test_cjson"
+  ],
+  "leaf_modules_in_stock_discovery_order": [
+    "test.test_json.test_decode",
+    "test.test_json.test_default",
+    "test.test_json.test_dump",
+    "test.test_json.test_encode_basestring_ascii",
+    "test.test_json.test_enum",
+    "test.test_json.test_fail",
+    "test.test_json.test_float",
+    "test.test_json.test_indent",
+    "test.test_json.test_pass1",
+    "test.test_json.test_pass2",
+    "test.test_json.test_pass3",
+    "test.test_json.test_recursion",
+    "test.test_json.test_scanstring",
+    "test.test_json.test_separators",
+    "test.test_json.test_speedups",
+    "test.test_json.test_tool",
+    "test.test_json.test_unicode"
+  ]
+}

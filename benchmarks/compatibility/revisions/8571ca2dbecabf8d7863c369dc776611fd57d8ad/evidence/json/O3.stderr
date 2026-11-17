@@ -1,0 +1,464 @@
+IMRE_UNITTEST {"event": "collection", "count": 216}
+IMRE_UNITTEST {"event": "inventory", "id": "json"}
+IMRE_UNITTEST {"event": "inventory", "id": "json.encoder.JSONEncoder.encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.TestPyTest.test_pyjson"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.TestCTest.test_cjson"}
+IMRE_UNITTEST {"event": "inventory", "id": "json"}
+IMRE_UNITTEST {"event": "inventory", "id": "json.encoder.JSONEncoder.encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.TestPyTest.test_pyjson"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.TestCTest.test_cjson"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_bytes"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_constant_invalid_case"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_decimal"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_decoder_optimizations"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_empty_objects"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_extra_data"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_float"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_invalid_escape"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_invalid_input_type"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_keys_reuse"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_limit_int"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_negative_index"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_nonascii_digits_rejected"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_object_pairs_hook"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_parse_constant"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestCDecode.test_string_with_utf8_bom"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_bytes"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_constant_invalid_case"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_decimal"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_decoder_optimizations"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_empty_objects"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_extra_data"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_float"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_invalid_escape"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_invalid_input_type"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_keys_reuse"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_limit_int"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_negative_index"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_nonascii_digits_rejected"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_object_pairs_hook"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_parse_constant"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_decode.TestPyDecode.test_string_with_utf8_bom"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_default.TestCDefault.test_bad_default"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_default.TestCDefault.test_default"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_default.TestCDefault.test_ordereddict"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_default.TestPyDefault.test_bad_default"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_default.TestPyDefault.test_default"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_default.TestPyDefault.test_ordereddict"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestCDump.test_dump"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestCDump.test_dump_skipkeys"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestCDump.test_dump_skipkeys_indent_empty"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestCDump.test_dumps"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestCDump.test_encode_evil_dict"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestCDump.test_encode_mutated"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestCDump.test_encode_truefalse"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestCDump.test_large_list"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestCDump.test_skipkeys_indent"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestPyDump.test_dump"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestPyDump.test_dump_skipkeys"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestPyDump.test_dump_skipkeys_indent_empty"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestPyDump.test_dumps"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestPyDump.test_encode_evil_dict"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestPyDump.test_encode_mutated"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestPyDump.test_encode_truefalse"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_dump.TestPyDump.test_skipkeys_indent"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_encode_basestring_ascii"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_ordered_dict"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_overflow"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_sorted_dict"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_encode_basestring_ascii"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_ordered_dict"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_sorted_dict"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_enum.TestCEnum.test_dict_keys"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_enum.TestCEnum.test_dict_values"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_enum.TestCEnum.test_floats"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_enum.TestCEnum.test_ints"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_enum.TestCEnum.test_list"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_enum.TestCEnum.test_weird_floats"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_enum.TestPyEnum.test_dict_keys"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_enum.TestPyEnum.test_dict_values"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_enum.TestPyEnum.test_floats"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_enum.TestPyEnum.test_ints"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_enum.TestPyEnum.test_list"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_enum.TestPyEnum.test_weird_floats"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestCFail.test_extra_data"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestCFail.test_failures"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestCFail.test_linecol"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestCFail.test_non_string_keys_dict"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestCFail.test_not_serializable"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestCFail.test_truncated_input"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestCFail.test_unexpected_data"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestPyFail.test_extra_data"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestPyFail.test_failures"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestPyFail.test_linecol"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestPyFail.test_non_string_keys_dict"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestPyFail.test_not_serializable"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestPyFail.test_truncated_input"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestPyFail.test_unexpected_data"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_float.TestCFloat.test_allow_nan"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_float.TestCFloat.test_floats"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_float.TestCFloat.test_ints"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_float.TestCFloat.test_out_of_range"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_float.TestPyFloat.test_allow_nan"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_float.TestPyFloat.test_floats"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_float.TestPyFloat.test_ints"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_float.TestPyFloat.test_out_of_range"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_indent.TestCIndent.test_indent"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_indent.TestCIndent.test_indent0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_indent.TestPyIndent.test_indent"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_indent.TestPyIndent.test_indent0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_pass1.TestCPass1.test_parse"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_pass1.TestPyPass1.test_parse"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_pass2.TestCPass2.test_parse"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_pass2.TestPyPass2.test_parse"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_pass3.TestCPass3.test_parse"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_pass3.TestPyPass3.test_parse"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_recursion.TestCRecursion.test_defaultrecursion"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_recursion.TestCRecursion.test_dictrecursion"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_recursion.TestCRecursion.test_endless_recursion"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_recursion.TestCRecursion.test_highly_nested_objects_decoding"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_recursion.TestCRecursion.test_highly_nested_objects_encoding"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_recursion.TestCRecursion.test_listrecursion"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_recursion.TestPyRecursion.test_defaultrecursion"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_recursion.TestPyRecursion.test_dictrecursion"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_recursion.TestPyRecursion.test_endless_recursion"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_recursion.TestPyRecursion.test_highly_nested_objects_decoding"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_recursion.TestPyRecursion.test_highly_nested_objects_encoding"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_recursion.TestPyRecursion.test_listrecursion"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_scanstring.TestCScanstring.test_bad_escapes"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_scanstring.TestCScanstring.test_overflow"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_scanstring.TestCScanstring.test_scanstring"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_scanstring.TestCScanstring.test_surrogates"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_scanstring.TestPyScanstring.test_bad_escapes"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_scanstring.TestPyScanstring.test_overflow"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_scanstring.TestPyScanstring.test_scanstring"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_scanstring.TestPyScanstring.test_surrogates"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_separators.TestCSeparators.test_illegal_separators"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_separators.TestCSeparators.test_separators"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_separators.TestPySeparators.test_illegal_separators"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_separators.TestPySeparators.test_separators"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestDecode.test_bad_bool_args"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestDecode.test_make_scanner"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestEncode.test_bad_bool_args"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestEncode.test_bad_markers_argument_to_encoder"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestEncode.test_bad_str_encoder"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestEncode.test_current_indent_level"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestEncode.test_make_encoder"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestEncode.test_unsortable_keys"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestSpeedups.test_encode_basestring_ascii"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestSpeedups.test_scanstring"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_broken_pipe_error"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_colors"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_compact"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_ensure_ascii_default"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_help_flag"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_indent"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_infile_outfile"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_infile_stdout"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_jsonlines"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_jsonlines_from_file"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_no_ensure_ascii_flag"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_no_indent"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_non_ascii_infile"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_sort_keys_flag"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_stdin_stdout"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_tab"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_writing_in_place"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_broken_pipe_error"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_colors"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_compact"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_ensure_ascii_default"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_help_flag"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_indent"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_infile_outfile"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_infile_stdout"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_jsonlines"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_jsonlines_from_file"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_no_ensure_ascii_flag"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_no_indent"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_non_ascii_infile"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_sort_keys_flag"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_stdin_stdout"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_tab"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_writing_in_place"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_big_unicode_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_big_unicode_encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_bytes_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_bytes_encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding3"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding4"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding5"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding6"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding7"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_escaped_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_object_pairs_hook_with_unicode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_unicode_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_unicode_preservation"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_bytes_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_bytes_encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding3"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding4"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding5"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding6"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding7"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_escaped_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_object_pairs_hook_with_unicode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_single_surrogate_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_single_surrogate_encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_unicode_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_unicode_preservation"}
+IMRE_UNITTEST {"event": "start", "id": "json"}
+IMRE_UNITTEST {"event": "result", "id": "json", "outcome": "fail", "details": ["File \"<imre stdlib>/json/__init__.py\", line 11, in json\nFailed example:\nimport json\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[0]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 12, in json\nFailed example:\njson.dumps(['foo', {'bar': ('baz', None, 1.0, 2)}])\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[1]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 14, in json\nFailed example:\nprint(json.dumps(\"\\\"foo\\bar\"))\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[2]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 16, in json\nFailed example:\nprint(json.dumps('\\u1234'))\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[3]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 18, in json\nFailed example:\nprint(json.dumps('\\\\'))\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[4]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 20, in json\nFailed example:\nprint(json.dumps({\"c\": 0, \"b\": 0, \"a\": 0}, sort_keys=True))\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[5]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 22, in json\nFailed example:\nfrom io import StringIO\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[6]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 23, in json\nFailed example:\nio = StringIO()\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[7]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 24, in json\nFailed example:\njson.dump(['streaming API'], io)\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[8]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 25, in json\nFailed example:\nio.getvalue()\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[9]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 30, in json\nFailed example:\nimport json\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[10]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 31, in json\nFailed example:\nmydict = {'4': 5, '6': 7}\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[11]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 32, in json\nFailed example:\njson.dumps([1,2,3,mydict], separators=(',', ':'))\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[12]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 37, in json\nFailed example:\nimport json\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[13]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 38, in json\nFailed example:\nprint(json.dumps({'4': 5, '6': 7}, sort_keys=True, indent=4))\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[14]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 46, in json\nFailed example:\nimport json\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[15]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 47, in json\nFailed example:\nobj = ['foo', {'bar': ['baz', None, 1.0, 2]}]\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[16]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 48, in json\nFailed example:\njson.loads('[\"foo\", {\"bar\":[\"baz\", null, 1.0, 2]}]') == obj\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[17]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 50, in json\nFailed example:\njson.loads('\"\\\\\"foo\\\\bar\"') == '\"foo\\x08ar'\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[18]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 52, in json\nFailed example:\nfrom io import StringIO\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[19]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 53, in json\nFailed example:\nio = StringIO('[\"streaming API\"]')\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[20]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 54, in json\nFailed example:\njson.load(io)[0] == 'streaming API'\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[21]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 59, in json\nFailed example:\nimport json\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[22]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 60, in json\nFailed example:\ndef as_complex(dct):\n    if '__complex__' in dct:\n        return complex(dct['real'], dct['imag'])\n    return dct\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[23]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 65, in json\nFailed example:\njson.loads('{\"__complex__\": true, \"real\": 1, \"imag\": 2}',\n    object_hook=as_complex)\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[24]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 68, in json\nFailed example:\nfrom decimal import Decimal\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[25]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 69, in json\nFailed example:\njson.loads('1.1', parse_float=Decimal) == Decimal('1.1')\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[26]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 74, in json\nFailed example:\nimport json\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[27]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 75, in json\nFailed example:\ndef encode_complex(obj):\n    if isinstance(obj, complex):\n        return [obj.real, obj.imag]\n    raise TypeError(f'Object of type {obj.__class__.__name__} '\n                    f'is not JSON serializable')\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[28]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 81, in json\nFailed example:\njson.dumps(2 + 1j, default=encode_complex)\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[29]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 83, in json\nFailed example:\njson.JSONEncoder(default=encode_complex).encode(2 + 1j)\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[30]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 85, in json\nFailed example:\n''.join(json.JSONEncoder(default=encode_complex).iterencode(2 + 1j))\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[31]>:1)\n"]}
+IMRE_UNITTEST {"event": "start", "id": "json.encoder.JSONEncoder.encode"}
+IMRE_UNITTEST {"event": "result", "id": "json.encoder.JSONEncoder.encode", "outcome": "fail", "details": ["File \"<imre stdlib>/json/encoder.py\", line 223, in json.encoder.JSONEncoder.encode\nFailed example:\nfrom json.encoder import JSONEncoder\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json.encoder.JSONEncoder.encode[0]>:1)\n\nFile \"<imre stdlib>/json/encoder.py\", line 224, in json.encoder.JSONEncoder.encode\nFailed example:\nJSONEncoder().encode({\"foo\": [\"bar\", \"baz\"]})\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json.encoder.JSONEncoder.encode[1]>:1)\n"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.TestPyTest.test_pyjson"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.TestPyTest.test_pyjson", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.TestCTest.test_cjson"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.TestCTest.test_cjson", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "json"}
+IMRE_UNITTEST {"event": "result", "id": "json", "outcome": "fail", "details": ["File \"<imre stdlib>/json/__init__.py\", line 11, in json\nFailed example:\nimport json\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[0]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 12, in json\nFailed example:\njson.dumps(['foo', {'bar': ('baz', None, 1.0, 2)}])\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[1]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 14, in json\nFailed example:\nprint(json.dumps(\"\\\"foo\\bar\"))\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[2]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 16, in json\nFailed example:\nprint(json.dumps('\\u1234'))\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[3]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 18, in json\nFailed example:\nprint(json.dumps('\\\\'))\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[4]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 20, in json\nFailed example:\nprint(json.dumps({\"c\": 0, \"b\": 0, \"a\": 0}, sort_keys=True))\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[5]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 22, in json\nFailed example:\nfrom io import StringIO\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[6]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 23, in json\nFailed example:\nio = StringIO()\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[7]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 24, in json\nFailed example:\njson.dump(['streaming API'], io)\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[8]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 25, in json\nFailed example:\nio.getvalue()\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[9]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 30, in json\nFailed example:\nimport json\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[10]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 31, in json\nFailed example:\nmydict = {'4': 5, '6': 7}\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[11]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 32, in json\nFailed example:\njson.dumps([1,2,3,mydict], separators=(',', ':'))\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[12]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 37, in json\nFailed example:\nimport json\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[13]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 38, in json\nFailed example:\nprint(json.dumps({'4': 5, '6': 7}, sort_keys=True, indent=4))\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[14]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 46, in json\nFailed example:\nimport json\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[15]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 47, in json\nFailed example:\nobj = ['foo', {'bar': ['baz', None, 1.0, 2]}]\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[16]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 48, in json\nFailed example:\njson.loads('[\"foo\", {\"bar\":[\"baz\", null, 1.0, 2]}]') == obj\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[17]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 50, in json\nFailed example:\njson.loads('\"\\\\\"foo\\\\bar\"') == '\"foo\\x08ar'\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[18]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 52, in json\nFailed example:\nfrom io import StringIO\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[19]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 53, in json\nFailed example:\nio = StringIO('[\"streaming API\"]')\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[20]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 54, in json\nFailed example:\njson.load(io)[0] == 'streaming API'\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[21]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 59, in json\nFailed example:\nimport json\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[22]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 60, in json\nFailed example:\ndef as_complex(dct):\n    if '__complex__' in dct:\n        return complex(dct['real'], dct['imag'])\n    return dct\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[23]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 65, in json\nFailed example:\njson.loads('{\"__complex__\": true, \"real\": 1, \"imag\": 2}',\n    object_hook=as_complex)\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[24]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 68, in json\nFailed example:\nfrom decimal import Decimal\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[25]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 69, in json\nFailed example:\njson.loads('1.1', parse_float=Decimal) == Decimal('1.1')\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[26]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 74, in json\nFailed example:\nimport json\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[27]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 75, in json\nFailed example:\ndef encode_complex(obj):\n    if isinstance(obj, complex):\n        return [obj.real, obj.imag]\n    raise TypeError(f'Object of type {obj.__class__.__name__} '\n                    f'is not JSON serializable')\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[28]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 81, in json\nFailed example:\njson.dumps(2 + 1j, default=encode_complex)\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[29]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 83, in json\nFailed example:\njson.JSONEncoder(default=encode_complex).encode(2 + 1j)\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[30]>:1)\n\nFile \"<imre stdlib>/json/__init__.py\", line 85, in json\nFailed example:\n''.join(json.JSONEncoder(default=encode_complex).iterencode(2 + 1j))\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json[31]>:1)\n"]}
+IMRE_UNITTEST {"event": "start", "id": "json.encoder.JSONEncoder.encode"}
+IMRE_UNITTEST {"event": "result", "id": "json.encoder.JSONEncoder.encode", "outcome": "fail", "details": ["File \"<imre stdlib>/json/encoder.py\", line 223, in json.encoder.JSONEncoder.encode\nFailed example:\nfrom json.encoder import JSONEncoder\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json.encoder.JSONEncoder.encode[0]>:1)\n\nFile \"<imre stdlib>/json/encoder.py\", line 224, in json.encoder.JSONEncoder.encode\nFailed example:\nJSONEncoder().encode({\"foo\": [\"bar\", \"baz\"]})\nException raised:\nNotImplementedError: no compiled Python body for <module> (<doctest json.encoder.JSONEncoder.encode[1]>:1)\n"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.TestPyTest.test_pyjson"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.TestPyTest.test_pyjson", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.TestCTest.test_cjson"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.TestCTest.test_cjson", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_bytes"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_bytes", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_constant_invalid_case"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_constant_invalid_case", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_decimal"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_decimal", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_decoder_optimizations"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_decoder_optimizations", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_empty_objects"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_empty_objects", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_extra_data"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_extra_data", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_float"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_float", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_invalid_escape"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_invalid_escape", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_invalid_input_type"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_invalid_input_type", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_keys_reuse"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_keys_reuse", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_limit_int"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_limit_int", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_negative_index"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_negative_index", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_nonascii_digits_rejected"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_nonascii_digits_rejected", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_object_pairs_hook"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_object_pairs_hook", "outcome": "error", "details": ["no compiled Python body for <module> (<string>:1)"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_parse_constant"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_parse_constant", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestCDecode.test_string_with_utf8_bom"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestCDecode.test_string_with_utf8_bom", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_bytes"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_bytes", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_constant_invalid_case"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_constant_invalid_case", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_decimal"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_decimal", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_decoder_optimizations"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_decoder_optimizations", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_empty_objects"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_empty_objects", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_extra_data"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_extra_data", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_float"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_float", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_invalid_escape"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_invalid_escape", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_invalid_input_type"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_invalid_input_type", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_keys_reuse"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_keys_reuse", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_limit_int"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_limit_int", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_negative_index"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_negative_index", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_nonascii_digits_rejected"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_nonascii_digits_rejected", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_object_pairs_hook"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_object_pairs_hook", "outcome": "error", "details": ["no compiled Python body for <module> (<string>:1)"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_parse_constant"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_parse_constant", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_decode.TestPyDecode.test_string_with_utf8_bom"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_decode.TestPyDecode.test_string_with_utf8_bom", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_default.TestCDefault.test_bad_default"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_default.TestCDefault.test_bad_default", "outcome": "error", "details": ["expected str"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_default.TestCDefault.test_default"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_default.TestCDefault.test_default", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_default.TestCDefault.test_ordereddict"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_default.TestCDefault.test_ordereddict", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_default.TestPyDefault.test_bad_default"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_default.TestPyDefault.test_bad_default", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_default.TestPyDefault.test_default"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_default.TestPyDefault.test_default", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_default.TestPyDefault.test_ordereddict"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_default.TestPyDefault.test_ordereddict", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestCDump.test_dump"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestCDump.test_dump", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestCDump.test_dump_skipkeys"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestCDump.test_dump_skipkeys", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestCDump.test_dump_skipkeys_indent_empty"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestCDump.test_dump_skipkeys_indent_empty", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestCDump.test_dumps"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestCDump.test_dumps", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestCDump.test_encode_evil_dict"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestCDump.test_encode_evil_dict", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestCDump.test_encode_mutated"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestCDump.test_encode_mutated", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestCDump.test_encode_truefalse"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestCDump.test_encode_truefalse", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestCDump.test_large_list"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestCDump.test_large_list", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestCDump.test_skipkeys_indent"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestCDump.test_skipkeys_indent", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestPyDump.test_dump"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestPyDump.test_dump", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestPyDump.test_dump_skipkeys"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestPyDump.test_dump_skipkeys", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestPyDump.test_dump_skipkeys_indent_empty"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestPyDump.test_dump_skipkeys_indent_empty", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestPyDump.test_dumps"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestPyDump.test_dumps", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestPyDump.test_encode_evil_dict"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestPyDump.test_encode_evil_dict", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestPyDump.test_encode_mutated"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestPyDump.test_encode_mutated", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestPyDump.test_encode_truefalse"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestPyDump.test_encode_truefalse", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_dump.TestPyDump.test_skipkeys_indent"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_dump.TestPyDump.test_skipkeys_indent", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_encode_basestring_ascii"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_encode_basestring_ascii", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_ordered_dict"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_ordered_dict", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_overflow"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_overflow", "outcome": "skip", "details": ["not enough memory: 8589934592.0G minimum needed"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_sorted_dict"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_sorted_dict", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_encode_basestring_ascii"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_encode_basestring_ascii", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_ordered_dict"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_ordered_dict", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_sorted_dict"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_sorted_dict", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_enum.TestCEnum.test_dict_keys"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_enum.TestCEnum.test_dict_keys", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_enum.TestCEnum.test_dict_values"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_enum.TestCEnum.test_dict_values", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_enum.TestCEnum.test_floats"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_enum.TestCEnum.test_floats", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_enum.TestCEnum.test_ints"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_enum.TestCEnum.test_ints", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_enum.TestCEnum.test_list"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_enum.TestCEnum.test_list", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_enum.TestCEnum.test_weird_floats"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_enum.TestCEnum.test_weird_floats", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_enum.TestPyEnum.test_dict_keys"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_enum.TestPyEnum.test_dict_keys", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_enum.TestPyEnum.test_dict_values"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_enum.TestPyEnum.test_dict_values", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_enum.TestPyEnum.test_floats"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_enum.TestPyEnum.test_floats", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_enum.TestPyEnum.test_ints"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_enum.TestPyEnum.test_ints", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_enum.TestPyEnum.test_list"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_enum.TestPyEnum.test_list", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_enum.TestPyEnum.test_weird_floats"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_enum.TestPyEnum.test_weird_floats", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestCFail.test_extra_data"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestCFail.test_extra_data", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestCFail.test_failures"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestCFail.test_failures", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestCFail.test_linecol"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestCFail.test_linecol", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestCFail.test_non_string_keys_dict"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestCFail.test_non_string_keys_dict", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestCFail.test_not_serializable"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestCFail.test_not_serializable", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestCFail.test_truncated_input"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestCFail.test_truncated_input", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestCFail.test_unexpected_data"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestCFail.test_unexpected_data", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestPyFail.test_extra_data"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestPyFail.test_extra_data", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestPyFail.test_failures"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestPyFail.test_failures", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestPyFail.test_linecol"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestPyFail.test_linecol", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestPyFail.test_non_string_keys_dict"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestPyFail.test_non_string_keys_dict", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestPyFail.test_not_serializable"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestPyFail.test_not_serializable", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestPyFail.test_truncated_input"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestPyFail.test_truncated_input", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestPyFail.test_unexpected_data"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestPyFail.test_unexpected_data", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_float.TestCFloat.test_allow_nan"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_float.TestCFloat.test_allow_nan", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_float.TestCFloat.test_floats"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_float.TestCFloat.test_floats", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_float.TestCFloat.test_ints"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_float.TestCFloat.test_ints", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_float.TestCFloat.test_out_of_range"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_float.TestCFloat.test_out_of_range", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_float.TestPyFloat.test_allow_nan"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_float.TestPyFloat.test_allow_nan", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_float.TestPyFloat.test_floats"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_float.TestPyFloat.test_floats", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_float.TestPyFloat.test_ints"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_float.TestPyFloat.test_ints", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_float.TestPyFloat.test_out_of_range"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_float.TestPyFloat.test_out_of_range", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_indent.TestCIndent.test_indent"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_indent.TestCIndent.test_indent", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_indent.TestCIndent.test_indent0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_indent.TestCIndent.test_indent0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_indent.TestPyIndent.test_indent"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_indent.TestPyIndent.test_indent", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_indent.TestPyIndent.test_indent0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_indent.TestPyIndent.test_indent0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_pass1.TestCPass1.test_parse"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_pass1.TestCPass1.test_parse", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_pass1.TestPyPass1.test_parse"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_pass1.TestPyPass1.test_parse", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_pass2.TestCPass2.test_parse"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_pass2.TestCPass2.test_parse", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_pass2.TestPyPass2.test_parse"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_pass2.TestPyPass2.test_parse", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_pass3.TestCPass3.test_parse"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_pass3.TestCPass3.test_parse", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_pass3.TestPyPass3.test_parse"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_pass3.TestPyPass3.test_parse", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_recursion.TestCRecursion.test_defaultrecursion"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_recursion.TestCRecursion.test_defaultrecursion", "outcome": "error", "details": ["expected str"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_recursion.TestCRecursion.test_dictrecursion"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_recursion.TestCRecursion.test_dictrecursion", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_recursion.TestCRecursion.test_endless_recursion"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_recursion.TestCRecursion.test_endless_recursion", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_recursion.TestCRecursion.test_highly_nested_objects_decoding"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_recursion.TestCRecursion.test_highly_nested_objects_decoding", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_recursion.TestCRecursion.test_highly_nested_objects_encoding"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_recursion.TestCRecursion.test_highly_nested_objects_encoding", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_recursion.TestCRecursion.test_listrecursion"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_recursion.TestCRecursion.test_listrecursion", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_recursion.TestPyRecursion.test_defaultrecursion"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_recursion.TestPyRecursion.test_defaultrecursion", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_recursion.TestPyRecursion.test_dictrecursion"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_recursion.TestPyRecursion.test_dictrecursion", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_recursion.TestPyRecursion.test_endless_recursion"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_recursion.TestPyRecursion.test_endless_recursion", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_recursion.TestPyRecursion.test_highly_nested_objects_decoding"}

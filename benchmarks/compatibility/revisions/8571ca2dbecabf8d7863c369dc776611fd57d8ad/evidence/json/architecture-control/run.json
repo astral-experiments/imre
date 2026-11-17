@@ -1,0 +1,43 @@
+{
+  "argv": [
+    "/workspace/imre/target/release/imre",
+    "build",
+    "/workspace/imre-json-8571/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/positive_launcher.py",
+    "--module-root",
+    "/workspace/imre-json-8571/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json",
+    "--extension-path",
+    "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+    "--no-cache",
+    "--opt-level",
+    "0",
+    "--runtime",
+    "/workspace/imre/target/release/libimre_runtime.a",
+    "--clang",
+    "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+    "-o",
+    "/workspace/scratch/json-8571-control.exe"
+  ],
+  "cwd": "/workspace/imre-json-8571",
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "TMPDIR": "/workspace/scratch/json-8571-tmp",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "IMREFLAGS": "--opt-level 0",
+    "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+  },
+  "timeout_seconds": 120,
+  "exit_code": 1,
+  "timed_out": false,
+  "expected_int_got_bool": true,
+  "image_exists": false,
+  "image_sha256": null,
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "e1c59a948c4563486107029a86456c70ac74b54600745c7f4b3d1a153377d265",
+  "positive_launcher_sha256": "e1ea0582a2e58d7f227491818ac2fefbd8e43c4a4c8616c24ebbdac6ca4c6375",
+  "injected_launcher_sha256": "1eb5f557dbb3183c50db4c263971533965d74f8cf790d33045f3c9f2c81e2672",
+  "control_module_sha256": "14841721c7b84f57d26a6a38a53827c683daf10930b9f297cfc15335bd1257b5",
+  "restored_launcher_sha256": "e1ea0582a2e58d7f227491818ac2fefbd8e43c4a4c8616c24ebbdac6ca4c6375",
+  "passed": true
+}
