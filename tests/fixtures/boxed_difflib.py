@@ -37,6 +37,7 @@ def check_live_matcher_state():
     assert matcher.find_longest_match(0, 2, 0, 1) == Match(0, 0, 0)
     assert SequenceMatcher(None, "é雪", "x雪").find_longest_match() == Match(1, 1, 1)
     assert SequenceMatcher(None, "x", "y" * 4096, False).find_longest_match() == Match(0, 0, 0)
+    assert SequenceMatcher(None, "Ω", "雪" * 4096, False).find_longest_match() == Match(0, 0, 0)
     del matcher
     gc.collect()
 

@@ -386,7 +386,7 @@ fn unicode_positions(
     };
     let mut groups = Vec::new();
     groups
-        .try_reserve_exact(entries.len())
+        .try_reserve_exact(active.len().min(entries.len()))
         .map_err(|_| crate::Error::memory_error())?;
     for &(key, value) in entries.iter() {
         let Some(key) = single_char(ctx, key) else {
@@ -519,6 +519,11 @@ fn find_longest(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     let (a_len, b_len, ascii) = match (ctx.heap.get(a), ctx.heap.get(b)) {
         (Value::Str(a), Value::Str(b)) => {
             let ascii = a.is_ascii() && b.is_ascii();
+            if !ascii && b.len() > a.len().saturating_mul(64).max(4096) {
+                // The source loop touches only left-hand anchors. Avoid walking,
+                // counting, then copying a severely asymmetric Unicode right side.
+                return Ok(None);
+            }
             (
                 if ascii { a.len() } else { a.chars().count() },
                 if ascii { b.len() } else { b.chars().count() },
