@@ -2139,11 +2139,13 @@ pub(crate) enum Builtin {
     ExceptionSubclass(u32, u32),
     LiteralStringView,
     IntListContains,
-    BisectIntList {
+    BisectIntSequence {
         left: bool,
+        tuple: bool,
     },
-    BisectIntListBounds {
+    BisectIntSequenceBounds {
         left: bool,
+        tuple: bool,
     },
     StringListContains,
     StringTupleContains,

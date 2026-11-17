@@ -13918,6 +13918,7 @@ impl<'a> Checker<'a> {
                 if key_none {
                     params.push(ParameterKind::KeywordOnly.parameter("key", Type::None, None));
                 }
+                let mut tuple = false;
                 let mut args = self
                     .arguments_with(call, &params, None, |checker, index, source| {
                         if index == 3 && matches!(source, ast::Expr::NoneLiteral(_)) {
@@ -13931,7 +13932,15 @@ impl<'a> Checker<'a> {
                             };
                         }
                         let value = checker.expr(source)?;
-                        if value.ty != params[index].ty {
+                        if index == 0 {
+                            if value.ty == Type::ListInt {
+                                tuple = false;
+                            } else if checker.types.var_tuple_element(value.ty) == Some(Type::Int) {
+                                tuple = true;
+                            } else {
+                                return Err(checker.object_runtime_export(name, source));
+                            }
+                        } else if value.ty != params[index].ty {
                             return Err(checker.object_runtime_export(name, source));
                         }
                         Ok(value)
@@ -13946,9 +13955,9 @@ impl<'a> Checker<'a> {
                 }
                 let left = name.ends_with("_left");
                 let builtin = if bounded {
-                    Builtin::BisectIntListBounds { left }
+                    Builtin::BisectIntSequenceBounds { left, tuple }
                 } else {
-                    Builtin::BisectIntList { left }
+                    Builtin::BisectIntSequence { left, tuple }
                 };
                 return Ok(self.ordered_builtin(builtin, Type::Int, args));
             }

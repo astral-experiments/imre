@@ -684,7 +684,7 @@ impl Builtin {
             | Self::StrEnumValue
             | Self::EnumString
             | Self::IntListContains
-            | Self::BisectIntList { .. }
+            | Self::BisectIntSequence { .. }
             | Self::StructListContains
             | Self::DequeContains
             | Self::StringContains
@@ -692,7 +692,7 @@ impl Builtin {
             | Self::UnionInject
             | Self::TargetLittleEndian
             | Self::UnionProject => Contract::new(false, PreservesLists),
-            Self::BisectIntListBounds { .. } => Contract::new(true, PreservesLists),
+            Self::BisectIntSequenceBounds { .. } => Contract::new(true, PreservesLists),
             Self::Append
             | Self::AppendInWindow(_)
             | Self::BeginListAppends(_)
@@ -1368,6 +1368,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
             name,
             "imre_list_bisect_left_bounds"
                 | "imre_list_bisect_right_bounds"
+                | "imre_tuple_bisect_left_bounds"
+                | "imre_tuple_bisect_right_bounds"
                 | "imre_weak_proxy_new"
                 | "imre_mktime"
                 | "imre_mktime_indexed"

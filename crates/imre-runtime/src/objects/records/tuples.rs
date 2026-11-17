@@ -202,6 +202,94 @@ pub unsafe extern "C" fn imre_tuple_len(tuple: *const usize) -> usize {
     Int::from_usize(unsafe { descriptor(tuple) }.length).into_raw()
 }
 
+/// Borrow the flat tagged words of an exact homogeneous integer tuple.
+///
+/// # Safety
+/// The caller roots an initialized exact tuple whose every field is a canonical integer.
+unsafe fn int_tuple_fields<'a>(tuple: *const usize) -> &'a [Int] {
+    // SAFETY: integer record fields have the same transparent word layout as Int.
+    unsafe { std::slice::from_raw_parts(tuple.cast::<Int>(), descriptor(tuple).length) }
+}
+
+/// Find the left insertion point in an exact integer tuple.
+///
+/// # Safety
+/// The caller roots the homogeneous tuple and the canonical integer needle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_tuple_bisect_left(tuple: *const usize, needle: usize) -> usize {
+    // SAFETY: exact integer comparison neither invokes user code nor mutates the rooted tuple.
+    let index =
+        unsafe { crate::bisect_ints::<true>(int_tuple_fields(tuple), &Int::borrow(needle)) };
+    (index << 1) | 1
+}
+
+/// Find the right insertion point in an exact integer tuple.
+///
+/// # Safety
+/// The caller roots the homogeneous tuple and the canonical integer needle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_tuple_bisect_right(tuple: *const usize, needle: usize) -> usize {
+    // SAFETY: exact integer comparison neither invokes user code nor mutates the rooted tuple.
+    let index =
+        unsafe { crate::bisect_ints::<false>(int_tuple_fields(tuple), &Int::borrow(needle)) };
+    (index << 1) | 1
+}
+
+unsafe fn tuple_bisect_bounds<const LEFT: bool>(
+    tuple: *const usize,
+    needle: usize,
+    lo: usize,
+    hi: usize,
+) -> crate::Result<usize> {
+    // SAFETY: the ABI caller roots all four operands throughout this nonreentrant read.
+    unsafe {
+        let (lo, hi) = crate::bisect_indices(&Int::borrow(lo), &Int::borrow(hi))?;
+        crate::bisect_ints_bounds::<LEFT>(
+            int_tuple_fields(tuple),
+            &Int::borrow(needle),
+            lo,
+            hi,
+            "tuple index out of range",
+        )
+    }
+}
+
+/// Search a bounded exact integer tuple using the left insertion rule.
+///
+/// # Safety
+/// The caller roots the homogeneous tuple and all three canonical integer words.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_tuple_bisect_left_bounds(
+    tuple: *const usize,
+    needle: usize,
+    lo: usize,
+    hi: usize,
+) -> usize {
+    // SAFETY: the ABI contract roots the inputs, and exact integer comparisons cannot reenter.
+    crate::finish(
+        unsafe { tuple_bisect_bounds::<true>(tuple, needle, lo, hi) },
+        0,
+    )
+}
+
+/// Search a bounded exact integer tuple using the right insertion rule.
+///
+/// # Safety
+/// The caller roots the homogeneous tuple and all three canonical integer words.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_tuple_bisect_right_bounds(
+    tuple: *const usize,
+    needle: usize,
+    lo: usize,
+    hi: usize,
+) -> usize {
+    // SAFETY: the ABI contract roots the inputs, and exact integer comparisons cannot reenter.
+    crate::finish(
+        unsafe { tuple_bisect_bounds::<false>(tuple, needle, lo, hi) },
+        0,
+    )
+}
+
 /// # Safety
 /// Tuple and index remain rooted. Return one owned word of the statically proven kind.
 #[unsafe(no_mangle)]
