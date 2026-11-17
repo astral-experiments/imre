@@ -1,0 +1,342 @@
+{
+  "revision": "8571ca2dbecabf8d7863c369dc776611fd57d8ad",
+  "toolchain_sha256": {
+    "compiler": "b07018ea9eb8e9af234307899c33a6b14e498ba5fded97a26a582a9e2ad9be9e",
+    "runtime": "6c71c26ec0f9d9a34c56a0b82226574243c189c2854f689ef127b8d92e481fb5"
+  },
+  "gate": "../architecture-control/run.json",
+  "controls": {
+    "stack": "unlimited:unlimited; triggers the original skip_if_unlimited_stack_size decorator",
+    "nproc": "0:0; denies child process creation for tool originals",
+    "timeout_seconds": 90
+  },
+  "withdrawal": {
+    "sources": [
+      {
+        "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/__init__.py",
+        "backup": "/workspace/scratch/json-tail-withdrawn/test/test_json/__init__.py",
+        "kind": "test_source",
+        "sha256_before": "b99348d18818d4a27ad5db018045a1c3abf50f2bbb0bad81643f082389201d73",
+        "sha256_after": "b99348d18818d4a27ad5db018045a1c3abf50f2bbb0bad81643f082389201d73",
+        "restored": true
+      },
+      {
+        "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/__main__.py",
+        "backup": "/workspace/scratch/json-tail-withdrawn/test/test_json/__main__.py",
+        "kind": "test_source",
+        "sha256_before": "99fbc0d494395da89493b77a15c88b5100363ef25c7fee27101e3106eda61bb4",
+        "sha256_after": "99fbc0d494395da89493b77a15c88b5100363ef25c7fee27101e3106eda61bb4",
+        "restored": true
+      },
+      {
+        "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_decode.py",
+        "backup": "/workspace/scratch/json-tail-withdrawn/test/test_json/test_decode.py",
+        "kind": "test_source",
+        "sha256_before": "7905c620f00c028e1b28ea27656b66d14584fa809206d3eb996fac5dbee2546c",
+        "sha256_after": "7905c620f00c028e1b28ea27656b66d14584fa809206d3eb996fac5dbee2546c",
+        "restored": true
+      },
+      {
+        "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_default.py",
+        "backup": "/workspace/scratch/json-tail-withdrawn/test/test_json/test_default.py",
+        "kind": "test_source",
+        "sha256_before": "726eabe1b591f70ca755b8bd2f45a2d4fc8ec5b62630dd49a2c4294a9c82b4dd",
+        "sha256_after": "726eabe1b591f70ca755b8bd2f45a2d4fc8ec5b62630dd49a2c4294a9c82b4dd",
+        "restored": true
+      },
+      {
+        "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_dump.py",
+        "backup": "/workspace/scratch/json-tail-withdrawn/test/test_json/test_dump.py",
+        "kind": "test_source",
+        "sha256_before": "e5eaeec50d6127c4c5c2fe1dfecc17f72e82034612c84d9d72bfbde1c241f758",
+        "sha256_after": "e5eaeec50d6127c4c5c2fe1dfecc17f72e82034612c84d9d72bfbde1c241f758",
+        "restored": true
+      },
+      {
+        "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_encode_basestring_ascii.py",
+        "backup": "/workspace/scratch/json-tail-withdrawn/test/test_json/test_encode_basestring_ascii.py",
+        "kind": "test_source",
+        "sha256_before": "47e24e85933b2704fa8baa87ac6e3010da044c74476452fa1f56062306e05078",
+        "sha256_after": "47e24e85933b2704fa8baa87ac6e3010da044c74476452fa1f56062306e05078",
+        "restored": true
+      },
+      {
+        "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_enum.py",
+        "backup": "/workspace/scratch/json-tail-withdrawn/test/test_json/test_enum.py",
+        "kind": "test_source",
+        "sha256_before": "82544c2ef9cf58b69c969d19bd470c2cfc4533e37b6dd8d64fc52209fe37e276",
+        "sha256_after": "82544c2ef9cf58b69c969d19bd470c2cfc4533e37b6dd8d64fc52209fe37e276",
+        "restored": true
+      },
+      {
+        "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_fail.py",
+        "backup": "/workspace/scratch/json-tail-withdrawn/test/test_json/test_fail.py",
+        "kind": "test_source",
+        "sha256_before": "6d6a2b5081a071ff838e2fa03b0a29aa81242ecfc1ac9332f274ace97b6b1b64",
+        "sha256_after": "6d6a2b5081a071ff838e2fa03b0a29aa81242ecfc1ac9332f274ace97b6b1b64",
+        "restored": true
+      },
+      {
+        "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_float.py",
+        "backup": "/workspace/scratch/json-tail-withdrawn/test/test_json/test_float.py",
+        "kind": "test_source",
+        "sha256_before": "86031dc23e0e69c8d5c7d82dd62c8db74dade2821aad66edf3f36e3fe3e7bb7e",
+        "sha256_after": "86031dc23e0e69c8d5c7d82dd62c8db74dade2821aad66edf3f36e3fe3e7bb7e",
+        "restored": true
+      },
+      {
+        "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_indent.py",
+        "backup": "/workspace/scratch/json-tail-withdrawn/test/test_json/test_indent.py",
+        "kind": "test_source",
+        "sha256_before": "38f1e868b1daf10aa0342e239074cb2a9c0b021006b07b9acac083ee984b565e",
+        "sha256_after": "38f1e868b1daf10aa0342e239074cb2a9c0b021006b07b9acac083ee984b565e",
+        "restored": true
+      },
+      {
+        "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_pass1.py",
+        "backup": "/workspace/scratch/json-tail-withdrawn/test/test_json/test_pass1.py",
+        "kind": "test_source",
+        "sha256_before": "aa91e64f7afe9f5c82fa3b4019352bc762e6f8d1aa05bdd5408305daa629f91d",
+        "sha256_after": "aa91e64f7afe9f5c82fa3b4019352bc762e6f8d1aa05bdd5408305daa629f91d",
+        "restored": true
+      },
+      {
+        "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_pass2.py",
+        "backup": "/workspace/scratch/json-tail-withdrawn/test/test_json/test_pass2.py",
+        "kind": "test_source",
+        "sha256_before": "d7d20a9f15b209485ddcd9794b5ee327993ff56c96b4f0d0548e5769d8a5f7cb",
+        "sha256_after": "d7d20a9f15b209485ddcd9794b5ee327993ff56c96b4f0d0548e5769d8a5f7cb",
+        "restored": true
+      },
+      {
+        "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_pass3.py",
+        "backup": "/workspace/scratch/json-tail-withdrawn/test/test_json/test_pass3.py",
+        "kind": "test_source",
+        "sha256_before": "1e813e2e1546526f216de8e547e99cb4f3e3830d061c440b371a676cab0359a2",
+        "sha256_after": "1e813e2e1546526f216de8e547e99cb4f3e3830d061c440b371a676cab0359a2",
+        "restored": true
+      },
+      {
+        "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_recursion.py",
+        "backup": "/workspace/scratch/json-tail-withdrawn/test/test_json/test_recursion.py",
+        "kind": "test_source",
+        "sha256_before": "fd5d77dcf5d919d53930ae8840a4e8ebccdbaf5a4e8d748f637ba8b22182380b",
+        "sha256_after": "fd5d77dcf5d919d53930ae8840a4e8ebccdbaf5a4e8d748f637ba8b22182380b",
+        "restored": true
+      },
+      {
+        "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_scanstring.py",
+        "backup": "/workspace/scratch/json-tail-withdrawn/test/test_json/test_scanstring.py",
+        "kind": "test_source",
+        "sha256_before": "f1062012d977de8d0fed27156123ec8aed7f20a60323f55342fd85fa7b84e153",
+        "sha256_after": "f1062012d977de8d0fed27156123ec8aed7f20a60323f55342fd85fa7b84e153",
+        "restored": true
+      },
+      {
+        "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_separators.py",
+        "backup": "/workspace/scratch/json-tail-withdrawn/test/test_json/test_separators.py",
+        "kind": "test_source",
+        "sha256_before": "3fb3ed4833418c98f7828f5be0052e731f70c05642002f4ed6907e3f970f374a",
+        "sha256_after": "3fb3ed4833418c98f7828f5be0052e731f70c05642002f4ed6907e3f970f374a",
+        "restored": true
+      },
+      {
+        "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_speedups.py",
+        "backup": "/workspace/scratch/json-tail-withdrawn/test/test_json/test_speedups.py",
+        "kind": "test_source",
+        "sha256_before": "f36ce38442f60a8b9e5815307f0ab845e223ba439a876ad6cd461edaf4160ff7",
+        "sha256_after": "f36ce38442f60a8b9e5815307f0ab845e223ba439a876ad6cd461edaf4160ff7",
+        "restored": true
+      },
+      {
+        "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_tool.py",
+        "backup": "/workspace/scratch/json-tail-withdrawn/test/test_json/test_tool.py",
+        "kind": "test_source",
+        "sha256_before": "7ad6456d0f4b0285bd4d8a532c8ba102002c45f872228726be05d6685d4c4724",
+        "sha256_after": "7ad6456d0f4b0285bd4d8a532c8ba102002c45f872228726be05d6685d4c4724",
+        "restored": true
+      },
+      {
+        "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_unicode.py",
+        "backup": "/workspace/scratch/json-tail-withdrawn/test/test_json/test_unicode.py",
+        "kind": "test_source",
+        "sha256_before": "3929dbd0ca60f6e6ffd1bee78a7cb70ba24ac3743bbebbb2bedd6a980e81745a",
+        "sha256_after": "3929dbd0ca60f6e6ffd1bee78a7cb70ba24ac3743bbebbb2bedd6a980e81745a",
+        "restored": true
+      },
+      {
+        "path": "/workspace/imre-json-8571/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/positive_launcher.py",
+        "backup": "/workspace/scratch/json-tail-withdrawn/launcher/positive_launcher.py",
+        "kind": "launcher",
+        "sha256_before": "e1ea0582a2e58d7f227491818ac2fefbd8e43c4a4c8616c24ebbdac6ca4c6375",
+        "sha256_after": "e1ea0582a2e58d7f227491818ac2fefbd8e43c4a4c8616c24ebbdac6ca4c6375",
+        "restored": true
+      }
+    ],
+    "source_count": 19,
+    "bytecode_count": 0,
+    "all_restored": true
+  },
+  "images": {
+    "O0": {
+      "image_sha256": "51a3c1413be023357291bb9068fe3b6b59a97092f53f1ecefd53e1c18c8e2291",
+      "readelf": {
+        "argv": [
+          "readelf",
+          "-d",
+          "/workspace/scratch/json-8571-native/O0.exe"
+        ],
+        "exit_code": 0,
+        "stdout_sha256": "e4bd937c2f06b91d77001ebfd1e81bd2d93095b2709f06a93c2556c9751dd5b2",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "ldd": {
+        "argv": [
+          "ldd",
+          "/workspace/scratch/json-8571-native/O0.exe"
+        ],
+        "exit_code": 0,
+        "stdout_sha256": "095ebde29ee3e0e0ad8117d15d24a8d888bc108dba1638821f93ef6ad7632652",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-window-1/O0.trace",
+        "/usr/bin/prlimit",
+        "--stack=unlimited:unlimited",
+        "--nproc=0:0",
+        "--",
+        "/workspace/scratch/json-8571-native/O0.exe"
+      ],
+      "trace_sha256": "f3d55d4620bf2db774ecde2077a4b7aa89668cc2f62652abbe07cc89bca4511c",
+      "successful_execs": [
+        "12878 execve(\"/usr/bin/prlimit\", [\"/usr/bin/prlimit\", \"--stack=unlimited:unlimited\", \"--nproc=0:0\", \"--\", \"/workspace/scratch/json-8571-native/O0.exe\"], 0x7fffe6d6cc10 /* 79 vars */) = 0",
+        "12878 execve(\"/workspace/scratch/json-8571-native/O0.exe\", [\"/workspace/scratch/json-8571-native/O0.exe\"], 0x7fffd1ee6688 /* 79 vars */) = 0"
+      ],
+      "no_child_exec": true,
+      "no_libpython": true,
+      "source_paths_absent_during_run": true,
+      "collection": 216,
+      "inventory_complete": true,
+      "exit_code": 1,
+      "timed_out": false
+    },
+    "O3": {
+      "image_sha256": "2de536be488e135cabf2d9b76bd4a5a8e17202c60b72c41644f430890afd9032",
+      "readelf": {
+        "argv": [
+          "readelf",
+          "-d",
+          "/workspace/scratch/json-8571-native/O3.exe"
+        ],
+        "exit_code": 0,
+        "stdout_sha256": "21a4e689def41cf16ed686b4f5e8430172faa8bc814bb0c1d08ce06566d43bf7",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "ldd": {
+        "argv": [
+          "ldd",
+          "/workspace/scratch/json-8571-native/O3.exe"
+        ],
+        "exit_code": 0,
+        "stdout_sha256": "64a70c7fe6c6131df8c95ac2cf08d9397a21c41d8e593b1c3536cd94cd59fc34",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-window-1/O3.trace",
+        "/usr/bin/prlimit",
+        "--stack=unlimited:unlimited",
+        "--nproc=0:0",
+        "--",
+        "/workspace/scratch/json-8571-native/O3.exe"
+      ],
+      "trace_sha256": "0c2e7040fd067ebf4d23e814d4ca1880ab141b685426a3c30280f77ab03a9a83",
+      "successful_execs": [
+        "12879 execve(\"/usr/bin/prlimit\", [\"/usr/bin/prlimit\", \"--stack=unlimited:unlimited\", \"--nproc=0:0\", \"--\", \"/workspace/scratch/json-8571-native/O3.exe\"], 0x7ffebbf00ed0 /* 79 vars */) = 0",
+        "12879 execve(\"/workspace/scratch/json-8571-native/O3.exe\", [\"/workspace/scratch/json-8571-native/O3.exe\"], 0x7fff1b753e88 /* 79 vars */) = 0"
+      ],
+      "no_child_exec": true,
+      "no_libpython": true,
+      "source_paths_absent_during_run": true,
+      "collection": 216,
+      "inventory_complete": true,
+      "exit_code": 1,
+      "timed_out": false
+    }
+  },
+  "receipt_update": {
+    "base_commit": "85f8f6772ccc8d71b87d9104a28a364d39aeb32a",
+    "receipt_preimage_sha256": "a915837768d403cc5378068c70420905f74c7686b8c39e8cbdbddc71b84da7b8",
+    "receipt_postimage_sha256": "20373fc98627ffc4b11118acad4eb8757d0fa6ac73536fb562e2d87584588f5f",
+    "stock_reused_exact_from_staged_data": true,
+    "stock_capture_sha256": "56a417b524616187cdced92b16d6b4fac21840420f5801db4e59f1e601abf536",
+    "stock_stderr_sha256": "4c68de34619cb947c0f92916dcb4b0caa0577895252fe2bae125d7d99287b820",
+    "stock_invocation": [
+      "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+      "-B",
+      "/workspace/imre-json-8571/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/positive_launcher.py"
+    ],
+    "platform": {
+      "os": "linux",
+      "arch": "x86_64",
+      "release": "6.18.57"
+    },
+    "join_keys": [
+      "CPython commit",
+      "source Git blob",
+      "source SHA-256",
+      "full ID",
+      "occurrence",
+      "stock invocation",
+      "platform"
+    ],
+    "updated_original_occurrences": 92,
+    "new_pairs": 55,
+    "total_pairs": 169,
+    "counts": {
+      "stock": {
+        "pass": 215,
+        "skip": 1
+      },
+      "O0": {
+        "fail": 4,
+        "pass": 169,
+        "error": 40,
+        "skip": 2,
+        "timeout": 1
+      },
+      "O3": {
+        "fail": 4,
+        "pass": 169,
+        "error": 40,
+        "skip": 2,
+        "timeout": 1
+      }
+    },
+    "isolated_timeout": {
+      "id": "test.test_json.test_recursion.TestPyRecursion.test_highly_nested_objects_decoding",
+      "occurrence": 1,
+      "outcome": "timeout",
+      "omission_reason": null,
+      "first_run_evidence": {
+        "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/O0.stderr#L464",
+        "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/O3.stderr#L464"
+      }
+    }
+  }
+}
