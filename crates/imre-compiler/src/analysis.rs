@@ -3903,20 +3903,20 @@ impl Session {
                     DefinitionKind::Assignment(a)
                         if a.unpack().is_none() && a.target(&parsed).is_name_expr() =>
                     {
-                        let mut annotations = definitions
-                            .declarations_at_binding(definition)
-                            .filter_map(|d| d.declaration.definition())
-                            .filter_map(|d| match d.kind(db) {
+                        let mut declarations = definitions.declarations_at_binding(definition);
+                        let annotation = declarations
+                            .next()
+                            .filter(|_| declarations.next().is_none())
+                            .and_then(|d| d.declaration.definition())
+                            .filter(|d| d.file(db) == file)
+                            .and_then(|d| match d.kind(db) {
                                 DefinitionKind::AnnotatedAssignment(a) => {
                                     Some(a.annotation(&parsed))
                                 }
+                                DefinitionKind::Parameter(p) => p.annotation(&parsed),
                                 _ => None,
                             });
-                        let first = annotations.next();
-                        (
-                            first.filter(|_| annotations.next().is_none()),
-                            Some(a.value(&parsed)),
-                        )
+                        (annotation, Some(a.value(&parsed)))
                     }
                     _ => continue,
                 };
