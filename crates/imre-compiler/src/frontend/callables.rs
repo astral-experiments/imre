@@ -66,8 +66,9 @@ pub(super) fn validate_storage(
     mut visit: impl FnMut(&Expr),
 ) -> std::result::Result<(), String> {
     let unsupported = |ty| invalid_aggregate(ty, types) && handler_signature(ty, types).is_none();
-    let mut invalid = invalid_aggregate(function.returns, types)
-        || function.locals.iter().copied().any(unsupported);
+    // The declared return layout alone stores no value. Actual returned values
+    // are visited below; a function that only raises need not allocate that layout.
+    let mut invalid = function.locals.iter().copied().any(unsupported);
     let signature =
         |dict| handler_signature(dict, types).filter(|&item| !types.is_plain_callback(item));
     // A source singleton has no bound receiver. A cached adapter owns extra

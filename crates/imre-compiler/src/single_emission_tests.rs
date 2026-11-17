@@ -528,6 +528,91 @@ fn an_escaping_bound_method_keeps_its_default_and_fixed_callable() {
 }
 
 #[test]
+fn an_unused_aggregate_return_does_not_change_a_bound_callback() {
+    let project = tempfile::tempdir().unwrap();
+    let path = project.path().join("capture.py");
+    let source = include_str!("../../../tests/fixtures/callables/escaping_bound_method.py");
+    let unused = "\ndef unused() -> tuple[Callable[[], int], Callable[[], int]]:\n    raise ValueError('unused')\n";
+    let mut bodies = Vec::new();
+    for source in [source.to_owned(), format!("{source}{unused}")] {
+        std::fs::write(&path, source).unwrap();
+        let mut output = ProgramOutput::new(CodegenLayout::Whole);
+        let mut passes = 0;
+        object_fallback(Some(&mut output), ProgramEntry::File(&path, None), &CompileOptions::default(), Default::default(), None, |graph, cache, call_error| {
+            passes += 1;
+            let checked = checked_lower_with(graph, cache, call_error)?;
+            let CheckedProgram::Native(fixed) = &checked else { panic!("callback must stay native"); };
+            let mut bound = false;
+            ir::walk_expressions(&fixed.ir.0.functions[0].body, &mut |value| {
+                bound |= matches!(&value.kind, ir::ExprKind::Callable { receiver: Some(receiver), .. } if matches!(receiver.ty, ir::Type::Callable(_)));
+            });
+            assert!(bound);
+            Ok(checked)
+        }).unwrap();
+        assert_eq!(passes, 1);
+        let llvm = output.compilation.into_whole().llvm_ir;
+        let body = llvm
+            .split_once("define internal ptr @fn_0(")
+            .unwrap()
+            .1
+            .split_once("\n}")
+            .unwrap()
+            .0;
+        bodies.push(
+            regex::Regex::new(r"@fn_[0-9]+")
+                .unwrap()
+                .replace_all(body, "@fn_ID")
+                .into_owned(),
+        );
+    }
+    assert_eq!(bodies[0], bodies[1]);
+}
+
+#[test]
+fn a_bound_callback_and_an_independent_lambda_lower_once() {
+    let project = tempfile::tempdir().unwrap();
+    let path = project.path().join("capture.py");
+    let source = include_str!("../../../tests/fixtures/callables/stable_bound_callback.py");
+    let mixed = format!("{source}def escape(value: int):\n    return lambda: value\n");
+    std::fs::write(&path, &mixed).unwrap();
+    let mut passes = 0;
+    let error = object_fallback(
+        None,
+        ProgramEntry::File(&path, None),
+        &CompileOptions::default(),
+        Default::default(),
+        None,
+        |graph, _, call_error| {
+            passes += 1;
+            graph.session.explicit_check = true;
+            checked_lower_with(graph, None, call_error)
+        },
+    )
+    .err()
+    .unwrap();
+    assert_eq!(passes, 1);
+    assert!(
+        error.contains("a lambda requires an exact Callable context"),
+        "{error}"
+    );
+
+    for (invalid, expected) in [
+        (
+            source.replace("return saved()", "return saved('wrong')"),
+            ":18:22: Imre: expected int, got str; annotations are enforced contracts",
+        ),
+        (
+            format!("{source}status: int = True\n"),
+            ":38:15: Imre: expected int, got bool; annotations are enforced contracts",
+        ),
+    ] {
+        std::fs::write(&path, invalid).unwrap();
+        let error = check_file(&path, None).unwrap_err();
+        assert_source_diagnostic(&error, &path, expected);
+    }
+}
+
+#[test]
 fn an_escaping_bound_method_preserves_registered_callers() {
     let project = tempfile::tempdir().unwrap();
     let path = project.path().join("capture.py");

@@ -218,12 +218,6 @@ impl Function {
                 "local callbacks must be noncapturing and have positional parameters",
             ));
         }
-        if self.bound_capture {
-            checker
-                .graph
-                .layout_hint
-                .set(crate::modules::LayoutHint::Applied);
-        }
         Ok(Expr {
             ty: types.callable(
                 self.signature.params.iter().map(|p| p.ty).collect(),
@@ -872,9 +866,12 @@ impl Checker<'_> {
             }
             _ => None,
         };
+        // A native callable owns its stable captured callable. A registered enclosing
+        // frame instead uses the original Python closure cell.
         let bound_capture = capture.is_some()
             && !self.graph.registered_startup
-            && self.graph.layout_hint.get() != crate::modules::LayoutHint::Disabled;
+            && self.registered_local_start.is_none()
+            && self.unrepresented.borrow().is_none();
         let captured_method = !bound_capture
             && capture
                 .and_then(|slot| self.narrowed.get(&slot))
