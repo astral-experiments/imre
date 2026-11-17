@@ -195,9 +195,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       # The native runtime depends on POSIX process and filesystem APIs.
-      - run: cargo test -p imre-compiler --lib --locked analysis::closed_program_tests::a_guarded_class_annotation_can_use_its_locally_imported_implementation -- --exact
-      - run: cargo test -p imre-compiler --lib --locked analysis::closed_program_tests::a_guarded_module_checks_arguments_after_its_callees_settle -- --exact
-      - run: cargo test -p imre-compiler --lib --locked frontend::registered::placement::tests::a_direct_local_body_checks_the_element_type_before_placing_its_caller -- --exact
+      - run: cargo test -p imre-compiler --lib --locked
 
   check:
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.sys_source && !inputs.unittest_source)
