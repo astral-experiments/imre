@@ -3652,7 +3652,13 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
                          "bdb.Bdb.runeval = replacement\nprint(bdb.Bdb().runeval(input()))\n")
         rejected = run(imre, "-B", entry, stdin=b"pass\n")
         assert (rejected.returncode, rejected.stdout) == (1, b""), rejected
-        assert b"monkeypatching a shipped method" in rejected.stderr and b"local function" in rejected.stderr, rejected
+        assert b"shipped method was replaced" in rejected.stderr and b"local function" in rejected.stderr, rejected
+        entry.write_text("import bdb\noperation = bdb.Bdb().runeval\n"
+                         "def replacement(self, source): return source\n"
+                         "bdb.Bdb.runeval = replacement\noperation(input())\n")
+        rejected = run(imre, "-B", entry, stdin=b"pass\n")
+        assert (rejected.returncode, rejected.stdout) == (1, b""), rejected
+        assert b"shipped method was replaced" in rejected.stderr and b"cannot prove" in rejected.stderr, rejected
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_inspect_signature.py")
         (root / "weather_report.py").write_text("def report(temp):\n    return f'{temp} C'\n")
         compare("-Bm", "inspect", "weather_report:report")
