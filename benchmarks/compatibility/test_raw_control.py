@@ -125,7 +125,9 @@ class RawControlTests(unittest.TestCase):
         run = json.loads((scorecard.ROOT / artifacts['run']).read_text())
         # The real fixture has a mixed-case "Lib" component. Rebind cwd,
         # metadata, trace and binding so hash checks cannot mask the hole.
-        run['runs']['O0']['cwd'] = scorecard.option(gate['command'], '--extension-path') + '/Work'
+        mixed_cwd = scorecard.option(gate['command'], '--extension-path') + '/Work'
+        for tier in scorecard.TIERS:
+            run['runs'][tier]['cwd'] = mixed_cwd
         meta = tmp/'mixed-case-run.json'; meta.write_text(json.dumps(run)+'\n')
         artifacts['run'] = locator(meta); entry['files'][locator(meta)] = digest(meta)
         binding_path.write_text(json.dumps(binding)+'\n')
