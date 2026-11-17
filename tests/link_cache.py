@@ -120,6 +120,10 @@ def main():
         assert subprocess.check_output([binary], text=True) == "second\n17\n"
         invoke(events=["hit"], mode="run")
 
+        # Disabling trusted caching must not force all Python modules into one LLVM unit.
+        bypass = invoke("--verbose-link", events=["bypass"], LD_LIBRARY_PATH=str(root / "unused"))
+        assert any("unit-0.o" in line and "unit-1.o" in line for line in bypass), bypass
+
         # Moving from the system linker to the packaged one changes only the link action.
         source_lld = next((p for p in (compiler.with_name("imre-ld.lld"), Path("/usr/bin/ld.lld-18"))
                            if p.is_file()), None)

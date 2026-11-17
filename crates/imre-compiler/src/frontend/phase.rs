@@ -29,9 +29,14 @@ pub(crate) enum Kind {
     ClassLayout,
     ScopedClassLayout,
     RegisteredClassDefinition,
+    SourceClassReturn {
+        owner: DefinitionId,
+        class: ruff_db::files::FileRange,
+    },
     GuardedSignature {
         owner: DefinitionId,
         missing_layout: bool,
+        class: Option<ruff_db::files::FileRange>,
     },
 }
 
@@ -147,6 +152,10 @@ impl<M> Diagnostic<M> {
         (self.kind == Kind::ExactType).then_some(*entry)
     }
 
+    pub(super) fn operand_range(&self) -> Option<TextRange> {
+        self.position.as_ref().map(|position| position.range)
+    }
+
     pub(super) fn exact_operand(&self) -> Option<TextRange> {
         (self.kind == Kind::ExactType).then_some(self.position.as_ref()?.range)
     }
@@ -259,7 +268,10 @@ impl<M> Diagnostic<M> {
     ) -> Option<&Self> {
         self.reports().find(|report| {
             report.kind == Kind::ExactType
-                && report.path.as_deref() == Some(path)
+                && report
+                    .path
+                    .as_deref()
+                    .is_some_and(|reported| crate::modules::same_source_path(reported, path))
                 && report.position.as_ref().is_some_and(|position| {
                     position.range == operand
                         && position.expected_from.is_some_and(|declaration| {
@@ -279,7 +291,10 @@ impl<M> Diagnostic<M> {
         self.reports().find_map(|report| {
             let position = report.position.as_ref()?;
             (report.kind == Kind::ReturnType
-                && report.path.as_deref() == Some(path)
+                && report
+                    .path
+                    .as_deref()
+                    .is_some_and(|reported| crate::modules::same_source_path(reported, path))
                 && position.expected_from == Some(TypeDeclaration { module, annotation }))
             .then_some((position.range, report))
         })
@@ -309,8 +324,18 @@ impl From<&str> for Diagnostic {
 }
 
 impl Kind {
+    pub(super) fn is_exact_contract(self) -> bool {
+        matches!(
+            self,
+            Self::ExactType | Self::DeclaredArgument | Self::ReturnType
+        )
+    }
+
     pub(crate) fn is_representation(self) -> bool {
-        self == Self::UnsupportedRepresentation || self.is_object()
+        matches!(
+            self,
+            Self::UnsupportedRepresentation | Self::SourceClassReturn { .. }
+        ) || self.is_object()
     }
 
     pub(super) fn is_object(self) -> bool {

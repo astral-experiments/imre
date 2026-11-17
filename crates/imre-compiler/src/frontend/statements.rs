@@ -92,6 +92,7 @@ pub(super) trait StatementLowering {
     fn definition(
         &mut self,
         def: &ast::StmtFunctionDef,
+        body: &mut Vec<Statement>,
     ) -> StdResult<Option<Statement>, Self::Error>;
     /// The enclosing block can already own this statement's checkpoint.
     fn position_only(&mut self, _range: TextRange) -> Option<Statement> {
@@ -127,7 +128,7 @@ pub(super) trait StatementLowering {
                 (None, self.assignment(targets, rhs, body)?)
             }
             ast::Stmt::If(branch) => (None, self.branch(branch, body)?),
-            ast::Stmt::FunctionDef(def) => (self.definition(def)?, true),
+            ast::Stmt::FunctionDef(def) => (self.definition(def, body)?, true),
             ast::Stmt::Expr(expr) => self.effect(&expr.value)?,
             ast::Stmt::Return(ret) if !module => (Some(self.returned(ret)?), false),
             ast::Stmt::For(loop_) => {
@@ -184,7 +185,11 @@ impl StatementLowering for Checker<'_> {
         Ok(continues)
     }
 
-    fn definition(&mut self, def: &ast::StmtFunctionDef) -> Result<Option<Statement>, String> {
+    fn definition(
+        &mut self,
+        def: &ast::StmtFunctionDef,
+        _body: &mut Vec<Statement>,
+    ) -> Result<Option<Statement>, String> {
         if self.registered_local_start.is_some() {
             let header = imre_ast::function_definition_expressions(def)
                 .map(|expr| self.expr(expr))

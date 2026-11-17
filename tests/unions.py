@@ -9,9 +9,6 @@ from assignments import main
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "unions"
 
 REJECTED = {
-    "unsupported_union": "def bad(value: int | str) -> None:\n    pass\n",
-    "unsupported_typing_union": "from typing import Union\ndef bad(value: Union[int, str]) -> None:\n    pass\n",
-    "mutable_union": "def bad(value: list[str] | list[bytes]) -> None:\n    pass\n",
     "wrong_argument": "def accept(value: str | bytes) -> None:\n    pass\naccept(1)\n",
     "wrong_return": "def bad() -> str | bytes:\n    return 1\n",
     "numeric_import_wrong_return": "from numbers import Number\ndef bad() -> int:\n    return 'wrong'\nprint(bad())\n",

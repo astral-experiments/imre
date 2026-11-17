@@ -666,6 +666,7 @@ fn object_fallback(
         || (options.sitecustomize
             && import_failure == Some(modules::EntryImportFailure::MissingModule))
         || operation.is_some()
+        || matches!(kind, LoweringKind::SourceClassReturn { .. })
         || graph
             .as_ref()
             .is_some_and(|g| g.needs_object_runtime.get() || g.traceback_objects);
@@ -1252,6 +1253,7 @@ fn checked_lower_with(
             if let LoweringKind::GuardedSignature {
                 owner,
                 missing_layout,
+                class,
             } = report.kind =>
         {
             use ruff_text_size::Ranged;
@@ -1261,7 +1263,9 @@ fn checked_lower_with(
                 cache.as_deref_mut().map(|compiler| &mut compiler.cache),
                 &graph.inputs,
             )?;
-            let cause = if missing_layout {
+            let cause = if let Some(class) = class {
+                LoweringKind::SourceClassReturn { owner, class }
+            } else if missing_layout {
                 LoweringKind::UnsupportedRepresentation
             } else {
                 LoweringKind::Ordinary

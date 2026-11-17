@@ -963,7 +963,9 @@ fn collect_class<'syntax>(
                         "StrEnum methods cannot override member metadata or special behavior",
                     ));
                 }
-                if matches!(name, "__dir__" | "__next__") {
+                if matches!(name, "__dir__" | "__next__")
+                    || (name == "__del__" && graph.command_startup.is_none())
+                {
                     // These hooks use the Python class namespace. Continue checking the
                     // other declarations before selecting its object representation.
                     graph

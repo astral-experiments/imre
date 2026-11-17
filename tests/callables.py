@@ -29,7 +29,6 @@ REJECTED = {
     ),
     "local_callback_captured_map": "def outer(x: int) -> int:\n    def add(y: int) -> int:\n        return x + y\n    return sum(map(add, [1]))\n",
     "local_recursive": "def outer(x: int) -> int:\n    def inner(y: int) -> int:\n        return inner(y)\n    return inner(x)\n",
-    "local_recursive_via_outer": "def outer(x: int) -> int:\n    def inner(y: int) -> int:\n        return outer(y)\n    return inner(x)\n",
     "local_forward": "def outer() -> int:\n    value = inner()\n    def inner() -> int:\n        return 1\n    return value\n",
     "local_conditional": "def outer(flag: bool) -> int:\n    if flag:\n        def inner() -> int:\n            return 1\n    return inner()\n",
     "local_uninitialized_capture": "def outer(flag: bool) -> int:\n    x: int\n    def get() -> int:\n        return x\n    if flag:\n        x = 1\n    return get()\n",
@@ -68,7 +67,6 @@ REJECTED = {
     "callable_dictionary": IMPORT + "def use(values: dict[str, Callable[[int], int]]) -> None:\n    pass\n",
     "optional_without_guard": IMPORT + "def use(fn: Callable[[int], int] | None) -> int:\n    return fn(1)\n",
     "lambda_default": IMPORT + "def run() -> None:\n    fn: Callable[[int], int] = lambda value=1: value\nrun()\n",
-    "indirect_cycle": IMPORT + "def apply(fn: Callable[[int], int], value: int) -> int:\n    return fn(value)\ndef again(value: int) -> int:\n    return apply(again, value)\nprint(apply(again, 1))\n",
     "map_wrong_input": FUNCTION + 'print(sum(map(identity, ["1"])))\n',
     "map_multiple_sources": FUNCTION + "print(sum(map(identity, [1], [2])))\n",
     "filter_wrong_input": FUNCTION + 'print(len(list(filter(identity, ["1"]))))\n',
@@ -87,6 +85,10 @@ IMPORTED_REJECTIONS = {
 }
 
 ERRORS = {
+    "indirect_cycle": (
+        IMPORT + "def apply(fn: Callable[[int], int], value: int) -> int:\n    return fn(value)\ndef again(value: int) -> int:\n    return apply(again, value)\nprint(apply(again, 1))\n",
+        "RecursionError",
+    ),
     "empty_handler_lookup": (
         IMPORT
         + 'def argument() -> int:\n    print("argument")\n    return 21\n'

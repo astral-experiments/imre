@@ -20,6 +20,14 @@ from textwrap import dedent
 from fixture_entry import imported_fixture
 
 ACCEPTED = {
+    "boxed_external_binary": """
+        from io import BytesIO
+        from typing import BinaryIO
+        def install(stream: BinaryIO) -> dict[str, object]:
+            return {"stream": stream}
+        stream = BytesIO(b"hello")
+        print(install(stream)["stream"] is stream, stream.read())
+    """,
     "module_rebind": 'import sys\nsys.argv = ["replacement"]\nprint(sys.argv)',
     "str_resource_list": "print(str([open('input.txt', 'r')]))",
     "typing_member": "from typing import Any\nvalue: Any = 1",
@@ -708,11 +716,6 @@ ERRORS = {
 }
 
 REJECTED = {
-    "boxed_external_binary": """
-        from typing import BinaryIO
-        def install(stream: BinaryIO) -> dict[str, object]:
-            return {"stream": stream}
-    """,
     "unchecked_memory_stream_cast": """
         from io import BytesIO
         from typing import cast

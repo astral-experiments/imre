@@ -874,6 +874,9 @@ impl Checker<'_> {
             if types.contains(&Type::PythonObject) {
                 return Err(self.scoped_builtin_error("Python object identity comparison", node));
             }
+            if types.contains(&Type::Float) {
+                return Err(self.scoped_builtin_error("float identity comparison", node));
+            }
             return Err(error(
                 self.source,
                 node,

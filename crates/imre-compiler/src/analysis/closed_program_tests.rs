@@ -4,6 +4,32 @@ use std::fs;
 use tempfile::tempdir;
 
 #[test]
+fn explicitly_written_bool_and_int_union_arms_keep_both_contracts() {
+    let dir = tempdir().unwrap();
+    let entry = dir.path().join("main.py");
+    for annotation in ["int | bool", "bool | int", "Union[int, bool]"] {
+        fs::write(
+            &entry,
+            format!("from typing import Union\ndef population(value: {annotation}) -> int:\n    return value.bit_count()\nprint(population(False), population(True), population(2))\n"),
+        )
+        .unwrap();
+        crate::check_file(&entry, None).unwrap_or_else(|e| panic!("{annotation}: {e}"));
+    }
+    for (annotation, argument, expected) in [
+        ("int", "False", "expected int, got bool"),
+        ("int | bool", "'bad'", "str"),
+    ] {
+        fs::write(
+            &entry,
+            format!("def take(value: {annotation}) -> int: return 0\nprint(take({argument}))\n"),
+        )
+        .unwrap();
+        let error = crate::check_file(&entry, None).unwrap_err();
+        assert!(error.contains(expected), "{error}");
+    }
+}
+
+#[test]
 fn module_qualified_class_value_uses_its_python_binding() {
     let project = tempdir().unwrap();
     let main = project.path().join("main.py");
@@ -1955,6 +1981,125 @@ fn quoted_annotations_use_a_linked_class_reexported_for_type_checking() {
             crate::CheckedProgram::Native(_)
         ));
     }
+}
+
+#[test]
+fn a_guarded_class_annotation_can_use_its_locally_imported_implementation() {
+    let app = tempdir().unwrap();
+    let site = tempdir().unwrap();
+    let pkg = site.path().join("pkg");
+    fs::create_dir(&pkg).unwrap();
+    let entry = app.path().join("main.py");
+    let entry_source = "import pkg\nprint(pkg.get().value())\n";
+    fs::write(&entry, entry_source).unwrap();
+    let check = || crate::check_file_with_extensions(&entry, None, &[site.path().to_owned()]);
+    let factory = |argument: &str| {
+        let source = format!(
+            r#"from typing import TYPE_CHECKING, Optional
+if TYPE_CHECKING:
+    from .model import Item
+_current: Optional['Item'] = None
+def get() -> 'Item':
+    global _current
+    if _current is None:
+        from .model import Item
+        _current = Item({argument})
+    return _current
+"#
+        );
+        fs::write(pkg.join("__init__.py"), source).unwrap();
+    };
+    let model = pkg.join("model.py");
+    fs::write(
+        &model,
+        concat!(
+            "class Item:\n    def __init__(self, width: int = 1): pass\n",
+            "    def value(self): return 42\n"
+        ),
+    )
+    .unwrap();
+    factory("");
+    check().unwrap();
+
+    factory("width='wrong'");
+    let error = check().unwrap_err();
+    assert!(
+        error.contains("invalid-argument-type") && error.contains("__init__.py:9:25"),
+        "{error}"
+    );
+    factory("");
+
+    fs::write(
+        &entry,
+        format!("{entry_source}\ndef invalid() -> None:\n    status: int = True\n"),
+    )
+    .unwrap();
+    let error = check().unwrap_err();
+    assert!(
+        error.contains("main.py:5:19: Imre: expected int, got bool"),
+        "{error}"
+    );
+    fs::write(&entry, entry_source).unwrap();
+
+    let init = pkg.join("__init__.py");
+    let provider = fs::read_to_string(&init).unwrap();
+    fs::write(&init, format!("{provider}cache: int = 'x'\n")).unwrap();
+    let error = check().unwrap_err();
+    assert!(
+        error.contains("__init__.py:11:") && error.contains("int"),
+        "{error}"
+    );
+    factory("");
+
+    let stub = model.with_extension("pyi");
+    fs::write(&stub, "class Item:\n    def value(self) -> int: ...\n").unwrap();
+    let error = check().unwrap_err();
+    assert!(
+        error.contains("model.pyi:1:7 has no linked native layout"),
+        "{error}"
+    );
+
+    fs::remove_file(stub).unwrap();
+    fs::write(
+        &model,
+        "class Item:\n    def value(self): return eval(input())\n",
+    )
+    .unwrap();
+    let error = check().unwrap_err();
+    assert!(
+        error.contains("model.py:1:7 has no linked native layout"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_guarded_module_checks_arguments_after_its_callees_settle() {
+    let project = tempdir().unwrap();
+    let root = project.path();
+    let pkg = root.join("pkg");
+    fs::create_dir(&pkg).unwrap();
+    fs::write(pkg.join("model.py"), "class Item: pass\n").unwrap();
+    fs::write(
+        pkg.join("__init__.py"),
+        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from .model import Item\ndef get() -> 'Item':\n    from .model import Item\n    return Item()\n",
+    )
+    .unwrap();
+    let entry = root.join("main.py");
+    let source = concat!(
+        "import pkg\n",
+        "def takes(a: int, b: int) -> None: pass\n",
+        "def stop() -> int: raise ValueError()\n",
+        "def indirect() -> int: return stop()\n",
+        "try:\n    takes(ARGS)\nexcept ValueError:\n    pass\n",
+    );
+    fs::write(&entry, source.replace("ARGS", "indirect(), True")).unwrap();
+    crate::check_file(&entry, Some(root)).unwrap();
+    fs::write(&entry, source.replace("ARGS", "True, indirect()")).unwrap();
+    let error = crate::check_file(&entry, Some(root)).unwrap_err();
+    assert!(
+        error.contains("main.py:6:11: Imre: expected int, got bool"),
+        "{error}"
+    );
 }
 
 #[test]
