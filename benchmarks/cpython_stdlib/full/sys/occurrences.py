@@ -2,6 +2,8 @@
 import ast
 import hashlib
 from pathlib import Path
+import subprocess
+import sys
 
 import intern_case
 from ioencoding_case import observe as ioencoding_observation
@@ -41,6 +43,27 @@ def reference_skips(reference, level):
             "reason": reference["reference"][test_id]["skipped"], "source": f"Lib/test/test_sys.py:{line}",
         }
     return result
+
+
+def lost_displayhook_observation(toolchain, folder, source, cls, method, proof):
+    control = Path(__file__).with_name("lost_displayhook_control.py")
+    work = folder / "operation-control"
+    work.mkdir()
+    binary = toolchain.build(control.read_bytes(), work)
+    reference = subprocess.run([sys.executable, "-E", work / "case.py"], capture_output=True, text=True, timeout=60)
+    actual = subprocess.run([binary], capture_output=True, text=True, timeout=60)
+    refusal = "NotImplementedError: no compiled Python body for <module> (<string>:1)"
+    failure = 'AssertionError: "^lost sys.displayhook$" does not match "no compiled Python body for <module> (<string>:1)"'
+    if reference.returncode or reference.stdout or reference.stderr:
+        raise AssertionError(("lost displayhook reference control", reference))
+    if actual.returncode != 1 or actual.stdout or refusal not in actual.stderr.splitlines() or actual.stderr.splitlines()[-1] != failure:
+        raise AssertionError(("lost displayhook native control", actual))
+    proof.update(stage="native operation control", method_sha256=hashlib.sha256(method_bytes(source, cls, method)).hexdigest(),
+                 original_method="passed", control=control.name, reference_status=reference.returncode,
+                 native_status=actual.returncode, diagnostic=refusal)
+    return {"outcome": "failure", "roles": roles(body="imre", assertions="imre", operation="unknown", fixture="cpython"),
+            "reason": "The original assertion accepts NotImplementedError as a RuntimeError subclass; the stricter lost-displayhook control fails because eval has no linked body.",
+            "evidence": proof}
 
 
 def blocked_methods(toolchain, root, source, reference, selected, module):
@@ -106,6 +129,9 @@ def blocked_methods(toolchain, root, source, reference, selected, module):
             else:
                 observed, failures, skips = run_in_fixtures(load_suite(MODULE), {name: compiled})
                 if observed:
+                    if name == f"{MODULE}.DisplayHookTest.test_lost_displayhook":
+                        results[key] = lost_displayhook_observation(toolchain, folder, source, cls, method, proof)
+                        continue
                     raise AssertionError(f"{name}: newly executable complete method; identify its product operation")
                 if not failures:
                     raise AssertionError((name, "unreconciled fixture skip", skips))
