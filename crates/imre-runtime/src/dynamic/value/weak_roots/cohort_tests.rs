@@ -31,6 +31,46 @@ fn partial_finalizer_paths_keep_independent_branches_and_reject_stale_edges() {
 }
 
 #[test]
+fn learning_preserves_live_finalizer_branches_without_reviving_a_stale_owner() {
+    let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+    let class = ctx.builtin("object");
+    let scope = ctx.scope("sample", None);
+    ctx.heap.enter(scope, NONE, FrameOwner::Module(NONE));
+    let first = ctx.instance(class, None);
+    let second = ctx.instance(class, None);
+    ctx.heap.register_finalizer(first);
+    ctx.heap.register_finalizer(second);
+    let left = ctx.alloc(Value::Cell(Some(first)));
+    let right = ctx.alloc(Value::Cell(Some(second)));
+    let holder = ctx.alloc(Value::List(vec![left, right]));
+    let Value::Scope(bindings) = ctx.heap.get_mut(scope) else {
+        unreachable!()
+    };
+    bindings.names.insert("holder".into(), holder);
+    ctx.heap.release_temporaries_since(0);
+    let globals = ctx.finalizer_path_roots();
+    assert!(ctx.heap.learn_finalizer_paths(globals, None));
+    assert!(ctx.heap.finalizer_roots.contains(first));
+    assert!(ctx.heap.finalizer_roots.contains(second));
+
+    *ctx.heap.get_mut(left) = Value::Cell(None);
+    let third = ctx.instance(class, None);
+    ctx.heap.register_finalizer(third);
+    let Value::List(items) = ctx.heap.get_mut(holder) else {
+        unreachable!()
+    };
+    items.push(third);
+    ctx.heap.release_temporaries_since(0);
+    assert!(ctx.heap.learn_finalizer_paths(globals, None));
+    assert!(!ctx.heap.finalizer_roots.contains(first));
+    assert!(ctx.heap.finalizer_roots.contains(second));
+    assert!(ctx.heap.finalizer_roots.contains(third));
+    assert!(!ctx.heap.cached_finalizers_kept(globals, None, None));
+    ctx.heap.take_finalizer(first, false);
+    assert!(ctx.heap.cached_finalizers_kept(globals, None, None));
+}
+
+#[test]
 fn retained_closure_owner_rechecks_the_cell_and_its_contents() {
     let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
     let scope = ctx.scope("sample", None);

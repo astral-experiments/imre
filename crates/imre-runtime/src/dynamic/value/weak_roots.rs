@@ -366,6 +366,7 @@ impl RootPaths {
 
     /// Prepare parent/child positions after discovery has sorted the path nodes.
     fn index_edges(&mut self) -> Option<()> {
+        self.edge_indices.clear();
         self.edge_indices.try_reserve_exact(self.edges.len()).ok()?;
         for &(parent, _, child) in &self.edges {
             self.edge_indices.push((
@@ -420,6 +421,69 @@ impl RootPaths {
         Some(self.live.borrow())
     }
 
+    /// Keep validated branches leading to current endpoints, dropping obsolete paths.
+    fn retain_live(
+        &self,
+        heap: &Heap,
+        globals: [Id; 2],
+        endpoints: impl Iterator<Item = Id>,
+    ) -> Option<Self> {
+        let live = self.live_nodes(heap, globals)?;
+        let mut needed = Vec::new();
+        needed.try_reserve_exact(self.nodes.len()).ok()?;
+        needed.resize(self.nodes.len(), false);
+        for id in endpoints {
+            if let Ok(i) = self.nodes.binary_search(&id) {
+                needed[i] = live[i];
+            }
+        }
+        let mut linked = Vec::new();
+        linked.try_reserve_exact(self.edges.len()).ok()?;
+        for (&(parent, slot, child), &(p, c)) in self.edges.iter().zip(&self.edge_indices) {
+            linked.push(
+                live[p]
+                    && live[c]
+                    && has_strong_edge(heap.get(parent), child, slot, self.dict_keys),
+            );
+        }
+        for (&(p, c), &valid) in self.edge_indices.iter().zip(&linked).rev() {
+            if valid && needed[c] {
+                needed[p] = true;
+            }
+        }
+        let selected = |id: Id| self.nodes.binary_search(&id).is_ok_and(|i| needed[i]);
+        let mut paths = Self {
+            dict_keys: self.dict_keys,
+            ..Self::default()
+        };
+        paths.nodes.try_reserve(self.nodes.len()).ok()?;
+        paths
+            .nodes
+            .extend(self.nodes.iter().copied().filter(|&id| selected(id)));
+        paths.anchors.try_reserve(self.anchors.len()).ok()?;
+        paths
+            .anchors
+            .extend(self.anchors.iter().copied().filter(|&(origin, id)| {
+                selected(id)
+                    && match origin {
+                        Root::Frame(index) => heap
+                            .execution
+                            .frames
+                            .get(index)
+                            .is_some_and(|frame| frame.scope == id),
+                        Root::Global(index) => globals[index] == id,
+                        Root::Surviving => false,
+                    }
+            }));
+        paths.edges.try_reserve(self.edges.len()).ok()?;
+        paths
+            .edges
+            .extend(self.edges.iter().zip(linked).filter_map(|(&edge, valid)| {
+                (valid && selected(edge.0) && selected(edge.2)).then_some(edge)
+            }));
+        Some(paths)
+    }
+
     fn discover(
         heap: &Heap,
         globals: [Id; 2],
@@ -427,18 +491,38 @@ impl RootPaths {
         full_frame_search: bool,
         dict_keys: bool,
     ) -> Option<Self> {
-        let mut edges_left = MAX_EDGES;
-        let mut nodes_left = heap.slots.len().min(MAX_NODES);
+        Self::extend(
+            Self {
+                dict_keys,
+                ..Self::default()
+            },
+            heap,
+            globals,
+            endpoints,
+            full_frame_search,
+        )
+    }
+
+    /// Extend a still-rooted proof without searching again for its covered endpoints.
+    fn extend(
+        mut paths: Self,
+        heap: &Heap,
+        globals: [Id; 2],
+        endpoints: impl Iterator<Item = Id>,
+        full_frame_search: bool,
+    ) -> Option<Self> {
+        let mut edges_left = MAX_EDGES.saturating_sub(paths.edges.len());
+        let mut nodes_left = heap
+            .slots
+            .len()
+            .min(MAX_NODES)
+            .saturating_sub(paths.nodes.len());
         let mut wanted = IdSet::with_hasher(hashbrown::DefaultHashBuilder::default());
         for id in endpoints {
             edges_left = edges_left.checked_sub(1)?;
             wanted.try_reserve(1).ok()?;
             wanted.insert(id);
         }
-        let mut paths = Self {
-            dict_keys,
-            ..Self::default()
-        };
         let global_roots = globals
             .into_iter()
             .enumerate()
@@ -823,23 +907,45 @@ impl Heap {
         globals: [Id; 2],
         streams: Option<&crate::dynamic::stdlib::io::StandardStreamRoots>,
     ) -> bool {
-        // Retry from the current roots when a previously proven path loses an anchor or edge.
-        if !self.finalizer_roots.nodes.is_empty() && !self.finalizer_roots.valid(self, globals) {
-            self.finalizer_roots = RootPaths::default();
+        let mut paths = std::mem::take(&mut self.finalizer_roots);
+        if !paths.nodes.is_empty() && !paths.valid(self, globals) {
+            // One resumed frame can break a single branch while the rest of the
+            // cohort remains rooted. Preserve those independently verified paths.
+            paths = paths
+                .retain_live(
+                    self,
+                    globals,
+                    self.ordinary_finalizers
+                        .iter()
+                        .chain(&self.descriptor_owners)
+                        .copied(),
+                )
+                .unwrap_or_default();
         }
-        if !self.finalizer_roots.search_due() {
+        if !paths.search_due() {
+            self.finalizer_roots = paths;
             return false;
         }
-        let endpoints = self
+        let mut endpoints = Vec::new();
+        for id in self
             .ordinary_finalizers
             .iter()
             .chain(&self.descriptor_owners)
             .copied()
-            .filter(|id| {
-                !streams.is_some_and(|roots| roots.contains(id))
-                    && !self.operand_keeps_finalizer(*id, 0)
-            });
-        let Some(mut paths) = RootPaths::discover(self, globals, endpoints, true, false) else {
+        {
+            if !streams.is_some_and(|roots| roots.contains(&id))
+                && !paths.contains(id)
+                && !self.operand_keeps_finalizer(id, 0)
+            {
+                if endpoints.try_reserve(1).is_err() {
+                    self.finalizer_roots = paths;
+                    return false;
+                }
+                endpoints.push(id);
+            }
+        }
+        let Some(mut paths) = RootPaths::extend(paths, self, globals, endpoints.into_iter(), true)
+        else {
             return false;
         };
         // Failure leaves the ordinary all-or-nothing proof available.
@@ -926,16 +1032,20 @@ impl Heap {
         if self.descriptor_owners.is_empty() {
             return;
         }
-        let paths_valid = self.finalizer_roots.valid(self, globals);
+        let live = self.finalizer_roots.live_nodes(self, globals);
+        let paths_valid = live.is_none() && self.finalizer_roots.valid(self, globals);
         let retained = self.temporary_mark();
-        if self.descriptor_owners.iter().any(|&owner| {
-            !self.root_keeps_owner(
-                owner,
-                paths_valid && self.finalizer_roots.contains(owner),
-                streams,
-                retained,
-            )
-        }) {
+        let missing = self.descriptor_owners.iter().any(|&owner| {
+            let path_keeps_owner = live.as_ref().is_some_and(|nodes| {
+                self.finalizer_roots
+                    .nodes
+                    .binary_search(&owner)
+                    .is_ok_and(|i| nodes[i])
+            }) || (paths_valid && self.finalizer_roots.contains(owner));
+            !self.root_keeps_owner(owner, path_keeps_owner, streams, retained)
+        });
+        drop(live);
+        if missing {
             self.learn_finalizer_paths(globals, streams);
         }
     }
