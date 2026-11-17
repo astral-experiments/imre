@@ -1,0 +1,31 @@
+{
+  "activation": {
+    "artifact_identity_sha256": "ceafa0a7da1c1b1694f81229055380fc97e16f60ee8b04f505b1f094ce30e0bd",
+    "blob": "9047da99cc905b4726688ed949d9737b467427f5",
+    "commit": "4f4dafbe58cc097aa6c637b05c8e1c47eb0771ce",
+    "sha256": "d9c7f0aa6061b104b24dfca242227c7ce753efee84764d7f3c95056f557f2c67"
+  },
+  "cases": {
+    "ruff-publisher": {
+      "status": "strict_pass",
+      "strict_pair": true
+    },
+    "ty-readme": {
+      "status": "strict_pass",
+      "strict_pair": true
+    },
+    "uv-publisher": {
+      "status": "strict_pass",
+      "strict_pair": true
+    },
+    "uv-rich": {
+      "status": "strict_pass",
+      "strict_pair": true
+    }
+  },
+  "native_revision": "d26f19448c70c00039c305f105a85c215f820577",
+  "schema": "imre.prospective.strict.v1",
+  "stock_commit": "99964c6734dbe008d69d5016eb60d25abd31ab0d",
+  "strict_pairs": 4,
+  "total_cases": 4
+}
