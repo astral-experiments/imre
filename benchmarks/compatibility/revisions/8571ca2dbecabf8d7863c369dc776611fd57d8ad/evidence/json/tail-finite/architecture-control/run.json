@@ -1,0 +1,48 @@
+{
+  "argv": [
+    "/workspace/imre/target/release/imre",
+    "build",
+    "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+    "--module-root",
+    "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite",
+    "--extension-path",
+    "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+    "--no-cache",
+    "--opt-level",
+    "0",
+    "--runtime",
+    "/workspace/imre/target/release/libimre_runtime.a",
+    "--clang",
+    "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+    "-o",
+    "/workspace/scratch/json-finite-control.exe"
+  ],
+  "cwd": "/workspace/imre-json-tail",
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "TMPDIR": "/workspace/scratch/json-8571-tmp",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "IMREFLAGS": "--opt-level 0",
+    "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+  },
+  "timeout_seconds": 120,
+  "exit_code": 1,
+  "expected_int_got_bool": true,
+  "image_exists": false,
+  "positive_launcher_sha256": "75a143b66b7cdd5544045abc21cc6e84aa13e3077fb4732fae8e3842d3872cb6",
+  "injected_launcher_sha256": "c7d3f01c5f687d9ac4ebb4bfda5acc528cae6ef35696c4e6b17bda1bbc932d02",
+  "control_module_sha256": "14841721c7b84f57d26a6a38a53827c683daf10930b9f297cfc15335bd1257b5",
+  "compiler_sha256": "b07018ea9eb8e9af234307899c33a6b14e498ba5fded97a26a582a9e2ad9be9e",
+  "runtime_sha256": "6c71c26ec0f9d9a34c56a0b82226574243c189c2854f689ef127b8d92e481fb5",
+  "head": "8571ca2dbecabf8d7863c369dc776611fd57d8ad",
+  "stack_rlimit": [
+    8388608,
+    -1
+  ],
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "8fec83ad45a3efcbc90ffb5e5e9036bccb4c1980c76802b74aa4e9fce0ea3b9d",
+  "restored_launcher_sha256": "75a143b66b7cdd5544045abc21cc6e84aa13e3077fb4732fae8e3842d3872cb6",
+  "passed": true
+}

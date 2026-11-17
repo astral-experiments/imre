@@ -1,0 +1,41 @@
+{
+  "build_argv": [
+    "/usr/bin/cc",
+    "-shared",
+    "-fPIC",
+    "-O2",
+    "-o",
+    "/workspace/scratch/json-tail-finite/deny_python.so",
+    "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/deny_python.c",
+    "-ldl"
+  ],
+  "source_sha256": "e17980aaad511aa833ea825c88736d0d13c0ebf8c82208bcfb7addd5da7feed6",
+  "preload_path": "/workspace/scratch/json-tail-finite/deny_python.so",
+  "preload_sha256": "5f09ba7872d0530a45e84808e887bcf0aebbeab13e962613300557736e3c9cd1",
+  "probe_argv": [
+    "/bin/sh",
+    "-c",
+    "exec /usr/bin/python3 -V"
+  ],
+  "probe_exit_code": 126,
+  "probe_stderr_sha256": "9244d619f00905c714c8f4735f56fdcb2de4ca043d11f63c09d20afb511b4acd",
+  "purpose": "Native-only targeted CPython executable and libpython dlopen denial; other child programs remain allowed. Syscall tracing separately audits successful execs and libpython opens; this interposer is not a sandbox.",
+  "dlopen_probe_argv": [
+    "/workspace/scratch/json-tail-finite/dlopen_probe"
+  ],
+  "dlopen_probe_build_argv": [
+    "/usr/bin/cc",
+    "-o",
+    "/workspace/scratch/json-tail-finite/dlopen_probe",
+    "/workspace/scratch/json-tail-finite/dlopen_probe.c",
+    "-ldl"
+  ],
+  "dlopen_probe_exit_code": 0,
+  "dlopen_probe_stderr_sha256": "a135d390b367298a221e56dbe63532345935689b0d068cf3559a0b1d1d9fb292",
+  "allowed_child_probe_argv": [
+    "/bin/sh",
+    "-c",
+    "exec /bin/true"
+  ],
+  "allowed_child_probe_exit_code": 0
+}

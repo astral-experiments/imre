@@ -1,0 +1,47 @@
+{
+  "receipt_sha256": "d0b3ea2580bb8c2cf92ac55318466c45b33ada4f0e76a865abe79ee1b922b098",
+  "schema_sha256": "e16abfb352c5ba388deb0abbf7ce47955c1a4d8decd97ab02645e10a1990975e",
+  "record_count": 216,
+  "unique_ids": 212,
+  "changed_occurrences": 92,
+  "unchanged_occurrences": 124,
+  "raw_event_anchors_verified": 276,
+  "source_occurrence_identity_and_order_unchanged": true,
+  "first_decoding_timeout_byte_equivalent_as_record": true,
+  "repeated_doctest_rows_unchanged": true,
+  "controls": {
+    "stock": {
+      "script_windows": 38,
+      "total_successful_execs": 120,
+      "CPython_successful_execs": 120,
+      "successful_test_source_launcher_or_libpython_opens": 344,
+      "counts": {
+        "pass": 92
+      }
+    },
+    "O0": {
+      "script_windows": 38,
+      "total_successful_execs": 168,
+      "CPython_successful_execs": 0,
+      "successful_test_source_launcher_or_libpython_opens": 0,
+      "counts": {
+        "timeout": 35,
+        "pass": 55,
+        "error": 2
+      }
+    },
+    "O3": {
+      "script_windows": 38,
+      "total_successful_execs": 174,
+      "CPython_successful_execs": 0,
+      "successful_test_source_launcher_or_libpython_opens": 0,
+      "counts": {
+        "timeout": 35,
+        "pass": 55,
+        "error": 2
+      }
+    }
+  },
+  "paired": 169,
+  "schema_and_revision_scoped_scorecard_passed": true
+}

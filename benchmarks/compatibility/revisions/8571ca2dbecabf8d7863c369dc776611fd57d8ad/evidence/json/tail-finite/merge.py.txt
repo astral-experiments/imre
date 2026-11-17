@@ -1,0 +1,45 @@
+from pathlib import Path
+import collections,hashlib,json,sys,subprocess
+import jsonschema
+R=Path('/workspace/imre-json-tail');V='8571ca2dbecabf8d7863c369dc776611fd57d8ad';E=R/f'benchmarks/compatibility/revisions/{V}/evidence/json';W=E/'tail-finite';P=R/f'benchmarks/compatibility/revisions/{V}/stdlib/json.jsonl';rel=W.relative_to(R);base=subprocess.check_output(['git','show',f'85f8f6772ccc8d71b87d9104a28a364d39aeb32a:{P.relative_to(R)}']);assert P.read_bytes()==base
+rows=[json.loads(s) for s in base.decode().splitlines()];ids=[json.loads(s) for s in (W/'tail-ids.jsonl').read_text().splitlines()];assert len(rows)==216 and len(ids)==92; gate=json.loads((W/'architecture-control/run.json').read_text());build=json.loads((W/'build.json').read_text());withdraw=json.loads((W/'withdrawal.json').read_text());assert gate['passed'] and gate['positive_launcher_sha256']==build['launcher_sha256'] and withdraw['all_restored'] and withdraw['no_source_or_bytecode_files_during_run']
+caps={t:json.loads((W/f'{t}.capture.json').read_text()) for t in ('stock','O0','O3')};firststock=json.loads((E/'stock.capture.json').read_text());assert [(r['id'],r['occurrence']) for r in rows]==[(r['id'],r['occurrence']) for r in firststock['originals']]
+idx={t:{} for t in caps}
+for t,c in caps.items():
+ assert c['originals']==92 and len(c['windows'])==38
+ for window in c['windows']:
+  for o in window['capture']['originals']:
+   key=o['id'],o['occurrence'];assert key not in idx[t]; idx[t][key]=(window,o)
+ assert set(idx[t])=={(x['id'],x['occurrence']) for x in ids}
+before=bytes(base);update=0;withheld=[]
+for r in rows:
+ key=r['id'],r['occurrence']
+ if key not in idx['stock']:continue
+ assert r['runs']['O0']['outcome']==r['runs']['O3']['outcome']=='not_run'
+ ident=ids[update]; assert (ident['id'],ident['occurrence'])==key and ident['source']==r['source'];update+=1
+ source=Path('/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115')/r['source']['path'];data=source.read_bytes();assert hashlib.sha256(data).hexdigest()==r['source']['sha256'] and hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()==r['source']['git_blob']
+ controls=True
+ for t in ('stock','O0','O3'):
+  w,o=idx[t][key];run={'argv':w['argv'],'environment':w['environment'],'outcome':o['outcome']}
+  if t=='stock':run.update(version=r['runs']['stock']['version'],full_version=r['runs']['stock']['full_version'])
+  else:run['build_argv']=build['images'][t]['build_argv'];controls=controls and w['no_child_exec'] and w['no_libpython_open'] and not w['targeted_denials']
+  if o['outcome']=='not_run':run['reason']='finite window exited before this original started'
+  else:
+   run['evidence']=f'{rel}/{t}.stderr#L{o["evidence_line"]}'
+   if o['outcome']=='timeout':run['reason']=f'active exact original exceeded its {w["timeout_seconds"]}-second finite window'
+   elif o.get('details'):run['reason']='; '.join(o['details'])[:1000]
+  r['runs'][t]=run
+ triple=all(r['runs'][t]['outcome']=='pass' for t in ('stock','O0','O3'))
+ if r['source']['path'].endswith('/test_tool.py'):controls=False
+ r['omission_reason']=None
+ if triple and not controls:
+  r['omission_reason']='Paired credit withheld: the tool original requires observable CLI subprocess behavior; targeted CPython denial or child execution prevents establishing the required no-child-exec control.';withheld.append(key)
+ r['paired']=bool(triple and controls)
+assert update==92
+timeout=next(r for r in rows if r['id']=='test.test_json.test_recursion.TestPyRecursion.test_highly_nested_objects_decoding');assert timeout['runs']['O0']['outcome']==timeout['runs']['O3']['outcome']=='timeout' and not timeout['paired'] and timeout['omission_reason'] is None
+sys.path.insert(0,str(R/'benchmarks/compatibility'));import scorecard;scorecard.COHORT=scorecard.COHORT.copy();scorecard.COHORT['imre_revision']=V;validator=jsonschema.Draft202012Validator(json.loads((R/'benchmarks/compatibility/schema.json').read_text()))
+for r in rows:validator.validate(r);scorecard.validate_record(r,'stdlib',{'json'})
+pbytes=''.join(json.dumps(r,sort_keys=True)+'\n' for r in rows).encode();P.write_bytes(pbytes)
+def sha(p):return hashlib.sha256(Path(p).read_bytes()).hexdigest()
+counts={t:dict(collections.Counter(r['runs'][t]['outcome'] for r in rows)) for t in ('stock','O0','O3')};pairs=sum(r['paired'] for r in rows);meta={'revision':V,'base':'85f8f6772ccc8d71b87d9104a28a364d39aeb32a','receipt_preimage_sha256':hashlib.sha256(before).hexdigest(),'receipt_sha256':sha(P),'receipt_rows':len(rows),'original_ids':len(set(r['id'] for r in rows)),'tail_occurrences_updated':update,'tail_ids_sha256':sha(W/'tail-ids.jsonl'),'gate':'architecture-control/run.json','launcher_sha256':build['launcher_sha256'],'compiler_sha256':build['compiler_sha256'],'runtime_sha256':build['runtime_sha256'],'stack_rlimit':build['stack_rlimit'],'native_images':{t:build['images'][t]['sha256'] for t in ('O0','O3')},'counts':counts,'paired':pairs,'new_pairs':pairs-114,'observed_triple_pass':sum(all(r['runs'][t]['outcome']=='pass' for t in ('stock','O0','O3')) for r in rows),'withheld_triple_pass_keys':withheld,'original_decoding_timeout_unchanged':True,'changed_controls_auxiliary_run':'../tail-window-1/run.json','evidence':{t:f'{t}.capture.json' for t in caps},'withdrawal':'withdrawal.json','targeted_deny':'deny-control.json','validation':'canonical schema.json Draft 2020-12 and scorecard.validate_record with only revision scoped to 8571; exact staged stock inventory order, original ID+occurrence, upstream source Git blob/SHA256, and raw event line evidence checked'}
+(W/'run.json').write_text(json.dumps(meta,indent=2)+'\n');print(json.dumps({'counts':counts,'paired':pairs,'new_pairs':pairs-114,'withheld':len(withheld)},indent=2))

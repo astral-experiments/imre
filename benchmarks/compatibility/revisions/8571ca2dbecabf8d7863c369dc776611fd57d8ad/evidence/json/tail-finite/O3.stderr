@@ -1,0 +1,320 @@
+# WINDOW 0 slice=[0, 1]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_recursion.TestPyRecursion.test_highly_nested_objects_encoding"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_recursion.TestPyRecursion.test_highly_nested_objects_encoding"}
+# WINDOW 1 slice=[1, 24]
+IMRE_UNITTEST {"event": "collection", "count": 23}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_recursion.TestPyRecursion.test_listrecursion"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_scanstring.TestCScanstring.test_bad_escapes"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_scanstring.TestCScanstring.test_overflow"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_scanstring.TestCScanstring.test_scanstring"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_scanstring.TestCScanstring.test_surrogates"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_scanstring.TestPyScanstring.test_bad_escapes"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_scanstring.TestPyScanstring.test_overflow"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_scanstring.TestPyScanstring.test_scanstring"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_scanstring.TestPyScanstring.test_surrogates"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_separators.TestCSeparators.test_illegal_separators"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_separators.TestCSeparators.test_separators"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_separators.TestPySeparators.test_illegal_separators"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_separators.TestPySeparators.test_separators"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestDecode.test_bad_bool_args"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestDecode.test_make_scanner"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestEncode.test_bad_bool_args"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestEncode.test_bad_markers_argument_to_encoder"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestEncode.test_bad_str_encoder"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestEncode.test_current_indent_level"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestEncode.test_make_encoder"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestEncode.test_unsortable_keys"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestSpeedups.test_encode_basestring_ascii"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestSpeedups.test_scanstring"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_recursion.TestPyRecursion.test_listrecursion"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_recursion.TestPyRecursion.test_listrecursion", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_scanstring.TestCScanstring.test_bad_escapes"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_scanstring.TestCScanstring.test_bad_escapes", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_scanstring.TestCScanstring.test_overflow"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_scanstring.TestCScanstring.test_overflow", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_scanstring.TestCScanstring.test_scanstring"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_scanstring.TestCScanstring.test_scanstring", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_scanstring.TestCScanstring.test_surrogates"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_scanstring.TestCScanstring.test_surrogates", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_scanstring.TestPyScanstring.test_bad_escapes"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_scanstring.TestPyScanstring.test_bad_escapes", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_scanstring.TestPyScanstring.test_overflow"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_scanstring.TestPyScanstring.test_overflow", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_scanstring.TestPyScanstring.test_scanstring"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_scanstring.TestPyScanstring.test_scanstring", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_scanstring.TestPyScanstring.test_surrogates"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_scanstring.TestPyScanstring.test_surrogates", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_separators.TestCSeparators.test_illegal_separators"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_separators.TestCSeparators.test_illegal_separators", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_separators.TestCSeparators.test_separators"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_separators.TestCSeparators.test_separators", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_separators.TestPySeparators.test_illegal_separators"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_separators.TestPySeparators.test_illegal_separators", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_separators.TestPySeparators.test_separators"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_separators.TestPySeparators.test_separators", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_speedups.TestDecode.test_bad_bool_args"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_speedups.TestDecode.test_bad_bool_args", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_speedups.TestDecode.test_make_scanner"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_speedups.TestDecode.test_make_scanner", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_speedups.TestEncode.test_bad_bool_args"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_speedups.TestEncode.test_bad_bool_args", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_speedups.TestEncode.test_bad_markers_argument_to_encoder"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_speedups.TestEncode.test_bad_markers_argument_to_encoder", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_speedups.TestEncode.test_bad_str_encoder"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_speedups.TestEncode.test_bad_str_encoder", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_speedups.TestEncode.test_current_indent_level"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_speedups.TestEncode.test_current_indent_level", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_speedups.TestEncode.test_make_encoder"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_speedups.TestEncode.test_make_encoder", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_speedups.TestEncode.test_unsortable_keys"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_speedups.TestEncode.test_unsortable_keys", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_speedups.TestSpeedups.test_encode_basestring_ascii"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_speedups.TestSpeedups.test_encode_basestring_ascii", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_speedups.TestSpeedups.test_scanstring"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_speedups.TestSpeedups.test_scanstring", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "summary", "run": 23, "successful": true}
+# WINDOW 2 slice=[24, 25]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_broken_pipe_error"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestMain.test_broken_pipe_error"}
+# WINDOW 3 slice=[25, 26]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_colors"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestMain.test_colors"}
+# WINDOW 4 slice=[26, 27]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_compact"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestMain.test_compact"}
+# WINDOW 5 slice=[27, 28]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_ensure_ascii_default"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestMain.test_ensure_ascii_default"}
+# WINDOW 6 slice=[28, 29]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_help_flag"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestMain.test_help_flag"}
+# WINDOW 7 slice=[29, 30]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_indent"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestMain.test_indent"}
+# WINDOW 8 slice=[30, 31]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_infile_outfile"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestMain.test_infile_outfile"}
+# WINDOW 9 slice=[31, 32]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_infile_stdout"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestMain.test_infile_stdout"}
+# WINDOW 10 slice=[32, 33]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_jsonlines"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestMain.test_jsonlines"}
+# WINDOW 11 slice=[33, 34]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_jsonlines_from_file"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestMain.test_jsonlines_from_file"}
+# WINDOW 12 slice=[34, 35]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_no_ensure_ascii_flag"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestMain.test_no_ensure_ascii_flag"}
+# WINDOW 13 slice=[35, 36]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_no_indent"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestMain.test_no_indent"}
+# WINDOW 14 slice=[36, 37]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_non_ascii_infile"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestMain.test_non_ascii_infile"}
+# WINDOW 15 slice=[37, 38]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_sort_keys_flag"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestMain.test_sort_keys_flag"}
+# WINDOW 16 slice=[38, 39]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_stdin_stdout"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestMain.test_stdin_stdout"}
+# WINDOW 17 slice=[39, 40]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_tab"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestMain.test_tab"}
+# WINDOW 18 slice=[40, 41]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestMain.test_writing_in_place"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestMain.test_writing_in_place"}
+# WINDOW 19 slice=[41, 42]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_broken_pipe_error"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestTool.test_broken_pipe_error"}
+# WINDOW 20 slice=[42, 43]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_colors"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestTool.test_colors"}
+# WINDOW 21 slice=[43, 44]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_compact"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestTool.test_compact"}
+# WINDOW 22 slice=[44, 45]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_ensure_ascii_default"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestTool.test_ensure_ascii_default"}
+# WINDOW 23 slice=[45, 46]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_help_flag"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestTool.test_help_flag"}
+# WINDOW 24 slice=[46, 47]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_indent"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestTool.test_indent"}
+# WINDOW 25 slice=[47, 48]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_infile_outfile"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestTool.test_infile_outfile"}
+# WINDOW 26 slice=[48, 49]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_infile_stdout"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestTool.test_infile_stdout"}
+# WINDOW 27 slice=[49, 50]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_jsonlines"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestTool.test_jsonlines"}
+# WINDOW 28 slice=[50, 51]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_jsonlines_from_file"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestTool.test_jsonlines_from_file"}
+# WINDOW 29 slice=[51, 52]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_no_ensure_ascii_flag"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestTool.test_no_ensure_ascii_flag"}
+# WINDOW 30 slice=[52, 53]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_no_indent"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestTool.test_no_indent"}
+# WINDOW 31 slice=[53, 54]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_non_ascii_infile"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestTool.test_non_ascii_infile"}
+# WINDOW 32 slice=[54, 55]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_sort_keys_flag"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestTool.test_sort_keys_flag"}
+# WINDOW 33 slice=[55, 56]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_stdin_stdout"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestTool.test_stdin_stdout"}
+# WINDOW 34 slice=[56, 57]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_tab"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestTool.test_tab"}
+# WINDOW 35 slice=[57, 58]
+IMRE_UNITTEST {"event": "collection", "count": 1}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_tool.TestTool.test_writing_in_place"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_tool.TestTool.test_writing_in_place"}
+# WINDOW 36 slice=[58, 75]
+IMRE_UNITTEST {"event": "collection", "count": 17}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_big_unicode_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_big_unicode_encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_bytes_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_bytes_encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding3"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding4"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding5"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding6"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding7"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_escaped_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_object_pairs_hook_with_unicode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_unicode_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_unicode_preservation"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_encode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_encode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_big_unicode_decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_big_unicode_decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_big_unicode_encode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_big_unicode_encode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_bytes_decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_bytes_decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_bytes_encode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_bytes_encode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding3"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding3", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding4"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding4", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding5"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding5", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding6"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding6", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding7"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding7", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_escaped_decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_escaped_decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_object_pairs_hook_with_unicode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_object_pairs_hook_with_unicode", "outcome": "error", "details": ["no compiled Python body for <module> (<string>:1)"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_encode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_encode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_unicode_decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_unicode_decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_unicode_preservation"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_unicode_preservation", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "summary", "run": 17, "successful": false}
+# WINDOW 37 slice=[75, 92]
+IMRE_UNITTEST {"event": "collection", "count": 17}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_bytes_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_bytes_encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding3"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding4"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding5"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding6"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding7"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_escaped_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_object_pairs_hook_with_unicode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_single_surrogate_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_single_surrogate_encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_unicode_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_unicode_preservation"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_encode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_encode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_encode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_encode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_bytes_decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_bytes_decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_bytes_encode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_bytes_encode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding3"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding3", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding4"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding4", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding5"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding5", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding6"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding6", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding7"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding7", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_escaped_decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_escaped_decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_object_pairs_hook_with_unicode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_object_pairs_hook_with_unicode", "outcome": "error", "details": ["no compiled Python body for <module> (<string>:1)"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_single_surrogate_decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_single_surrogate_decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_single_surrogate_encode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_single_surrogate_encode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_unicode_decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_unicode_decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_unicode_preservation"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_unicode_preservation", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "summary", "run": 17, "successful": false}

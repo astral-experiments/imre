@@ -1,0 +1,2 @@
+JSON_CONTROL_DENIED /usr/bin/python3
+/bin/sh: 1: exec: /usr/bin/python3: Permission denied

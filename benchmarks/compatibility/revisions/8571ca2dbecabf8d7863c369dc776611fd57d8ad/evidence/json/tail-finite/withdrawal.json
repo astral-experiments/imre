@@ -1,0 +1,169 @@
+{
+  "sources": [
+    {
+      "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/__init__.py",
+      "backup": "/workspace/scratch/json-tail-finite/withdrawn/__init__.py",
+      "kind": "test_source",
+      "sha256_before": "b99348d18818d4a27ad5db018045a1c3abf50f2bbb0bad81643f082389201d73",
+      "sha256_after": "b99348d18818d4a27ad5db018045a1c3abf50f2bbb0bad81643f082389201d73",
+      "restored": true
+    },
+    {
+      "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/__main__.py",
+      "backup": "/workspace/scratch/json-tail-finite/withdrawn/__main__.py",
+      "kind": "test_source",
+      "sha256_before": "99fbc0d494395da89493b77a15c88b5100363ef25c7fee27101e3106eda61bb4",
+      "sha256_after": "99fbc0d494395da89493b77a15c88b5100363ef25c7fee27101e3106eda61bb4",
+      "restored": true
+    },
+    {
+      "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_decode.py",
+      "backup": "/workspace/scratch/json-tail-finite/withdrawn/test_decode.py",
+      "kind": "test_source",
+      "sha256_before": "7905c620f00c028e1b28ea27656b66d14584fa809206d3eb996fac5dbee2546c",
+      "sha256_after": "7905c620f00c028e1b28ea27656b66d14584fa809206d3eb996fac5dbee2546c",
+      "restored": true
+    },
+    {
+      "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_default.py",
+      "backup": "/workspace/scratch/json-tail-finite/withdrawn/test_default.py",
+      "kind": "test_source",
+      "sha256_before": "726eabe1b591f70ca755b8bd2f45a2d4fc8ec5b62630dd49a2c4294a9c82b4dd",
+      "sha256_after": "726eabe1b591f70ca755b8bd2f45a2d4fc8ec5b62630dd49a2c4294a9c82b4dd",
+      "restored": true
+    },
+    {
+      "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_dump.py",
+      "backup": "/workspace/scratch/json-tail-finite/withdrawn/test_dump.py",
+      "kind": "test_source",
+      "sha256_before": "e5eaeec50d6127c4c5c2fe1dfecc17f72e82034612c84d9d72bfbde1c241f758",
+      "sha256_after": "e5eaeec50d6127c4c5c2fe1dfecc17f72e82034612c84d9d72bfbde1c241f758",
+      "restored": true
+    },
+    {
+      "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_encode_basestring_ascii.py",
+      "backup": "/workspace/scratch/json-tail-finite/withdrawn/test_encode_basestring_ascii.py",
+      "kind": "test_source",
+      "sha256_before": "47e24e85933b2704fa8baa87ac6e3010da044c74476452fa1f56062306e05078",
+      "sha256_after": "47e24e85933b2704fa8baa87ac6e3010da044c74476452fa1f56062306e05078",
+      "restored": true
+    },
+    {
+      "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_enum.py",
+      "backup": "/workspace/scratch/json-tail-finite/withdrawn/test_enum.py",
+      "kind": "test_source",
+      "sha256_before": "82544c2ef9cf58b69c969d19bd470c2cfc4533e37b6dd8d64fc52209fe37e276",
+      "sha256_after": "82544c2ef9cf58b69c969d19bd470c2cfc4533e37b6dd8d64fc52209fe37e276",
+      "restored": true
+    },
+    {
+      "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_fail.py",
+      "backup": "/workspace/scratch/json-tail-finite/withdrawn/test_fail.py",
+      "kind": "test_source",
+      "sha256_before": "6d6a2b5081a071ff838e2fa03b0a29aa81242ecfc1ac9332f274ace97b6b1b64",
+      "sha256_after": "6d6a2b5081a071ff838e2fa03b0a29aa81242ecfc1ac9332f274ace97b6b1b64",
+      "restored": true
+    },
+    {
+      "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_float.py",
+      "backup": "/workspace/scratch/json-tail-finite/withdrawn/test_float.py",
+      "kind": "test_source",
+      "sha256_before": "86031dc23e0e69c8d5c7d82dd62c8db74dade2821aad66edf3f36e3fe3e7bb7e",
+      "sha256_after": "86031dc23e0e69c8d5c7d82dd62c8db74dade2821aad66edf3f36e3fe3e7bb7e",
+      "restored": true
+    },
+    {
+      "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_indent.py",
+      "backup": "/workspace/scratch/json-tail-finite/withdrawn/test_indent.py",
+      "kind": "test_source",
+      "sha256_before": "38f1e868b1daf10aa0342e239074cb2a9c0b021006b07b9acac083ee984b565e",
+      "sha256_after": "38f1e868b1daf10aa0342e239074cb2a9c0b021006b07b9acac083ee984b565e",
+      "restored": true
+    },
+    {
+      "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_pass1.py",
+      "backup": "/workspace/scratch/json-tail-finite/withdrawn/test_pass1.py",
+      "kind": "test_source",
+      "sha256_before": "aa91e64f7afe9f5c82fa3b4019352bc762e6f8d1aa05bdd5408305daa629f91d",
+      "sha256_after": "aa91e64f7afe9f5c82fa3b4019352bc762e6f8d1aa05bdd5408305daa629f91d",
+      "restored": true
+    },
+    {
+      "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_pass2.py",
+      "backup": "/workspace/scratch/json-tail-finite/withdrawn/test_pass2.py",
+      "kind": "test_source",
+      "sha256_before": "d7d20a9f15b209485ddcd9794b5ee327993ff56c96b4f0d0548e5769d8a5f7cb",
+      "sha256_after": "d7d20a9f15b209485ddcd9794b5ee327993ff56c96b4f0d0548e5769d8a5f7cb",
+      "restored": true
+    },
+    {
+      "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_pass3.py",
+      "backup": "/workspace/scratch/json-tail-finite/withdrawn/test_pass3.py",
+      "kind": "test_source",
+      "sha256_before": "1e813e2e1546526f216de8e547e99cb4f3e3830d061c440b371a676cab0359a2",
+      "sha256_after": "1e813e2e1546526f216de8e547e99cb4f3e3830d061c440b371a676cab0359a2",
+      "restored": true
+    },
+    {
+      "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_recursion.py",
+      "backup": "/workspace/scratch/json-tail-finite/withdrawn/test_recursion.py",
+      "kind": "test_source",
+      "sha256_before": "fd5d77dcf5d919d53930ae8840a4e8ebccdbaf5a4e8d748f637ba8b22182380b",
+      "sha256_after": "fd5d77dcf5d919d53930ae8840a4e8ebccdbaf5a4e8d748f637ba8b22182380b",
+      "restored": true
+    },
+    {
+      "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_scanstring.py",
+      "backup": "/workspace/scratch/json-tail-finite/withdrawn/test_scanstring.py",
+      "kind": "test_source",
+      "sha256_before": "f1062012d977de8d0fed27156123ec8aed7f20a60323f55342fd85fa7b84e153",
+      "sha256_after": "f1062012d977de8d0fed27156123ec8aed7f20a60323f55342fd85fa7b84e153",
+      "restored": true
+    },
+    {
+      "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_separators.py",
+      "backup": "/workspace/scratch/json-tail-finite/withdrawn/test_separators.py",
+      "kind": "test_source",
+      "sha256_before": "3fb3ed4833418c98f7828f5be0052e731f70c05642002f4ed6907e3f970f374a",
+      "sha256_after": "3fb3ed4833418c98f7828f5be0052e731f70c05642002f4ed6907e3f970f374a",
+      "restored": true
+    },
+    {
+      "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_speedups.py",
+      "backup": "/workspace/scratch/json-tail-finite/withdrawn/test_speedups.py",
+      "kind": "test_source",
+      "sha256_before": "f36ce38442f60a8b9e5815307f0ab845e223ba439a876ad6cd461edaf4160ff7",
+      "sha256_after": "f36ce38442f60a8b9e5815307f0ab845e223ba439a876ad6cd461edaf4160ff7",
+      "restored": true
+    },
+    {
+      "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_tool.py",
+      "backup": "/workspace/scratch/json-tail-finite/withdrawn/test_tool.py",
+      "kind": "test_source",
+      "sha256_before": "7ad6456d0f4b0285bd4d8a532c8ba102002c45f872228726be05d6685d4c4724",
+      "sha256_after": "7ad6456d0f4b0285bd4d8a532c8ba102002c45f872228726be05d6685d4c4724",
+      "restored": true
+    },
+    {
+      "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_unicode.py",
+      "backup": "/workspace/scratch/json-tail-finite/withdrawn/test_unicode.py",
+      "kind": "test_source",
+      "sha256_before": "3929dbd0ca60f6e6ffd1bee78a7cb70ba24ac3743bbebbb2bedd6a980e81745a",
+      "sha256_after": "3929dbd0ca60f6e6ffd1bee78a7cb70ba24ac3743bbebbb2bedd6a980e81745a",
+      "restored": true
+    },
+    {
+      "path": "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+      "backup": "/workspace/scratch/json-tail-finite/withdrawn/positive_launcher.py",
+      "kind": "launcher",
+      "sha256_before": "75a143b66b7cdd5544045abc21cc6e84aa13e3077fb4732fae8e3842d3872cb6",
+      "sha256_after": "75a143b66b7cdd5544045abc21cc6e84aa13e3077fb4732fae8e3842d3872cb6",
+      "restored": true
+    }
+  ],
+  "test_source_count": 19,
+  "bytecode_count": 0,
+  "no_source_or_bytecode_files_during_run": true,
+  "all_restored": true,
+  "fixtures_retained": true
+}

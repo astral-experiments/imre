@@ -1,0 +1,120 @@
+{
+  "revision": "8571ca2dbecabf8d7863c369dc776611fd57d8ad",
+  "compiler_sha256": "b07018ea9eb8e9af234307899c33a6b14e498ba5fded97a26a582a9e2ad9be9e",
+  "runtime_sha256": "6c71c26ec0f9d9a34c56a0b82226574243c189c2854f689ef127b8d92e481fb5",
+  "launcher_sha256": "75a143b66b7cdd5544045abc21cc6e84aa13e3077fb4732fae8e3842d3872cb6",
+  "stack_rlimit": [
+    8388608,
+    -1
+  ],
+  "images": {
+    "O0": {
+      "build_argv": [
+        "/workspace/imre/target/release/imre",
+        "build",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "--module-root",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite",
+        "--extension-path",
+        "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "--no-cache",
+        "--opt-level",
+        "0",
+        "--runtime",
+        "/workspace/imre/target/release/libimre_runtime.a",
+        "--clang",
+        "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+        "-o",
+        "/workspace/scratch/json-tail-finite/O0.exe"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "TMPDIR": "/workspace/scratch/json-8571-tmp",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "IMREFLAGS": "--opt-level 0",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+      },
+      "exit_code": 0,
+      "elapsed_seconds": 19.24,
+      "path": "/workspace/scratch/json-tail-finite/O0.exe",
+      "sha256": "cd3af6ea4a291fa5e19e10521f9f3513856130bc380568deadd33241bab67c54",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "03dde70dc25632377b5492d2310d27f0292f61518a028dccb76c44156bf79bc4",
+      "readelf": {
+        "argv": [
+          "readelf",
+          "-d",
+          "/workspace/scratch/json-tail-finite/O0.exe"
+        ],
+        "exit_code": 0,
+        "stdout_sha256": "3c02cc0eb4d9de8c21d16541ff880d7e31f16bffc8213c4b6a4a7eeeeb5b7a9a",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "ldd": {
+        "argv": [
+          "ldd",
+          "/workspace/scratch/json-tail-finite/O0.exe"
+        ],
+        "exit_code": 0,
+        "stdout_sha256": "01a5c2e744be3fa01306e201ac8bbbd4b894517490c35cc610ec123c07c9ba5b",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "O3": {
+      "build_argv": [
+        "/workspace/imre/target/release/imre",
+        "build",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "--module-root",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite",
+        "--extension-path",
+        "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "--no-cache",
+        "--opt-level",
+        "3",
+        "--runtime",
+        "/workspace/imre/target/release/libimre_runtime.a",
+        "--clang",
+        "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+        "-o",
+        "/workspace/scratch/json-tail-finite/O3.exe"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "TMPDIR": "/workspace/scratch/json-8571-tmp",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "IMREFLAGS": "--opt-level 3",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+      },
+      "exit_code": 0,
+      "elapsed_seconds": 91.5,
+      "path": "/workspace/scratch/json-tail-finite/O3.exe",
+      "sha256": "724fe82c7cc45f2b40e5e47d67bbcc63e0b79534b4ffe0f13f4f97ebcd9937b5",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "8545ee1907c4e65abc2d38d6ea9d51fbc3112e07d63de8a0ac25fccf27b04a1a",
+      "readelf": {
+        "argv": [
+          "readelf",
+          "-d",
+          "/workspace/scratch/json-tail-finite/O3.exe"
+        ],
+        "exit_code": 0,
+        "stdout_sha256": "b43ecc0877db582d31fe4a3dd574b216893c88260e0f7d5e8f771eefe141634b",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "ldd": {
+        "argv": [
+          "ldd",
+          "/workspace/scratch/json-tail-finite/O3.exe"
+        ],
+        "exit_code": 0,
+        "stdout_sha256": "6e90ec867c7e98972f52768c05559f4487c523c7ae6ebcfb5997c57a037a70b3",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    }
+  }
+}

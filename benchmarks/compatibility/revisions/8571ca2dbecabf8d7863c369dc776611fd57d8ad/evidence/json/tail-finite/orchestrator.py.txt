@@ -1,0 +1,48 @@
+from pathlib import Path
+import concurrent.futures,collections,gzip,hashlib,json,os,resource,shutil,sys
+R=Path('/workspace/imre-json-tail');V='8571ca2dbecabf8d7863c369dc776611fd57d8ad';E=R/f'benchmarks/compatibility/revisions/{V}/evidence/json';W=E/'tail-finite';D=Path('/workspace/scratch/json-tail-finite'); F=Path('/workspace/scratch/imre-cpython-test-fixtures/Lib');P='/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14';G=json.loads((W/'architecture-control/run.json').read_text());assert G['passed']; IDS=[json.loads(s) for s in (W/'tail-ids.jsonl').read_text().splitlines()]; TIER=sys.argv[1];assert TIER in ('stock','native');sys.path.insert(0,str(R/'benchmarks/compatibility'));from collect_unittest_results import capture,parse
+def sha(p):
+ h=hashlib.sha256()
+ with open(p,'rb') as f:
+  for b in iter(lambda:f.read(1048576),b''):h.update(b)
+ return h.hexdigest()
+assert resource.getrlimit(resource.RLIMIT_STACK)==(8388608,-1)
+wins=[(0,1,25),(1,24,45)]+[(i,i+1,8) for i in range(24,58)]+[(58,75,45),(75,92,45)]
+assert [i for a,b,_ in wins for i in range(a,b)]==list(range(92))
+baseenv={'PYTHONPATH':str(F),'PYTHONDONTWRITEBYTECODE':'1','PYTHON_COLORS':'0','NO_COLOR':'1','PATH':'/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:'+os.environ['PATH']}
+def run(job):
+ tier,wi=job;a,b,to=wins[wi]; tmp=D/f'tmp-{tier}-{wi}';tmp.mkdir(exist_ok=True); trace=D/f'{tier}-{wi}.trace'; env=os.environ.copy();env.pop('IMRE_ENCODED_FLAGS',None);rec=baseenv.copy();rec['TMPDIR']=str(tmp)
+ if tier=='stock': cmd=[P,'-B',str(W/'positive_launcher.py'),str(a),str(b)]
+ else:
+  rec.update(IMREFLAGS='--opt-level '+tier[1],IMRE_PYTHON=G['argv'][0],LD_PRELOAD=str(D/'deny_python.so'));cmd=[str(D/f'{tier}.exe'),str(a),str(b)]
+ env.update(rec); argv=['strace','-f','-qq','-s','200','-e','trace=execve,execveat,openat','-o',str(trace),*cmd];code,so,se,timed=capture(argv,to,env);result=parse(se,timed);expected=[(x['id'],x['occurrence']) for x in IDS[a:b]];got=[(x['id'],x['occurrence']) for x in result['originals']];assert got==expected,(tier,wi,got,expected,se[-500:]); raw=trace.read_bytes(); lines=raw.decode(errors='replace').splitlines(); execs=[l for l in lines if ('execve(' in l or 'execveat(' in l) and l.rstrip().endswith('= 0')];nochild=tier!='stock' and len(execs)==1 and str(D/f'{tier}.exe') in execs[0];no_lib=b'libpython' not in raw.lower();denials=[l for l in se.decode(errors='replace').splitlines() if 'JSON_CONTROL_DENIED' in l]; meta={'window':wi,'slice':[a,b],'keys':expected,'argv':argv,'environment':rec,'timeout_seconds':to,'exit_code':code,'timed_out':timed,'stack_rlimit':list(resource.getrlimit(resource.RLIMIT_STACK)),'nproc_rlimit':list(resource.getrlimit(resource.RLIMIT_NPROC)),'capture':result,'trace_sha256':hashlib.sha256(raw).hexdigest(),'successful_execs':execs,'no_child_exec':nochild,'no_libpython_open':no_lib,'targeted_denials':denials,'stdout_sha256':hashlib.sha256(so).hexdigest(),'stderr_sha256':hashlib.sha256(se).hexdigest()};return tier,wi,meta,so,se,raw
+def aggregate(tier,jobs):
+ results=sorted(jobs,key=lambda x:x[1]);stderr=bytearray();stdout=bytearray();traces=bytearray(); MS=[]
+ for _,wi,m,so,se,raw in results:
+  hdr=f'# WINDOW {wi} slice={m["slice"]}\n'.encode();stderr.extend(hdr);offset=stderr.count(b'\n');stderr.extend(se);stderr.extend(b'' if not se or se.endswith(b'\n') else b'\n');stdout.extend(hdr+so+(b'' if not so or so.endswith(b'\n') else b'\n'));traces.extend(hdr+raw+(b'' if not raw or raw.endswith(b'\n') else b'\n'))
+  for x in m['capture']['originals']:
+   if 'line' in x:x['evidence_line']=offset+x['line']
+   elif x['outcome']=='timeout':
+    lines=se.decode(errors='replace').splitlines();needle='"event": "start", "id": "'+x['id']+'"';x['evidence_line']=offset+next(i for i,l in enumerate(lines,1) if needle in l)
+  MS.append(m)
+ (W/f'{tier}.stderr').write_bytes(stderr);(W/f'{tier}.stdout').write_bytes(stdout);(W/f'{tier}.trace.gz').write_bytes(gzip.compress(bytes(traces),mtime=0));meta={'tier':tier,'fresh':True,'windows':MS,'stderr_sha256':sha(W/f'{tier}.stderr'),'stdout_sha256':sha(W/f'{tier}.stdout'),'compressed_trace_sha256':sha(W/f'{tier}.trace.gz'),'originals':len(IDS),'counts':dict(collections.Counter(x['outcome'] for m in MS for x in m['capture']['originals']))};(W/f'{tier}.capture.json').write_text(json.dumps(meta,indent=2)+'\n');print(tier,meta['counts'],'windows',len(MS),flush=True);return meta
+if TIER=='stock':
+ with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:jobs=list(pool.map(run,[('stock',i) for i in range(len(wins))]))
+ aggregate('stock',jobs)
+else:
+ B=json.loads((W/'build.json').read_text());assert sha(G['argv'][0])==B['compiler_sha256'] and sha(G['argv'][G['argv'].index('--runtime')+1])==B['runtime_sha256'];assert all(sha(D/f'{t}.exe')==B['images'][t]['sha256'] for t in ('O0','O3'));assert sha(D/'deny_python.so')==json.loads((W/'deny-control.json').read_text())['preload_sha256'];assert sha(W/'positive_launcher.py')==G['positive_launcher_sha256']
+ prior=json.loads((E/'withdrawal.json').read_text());back=D/'withdrawn';back.mkdir(exist_ok=True);manifest=[]
+ for x in prior['sources']:
+  if x['kind']!='test_source':continue
+  p=Path(x['path']);assert sha(p)==x['sha256_before'];dst=back/p.name;assert not dst.exists();manifest.append({'path':str(p),'backup':str(dst),'kind':x['kind'],'sha256_before':sha(p)});shutil.move(p,dst)
+ p=W/'positive_launcher.py';dst=back/'positive_launcher.py';assert not dst.exists();manifest.append({'path':str(p),'backup':str(dst),'kind':'launcher','sha256_before':sha(p)});shutil.move(p,dst)
+ pkg=F/'test/test_json';bytecode=[p for p in pkg.rglob('*') if p.is_file() and p.suffix in ('.pyc','.pyo')];assert not bytecode and not [p for p in pkg.rglob('*.py')] and all(not Path(x['path']).exists() for x in manifest)
+ try:
+  jobspec=[(t,i) for i in range(len(wins)) for t in ('O0','O3')]
+  with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:jobs=list(pool.map(run,jobspec))
+  assert all(not Path(x['path']).exists() for x in manifest)
+  for t in ('O0','O3'):aggregate(t,[x for x in jobs if x[0]==t])
+ finally:
+  for x in manifest:
+   shutil.move(x['backup'],x['path']);x['sha256_after']=sha(x['path']);x['restored']=x['sha256_before']==x['sha256_after'];assert x['restored']
+  (W/'withdrawal.json').write_text(json.dumps({'sources':manifest,'test_source_count':19,'bytecode_count':len(bytecode),'no_source_or_bytecode_files_during_run':True,'all_restored':all(x['restored'] for x in manifest),'fixtures_retained':True},indent=2)+'\n')
