@@ -6,11 +6,10 @@ use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
 
 use ruff_python_ast as ast;
-use ruff_python_ast::visitor::{Visitor, walk_expr};
 use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use super::prepare::{Initializer, PreparedUnit};
-use crate::dynamic::literal::LiteralSites;
+use crate::dynamic::literal::{LiteralBody, LiteralSites};
 use crate::frontend::function_scope::{ClassBindings, NamedFunction};
 use crate::frontend::module_source::{self, ParsedModule};
 use crate::frontend::{
@@ -474,7 +473,7 @@ impl<'a> PreparedBody<'a> {
                     let (operand, reason) = body
                         .source
                         .exec_literals
-                        .body(site)
+                        .plan(site, None)
                         .and_then(Result::err)
                         .expect("selected literal refusal belongs to this source");
                     body.source.literal_diagnostic(operand, reason)
@@ -737,7 +736,6 @@ impl<'a> PreparedBody<'a> {
         let statement_sites = prepare.sites;
         let source = SourceInfo {
             exec_literals,
-            eval_literals: EvalLiterals::collect(&body, python_optimization),
             annotation_children,
             scopes,
             #[cfg(test)]
@@ -999,7 +997,6 @@ impl<'a> RegisteredBody<'a> {
 #[derive(Default)]
 struct SourceInfo<'a> {
     exec_literals: LiteralSites,
-    eval_literals: HashMap<TextRange, EvalLiteral>,
     annotation_children:
         indexmap::IndexMap<String, crate::frontend::AnnotationBody<Box<SourceInfo<'static>>>>,
     scopes: crate::frontend::function_scope::ScopeFacts<'a>,
@@ -1025,55 +1022,6 @@ struct SourceInfo<'a> {
     method_imports: Cow<'a, std::collections::BTreeSet<String>>,
     future_flags: u32,
     text: Cow<'a, str>,
-}
-
-struct EvalLiteral {
-    text: String,
-    body: crate::frontend::AnnotationBody<Box<SourceInfo<'static>>>,
-}
-
-struct EvalLiterals {
-    optimization: i32,
-    sites: HashMap<TextRange, EvalLiteral>,
-}
-
-impl EvalLiterals {
-    /// Prepare literal expression bodies at direct `eval(...)` sites. The
-    /// runtime guard still decides whether the selected callable is builtin
-    /// `eval`; a Python function named `eval` receives the original string.
-    fn collect(body: &[ast::Stmt], optimization: i32) -> HashMap<TextRange, EvalLiteral> {
-        let mut visitor = Self {
-            optimization,
-            sites: HashMap::new(),
-        };
-        visitor.visit_body(body);
-        visitor.sites
-    }
-}
-
-impl<'a> Visitor<'a> for EvalLiterals {
-    fn visit_expr(&mut self, expr: &'a ast::Expr) {
-        if let ast::Expr::Call(call) = expr
-            && call
-                .func
-                .as_name_expr()
-                .is_some_and(|name| name.id == "eval")
-            && let Some(ast::Expr::StringLiteral(literal)) = call.arguments.args.first()
-            && crate::analysis::check_source_complexity(literal.value.to_str()).is_ok()
-            && let Ok(parsed) = ruff_python_parser::parse_expression(literal.value.to_str())
-            && let Some(body) =
-                PreparedBody::prepare_annotation(literal.value.to_str(), &parsed, self.optimization)
-        {
-            self.sites.insert(
-                call.range(),
-                EvalLiteral {
-                    text: literal.value.to_string(),
-                    body,
-                },
-            );
-        }
-        walk_expr(self, expr);
-    }
 }
 
 impl SourceInfo<'_> {
@@ -1268,6 +1216,27 @@ impl SourceMap<'_> {
     }
 }
 
+impl crate::frontend::AnnotationBody<Box<SourceInfo<'static>>> {
+    /// Emit a decoded expression through the same checked provider used for annotations.
+    fn emit(&self, output: &mut Output, unit: usize, file: &str) -> String {
+        let location = SourceMap {
+            info: &self.scope,
+            callable_code: Default::default(),
+            exec_code: Default::default(),
+            unit,
+            positions: &SourcePositions::new(&self.scope.path, &self.scope.text, file)
+                .with_names(&self.scope.private_names),
+        };
+        location.code(
+            output,
+            QualnameScope::MODULE,
+            Body::CheckedProvider(Ok(&self.code), AnnotationScope::Plain),
+            false,
+            None,
+        )
+    }
+}
+
 enum Callable<'a> {
     Lambda(&'a RegisteredLambda, bool),
     Named(&'a NamedFunction<'a>),
@@ -1321,30 +1290,19 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
         let code = entries
             .entry(RequiredSite::AnnotationString(child))
             .or_insert_with(|| {
-                let text = body.scope.text.as_ref();
                 let file = self.frame.output.data(b"<string>");
-                let location = SourceMap {
-                    info: &body.scope,
-                    callable_code: Default::default(),
-                    exec_code: Default::default(),
-                    unit: self.source.unit,
-                    positions: &SourcePositions::new(&body.scope.path, text, &file)
-                        .with_names(&body.scope.private_names),
-                };
-                location.code(
-                    self.frame.output,
-                    QualnameScope::MODULE,
-                    Body::CheckedProvider(Ok(&body.code), AnnotationScope::Plain),
-                    false,
-                    None,
-                )
+                body.emit(self.frame.output, self.source.unit, &file)
             });
         let text = self.frame.source_text(spelling, None);
         self.frame.bind_annotation_expression(&text, code);
         text
     }
 
-    fn exec_literal_at(&mut self, site: TextRange) -> Option<sites::CompiledExec> {
+    fn exec_literal_at(
+        &mut self,
+        site: TextRange,
+        expression: Option<&str>,
+    ) -> Option<sites::CompiledExec> {
         let output = &mut self.frame.output;
         if output.diagnostic.is_some() {
             return None;
@@ -1354,70 +1312,58 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
             std::collections::hash_map::Entry::Occupied(entry) => return Some(entry.get().clone()),
             std::collections::hash_map::Entry::Vacant(entry) => entry,
         };
-        if let Some(literal) = self.source.eval_literals.get(&site) {
-            let body = &literal.body;
-            let file = output.data(b"<string>");
-            let location = SourceMap {
-                info: &body.scope,
-                callable_code: Default::default(),
-                exec_code: Default::default(),
-                unit: self.source.unit,
-                positions: &SourcePositions::new(&body.scope.path, &literal.text, &file)
-                    .with_names(&body.scope.private_names),
-            };
-            let code = location.code(
-                output,
-                QualnameScope::MODULE,
-                Body::CheckedProvider(Ok(&body.code), AnnotationScope::Plain),
-                false,
-                None,
-            );
-            let compiled = sites::CompiledExec {
-                alternatives: vec![sites::CompiledExecAlternative {
-                    entry: code,
-                    flags: self.source.future_flags,
-                    source: output.data(literal.text.as_bytes()),
-                    expression: true,
-                    file: None,
-                }],
-            };
-            return Some(entry.insert(compiled).clone());
-        }
-        let children = self.source.exec_literals.bodies(site)?;
-        let children = match children {
+        let children = match self.source.exec_literals.plan(site, expression)? {
             Ok(children) => children,
             Err((operand, reason)) => {
                 output.diagnostic = Some(self.source.literal_diagnostic(operand, reason));
                 return None;
             }
         };
-        let mut alternatives = Vec::with_capacity(children.len());
+        let mut alternatives = Vec::with_capacity(children.size_hint().0);
         for child in children {
-            let file = match child.file.as_deref() {
+            let path = match &child {
+                LiteralBody::Suite(child) => child.file.as_deref(),
+                LiteralBody::Expression(_) => None,
+            };
+            let file = match path {
                 Some(path) => output.data(path.as_os_str().as_encoded_bytes()),
                 None => output.data(b"<string>"),
             };
-            // A decoded module interns its own constants when its prologue runs.
-            let parent_names = std::mem::take(&mut output.interned_identifiers);
-            let compiled = child.body.emit(output, self.source.unit, &file);
-            output.interned_identifiers = parent_names;
-            let code = match compiled {
-                Ok(code) => code,
-                Err(error) => {
-                    output.diagnostic = Some(error);
-                    return None;
+            let (code, text, flags, expression) = match child {
+                LiteralBody::Suite(child) => {
+                    let body = &child.body;
+                    // A decoded module interns its own constants when its prologue runs.
+                    let parent_names = std::mem::take(&mut output.interned_identifiers);
+                    let compiled = body.emit(output, self.source.unit, &file);
+                    output.interned_identifiers = parent_names;
+                    let code = compiled
+                        .map_err(|error| output.diagnostic = Some(error))
+                        .ok()?;
+                    (
+                        code,
+                        child.original_text.as_deref().unwrap_or(&body.source.text),
+                        body.source.future_flags,
+                        false,
+                    )
+                }
+                LiteralBody::Expression(text) => {
+                    crate::analysis::check_source_complexity(text).ok()?;
+                    let parsed = ruff_python_parser::parse_expression(text).ok()?;
+                    let body = PreparedBody::prepare_annotation(
+                        text,
+                        &parsed,
+                        self.source.python_optimization,
+                    )?;
+                    let code = body.emit(output, self.source.unit, &file);
+                    (code, text, self.source.future_flags, true)
                 }
             };
-            let text = child
-                .original_text
-                .as_deref()
-                .unwrap_or(&child.body.source.text);
             alternatives.push(sites::CompiledExecAlternative {
                 entry: code,
-                flags: child.body.source.future_flags,
+                flags,
                 source: output.data(text.as_bytes()),
-                expression: false,
-                file: child.file.is_some().then_some(file),
+                expression,
+                file: path.is_some().then_some(file),
             });
         }
         let compiled = sites::CompiledExec { alternatives };

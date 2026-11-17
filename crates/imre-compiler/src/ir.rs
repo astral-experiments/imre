@@ -1860,6 +1860,8 @@ pub(crate) enum RegisteredCallTarget {
     Callable {
         end: ruff_text_size::TextSize,
         suspended_name: Option<ruff_text_size::TextRange>,
+        /// The direct source name survives a checked local or shadowed target.
+        direct_eval: bool,
     },
     /// The fixed checker resolved builtin exec and checked the written str operand.
     FixedExec {

@@ -27,6 +27,12 @@ pub(crate) struct LiteralCandidate {
     pub(crate) file: Option<PathBuf>,
 }
 
+/// The selected source is either a prepared suite or a checked literal expression.
+pub(super) enum LiteralBody<'a> {
+    Suite(&'a PreparedLiteral),
+    Expression(&'a str),
+}
+
 pub(super) struct PreparedLiteral {
     pub(super) body: PreparedBody<'static>,
     /// Original operand bytes when source decoding or normalization changed the checked text.
@@ -42,6 +48,23 @@ pub(crate) struct LiteralSites {
 }
 
 impl LiteralSites {
+    /// Borrow the selected suites or the one checked expression at this call.
+    pub(super) fn plan<'a>(
+        &'a self,
+        site: TextRange,
+        expression: Option<&'a str>,
+    ) -> Option<Result<impl Iterator<Item = LiteralBody<'a>>, (TextSize, &'a str)>> {
+        let (suites, expression) = match self.sites.get(&site) {
+            Some(Ok(suites)) => (suites.as_slice(), None),
+            Some(Err((operand, reason))) => return Some(Err((*operand, reason.as_str()))),
+            None => (&[][..], Some(expression?)),
+        };
+        Some(Ok(suites
+            .iter()
+            .map(LiteralBody::Suite)
+            .chain(expression.map(LiteralBody::Expression))))
+    }
+
     fn insert(&mut self, site: LiteralSite, body: Result<PreparedLiteral, String>) {
         match body {
             Ok(mut body) => {
@@ -71,33 +94,6 @@ impl LiteralSites {
 
     pub(crate) fn has_refusals(&self) -> bool {
         self.sites.values().any(Result::is_err)
-    }
-
-    /// Absence means the ordinary callable owns this string. A selected builtin
-    /// with a refused child must retain its diagnostic through placement.
-    pub(super) fn body(
-        &self,
-        site: TextRange,
-    ) -> Option<Result<&PreparedLiteral, (TextSize, &str)>> {
-        Some(
-            self.sites
-                .get(&site)?
-                .as_ref()
-                .map(|bodies| bodies.first().expect("selected literal body"))
-                .map_err(|(operand, reason)| (*operand, reason.as_str())),
-        )
-    }
-
-    pub(super) fn bodies(
-        &self,
-        site: TextRange,
-    ) -> Option<Result<&[PreparedLiteral], (TextSize, &str)>> {
-        Some(
-            self.sites
-                .get(&site)?
-                .as_deref()
-                .map_err(|(operand, reason)| (*operand, reason.as_str())),
-        )
     }
 }
 

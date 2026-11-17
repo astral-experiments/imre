@@ -1264,6 +1264,9 @@ def method_argument_lifetime():
 def source_eval():
     make = tuple
     assert eval("make([2, 1])") == (2, 1)
+    def shadowed(eval):
+        return eval("1 +")
+    assert shadowed(lambda source: ("shadow", source)) == ("shadow", "1 +")
     assert eval("(make := 3)") == 3 and make is tuple
     supplied = {"a": 9}
     code = compile("a * 2", "<expr>", "eval")

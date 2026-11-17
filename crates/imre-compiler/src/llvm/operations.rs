@@ -328,7 +328,20 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         use ir::{RegisteredArguments, RegisteredCallTarget};
 
         let frame = self.python();
-        let exec = frame.exec_literal_at(call.range);
+        let expression = matches!(
+            call.target,
+            RegisteredCallTarget::Callable {
+                direct_eval: true,
+                ..
+            }
+        )
+        .then(|| args.first())
+        .flatten()
+        .and_then(|value| match &value.without_location().kind {
+            ExprKind::Str(text) => Some(text.as_str()),
+            _ => None,
+        });
+        let exec = frame.exec_literal_at(call.range, expression);
         let mark = usage.operand_mark(frame);
         let edge = frame.begin_operand_scope();
         if frame.native_suspension

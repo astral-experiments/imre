@@ -6860,6 +6860,7 @@ print(choose({left}), choose({right}))
                 let ir::RegisteredCallTarget::Callable {
                     end,
                     suspended_name: Some(name),
+                    ..
                 } = site.call.target
                 else {
                     panic!("expected a named callable")

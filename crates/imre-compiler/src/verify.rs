@@ -1125,6 +1125,7 @@ mod tests {
                 ir::RegisteredCallTarget::Callable {
                     end: 1.into(),
                     suspended_name: None,
+                    direct_eval: false,
                 },
                 ir::RegisteredArguments::Positional,
             )
