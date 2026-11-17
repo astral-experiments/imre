@@ -2344,6 +2344,9 @@ impl Session {
     }
 
     /// Track the exact suites excluded by the selected entry profile for cross-file diagnostics.
+    /// Module IDs must belong to this session, and ranges must come from the profile's
+    /// excluded suites rather than a broader function or module span. Salsa tracks the
+    /// resulting path-based map so changing or copying the profile invalidates the proof.
     pub(crate) fn set_profile_exclusions(
         &mut self,
         exclusions: impl IntoIterator<Item = (usize, Vec<TextRange>)>,
