@@ -1,3 +1,7 @@
 The primary stock suite contains 137 originals including the itertools.batched doctest. The companion FILE registers the 138th original on stock. Aggregate native runs were stopped at expensive originals; the individual logs concatenate exact raw stderr from separately bounded original-ID invocations, with explicit argv headers. Each result line is emitted by the suite runner, not reconstructed. The doctest is discovered by the intact stock load_tests hook. Companion evidence uses the canonical FILE runner. No missing original or diagnostic is counted as a pair.
 
 `run.json` records the pinned source/build hashes, exact commands, flags, environments, process results, and raw stream hashes. `receipt_runner.py` only changes unittest result descriptions and limits printed failure details; the original test files and complete fixtures are unchanged.
+
+The fresh O0 architecture control imported a separate first-party module containing `status: int = True` from the actual positive launcher, with the same finite suite declarations. It exited 0, produced an image, and emitted no expected int/got bool diagnostic. All prospective pairs from this launcher are unverified and have `omission_reason` set; observed native outcomes remain intact. See `architecture-control/run.json`.
+
+The retained O0 and O3 artifacts passed one original with the staged launcher and suite source withdrawn. The execve traces show no CPython process for those selected observations; this does not repair the failed control. See `source-withdrawal/run.json`.

@@ -274,5 +274,13 @@
       "git_blob": "5cf6d64f3eade60b65f1324ae394454e97883c45",
       "sha256": "d68a4d04d2cfd95897498307f29349058b42c3f48ea6aa6739714a09200a7d01"
     }
-  ]
+  ],
+  "architecture_control": {
+    "evidence": "architecture-control/run.json",
+    "control_passed": false,
+    "exit_code": 0,
+    "expected_int_got_bool": false,
+    "image_exists": true
+  },
+  "source_withdrawal": "source-withdrawal/run.json"
 }

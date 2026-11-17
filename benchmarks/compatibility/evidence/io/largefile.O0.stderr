@@ -1,0 +1,30 @@
+test_large_read (test.test_largefile.CLargeFileTest.test_large_read) ... skipped 'not enough memory: 4.7G minimum needed'
+test_lseek (test.test_largefile.CLargeFileTest.test_lseek) ... ok
+test_osstat (test.test_largefile.CLargeFileTest.test_osstat) ... ok
+test_seek_read (test.test_largefile.CLargeFileTest.test_seek_read) ... ok
+test_seek_readall (test.test_largefile.CLargeFileTest.test_seek_readall) ... skipped 'not enough memory: 4.7G minimum needed'
+test_seekable (test.test_largefile.CLargeFileTest.test_seekable) ... ok
+test_truncate (test.test_largefile.CLargeFileTest.test_truncate) ... ok
+test_large_read (test.test_largefile.PyLargeFileTest.test_large_read) ... skipped 'not enough memory: 4.7G minimum needed'
+test_lseek (test.test_largefile.PyLargeFileTest.test_lseek) ... ok
+test_osstat (test.test_largefile.PyLargeFileTest.test_osstat) ... ok
+test_seek_read (test.test_largefile.PyLargeFileTest.test_seek_read) ... ok
+test_seek_readall (test.test_largefile.PyLargeFileTest.test_seek_readall) ... skipped 'not enough memory: 4.7G minimum needed'
+test_seekable (test.test_largefile.PyLargeFileTest.test_seekable) ... ok
+test_truncate (test.test_largefile.PyLargeFileTest.test_truncate) ... ok
+test_it (test.test_largefile.TestCopyfile.test_it) ... ok
+test_it (test.test_largefile.TestSocketSendfile.test_it) ... ERROR
+test_it (test.test_largefile.TestSocketSendfile.test_it) ... ERROR
+
+ERROR: test.test_largefile.TestSocketSendfile.test_it
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+ERROR: test.test_largefile.TestSocketSendfile.test_it
+  File "<imre stdlib>/threading.py", line 95, in join
+    raise RuntimeError("cannot join thread before it is started")
+RuntimeError: cannot join thread before it is started
+----------------------------------------------------------------------
+Ran 16 tests in 24.796s
+
+FAILED (errors=2, skipped=4)

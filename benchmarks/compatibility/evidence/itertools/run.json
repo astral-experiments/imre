@@ -456,5 +456,13 @@
     "git_blob": "e384329c4df0e201fc689c3ac3e64ea417c2dcc1",
     "sha256": "8d4141056bcba808624ffd153372a7bdb9e8d3036bbdffe733e2239b04137b7d"
   },
-  "aggregate_stop_note": "O0 and O3 aggregate selections were manually terminated at expensive originals (exit -9). Individual invocations have independent eight-second bounds."
+  "aggregate_stop_note": "O0 and O3 aggregate selections were manually terminated at expensive originals (exit -9). Individual invocations have independent eight-second bounds.",
+  "architecture_control": {
+    "evidence": "architecture-control/run.json",
+    "control_passed": false,
+    "exit_code": 0,
+    "expected_int_got_bool": false,
+    "image_exists": true
+  },
+  "source_withdrawal": "source-withdrawal/run.json"
 }
