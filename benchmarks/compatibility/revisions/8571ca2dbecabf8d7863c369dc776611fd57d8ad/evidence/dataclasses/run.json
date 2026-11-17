@@ -1,0 +1,248 @@
+{
+  "family": "dataclasses",
+  "revision": "8571ca2dbecabf8d7863c369dc776611fd57d8ad",
+  "source": {
+    "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "git_blob": "fed32260c792707dbe9f43b7da4b99dd8ebcea2d",
+    "path": "Lib/test/test_dataclasses/__init__.py",
+    "repo": "https://github.com/python/cpython",
+    "sha256": "725ec19fa8c47f91b7aed7a8f2b1f3e74e6454647efd11e9a3e0e29245605af0"
+  },
+  "platform": {
+    "os": "linux",
+    "arch": "x86_64",
+    "release": "6.18.57"
+  },
+  "launcher_sha256": "f5ca0896c887d052e46040d323c8043dd30b7ed95277a3b5f9419d06a943c5a2",
+  "stock_version": "Python 3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+  "stock_python_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+  "runs": {
+    "stock": {
+      "argv": [
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses/launcher.py"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 180.0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "64aefbdd4c557b604c87014309807d8139e582234b85ccbad63c9f35cc67ef87",
+      "environment": {
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "PYTHONPATH": "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib"
+      },
+      "collection": 276,
+      "inventory_complete": true,
+      "summary": {
+        "event": "summary",
+        "run": 276,
+        "successful": true
+      },
+      "cwd": "/workspace/scratch/dataclasses-857-empty"
+    },
+    "O0": {
+      "argv": [
+        "/workspace/scratch/dataclasses-857-images/O0.exe"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/dataclasses-857-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+        "IMREFLAGS": "--opt-level 0",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+      },
+      "cwd": "/workspace/scratch/dataclasses-857-empty",
+      "build": {
+        "argv": [
+          "/workspace/imre/target/release/imre",
+          "build",
+          "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses/launcher.py",
+          "--module-root",
+          "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses",
+          "--extension-path",
+          "/workspace/scratch/dataclasses-857-fixtures/Lib",
+          "--no-cache",
+          "--quiet",
+          "--opt-level",
+          "0",
+          "--runtime",
+          "/workspace/imre/target/release/libimre_runtime.a",
+          "--clang",
+          "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+          "--include-module",
+          "test.test_dataclasses",
+          "--include-module",
+          "test.test_dataclasses.dataclass_module_1",
+          "--include-module",
+          "test.test_dataclasses.dataclass_module_1_str",
+          "--include-module",
+          "test.test_dataclasses.dataclass_module_2",
+          "--include-module",
+          "test.test_dataclasses.dataclass_module_2_str",
+          "--include-module",
+          "test.test_dataclasses.dataclass_textanno",
+          "-o",
+          "/workspace/scratch/dataclasses-857-images/O0.exe"
+        ],
+        "cwd": "/workspace/imre-dataclasses-data",
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 300,
+        "seconds": 17.232,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/dataclasses-857-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "IMREFLAGS": "--opt-level 0",
+          "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+        }
+      },
+      "image_sha256": "9045034642f8d15c65e207fab86824806008e11f12e06b2cb66a3e9b207181cf",
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 180,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "00cfd96ef0f42dee4a8be25d281693e9f91967d6d974617f417edc512912c564",
+      "withdrawal": {
+        "supervisor_argv": [
+          "strace",
+          "-f",
+          "-qq",
+          "-s",
+          "512",
+          "-e",
+          "trace=execve,execveat,open,openat,openat2,creat,io_uring_setup,newfstatat,rename,wait4,exit_group",
+          "-o",
+          "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses/raw-control/O0.trace",
+          "/workspace/scratch/raw-control-probe",
+          "withdraw",
+          "/workspace/scratch/dataclasses-857-fixtures/Lib/test",
+          "/workspace/scratch/dataclasses-857-fixtures/Lib/test.raw-control-stash",
+          "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/__init__.py",
+          "/workspace/scratch/dataclasses-857-images/O0.exe"
+        ],
+        "supervisor_exit_code": 0,
+        "timed_out": false,
+        "readelf": {
+          "argv": [
+            "readelf",
+            "-d",
+            "/workspace/scratch/dataclasses-857-images/O0.exe"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "2b4c0f45e6facc9ebf2b63eb2c86b3ceebeb5ccac711304ea84435a1a159a17a"
+        }
+      }
+    },
+    "O3": {
+      "argv": [
+        "/workspace/scratch/dataclasses-857-images/O3.exe"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/dataclasses-857-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+        "IMREFLAGS": "--opt-level 3",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+      },
+      "cwd": "/workspace/scratch/dataclasses-857-empty",
+      "build": {
+        "argv": [
+          "/workspace/imre/target/release/imre",
+          "build",
+          "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses/launcher.py",
+          "--module-root",
+          "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses",
+          "--extension-path",
+          "/workspace/scratch/dataclasses-857-fixtures/Lib",
+          "--no-cache",
+          "--quiet",
+          "--opt-level",
+          "3",
+          "--runtime",
+          "/workspace/imre/target/release/libimre_runtime.a",
+          "--clang",
+          "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+          "--include-module",
+          "test.test_dataclasses",
+          "--include-module",
+          "test.test_dataclasses.dataclass_module_1",
+          "--include-module",
+          "test.test_dataclasses.dataclass_module_1_str",
+          "--include-module",
+          "test.test_dataclasses.dataclass_module_2",
+          "--include-module",
+          "test.test_dataclasses.dataclass_module_2_str",
+          "--include-module",
+          "test.test_dataclasses.dataclass_textanno",
+          "-o",
+          "/workspace/scratch/dataclasses-857-images/O3.exe"
+        ],
+        "cwd": "/workspace/imre-dataclasses-data",
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 600,
+        "seconds": 76.967,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/dataclasses-857-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "IMREFLAGS": "--opt-level 3",
+          "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+        }
+      },
+      "image_sha256": "948be21a43c2196ae329f02fb97602990883b9a8175ba6aeb06a4b90692fe7a3",
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 180,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "00cfd96ef0f42dee4a8be25d281693e9f91967d6d974617f417edc512912c564",
+      "withdrawal": {
+        "supervisor_argv": [
+          "strace",
+          "-f",
+          "-qq",
+          "-s",
+          "512",
+          "-e",
+          "trace=execve,execveat,open,openat,openat2,creat,io_uring_setup,newfstatat,rename,wait4,exit_group",
+          "-o",
+          "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses/raw-control/O3.trace",
+          "/workspace/scratch/raw-control-probe",
+          "withdraw",
+          "/workspace/scratch/dataclasses-857-fixtures/Lib/test",
+          "/workspace/scratch/dataclasses-857-fixtures/Lib/test.raw-control-stash",
+          "/workspace/scratch/dataclasses-857-fixtures/Lib/test/test_dataclasses/__init__.py",
+          "/workspace/scratch/dataclasses-857-images/O3.exe"
+        ],
+        "supervisor_exit_code": 0,
+        "timed_out": false,
+        "readelf": {
+          "argv": [
+            "readelf",
+            "-d",
+            "/workspace/scratch/dataclasses-857-images/O3.exe"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "18dab85c25c1af2e015dafad67c7db6518ef6fda242f832c18dec42927455b87"
+        }
+      }
+    }
+  }
+}
