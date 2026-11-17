@@ -7,7 +7,7 @@ from importlib.machinery import FileFinder as _PathFileFinder
 from importlib.util import resolve_name as _spec_name
 from os import fsdecode
 from os.path import abspath as _absolute, dirname, join as _join
-from typing import NamedTuple
+from typing import Iterator as _Iterator, NamedTuple
 from _imre_importlib import module_suffixes as _target_suffixes
 from _imre_pkgutil import (
     filenames as _filenames,

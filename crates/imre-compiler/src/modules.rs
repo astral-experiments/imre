@@ -3197,10 +3197,15 @@ impl SourceModule {
                 return Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(export)));
             }
         }
-        if self.is_bundled("pkgutil") && name == "resolve_name" {
-            return Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
-                "pkgutil.resolve_name",
-            )));
+        if self.is_bundled("pkgutil") {
+            let export = match name {
+                "get_data" => Some("pkgutil.get_data"),
+                "resolve_name" => Some("pkgutil.resolve_name"),
+                _ => None,
+            };
+            if let Some(export) = export {
+                return Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(export)));
+            }
         }
         if self.is_bundled("platform") && name == "win32_is_iot" {
             return Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
@@ -5412,7 +5417,11 @@ impl<'a> Loader<'a> {
                     if resolve_binding(&self.modules, id, &guard.test)
                         == Some(Binding::Intrinsic(Intrinsic::TypeChecking))
                         && guard.elif_else_clauses.is_empty()
-                        && guard.body.iter().all(type_aliases::type_statement) =>
+                        && guard.body.iter().all(|statement| {
+                            type_aliases::type_statement(statement)
+                                || matches!(statement, ast::Stmt::FunctionDef(function)
+                                    if signature_declaration(function))
+                        }) =>
                 {
                     self.modules[id].type_guards.push(index);
                     for stmt in &guard.body {
@@ -7743,23 +7752,30 @@ fn native_declaration(statement: &ast::Stmt) -> bool {
                 })
         }
         ast::Stmt::Expr(doc) => matches!(&*doc.value, ast::Expr::StringLiteral(_)),
-        ast::Stmt::FunctionDef(f) => {
-            !f.is_async
-                && f.type_params.is_none()
-                && f.decorator_list.is_empty()
-                && f.returns.is_some()
-                && f.parameters.args.is_empty()
-                && f.parameters.kwonlyargs.is_empty()
-                && f.parameters.vararg.is_none()
-                && f.parameters.kwarg.is_none()
-                && f.parameters
-                    .posonlyargs
-                    .iter()
-                    .all(|p| p.annotation().is_some() && p.default.is_none())
-                && matches!(f.body.as_slice(), [ast::Stmt::Expr(s)] if matches!(&*s.value, ast::Expr::EllipsisLiteral(_)))
-        }
+        ast::Stmt::FunctionDef(f) => signature_declaration(f) && f.parameters.args.is_empty(),
         _ => false,
     }
+}
+
+/// Recognize a signature-only declaration that cannot run a Python body. Both native
+/// stubs and `TYPE_CHECKING` suites use required, annotated positional parameters;
+/// native stubs additionally restrict them to positional-only parameters.
+fn signature_declaration(function: &ast::StmtFunctionDef) -> bool {
+    !function.is_async
+        && function.type_params.is_none()
+        && function.decorator_list.is_empty()
+        && function.returns.is_some()
+        && function.parameters.kwonlyargs.is_empty()
+        && function.parameters.vararg.is_none()
+        && function.parameters.kwarg.is_none()
+        && function
+            .parameters
+            .posonlyargs
+            .iter()
+            .chain(&function.parameters.args)
+            .all(|parameter| parameter.annotation().is_some() && parameter.default.is_none())
+        && matches!(function.body.as_slice(), [ast::Stmt::Expr(statement)]
+            if matches!(&*statement.value, ast::Expr::EllipsisLiteral(_)))
 }
 
 pub(crate) fn declaration_name(statement: &ast::Stmt) -> Option<&ast::Identifier> {
@@ -8109,6 +8125,35 @@ else:
             .unwrap();
         assert_eq!(selected.path, child);
         assert!(selected.is_program_source());
+    }
+
+    #[test]
+    fn signature_declarations_reject_executable_or_open_signatures() {
+        let accepts = |source: &str| {
+            let parsed = ruff_python_parser::parse_module(source).unwrap();
+            let super::ast::Stmt::FunctionDef(function) = &parsed.syntax().body[0] else {
+                panic!("expected function");
+            };
+            super::signature_declaration(function)
+        };
+        assert!(accepts(
+            "def get_data(package: str, resource: str) -> bytes | None: ...\n"
+        ));
+        assert!(accepts("def native(data: bytes, /) -> int: ...\n"));
+        for source in [
+            "async def f(x: int) -> int: ...\n",
+            "@decorator\ndef f(x: int) -> int: ...\n",
+            "def f(x) -> int: ...\n",
+            "def f(x: int): ...\n",
+            "def f(x: int = 0) -> int: ...\n",
+            "def f(*, x: int) -> int: ...\n",
+            "def f(*args: int) -> int: ...\n",
+            "def f(**kwargs: int) -> int: ...\n",
+            "def f(x: int) -> int: return x\n",
+            "def f(x: int) -> int:\n    ...\n    return x\n",
+        ] {
+            assert!(!accepts(source), "{source}");
+        }
     }
 
     #[test]

@@ -816,8 +816,17 @@ fn lower_graph(
     let mut callable_definitions = Vec::new();
     // A source method needs its original binder and operand sites if its
     // callable layout requires a registered frame.
-    let can_transfer_frames = !classes.declarations.definitions.is_empty()
-        || !classes.declarations.registered_classes.is_empty();
+    let entry_may_call = graph.entry_may_call();
+    let can_transfer_frames = classes
+        .declarations
+        .definitions
+        .iter()
+        .any(|class| entry_may_call(&class.definition))
+        || classes
+            .declarations
+            .registered_classes
+            .iter()
+            .any(entry_may_call);
     for (module_id, module) in graph.modules.iter().enumerate() {
         if !module.executable.is_empty() {
             inference.discover_list_elements(graph, module_id, None);
@@ -2526,7 +2535,13 @@ fn registered_entry(
             .classified(Kind::ScopedObject));
         }
     }
-    if graph.registered_startup {
+    if graph.registered_startup
+        || graph.runtime_initializer.is_none()
+            && matches!(
+                operations.first_object,
+                Some((ir::ObjectCall::PkgutilGetData, _, _))
+            )
+    {
         return Ok(Some(crate::CheckedProgram::Registered(None)));
     }
     let reason = graph
@@ -2539,6 +2554,7 @@ fn registered_entry(
                 ir::ObjectCall::ExecText => ("exec", Kind::ScopedObject),
                 ir::ObjectCall::FormatField => ("this f-string field", Kind::Ordinary),
                 ir::ObjectCall::SocketSendfile => ("socket.sendfile", Kind::Object),
+                ir::ObjectCall::PkgutilGetData => ("pkgutil.get_data", Kind::ScopedObject),
             };
             let source = &graph.modules[id];
             Some(
@@ -13942,6 +13958,55 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::CachedProperty)) => {
                 return Err(self.object_runtime_export("functools.cached_property", call));
             }
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport("pkgutil.get_data"))) => {
+                let params = [
+                    parameter("package", Type::Str, None),
+                    parameter("resource", Type::Str, None),
+                ];
+                let args = self.arguments(call, &params, None)?;
+                let value = Expr {
+                    ty: self.types.optional(Type::Bytes),
+                    kind: ExprKind::Builtin(
+                        Builtin::ObjectCall(
+                            ir::ObjectCall::PkgutilGetData,
+                            self.module,
+                            call.range(),
+                        ),
+                        args.values,
+                    ),
+                };
+                if self.namespace.is_none() {
+                    let target = if let Some(field) = call.func.as_attribute_expr()
+                        && let Some(module) = field.value.as_name_expr()
+                        && !self.names.contains_key(module.id.as_str())
+                        && !ruff_python_stdlib::identifiers::is_mangled_private(module.id.as_str())
+                    {
+                        self.graph.modules[self.module]
+                            .registered_values()
+                            .operands(self.source, self.graph.python_optimization())
+                            .imported_call(
+                                module,
+                                call,
+                                self.graph.session.operand_types(self.module),
+                            )
+                    } else {
+                        self.placed_call_name(call).map(|name| {
+                            FixedAttribute::bound_call(
+                                call,
+                                registered::values::located_name(name),
+                                None,
+                            )
+                        })
+                    };
+                    if let (Some(target), Some(sites)) = (target, &mut self.fixed_sites)
+                        && let Some(written) = value.named_call_arguments()
+                        && sites.has_written_arguments(call, written)
+                    {
+                        sites.written_call(call, &value, || Some(target));
+                    }
+                }
+                return Ok(value);
+            }
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
                 name @ ("bisect.bisect_left" | "bisect.bisect_right"),
             ))) => {
@@ -14873,7 +14938,7 @@ impl<'a> Checker<'a> {
                 sites.invoked(call, &placed);
                 return Ok(placed);
             }
-            self.record_named_call(call, &value);
+            self.record_positional_call(call, &value);
             return Ok(value);
         }
         if matches!(&*call.func, ast::Expr::Name(name) if self.names.contains_key(name.id.as_str()))

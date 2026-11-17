@@ -80,6 +80,25 @@ OPTIONAL_DORMANT_PROBE = {
 }
 
 REJECTED = {
+    "pkgutil_get_data_preserves_imported_contract": ({
+        "main.py": (
+            "import pkgutil\nimport scores\n"
+            "data = pkgutil.get_data('observedpkg', 'one.txt')\n"
+            "print(scores.score('wrong'))\n"
+        ),
+        "scores.py": "def score(value: int) -> int:\n    return value\n",
+        "observedpkg/__init__.py": "pass\n",
+        "observedpkg/one.txt": "payload\n",
+    }, "expected int, got str"),
+    "pkgutil_get_data_checks_argument": ({
+        "main.py": "from pkgutil import get_data as read\nread(1, 'resource')\n",
+    }, "expected str, got int"),
+    "pkgutil_get_data_checks_result": ({
+        "main.py": "import pkgutil as tools\nstatus: int = tools.get_data('unknown', 'resource')\n",
+    }, "expected int, got bytes | None"),
+    "pkgutil_get_data_preserves_assignment": ({
+        "main.py": "import pkgutil\npkgutil.get_data('unknown', 'resource')\nstatus: int = True\n",
+    }, "expected int, got bool"),
     "optional_probe_with_invalid_dormant_call": (
         OPTIONAL_DORMANT_PROBE, "error[missing-argument]"
     ),
@@ -1777,6 +1796,40 @@ ACCEPTED = {
             "    print(msg['Subject'], msg.get_payload(decode=True), fp.read())\n"
         ),
     },
+    "pkgutil_get_data_keywords": {
+        "main.py": (
+            "import pkgutil as tools\nfrom pkgutil import get_data as read\n"
+            "package = 'observedpkg'\n"
+            "first = tools.get_data(resource='one.txt', package=package)\n"
+            "second = read(resource='one.txt', package='observedpkg')\n"
+            "print(first is not None and first == b'payload\\n', "
+            "second is not None and second == b'payload\\n')\n"
+        ),
+        "observedpkg/__init__.py": "print('initialize')\n",
+        "observedpkg/one.txt": "payload\n",
+    },
+    "pkgutil_get_data_initializes_package": {
+        "main.py": (
+            "from pathlib import Path\nimport pkgutil as tools\nfrom pkgutil import get_data as read\nfrom importlib import import_module\n"
+            "marker = Path('pkgutil_initialized.marker')\nmarker.unlink(missing_ok=True)\n"
+            "print('before', marker.exists())\n"
+            "data = tools.get_data('observedpkg', 'one.txt')\n"
+            "print(data is not None and data == b'payload\\n', marker.exists())\n"
+            "again = read(resource='one.txt', package='observedpkg')\nimport_module('observedpkg')\n"
+            "print(again is not None and again == b'payload\\n', marker.read_text() == 'once\\n')\n"
+            "print(tools.get_data('missing_pkgutil_package', 'one.txt') is None)\n"
+            "try:\n    tools.get_data('observedpkg', 'missing.txt')\n"
+            "except FileNotFoundError:\n    print('missing resource')\n"
+            "try:\n    tools.get_data('brokenpkg', 'one.txt')\n"
+            "except ValueError as error:\n    print(str(error))\n"
+        ),
+        "observedpkg/__init__.py": (
+            "from pathlib import Path\nprint('initialize')\n"
+            "with Path('pkgutil_initialized.marker').open('a') as marker:\n    marker.write('once\\n')\n"
+        ),
+        "observedpkg/one.txt": "payload\n",
+        "brokenpkg/__init__.py": "raise ValueError('initialization failed')\n",
+    },
     "zip_source_spec": {
         "main.py": (
             "import sys\nimport zipimport\nfrom importlib import import_module, invalidate_caches\n"
@@ -2281,6 +2334,8 @@ NATIVE_REFUSALS = {
     "source_loader_compile_override": (ACCEPTED.pop("source_loader_compile_override"), ""),
 }
 FINITE_IMPORTS = {
+    "pkgutil_get_data_initializes_package": ("observedpkg",),
+    "pkgutil_get_data_keywords": ("observedpkg",),
     "reload_source_plugin": ("plugins.report",),
     "late_importlib_abc": ("installed_loader_plugin",),
     "lazy_loader": ("price_plugin",),
@@ -2490,7 +2545,7 @@ def main() -> None:
                     "builtin_method_creation", "email_address_parsers", "filesystem_resources", "fractions_indirect",
                     "function_type_for_selected_callback", "lzma_formats_and_error",
                     "nullable_forwarder_uses_live_target_and_default", "optional_stdlib_probe_in_dependency",
-                    "platform_iot_indirect", "record_warnings",
+                    "platform_iot_indirect", "pkgutil_get_data_initializes_package", "pkgutil_get_data_keywords", "record_warnings",
                     "sdk_import_after_provider_hint", "source_loader_external_code", "source_loader_namespace_directory",
                     "warn_named_helper",
                     "zip_source_spec",
@@ -2501,7 +2556,18 @@ def main() -> None:
                 if name == "late_importlib_abc":
                     (case / "installed_loader_plugin.py").unlink()
                 arguments = ["41"] if name == "source_loader_external_code" else []
-                result = run([str(executable), *arguments], temporary)
+                withheld = []
+                if name == "pkgutil_get_data_initializes_package":
+                    for relative in ("main.py", "observedpkg/__init__.py", "brokenpkg/__init__.py"):
+                        source = case / relative
+                        hidden = source.with_suffix(".withheld")
+                        source.rename(hidden)
+                        withheld.append((source, hidden))
+                try:
+                    result = run([str(executable), *arguments], temporary)
+                finally:
+                    for source, hidden in withheld:
+                        hidden.rename(source)
                 require_success(result)
                 assert result.stdout == baseline.stdout, (name, level, result.stdout, baseline.stdout)
                 if name == "entry_module_attribute_guard":
@@ -2707,6 +2773,11 @@ def main() -> None:
             result = run([compiler, "check", str(case / "main.py")], temporary)
             assert result.returncode != 0 and expected in result.stderr, (name, result.stdout, result.stderr)
             checks += 1
+            if name.startswith("pkgutil_get_data_"):
+                executable = temporary / f"rejected-{name}"
+                result = run([compiler, "build", str(case / "main.py"), "-o", str(executable)], temporary)
+                assert result.returncode != 0 and expected in result.stderr and not executable.exists(), (name, result)
+                checks += 1
 
         for name, (files, exception) in RUNTIME_ERRORS.items():
             case = temporary / name
