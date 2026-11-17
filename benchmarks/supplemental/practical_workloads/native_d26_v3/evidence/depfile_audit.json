@@ -1,18 +1,28 @@
 {
+  "audit_history": {
+    "archived_controller_sha256": "0fa80a8984d0b6f89c2edfb2550fab3eb3876063299fd814aec65f9e34858127",
+    "correction_proof_sha256": "5019d454020f84a9a4ec43c7bd05e8a299d4b581ad80910f3215a065c7fd4b99",
+    "correction_verifier_sha256": "eadc5d28ea5194d00e9e0f44603dce7538a93f8a54fe3447e1dd5e3b60e7cd9b",
+    "meaning": "The as-used audit compared raw Git blob OIDs first and then invoked git hash-object --path on mismatches. Its tracked_exact_git_blobs count meant Git-clean-filter canonical identity, not raw checkout-byte identity. The archived controller source is unchanged."
+  },
   "depfiles": {
     "compiler": {
       "generated": 2,
       "inputs": 781,
       "lexical_dotdot": 37,
       "raw_sha256": "d1280bfa57e6c4b2dc0e803367c06cef0573beb0011068aebc6f95baa6d454a2",
-      "tracked_exact_git_blobs": 779
+      "tracked_canonical_git_blobs": 779,
+      "tracked_deterministic_attribute_transforms": 3,
+      "tracked_raw_exact": 776
     },
     "runtime": {
       "generated": 5,
       "inputs": 604,
       "lexical_dotdot": 0,
       "raw_sha256": "5b14c33c7da7caadde520d027330453bfd41d0b2315683c3cf799322547c3fba",
-      "tracked_exact_git_blobs": 599
+      "tracked_canonical_git_blobs": 599,
+      "tracked_deterministic_attribute_transforms": 0,
+      "tracked_raw_exact": 599
     }
   },
   "generated": [

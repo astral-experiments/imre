@@ -1,0 +1,77 @@
+{
+  "depfiles": {
+    "compiler": {
+      "deterministic_attribute_transforms": 3,
+      "generated_separately_bound": 2,
+      "inputs": 781,
+      "raw_depfile_sha256": "d1280bfa57e6c4b2dc0e803367c06cef0573beb0011068aebc6f95baa6d454a2",
+      "raw_exact": 776
+    },
+    "runtime": {
+      "deterministic_attribute_transforms": 0,
+      "generated_separately_bound": 5,
+      "inputs": 604,
+      "raw_depfile_sha256": "5b14c33c7da7caadde520d027330453bfd41d0b2315683c3cf799322547c3fba",
+      "raw_exact": 599
+    }
+  },
+  "revision": "d26f19448c70c00039c305f105a85c215f820577",
+  "tracked_gitattributes": {
+    "blob_oid": "9240d24318f0a174c8c8e8bbe2489488179fd2f0",
+    "content_sha256": "a89403f68ff7e2bfcd0bc6a35009f48791ac5b26da5dd963324ed67f42b527f3",
+    "rules": [
+      "crates/imre-compiler/stdlib/venv/scripts/common/Activate.ps1 text eol=crlf",
+      "crates/imre-compiler/stdlib/venv/scripts/nt/*.bat text eol=crlf"
+    ]
+  },
+  "transforms": [
+    {
+      "attributes": {
+        "eol": "crlf",
+        "filter": "unspecified",
+        "ident": "unspecified",
+        "text": "set",
+        "working-tree-encoding": "unspecified"
+      },
+      "canonical_blob_oid": "d75b8fbcfc77781ebc84c0d8486e3df2c5cecfc1",
+      "canonical_bytes": 8783,
+      "canonical_content_sha256": "5048933e070dfd063dcff5ab368ddface38ad296ec9795a49259e66333c086b3",
+      "path": "crates/imre-compiler/stdlib/venv/scripts/common/Activate.ps1",
+      "raw_bytes": 9031,
+      "raw_sha256": "eb8ce20f580877d300c4fed60a7f36daa18715d35c50bb3596d6995d023b4ffe",
+      "relation": "raw == canonical.replace(LF, CRLF); canonical == raw.replace(CRLF, LF); canonical contains no CR"
+    },
+    {
+      "attributes": {
+        "eol": "crlf",
+        "filter": "unspecified",
+        "ident": "unspecified",
+        "text": "set",
+        "working-tree-encoding": "unspecified"
+      },
+      "canonical_blob_oid": "35533e4b551155a166724e9ee498ed15ec6c75d9",
+      "canonical_bytes": 986,
+      "canonical_content_sha256": "ff8416ea4ae22f8a714258d9009d7cdb41d327ba27743f4123eb9fa28189a9a5",
+      "path": "crates/imre-compiler/stdlib/venv/scripts/nt/activate.bat",
+      "raw_bytes": 1020,
+      "raw_sha256": "55e379f69c114f9645999ea7aeb0124a797f230e8340d01df83b3388fd72de28",
+      "relation": "raw == canonical.replace(LF, CRLF); canonical == raw.replace(CRLF, LF); canonical contains no CR"
+    },
+    {
+      "attributes": {
+        "eol": "crlf",
+        "filter": "unspecified",
+        "ident": "unspecified",
+        "text": "set",
+        "working-tree-encoding": "unspecified"
+      },
+      "canonical_blob_oid": "62a39a7584f4d7c5fbc31758e3e9e7eff700276d",
+      "canonical_bytes": 371,
+      "canonical_content_sha256": "51072cbfa09d4744398d97fc7564e37d7c1746d4fbcd973e82dd5f5340b3b382",
+      "path": "crates/imre-compiler/stdlib/venv/scripts/nt/deactivate.bat",
+      "raw_bytes": 393,
+      "raw_sha256": "fb53ed45866fee40f01c907c1f67555a399f98361722d89120d05a2580e9e563",
+      "relation": "raw == canonical.replace(LF, CRLF); canonical == raw.replace(CRLF, LF); canonical contains no CR"
+    }
+  ]
+}

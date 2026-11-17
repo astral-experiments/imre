@@ -71,7 +71,11 @@
   "compiler": "/workspace/imre/target/release/imre",
   "compiler_sha256": "3ba8589edc6db18ace7eed2ddf3480c5214e4090418a5bcc54d563c4e4bbb087",
   "depfile_audit": "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_d26_v3/evidence/depfile_audit.json",
-  "depfile_audit_sha256": "182433aa1837081e4c4201d18c1364283264d85164a0fc17f4bfd35fe0195d2d",
+  "depfile_audit_sha256": "70bf93f0d118e424a4e0ebb5e36c62a34b5574e4f2b029efabc8faa25c0b7cf3",
+  "depfile_correction_proof": "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_d26_v3/evidence/depfile_crlf_proof.json",
+  "depfile_correction_proof_sha256": "5019d454020f84a9a4ec43c7bd05e8a299d4b581ad80910f3215a065c7fd4b99",
+  "depfile_correction_verifier": "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_d26_v3/controls/check_depfile_crlf.py",
+  "depfile_correction_verifier_sha256": "eadc5d28ea5194d00e9e0f44603dce7538a93f8a54fe3447e1dd5e3b60e7cd9b",
   "depfiles": {
     "compiler": {
       "path": "/workspace/imre/target/release/imre.d",
