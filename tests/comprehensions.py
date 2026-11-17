@@ -30,7 +30,7 @@ REJECTED = {
     "wrong_context": "values: list[str] = [value for value in range(3)]\n",
     "wrong_nested_context": "values: list[list[str]] = [[value] for value in range(3)]\n",
     "ambiguous_empty_element": "values = [{} for value in range(0)]\n",
-    "heterogeneous_source": 'values = [value for value in [1, "wrong"]]\n',
+    "annotated_heterogeneous_source": 'values: list[int] = [value for value in [1, "wrong"]]\n',
     "bool_dict_key": "values = {True: value for value in range(3)}\n",
     "mutable_tuple_dict_key": "values = {(value, [value]): value for value in range(3)}\n",
     "bool_set_element": "values = {True for value in range(3)}\n",
@@ -64,6 +64,7 @@ REJECTED["dict_key_invalidates_field"] = FIELD_CASE + "    return {invalidate(r)
 REJECTED["last_filter_invalidates_field"] = FIELD_CASE + "    return {0: r.tag for r in rows if r.tag is not None if invalidate(r)}\n"
 
 CHECKED = {
+    "heterogeneous_source": 'values = [value for value in [1, "wrong"]]\n',
     "direct_helper_recursion": "def recursive(value: int) -> list[int]:\n    return [recursive(value)[0] for item in range(0)]\nrecursive(1)\n",
     "nested_helper_recursion": "def first(value: int) -> list[list[int]]:\n    return [[second(value) for inner in range(0)] for outer in range(0)]\ndef second(value: int) -> int:\n    return first(value)[0][0]\nfirst(1)\n",
     "method_helper_recursion": "class Item:\n    def __init__(self) -> None:\n        pass\n    def values(self) -> list[int]:\n        return [self.values()[0] for index in range(0)]\nItem().values()\n",
