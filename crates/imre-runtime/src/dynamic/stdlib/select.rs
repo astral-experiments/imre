@@ -130,6 +130,9 @@ pub(in crate::dynamic) unsafe fn run(context: *mut Context, args: &[Id]) -> Resu
         },
         |remaining| {
             let interests = sets;
+            if remaining.is_some_and(|duration| duration.is_zero()) {
+                return interests.wait_once(remaining).map(|ready| ready.map(Ok));
+            }
             // SAFETY: only copied native descriptor sets and the remaining duration enter the
             // parked syscall. Its io::Error captures errno before the execution is restored.
             match unsafe { ParkedExecution::wait(context, move || interests.wait_once(remaining)) }
@@ -260,7 +263,7 @@ pub(super) fn call(
     Ok(NONE)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use crate::dynamic::ffi;
@@ -276,7 +279,7 @@ mod tests {
     };
 
     #[test]
-    fn boxed_select_parks_only_while_the_syscall_is_waiting() {
+    fn boxed_select_parks_only_during_a_blocking_syscall() {
         let mut ctx = ffi::new_context(
             serde_json::json!({"paths": []}),
             std::iter::empty::<String>(),
@@ -313,5 +316,13 @@ mod tests {
             panic!("ready list")
         };
         assert_eq!(ready, &[descriptor]);
+
+        // A zero-time poll must not touch the parked execution registry.
+        let zero = ctx.int(0);
+        ctx.heap.keep(zero);
+        parked.store(7, Ordering::Release);
+        // SAFETY: the context and original descriptor arguments remain rooted.
+        unsafe { run(&raw mut ctx, &[reads, writes, errors, zero]) }.unwrap();
+        assert_eq!(parked.load(Ordering::Acquire), 7);
     }
 }
