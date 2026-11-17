@@ -1,0 +1,2 @@
+ Compiling /workspace/scratch/urllib-8571-graph/suite_runner.py (-O0)
+/workspace/scratch/urllib-8571-graph/urllib_poison.py:1:15: Imre: expected int, got bool; annotations are enforced contracts

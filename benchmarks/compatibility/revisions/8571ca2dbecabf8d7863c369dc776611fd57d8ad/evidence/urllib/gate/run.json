@@ -1,0 +1,45 @@
+{
+  "imre_revision": "8571ca2dbecabf8d7863c369dc776611fd57d8ad",
+  "positive_launcher_sha256": "f4421fa147999ac50832f9b399a73cc58e7a7c28eca3511befa5cf4f07476b8a",
+  "poisoned_launcher_sha256": "abad369781bffc0401715fe76889c3f577520e067d3fedb44257d3f476c2b019",
+  "poison_source_sha256": "14841721c7b84f57d26a6a38a53827c683daf10930b9f297cfc15335bd1257b5",
+  "poison_source": "status: int = True\n",
+  "change": "insert import urllib_poison directly after the positive launcher docstring; same source path, module root, fixture extension, O0 flags, CLI and runtime intended for the positive build",
+  "argv": [
+    "/workspace/imre/target/release/imre",
+    "build",
+    "/workspace/scratch/urllib-8571-graph/suite_runner.py",
+    "--module-root",
+    "/workspace/scratch/urllib-8571-graph",
+    "--extension-path",
+    "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+    "--no-cache",
+    "--opt-level",
+    "0",
+    "--runtime",
+    "/workspace/imre/target/release/libimre_runtime.a",
+    "--clang",
+    "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+    "-o",
+    "/workspace/scratch/urllib-8571-graph/poison-O0.exe"
+  ],
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "TMPDIR": "/workspace/scratch/imre-tmp"
+  },
+  "unset_environment": [
+    "IMRE_ENCODED_FLAGS"
+  ],
+  "timeout_seconds": 180,
+  "elapsed_seconds": 0.357,
+  "exit_code": 1,
+  "timed_out": false,
+  "expected_diagnostic_present": true,
+  "output_exists_before": false,
+  "output_exists_after": false,
+  "output_sha256": null,
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "c692b58823d6526c054d5f06055a8b0883f14ec750fc370b44fe911a797b308b",
+  "gate_passed": true
+}

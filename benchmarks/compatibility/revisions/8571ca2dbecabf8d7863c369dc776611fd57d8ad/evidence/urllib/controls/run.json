@@ -1,0 +1,103 @@
+{
+  "compile_commands": [
+    [
+      "cc",
+      "-O2",
+      "-shared",
+      "-fPIC",
+      "/workspace/imre-urllib-8571-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/urllib/controls/denyexec.c",
+      "-o",
+      "/workspace/scratch/urllib-8571-graph/denyexec.so"
+    ],
+    [
+      "cc",
+      "-O2",
+      "-shared",
+      "-fPIC",
+      "/workspace/imre-urllib-8571-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/urllib/controls/auditlibs.c",
+      "-o",
+      "/workspace/scratch/urllib-8571-graph/auditlibs.so"
+    ],
+    [
+      "cc",
+      "-O2",
+      "/workspace/imre-urllib-8571-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/urllib/controls/probe.c",
+      "-o",
+      "/workspace/scratch/urllib-8571-graph/probe",
+      "-ldl"
+    ]
+  ],
+  "artifact_sha256": {
+    "/workspace/scratch/urllib-8571-graph/denyexec.so": "16ceb8f1f111ca93760394d8759427f23675374ff8e54de07e1aa32f840070d7",
+    "/workspace/scratch/urllib-8571-graph/auditlibs.so": "15863cf6a33c94b54e5d61d99113f4a1781cb15cedb8d3db34db32c0f8b47792",
+    "/workspace/scratch/urllib-8571-graph/probe": "8f965413885d00937c0da668f5e58d79084df32cf850882b2fdc8f3b021ea54f"
+  },
+  "child_exec_probe": {
+    "argv": [
+      "/workspace/scratch/urllib-8571-graph/probe",
+      "exec"
+    ],
+    "environment": {
+      "DENYEXEC_LOG": "/workspace/imre-urllib-8571-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/urllib/controls/probe.denyexec.log",
+      "LD_PRELOAD": "/workspace/scratch/urllib-8571-graph/denyexec.so"
+    },
+    "exit_code": 0,
+    "observed": "forked child execve rejected with EPERM"
+  },
+  "libpython_probe": {
+    "argv": [
+      "/workspace/scratch/urllib-8571-graph/probe",
+      "python"
+    ],
+    "environment": {
+      "AUDITLIBS_LOG": "/workspace/imre-urllib-8571-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/urllib/controls/probe.auditlibs.log",
+      "LD_AUDIT": "/workspace/scratch/urllib-8571-graph/auditlibs.so"
+    },
+    "exit_code": 126,
+    "observed": "deliberate libpython load was detected and process exited"
+  },
+  "seccomp": "before main, deny execve and execveat with EPERM; inherited by forked children",
+  "linker_audit": "record every dynamically loaded object and exit 126 on a name containing libpython",
+  "stock_python_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+  "stock_full_version": "Python 3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+  "cpython_source_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "cpython_source_archive_sha256": "0d838be32b52da92a4293ecd99bc91f7be8b4acc573423665bd1a1428be46e47",
+  "platform": {
+    "os": "linux",
+    "arch": "x86_64",
+    "release": "6.18.57"
+  },
+  "summary": {
+    "urlparse": {
+      "stock": {
+        "pass": 77
+      },
+      "O0": {
+        "pass": 77
+      },
+      "O3": {
+        "pass": 77
+      }
+    },
+    "urllib": {
+      "stock": {
+        "pass": 97,
+        "skip": 2,
+        "error": 2
+      },
+      "O0": {
+        "pass": 97,
+        "skip": 2,
+        "error": 2
+      },
+      "O3": {
+        "pass": 97,
+        "skip": 2,
+        "error": 2
+      }
+    }
+  },
+  "receipts": 178,
+  "paired": 174,
+  "repeated_occurrences": 0
+}

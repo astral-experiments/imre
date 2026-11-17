@@ -1,0 +1,13 @@
+# urllib replay at 8571ca2
+
+The exact prior launcher is `suite_runner.py` (SHA-256 `f4421fa147999ac50832f9b399a73cc58e7a7c28eca3511befa5cf4f07476b8a`). It imports the unchanged pinned CPython modules, uses their ordinary unittest loader and lifecycle, and emits one atomic result line per original. `build.json` records the clean public Imre HEAD, offline joint CLI/runtime build command, and artifact digests. `gate/run.json` and raw streams show that injecting only `import urllib_poison` after the launcher's docstring, with a separate first-party `status: int = True` source, made the fresh O0/no-cache build exit 1 with `expected int, got bool` and no executable. The launcher was then restored by hash before the positive builds.
+
+Stock was run fresh using exact CPython 3.14.5 and source commit `5607950ef232dad16d75c0cf53101d9649d89115`; no historical native or stock observation was reused. The full 1,639-file test fixture tree was available to both builds. The saved O0/O3 images remain in Cloud at the paths and hashes in `controls/withdrawal.json`. After building them, the two exact test source files were withdrawn, no matching bytecode was present, and all other 1,637 fixture files remained. Both images ran both selectors with a pre-main seccomp filter denying `execve` and `execveat` for the process and its descendants, plus a dynamic-linker audit that records every loaded object and exits on libpython. The raw probe shows a forked child's exec was denied with EPERM; the libpython probe exited 126 when the audit detected a deliberate load. Each image's ELF dynamic section and each native run's audit/filter logs are retained. No image needed or loaded libpython. Both sources were restored by SHA-256 in a finally block. Full commands, environments, exits, hashes, timeouts and result counts are in the adjacent metadata.
+
+| Suite | Originals | Stock | O0 | O3 | Paired |
+| --- | ---: | --- | --- | --- | ---: |
+| `test_urlparse` | 77 | 77 pass | 77 pass | 77 pass | 77 |
+| `test_urllib` | 101 | 97 pass, 2 skip, 2 error | 97 pass, 2 skip, 2 error | 97 pass, 2 skip, 2 error | 97 |
+| Total | 178 | 174 pass, 2 skip, 2 error | 174 pass, 2 skip, 2 error | 174 pass, 2 skip, 2 error | 174 |
+
+There is no inventory mismatch or repeated ID. Five non-ASCII-byte subtests skip across three passing urlparse originals. The two original skips are Windows-specific pathname tests. The two errors are host-validation tests under the inherited Cloud proxy environment; the proxy settings were not changed. No timeout occurred. Raw stdout/stderr result evidence retains every exact ID and occurrence without unrelated tracebacks. No public PyPI packages were used.
