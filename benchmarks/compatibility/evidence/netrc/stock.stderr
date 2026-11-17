@@ -1,0 +1,28 @@
+test_comment_after_machine_line (test.test_netrc.NetrcTestCase.test_comment_after_machine_line) ... ok
+test_comment_after_machine_line_hash_only (test.test_netrc.NetrcTestCase.test_comment_after_machine_line_hash_only) ... ok
+test_comment_after_machine_line_no_space (test.test_netrc.NetrcTestCase.test_comment_after_machine_line_no_space) ... ok
+test_comment_at_end_of_machine_line (test.test_netrc.NetrcTestCase.test_comment_at_end_of_machine_line) ... ok
+test_comment_at_end_of_machine_line_no_space (test.test_netrc.NetrcTestCase.test_comment_at_end_of_machine_line_no_space) ... ok
+test_comment_at_end_of_machine_line_pass_has_hash (test.test_netrc.NetrcTestCase.test_comment_at_end_of_machine_line_pass_has_hash) ... ok
+test_comment_before_machine_line (test.test_netrc.NetrcTestCase.test_comment_before_machine_line) ... ok
+test_comment_before_machine_line_hash_only (test.test_netrc.NetrcTestCase.test_comment_before_machine_line_hash_only) ... ok
+test_comment_before_machine_line_no_space (test.test_netrc.NetrcTestCase.test_comment_before_machine_line_no_space) ... ok
+test_invalid_tokens (test.test_netrc.NetrcTestCase.test_invalid_tokens) ... ok
+test_macros (test.test_netrc.NetrcTestCase.test_macros) ... ok
+test_optional_tokens (test.test_netrc.NetrcTestCase.test_optional_tokens) ... ok
+test_security (test.test_netrc.NetrcTestCase.test_security) ... ok
+test_security_on_WASI (test.test_netrc.NetrcTestCase.test_security_on_WASI) ... skipped 'WASI only test'
+test_token_value_escape (test.test_netrc.NetrcTestCase.test_token_value_escape) ... ok
+test_token_value_internal_hash (test.test_netrc.NetrcTestCase.test_token_value_internal_hash) ... ok
+test_token_value_leading_hash (test.test_netrc.NetrcTestCase.test_token_value_leading_hash) ... ok
+test_token_value_non_ascii (test.test_netrc.NetrcTestCase.test_token_value_non_ascii) ... ok
+test_token_value_quotes (test.test_netrc.NetrcTestCase.test_token_value_quotes) ... ok
+test_token_value_trailing_hash (test.test_netrc.NetrcTestCase.test_token_value_trailing_hash) ... ok
+test_token_value_whitespace (test.test_netrc.NetrcTestCase.test_token_value_whitespace) ... ok
+test_toplevel_non_ordered_tokens (test.test_netrc.NetrcTestCase.test_toplevel_non_ordered_tokens) ... ok
+test_toplevel_tokens (test.test_netrc.NetrcTestCase.test_toplevel_tokens) ... ok
+
+----------------------------------------------------------------------
+Ran 23 tests in 0.038s
+
+OK (skipped=1)
