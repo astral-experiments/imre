@@ -1,0 +1,15 @@
+{
+  "source_repository": "https://github.com/astral-experiments/imre.git",
+  "head": "8571ca2dbecabf8d7863c369dc776611fd57d8ad",
+  "source_tree": "c6ff919e0ddeb2c23265857f299f785034e5b4bc",
+  "clean": true,
+  "worktree": "/workspace/scratch/imre-urllib-8571-pin",
+  "command": "CARGO_HOME=/workspace/.toolchains/cargo RUSTUP_HOME=/workspace/.toolchains/rustup PATH=/workspace/.toolchains/cargo/bin:$PATH cargo build --offline --release --locked -p imre-compiler -p imre-runtime --target-dir /workspace/imre/target",
+  "exit_code": 0,
+  "artifacts": {
+    "/workspace/imre/target/release/imre": "ac07b4a8a3e90f447cba8a4a454d05167bb52495689efdac1ae5a468d9501ca3",
+    "/workspace/imre/target/release/libimre_runtime.a": "55d84cc72223b0c11783d2e3e6c90d3871ab2bd8d6c8dba770225f8efdc45237"
+  },
+  "clang_path": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+  "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+}

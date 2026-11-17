@@ -1,0 +1,144 @@
+{
+  "module": "test.test_urlparse",
+  "source": {
+    "repo": "https://github.com/python/cpython",
+    "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "path": "Lib/test/test_urlparse.py",
+    "git_blob": "b2bde5a9b1d696ea07dd4cc18d5816eec225058f",
+    "sha256": "57c42d764a141958fcc56977f91fe80c5e9faa4f93ef9024bf250b2bbc28e0ef"
+  },
+  "stock": {
+    "argv": [
+      "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+      "-B",
+      "/workspace/scratch/urllib-8571-graph/suite_runner.py",
+      "test.test_urlparse"
+    ],
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "TMPDIR": "/workspace/scratch/imre-tmp"
+    },
+    "timeout_seconds": 120,
+    "exit_code": 0,
+    "version": "3.14.5",
+    "full_version": "Python 3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+    "fresh_run": true,
+    "inherited_proxy_variable_names": [
+      "HTTP_PROXY",
+      "HTTPS_PROXY",
+      "ALL_PROXY",
+      "NO_PROXY"
+    ],
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "157846d6e1906645c5c0d2a88a613b8cb262df12dcc2a5c6a0be7222ebfe26df"
+  },
+  "native": {
+    "O0": {
+      "argv": [
+        "/workspace/scratch/urllib-8571-graph/O0.exe",
+        "test.test_urlparse"
+      ],
+      "environment": {
+        "IMREFLAGS": "--opt-level 0",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "TMPDIR": "/workspace/scratch/imre-tmp",
+        "LD_PRELOAD": "/workspace/scratch/urllib-8571-graph/denyexec.so",
+        "DENYEXEC_LOG": "/workspace/imre-urllib-8571-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/urllib/urlparse/O0.denyexec.log",
+        "LD_AUDIT": "/workspace/scratch/urllib-8571-graph/auditlibs.so",
+        "AUDITLIBS_LOG": "/workspace/imre-urllib-8571-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/urllib/urlparse/O0.auditlibs.log"
+      },
+      "unset_environment": [
+        "IMRE_ENCODED_FLAGS"
+      ],
+      "timeout_seconds": 180,
+      "elapsed_seconds": 4.774,
+      "exit_code": 0,
+      "timed_out": false,
+      "source_files_absent": true,
+      "matching_bytecode_absent": true,
+      "controls_passed": true,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "157846d6e1906645c5c0d2a88a613b8cb262df12dcc2a5c6a0be7222ebfe26df",
+      "denyexec_sha256": "54ba4b59bf1fb78754be739c36f0a02ed7f3487c459d650aecf96201428752ce",
+      "auditlibs_sha256": "8cfe1142da8fd79b00215eb6446097c97c82e4f3c0b28fe6690e0c1d5f55fc52",
+      "build_argv": [
+        "/workspace/imre/target/release/imre",
+        "build",
+        "/workspace/scratch/urllib-8571-graph/suite_runner.py",
+        "--module-root",
+        "/workspace/scratch/urllib-8571-graph",
+        "--extension-path",
+        "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "--no-cache",
+        "--opt-level",
+        "0",
+        "--runtime",
+        "/workspace/imre/target/release/libimre_runtime.a",
+        "--clang",
+        "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+        "-o",
+        "/workspace/scratch/urllib-8571-graph/O0.exe"
+      ],
+      "build_exit_code": 0,
+      "image_sha256": "dfab613b1086775953258de053cd546bc0fae90f922e5fd0c6e2a5e83954d01e"
+    },
+    "O3": {
+      "argv": [
+        "/workspace/scratch/urllib-8571-graph/O3.exe",
+        "test.test_urlparse"
+      ],
+      "environment": {
+        "IMREFLAGS": "--opt-level 3",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "TMPDIR": "/workspace/scratch/imre-tmp",
+        "LD_PRELOAD": "/workspace/scratch/urllib-8571-graph/denyexec.so",
+        "DENYEXEC_LOG": "/workspace/imre-urllib-8571-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/urllib/urlparse/O3.denyexec.log",
+        "LD_AUDIT": "/workspace/scratch/urllib-8571-graph/auditlibs.so",
+        "AUDITLIBS_LOG": "/workspace/imre-urllib-8571-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/urllib/urlparse/O3.auditlibs.log"
+      },
+      "unset_environment": [
+        "IMRE_ENCODED_FLAGS"
+      ],
+      "timeout_seconds": 180,
+      "elapsed_seconds": 4.778,
+      "exit_code": 0,
+      "timed_out": false,
+      "source_files_absent": true,
+      "matching_bytecode_absent": true,
+      "controls_passed": true,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "157846d6e1906645c5c0d2a88a613b8cb262df12dcc2a5c6a0be7222ebfe26df",
+      "denyexec_sha256": "54ba4b59bf1fb78754be739c36f0a02ed7f3487c459d650aecf96201428752ce",
+      "auditlibs_sha256": "8cfe1142da8fd79b00215eb6446097c97c82e4f3c0b28fe6690e0c1d5f55fc52",
+      "build_argv": [
+        "/workspace/imre/target/release/imre",
+        "build",
+        "/workspace/scratch/urllib-8571-graph/suite_runner.py",
+        "--module-root",
+        "/workspace/scratch/urllib-8571-graph",
+        "--extension-path",
+        "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "--no-cache",
+        "--opt-level",
+        "3",
+        "--runtime",
+        "/workspace/imre/target/release/libimre_runtime.a",
+        "--clang",
+        "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+        "-o",
+        "/workspace/scratch/urllib-8571-graph/O3.exe"
+      ],
+      "build_exit_code": 0,
+      "image_sha256": "dcdc4ba3632bd596f3839b292f24d35a930105fbd51cb856632764ec8500fe73"
+    }
+  }
+}
