@@ -298,16 +298,28 @@ class ForwardRef:
 
         from _typing import _eval_type_expression, _validate_forward_ref
         arg = self.__forward_arg__
+        import keyword
+        if arg.isidentifier() and not keyword.iskeyword(arg):
+            import builtins
+            if arg in locals:
+                return locals[arg]
+            if arg in globals:
+                return globals[arg]
+            if hasattr(builtins, arg):
+                return getattr(builtins, arg)
+            if format == Format.FORWARDREF:
+                return self
+            error = NameError(f"name {arg!r} is not defined")
+            error.name = arg
+            raise error
         source = _rewrite_star_unpack(arg)
         try:
-            return _eval_type_expression(source, globals, locals)
+            checked = _validate_forward_ref(source)
         except SyntaxError:
-            # Parsing fails before CPython enters its symbolic fallback. An
-            # exception from the expression itself, however, still permits it.
-            try:
-                _validate_forward_ref(source)
-            except SyntaxError:
-                raise SyntaxError(f"Forward reference must be an expression -- got {arg!r}")
+            raise SyntaxError(f"Forward reference must be an expression -- got {arg!r}")
+        try:
+            return _eval_type_expression(checked, globals, locals)
+        except SyntaxError:
             if format == Format.VALUE:
                 raise
         except NameError as error:
@@ -327,7 +339,7 @@ class ForwardRef:
             owner, names, self.__forward_is_class__,
         )
         try:
-            result = _eval_type_expression(source, globals, symbolic)
+            result = _eval_type_expression(checked, globals, symbolic)
         except Exception:
             return self
         symbolic.finish()
@@ -952,9 +964,10 @@ def get_annotations(
             locals = {}
         locals = {param.__name__: param for param in type_params} | locals
 
+    from _typing import _eval_type_expression
     return_value = {
         key: value if not isinstance(value, str)
-        else eval(_rewrite_star_unpack(value), globals, locals)
+        else _eval_type_expression(_rewrite_star_unpack(value), globals, locals)
         for key, value in ann.items()
     }
     return return_value

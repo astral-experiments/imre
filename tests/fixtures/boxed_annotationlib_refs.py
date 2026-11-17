@@ -212,6 +212,65 @@ def current():
     }
     assert seen == [14]
 
+    def manual(value):
+        pass
+
+    manual.__annotations__ = {"value": "Token"}
+    assert module.get_annotations(manual, globals={"__builtins__": {"Token": bytes}},
+                                  eval_str=True) == {"value": bytes}
+    try:
+        module.ForwardRef("Token").evaluate(globals={"__builtins__": {"Token": bytes}})
+    except NameError as error:
+        assert error.name == "Token"
+    else:
+        raise AssertionError("ForwardRef must not use custom builtins for a bare name")
+    manual.__annotations__ = {"value": "Ｋey"}
+    namespace = {"Key": 23}
+    assert module.get_annotations(manual, globals=namespace, eval_str=True) == {"value": 23}
+    assert "__builtins__" in namespace
+
+    def grouped(a: "(int)", b: "(((int)))", c: "int # declared", d: "int ", e: "\nint"):
+        pass
+
+    assert module.get_annotations(grouped, eval_str=True) == {"a": int, "b": int, "c": int, "d": int, "e": int}
+    for spelling in (" int", "\tint"):
+        manual.__annotations__ = {"value": spelling}
+        namespace = {}
+        assert module.get_annotations(manual, globals=namespace, eval_str=True) == {"value": int}
+        assert "__builtins__" in namespace
+    manual.__annotations__ = {"value": "("}
+    namespace = {}
+    try:
+        module.get_annotations(manual, globals=namespace, eval_str=True)
+    except SyntaxError:
+        assert "__builtins__" in namespace
+    else:
+        raise AssertionError("expected syntax error")
+
+    namespace = {}
+    try:
+        module.ForwardRef("int\n \t").evaluate(globals=namespace)
+    except SyntaxError as error:
+        assert str(error) == "Forward reference must be an expression -- got 'int\\n \\t'"
+        assert "__builtins__" not in namespace
+    else:
+        raise AssertionError("invalid ForwardRef indentation accepted")
+
+    def compound(value: "list[Choice]"):
+        pass
+
+    assert module.get_annotations(compound, globals={"Choice": int},
+                                  locals={"Choice": str}, eval_str=True) == {
+        "value": list[str],
+    }
+
+    def generic[T](value: "tuple[T, ...]"):
+        pass
+
+    assert module.get_annotations(generic, eval_str=True) == {
+        "value": tuple[generic.__type_params__[0], ...],
+    }
+
     def sums(reflected: 1 + int, nested: Left + (Right + 1)):
         pass
 
@@ -221,3 +280,28 @@ def current():
     for name, ref in refs.items():
         assert type(ref) is module.ForwardRef and ref.__owner__ is sums
         assert ref.__forward_arg__ == texts[name]
+
+
+def unsupported():
+    def manual(value):
+        pass
+
+    for source in ("int ", "\nint", "(int)", "(((int)))", "int # runtime-only"):
+        # Build a fresh, unlinked string, even when that spelling also appears in a declaration.
+        text = "".join((source[:-1], source[-1:]))
+        manual.__annotations__ = {"value": text}
+        try:
+            annotationlib.get_annotations(manual, eval_str=True)
+        except NotImplementedError as error:
+            assert "declare the annotation in source or avoid eval_str" in str(error)
+        else:
+            raise AssertionError("unlinked manual annotation expression executed")
+    for text in ("\n    int", "\n\tint", "int\n \t", "\r int"):
+        manual.__annotations__ = {"value": text}
+        namespace = {}
+        try:
+            annotationlib.get_annotations(manual, globals=namespace, eval_str=True)
+        except IndentationError:
+            assert "__builtins__" in namespace
+        else:
+            raise AssertionError("invalid indentation accepted")

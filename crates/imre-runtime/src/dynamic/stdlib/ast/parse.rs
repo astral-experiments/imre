@@ -1225,9 +1225,9 @@ fn parse_source(
             let input = imre_ast::indentation::prepare(source);
             let body =
                 ruff_python_parser::parse_unchecked_source(&input.text, ast::PySourceType::Python);
-            if let Some(limit) =
-                crate::dynamic::source_code::IndentationDiagnostic::find(&body, source, true, None)
-            {
+            if let Some(limit) = crate::dynamic::source_code::IndentationDiagnostic::find(
+                &body, source, true, None, false,
+            ) {
                 let file = parser.ctx.text(filename);
                 return limit.raise(parser.ctx, file);
             }
