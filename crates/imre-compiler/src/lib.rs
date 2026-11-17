@@ -138,6 +138,8 @@ pub struct CompileOptions {
     pub stdlib_sitecustomize: bool,
     /// Explicit installation roots containing rebuilt native modules and their type stubs.
     pub extension_paths: Vec<PathBuf>,
+    /// Explicit finite source roots whose selected Python modules retain application contracts.
+    pub application_roots: Vec<PathBuf>,
     /// Additional source modules to link for imports whose names are chosen at runtime.
     pub include_modules: std::collections::BTreeSet<String>,
     /// Entries contributed by PYTHONPATH, after explicitly configured installation roots.

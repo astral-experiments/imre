@@ -30,7 +30,7 @@ enum Allocator {
 const JEMALLOC_RUNTIME: &str = "libimre_runtime_jemalloc.a";
 const PYTHON_HEADER: &str = include_str!("../../imre-runtime/include/Python.h");
 
-const USAGE: &str = "Usage: imre check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY] [--include-module MODULE] [--reachable-only] [--entry-profile FILE] [--watch | -w]
+const USAGE: &str = "Usage: imre check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY] [--site-packages DIRECTORY] [--include-module MODULE] [--reachable-only] [--entry-profile FILE] [--watch | -w]
        imre [--include-module MODULE] [-I] [-E] [-P] [-s] [-S] [-B] [-O] [-u] [-W OPTION] [-X frozen_modules[=on|off]] [-X faulthandler] [-X tracemalloc[=NFRAME]] [-X utf8[=0|1]] [-X warn_default_encoding] [-X context_aware_warnings=0|1] (-c CODE | -m MODULE | SCRIPT) [PROGRAM_ARGUMENTS...]
        On Linux, -X cpu_count=N|default sets the number of logical CPUs.
        imre extension-header
@@ -43,6 +43,7 @@ Build options:
   --module-root DIRECTORY  --runtime LIBRARY.a  --emit-llvm FILE.ll
   --reachable-only         Compile definitions reachable from program entry and module initialization
   --extension-path PATH       Search a directory or ZIP for Python modules, or a directory for Imre extensions (repeatable)
+  --site-packages DIRECTORY   Search an installed site and its declarative .pth paths; reject executable .pth code (repeatable)
   --include-module MODULE    Link a source module for runtime import (repeatable)
   --clang CLANG  --opt-level 0|1|2|3  --sanitize  --no-cache  --whole-program
   -q, --quiet              Suppress build status

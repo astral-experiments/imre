@@ -630,6 +630,8 @@ The build follows the imports and links the selected Python code into the execut
 
 Repeat `--extension-path` for additional roots. After the explicit roots, `imre check`, `imre build`, and `imre run` search the directories and ZIP archives on `PYTHONPATH`. A filename launch uses the same search order unless `-E` or `-I` disables the Python environment. When a wheel archive itself is an import root, the ZIP loader reads its directory and selected Python member at runtime. Keep the archive at its registered path so the loader can match that member's bytes to the compiled code. For native modules, install the typed declarations and compiled archive from an [Imre extension wheel](extensions.md) in a declared directory.
 
+For an installed console script or editable package, `--site-packages DIRECTORY` searches the site directory followed by existing directories from its sorted `.pth` files. Selected source modules in these roots retain application contract checks. This is a build-time operation: it never executes `.pth` code. If a path file contains an executable `import` line or names a non-directory file, the build stops with a diagnostic. Replace startup hooks with declarative paths or pass required roots and archives explicitly with `--extension-path`.
+
 An imported Python module may check its identity before other imports, for example
 `if __name__ != "pkg.helper": raise ValueError("unexpected module name")`.
 The guard compares a literal string and raises a supported builtin exception
