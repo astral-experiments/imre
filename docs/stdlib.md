@@ -5,7 +5,7 @@
 
 Revision `49f0dc2ef78b82692e333252faf71b4fc7730949` · CPython **3.14.5** · Linux x86-64. These are original-test receipts at this revision, not cumulative credits.
 
-Frozen 45-family cohort: **0 pinned receipts** of **16,225 raw upstream originals**, **0 verified paired passes**; **16,225 originals have no receipt**.
+Frozen 45-family cohort: **4,179 pinned receipts** of **16,225 raw upstream originals**, **0 verified paired passes**; **12,046 originals have no receipt**.
 
 Supplemental pilots, outside the frozen cohort: **3 receipts** of **3 originals**, **3 verified paired passes**.
 
@@ -15,7 +15,7 @@ Scripts: **0 of 84 original commands have receipts**, **0 verified paired passes
 
 | Family | Raw originals | Stock | O0 | O3 | Paired at pin | Historical mixed-revision credits |
 | --- | ---: | --- | --- | --- | --- | ---: |
-| `argparse` | 1,893 | not run | not run | not run | unknown (not run) | 1,887 |
+| `argparse` | 1,893 | 1,893 pass | not run | not run | 0 verified | 1,887 |
 | `base64` | 41 | not run | not run | not run | unknown (not run) | 40 |
 | `collections` | 659 | not run | not run | not run | unknown (not run) | 639 |
 | `configparser` | 344 | not run | not run | not run | unknown (not run) | 339 |
@@ -30,7 +30,7 @@ Scripts: **0 of 84 original commands have receipts**, **0 verified paired passes
 | `glob` | 24 | not run | not run | not run | unknown (not run) | 22 |
 | `gzip` | 75 | not run | not run | not run | unknown (not run) | 74 |
 | `hashlib` | 82 | not run | not run | not run | unknown (not run) | 78 |
-| `importlib` | 1,345 | not run | not run | not run | unknown (not run) | 432 |
+| `importlib` | 1,345 | 1,328 pass, 17 skip | not run | not run | 0 verified | 432 |
 | `inspect` | 362 | not run | not run | not run | unknown (not run) | 264 |
 | `io` | 1,038 | not run | not run | not run | unknown (not run) | 959 |
 | `itertools` | 138 | not run | not run | not run | unknown (not run) | 111 |
@@ -42,8 +42,8 @@ Scripts: **0 of 84 original commands have receipts**, **0 verified paired passes
 | `pathlib` | 1,369 | not run | not run | not run | unknown (not run) | 968 |
 | `re` | 165 | not run | not run | not run | unknown (not run) | 146 |
 | `shutil` | 223 | not run | not run | not run | unknown (not run) | 172 |
-| `socket` | 746 | not run | not run | not run | unknown (not run) | 110 |
-| `ssl` | 195 | not run | not run | not run | unknown (not run) | 66 |
+| `socket` | 746 | 614 pass, 132 skip | not run | not run | 0 verified | 110 |
+| `ssl` | 195 | 180 pass, 15 skip | not run | not run | 0 verified | 66 |
 | `struct` | 43 | not run | not run | not run | unknown (not run) | 34 |
 | `subprocess` | 353 | not run | not run | not run | unknown (not run) | 303 |
 | `tempfile` | 118 | not run | not run | not run | unknown (not run) | 110 |
