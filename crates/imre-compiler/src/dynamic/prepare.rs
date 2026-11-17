@@ -39,6 +39,7 @@ pub(super) struct PreparedUnit<'a> {
     pub(super) builtin: bool,
     pub(super) physical: Option<(&'a PhysicalFile, PhysicalModuleKind<'a>)>,
     pub(super) zip: Option<&'a [u8; 32]>,
+    pub(super) archive: Option<&'a Path>,
     pub(super) initializer: Result<Initializer<'a>, &'a ModuleSyntaxError>,
 }
 
@@ -269,6 +270,7 @@ pub(super) fn units<'a>(
                     (file, kind)
                 }),
                 zip,
+                archive: registrations.archive_paths.get(path).map(PathBuf::as_path),
                 initializer,
             }))
         })

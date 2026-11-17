@@ -2286,6 +2286,9 @@ pub(crate) fn compile(
                                 registrations
                                     .archive_members
                                     .insert(member.path.clone(), member.digest);
+                                registrations
+                                    .archive_paths
+                                    .insert(member.path.clone(), archive.archive_path().to_owned());
                                 if let Some(error) = imports.invalid_executable {
                                     module_errors.insert(member.path.clone(), error);
                                 } else {
@@ -2722,6 +2725,11 @@ pub(crate) fn compile(
                     registrations.python_providers.insert(sources.len());
                     if let Some(digest) = digest {
                         registrations.archive_members.insert(path.clone(), digest);
+                        if let Some(root) = &options.installed_stdlib_archive {
+                            registrations
+                                .archive_paths
+                                .insert(path.clone(), root.clone());
+                        }
                     }
                     if winner {
                         entry_sources.insert(prefix.clone(), (bundled_root.into(), package));

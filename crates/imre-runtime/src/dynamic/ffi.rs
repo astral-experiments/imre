@@ -987,6 +987,8 @@ fn context_with_heap<S: Into<crate::Str>>(
         original_builtins: None,
         source_builtins: None,
         zip_directories: HashMap::new(),
+        linked_zip_archives: Vec::new(),
+        linked_zip_paths: HashMap::new(),
         zip_path_importers: NONE,
         codec_entries: Default::default(),
         warning_state: None,
@@ -1186,6 +1188,16 @@ unsafe fn register_file_code(
             },
         );
     }
+}
+
+/// Retain the archive origin independently of its availability at runtime.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_register_zip_archive(
+    ctx: *mut Context,
+    archive: *const c_char,
+) {
+    // SAFETY: the compiler emits the archive path in static executable storage.
+    unsafe { (&mut *ctx).linked_zip_archives.push(native_path(archive)) };
 }
 
 /// Register the compiled body for a ZIP member without adding a directory finder.
@@ -1410,6 +1422,7 @@ fn register_source(
     code: ModuleInitializer,
     bundled_text: Option<&'static [u8]>,
 ) {
+    ctx.index_linked_zip_source(name, file, code);
     ctx.sources.entry(name).or_default().push(SourceModule {
         path: file.into(),
         code,

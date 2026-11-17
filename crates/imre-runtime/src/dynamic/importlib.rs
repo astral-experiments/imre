@@ -30,6 +30,22 @@ extern "C" fn empty_module(_: *mut Context, _: Id) -> Id {
     NONE
 }
 
+/// Compare the initializer, source digest and future flags for two registrations of one origin.
+/// Loader-issued diagnostics may share their fingerprint; ordinary compile requires unique errors.
+pub(super) fn matching_linked_compilation(
+    first: (Option<value::Code>, &[u8; 32], Option<u32>),
+    other: (Option<value::Code>, &[u8; 32], Option<u32>),
+    loader: bool,
+) -> bool {
+    first.1 == other.1
+        && first.2 == other.2
+        && match (first.0, other.0) {
+            (Some(a), Some(b)) => std::ptr::fn_addr_eq(a, b),
+            (None, None) => loader,
+            _ => false,
+        }
+}
+
 impl Context {
     /// Call the caller's import hook for side effects, then read the interpreter's module registry.
     pub(super) fn import_with_builtins(&mut self, module_name: &str) -> Result<Id> {
@@ -477,10 +493,11 @@ impl Context {
             if cfg!(unix)
                 && disk
                 && !spelling.as_os_str().is_empty()
-                && spelling
-                    .ancestors()
-                    .find_map(|p| p.metadata().ok())
-                    .is_some_and(|m| m.is_file())
+                && (self.linked_zip_archive(&spelling).is_some()
+                    || spelling
+                        .ancestors()
+                        .find_map(|p| p.metadata().ok())
+                        .is_some_and(|m| m.is_file()))
                 && let Some((origin, loader)) = self.zip_source(&spelling, name)?
             {
                 if loader == NONE {
@@ -677,14 +694,7 @@ impl Context {
             return Ok(None);
         }
         if entries.any(|(_, other, hash, other_flags)| {
-            hash != digest
-                || other_flags != flags
-                || match (entry, other) {
-                    (Some(a), Some(b)) => !std::ptr::fn_addr_eq(a, b),
-                    // Ordinary compile needs one unambiguous stored diagnostic.
-                    (None, None) => !loader,
-                    _ => true,
-                }
+            !matching_linked_compilation((entry, digest, flags), (other, hash, other_flags), loader)
         }) {
             return Ok(None);
         }
@@ -1122,5 +1132,50 @@ impl Context {
             self.location_list(&locations)?
         };
         self.file_spec(key, origin, locations, body)
+    }
+}
+
+#[cfg(test)]
+mod linked_compilation_tests {
+    use super::*;
+
+    extern "C" fn first(_: *mut Context, _: Id) -> Id {
+        NONE
+    }
+    extern "C" fn second(_: *mut Context, _: Id) -> Id {
+        TRUE
+    }
+
+    #[test]
+    fn duplicate_linked_compilations_require_entry_digest_and_flags_to_agree() {
+        let digest = [1; 32];
+        let changed = [2; 32];
+        let original = (Some(first as value::Code), &digest, Some(0));
+        assert!(matching_linked_compilation(original, original, true));
+        assert!(!matching_linked_compilation(
+            original,
+            (Some(second as value::Code), &digest, Some(0)),
+            true
+        ));
+        assert!(!matching_linked_compilation(
+            original,
+            (Some(first as value::Code), &changed, Some(0)),
+            true
+        ));
+        assert!(!matching_linked_compilation(
+            original,
+            (Some(first as value::Code), &digest, Some(1)),
+            true
+        ));
+        assert!(matching_linked_compilation(
+            (None, &digest, None),
+            (None, &digest, None),
+            true
+        ));
+        assert!(!matching_linked_compilation(
+            (None, &digest, None),
+            (None, &digest, None),
+            false
+        ));
     }
 }
