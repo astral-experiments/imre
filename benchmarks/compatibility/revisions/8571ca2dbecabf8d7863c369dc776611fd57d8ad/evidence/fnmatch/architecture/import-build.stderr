@@ -1,0 +1,2 @@
+ Compiling /workspace/scratch/fnmatch-8571-poison/import_only.py (-O0)
+/workspace/scratch/fnmatch-8571-poison/fnmatch_poison.py:1:15: Imre: expected int, got bool; annotations are enforced contracts
