@@ -185,6 +185,7 @@ struct Escape<'a, 'db> {
     guarded_names: Vec<TextRange>,
     session: &'db Session,
     open_providers: &'a [File],
+    selected_provider: &'a dyn Fn(&str) -> Option<File>,
     linked_exec: Option<&'a std::collections::HashSet<TextRange>>,
     literal_unit: Option<crate::dynamic::literal::LiteralUnit<'a>>,
     path: &'a Path,
@@ -209,10 +210,98 @@ impl<'ast, 'db> Escape<'ast, 'db> {
     }
 
     fn declared_function(&self, value: &Expr) -> Option<SourceFunction<'db>> {
-        let db = self.model.db();
         let ty @ Type::FunctionLiteral(_) = value.inferred_type(self.model)? else {
             return None;
         };
+        self.declared_source_type(ty)
+    }
+
+    /// Resolve a checked bound method without making it a linked-expression provider.
+    fn declared_bound_method(&self, value: &Expr) -> Option<SourceFunction<'db>> {
+        let ty @ Type::BoundMethod(_) = value.inferred_type(self.model)? else {
+            return None;
+        };
+        self.declared_source_type(ty)
+    }
+
+    /// Resolve an interface only for imported execution checking; it does not grant a linked entry.
+    fn selected_execution_target(&self, value: &Expr) -> Option<SourceFunction<'db>> {
+        let db = self.model.db();
+        let ty @ (Type::FunctionLiteral(_) | Type::BoundMethod(_)) =
+            value.inferred_type(self.model)?
+        else {
+            return None;
+        };
+        let TypeDefinition::Function(interface) =
+            ty.definition(db, &self.model.program_environment())?
+        else {
+            return None;
+        };
+        if !interface.file(db).path(db).is_vendored_path()
+            || self.selected_callable_was_replaced(interface, value.start())
+        {
+            return None;
+        }
+        let selected = self
+            .session
+            .selected_callable_definition(interface, self.selected_provider)?;
+        let DefinitionKind::Function(function) = selected.kind(db) else {
+            return None;
+        };
+        Some((selected.file(db), function))
+    }
+
+    /// A write to the resolved module or class member invalidates its interface correspondence.
+    fn selected_callable_was_replaced(
+        &self,
+        interface: ty_python_core::definition::Definition<'db>,
+        before: TextSize,
+    ) -> bool {
+        use ty_python_core::scope::NodeWithScopeKind;
+        let db = self.model.db();
+        let Some(name) = interface.name(db) else {
+            return true;
+        };
+        let index = ty_python_core::semantic_index(db, self.model.program_file());
+        let scope_owner = match interface.scope(db).node(db) {
+            NodeWithScopeKind::Class(class) => {
+                let parsed = self.session.parsed(interface.file(db));
+                ty_python_core::semantic_index(db, interface.program_file(db))
+                    .try_definition(class.node(&parsed))
+            }
+            _ => None,
+        };
+        index.scope_ids().any(|scope| {
+            index
+                .use_def_map(scope.file_scope_id(db))
+                .definitions_with_usage()
+                .any(|(_, def, _)| {
+                    let DefinitionKind::Assignment(assignment) = def.kind(db) else {
+                        return false;
+                    };
+                    let Some(attr) = assignment.target(self.parsed).as_attribute_expr() else {
+                        return false;
+                    };
+                    if attr.attr.as_str() != name || attr.start() >= before {
+                        return false;
+                    }
+                    let Some(ty) = attr.value.inferred_type(self.model) else {
+                        return false;
+                    };
+                    match ty.definition(db, &self.model.program_environment()) {
+                        Some(TypeDefinition::StaticClass(owner)) => Some(owner) == scope_owner,
+                        Some(TypeDefinition::Module(module)) => {
+                            module.file(db) == Some(interface.file(db))
+                        }
+                        _ => false,
+                    }
+                })
+        })
+    }
+
+    /// Preserve the selected physical Python definition; a stub or unrelated shadow is not an executable provider.
+    fn declared_source_type(&self, ty: Type<'db>) -> Option<SourceFunction<'db>> {
+        let db = self.model.db();
         let TypeDefinition::Function(def) = ty.definition(db, &self.model.program_environment())?
         else {
             return None;
@@ -482,9 +571,10 @@ impl<'ast, 'db> Escape<'ast, 'db> {
         (owner, declaration): SourceFunction<'_>,
         capture: Option<CapturedImport<'_>>,
         call: &'ast ExprCall,
+        selected_provider: bool,
     ) -> Option<ExecutionRequirement> {
-        let follows_open_source =
-            owner != self.model.file() && self.open_providers.contains(&owner);
+        let follows_open_source = owner != self.model.file()
+            && (selected_provider || self.open_providers.contains(&owner));
         let capture = capture.filter(|capture| capture.owner == owner);
         if !follows_open_source && capture.is_none() {
             return None;
@@ -493,7 +583,14 @@ impl<'ast, 'db> Escape<'ast, 'db> {
         let function = declaration.node(&parsed);
         let capture = capture.filter(|capture| capture.name == function.name.as_str());
         let captured = capture.is_some();
-        let bound = crate::frontend::fixed_call_arguments(call, &function.parameters)?;
+        let bound = if matches!(
+            call.func.inferred_type(self.model),
+            Some(Type::BoundMethod(_))
+        ) {
+            crate::frontend::fixed_bound_call_arguments(call, &function.parameters)?
+        } else {
+            crate::frontend::fixed_call_arguments(call, &function.parameters)?
+        };
         if !bound
             .iter()
             .all(|(_, argument)| self.argument_can_return(argument))
@@ -530,9 +627,9 @@ impl<'ast, 'db> Escape<'ast, 'db> {
         let mut nested = self.session.execution_visitor(path, &parsed, &model);
         nested.callbacks = callbacks;
         nested.visit_body(&function.body);
-        nested.first.filter(|error| {
-            callback || error.source == SourceCallable::Builtin(ExecutionIntrinsic::Exec)
-        })
+        nested
+            .first
+            .filter(|error| callback || matches!(error.source, SourceCallable::Builtin(_)))
     }
 
     fn exposes_captured_namespace(&self, value: &Expr) -> bool {
@@ -929,9 +1026,13 @@ impl<'a> Escape<'a, '_> {
             return;
         }
         let target = self.declared_function(&call.func);
-        if let Some(target) = target
-            && (capture.is_some() || !self.open_providers.is_empty())
-            && let Some(requirement) = self.imported_execution(target, capture, call)
+        let selected = self.selected_execution_target(&call.func);
+        if let Some(target) = selected
+            .or(target)
+            .or_else(|| self.declared_bound_method(&call.func))
+            && (selected.is_some() || capture.is_some() || !self.open_providers.is_empty())
+            && let Some(requirement) =
+                self.imported_execution(target, capture, call, selected.is_some())
         {
             self.first = Some(requirement);
             return;
@@ -1404,6 +1505,7 @@ impl Session {
             guarded_names: Vec::new(),
             session: self,
             open_providers: &[],
+            selected_provider: &|_| None,
             linked_exec: None,
             literal_unit: None,
             path,
@@ -1528,6 +1630,7 @@ impl Session {
         self.check_execution_with_imports(
             sources.map(|(id, path)| (id, path, false, None, None)),
             CapturedImports::default(),
+            &|_| None,
         )
     }
 
@@ -1543,6 +1646,7 @@ impl Session {
             ),
         > + Clone,
         mut captures: CapturedImports,
+        selected_provider: &dyn Fn(&str) -> Option<File>,
     ) -> Result<(), String> {
         let open_providers: Vec<_> = sources
             .clone()
@@ -1558,6 +1662,7 @@ impl Session {
             let model = SemanticModel::new(&self.db, source);
             let mut visitor = self.execution_visitor(path, &parsed, &model);
             visitor.open_providers = &open_providers;
+            visitor.selected_provider = selected_provider;
             visitor.linked_exec = linked_exec;
             visitor.literal_unit = literal_unit;
             let mut body = parsed.suite().as_slice();

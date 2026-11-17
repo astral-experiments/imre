@@ -3635,6 +3635,15 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         compare("-IB", symbolic_defaults)
         compare("-IB", "-O", symbolic_defaults)
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_eval_name.py")
+        for provider, source, intrinsic in (
+            ("bdb", "bdb.Bdb().runeval(input())", b"builtins.eval"),
+            ("timeit", "timer = timeit.Timer()\ntimer.__init__(input())", b"builtins.exec"),
+        ):
+            entry = root / f"unlinked_{provider}.py"
+            entry.write_text(f"import {provider}\nprint(\"entered\")\n{source}\n")
+            rejected = run(imre, "-B", entry, stdin=b"pass\n")
+            assert (rejected.returncode, rejected.stdout) == (1, b""), rejected
+            assert intrinsic in rejected.stderr and b"without a linked body" in rejected.stderr, rejected
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_inspect_signature.py")
         (root / "weather_report.py").write_text("def report(temp):\n    return f'{temp} C'\n")
         compare("-Bm", "inspect", "weather_report:report")
