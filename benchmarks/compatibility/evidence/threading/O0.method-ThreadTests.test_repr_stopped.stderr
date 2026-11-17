@@ -1,0 +1,5 @@
+test_repr_stopped (test.test_threading.ThreadTests.test_repr_stopped) ... ok
+----------------------------------------------------------------------
+Ran 1 test in 0.045s
+
+OK

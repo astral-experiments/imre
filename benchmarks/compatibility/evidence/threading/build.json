@@ -1,0 +1,75 @@
+{
+  "source_repository": "https://github.com/astral-experiments/imre.git",
+  "source_revision": "49f0dc2ef78b82692e333252faf71b4fc7730949",
+  "source_worktree": "/workspace/scratch/imre-pin",
+  "source_worktree_clean": true,
+  "command": "CARGO_HOME=/workspace/.toolchains/cargo RUSTUP_HOME=/workspace/.toolchains/rustup PATH=/workspace/.toolchains/cargo/bin:$PATH cargo build --offline --release --locked -p imre-compiler -p imre-runtime --target-dir /workspace/imre/target",
+  "cargo_build_log": "cargo-build.log",
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1\nLLVM version: 22.1.8",
+  "clang": {
+    "path": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+    "version": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin",
+    "sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+  },
+  "artifacts": {
+    "/workspace/imre/target/release/imre": "3c0d06385248cd1053f38d9d038da56f7cf6c614a8acd0f9b3747f462335f327",
+    "/workspace/imre/target/release/libimre_runtime.a": "4366b4378be3d02a7332375da1c277026111fb78eeccbd365de6e3b21cfdc694"
+  },
+  "imre_version": "imre 0.1.5",
+  "scorecard_tool_revision": "80bce5b7d77c79e5478ec7f38e923d533b966e88",
+  "runner_sha256": "b196330d76be57929ff4b937e4890d439ad1744c563d75a80416b0b92d55de39",
+  "stock_python": {
+    "path": "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "version": "Python 3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+    "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+    "fixture_install": "lib/python3.14/test; all upstream files verified; isolated children may generate bytecode",
+    "missing_test_extension": "_testcapi"
+  },
+  "cpython_source": {
+    "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "tag": "v3.14.5",
+    "archive_url": "https://codeload.github.com/python/cpython/tar.gz/5607950ef232dad16d75c0cf53101d9649d89115",
+    "archive_sha256": "0d838be32b52da92a4293ecd99bc91f7be8b4acc573423665bd1a1428be46e47",
+    "path": "Lib/test/test_threading.py",
+    "git_blob": "bb51ddd38e2cade5a8112678b434948305756db2",
+    "sha256": "f1e1aab64552fc00d451780ba5f9357310c60e7eabfce6b3312e138d5d0ce6e9",
+    "public_raw_blob_verified": true,
+    "public_raw_url": "https://raw.githubusercontent.com/python/cpython/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_threading.py"
+  },
+  "fixtures": {
+    "manifest": "fixtures.sha256",
+    "manifest_sha256": "200a366a608c9a144f6111e20229b94aba3591cbaf24ddd540cced8dcf67362d",
+    "upstream_files": 1639,
+    "upstream_verified": 1639,
+    "native_staging_verified": 1639,
+    "stock_install_verified": 1639,
+    "native_staging": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test"
+  },
+  "harness": {
+    "path": "/workspace/scratch/threading-harness/entry.py",
+    "evidence": "harness.txt",
+    "sha256": "40822f936283058295cbeb169e37f0abf5be691fd1b6619e89b5711e0fde1007",
+    "purpose": "Use the unchanged unittest loader and runner, with a TextTestResult adapter emitting exactly one raw original-level verdict after each test; aggregate subtest failures/errors without rewriting upstream tests."
+  },
+  "timeouts_seconds": {
+    "stock_run": 600,
+    "native_compile": 600,
+    "full_suite": 180,
+    "class_selector": 30,
+    "method_selector": 5
+  },
+  "declared_modules": [
+    "test.test_threading"
+  ],
+  "inventory": {
+    "expected_raw": 228,
+    "discovered": 228,
+    "unique_ids": 228,
+    "repeated_occurrences": [],
+    "loader_errors": [],
+    "frozen_stock_positive": 223,
+    "discovery_method": "unittest.defaultTestLoader.loadTestsFromName(\"test.test_threading\"); recursively enumerate TestCase.id() under exact stock Python with PYTHONPATH set to pinned CPython Lib",
+    "observed_stock_positive": 220
+  },
+  "native_child_toolchain_path_prefix": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin"
+}

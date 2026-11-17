@@ -1,0 +1,5 @@
+test_join_from_multiple_threads (test.test_threading.ThreadTests.test_join_from_multiple_threads) ... skipped 'not enough memory: 1.4G minimum needed'
+----------------------------------------------------------------------
+Ran 1 test in 0.010s
+
+OK (skipped=1)

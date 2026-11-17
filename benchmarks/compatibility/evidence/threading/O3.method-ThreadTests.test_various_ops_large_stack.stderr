@@ -1,0 +1,16 @@
+test_various_ops_large_stack (test.test_threading.ThreadTests.test_various_ops_large_stack) ... ERROR
+======================================================================
+ERROR: test_various_ops_large_stack (test.test_threading.ThreadTests.test_various_ops_large_stack)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 265, in test_various_ops_large_stack
+    threading.stack_size(0x100000)
+AttributeError: module 'threading' has no attribute 'stack_size'
+
+Stdout:
+with 1 MiB thread stack size...
+
+----------------------------------------------------------------------
+Ran 1 test in 0.030s
+
+FAILED (errors=1)

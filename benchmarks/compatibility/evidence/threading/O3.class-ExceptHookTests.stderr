@@ -1,0 +1,74 @@
+test_custom_excepthook (test.test_threading.ExceptHookTests.test_custom_excepthook) ... ERROR
+test_custom_excepthook_fail (test.test_threading.ExceptHookTests.test_custom_excepthook_fail) ... ERROR
+test_excepthook (test.test_threading.ExceptHookTests.test_excepthook) ... ERROR
+test_excepthook_thread_None (test.test_threading.ExceptHookTests.test_excepthook_thread_None) ... skipped 'implementation detail specific to cpython'
+test_original_excepthook (test.test_threading.ExceptHookTests.test_original_excepthook) ... ERROR
+test_system_exit (test.test_threading.ExceptHookTests.test_system_exit) ... ERROR
+======================================================================
+ERROR: test_custom_excepthook (test.test_threading.ExceptHookTests.test_custom_excepthook)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 2107, in test_custom_excepthook
+    thread.start()
+    ~~~~~~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: native workers require an ordinary Thread with the original run method
+
+======================================================================
+ERROR: test_custom_excepthook_fail (test.test_threading.ExceptHookTests.test_custom_excepthook_fail)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 2132, in test_custom_excepthook_fail
+    thread.start()
+    ~~~~~~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: native workers require an ordinary Thread with the original run method
+
+======================================================================
+ERROR: test_excepthook (test.test_threading.ExceptHookTests.test_excepthook)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/__init__.py", line 2966, in wrapper
+    return func(*args, **kwargs)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 2053, in test_excepthook
+    thread.start()
+    ~~~~~~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: native workers require an ordinary Thread with the original run method
+
+======================================================================
+ERROR: test_original_excepthook (test.test_threading.ExceptHookTests.test_original_excepthook)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 2150, in test_original_excepthook
+    default_output = run_thread()
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 2143, in run_thread
+    thread.start()
+    ~~~~~~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: native workers require an ordinary Thread with the original run method
+
+======================================================================
+ERROR: test_system_exit (test.test_threading.ExceptHookTests.test_system_exit)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 2092, in test_system_exit
+    thread.start()
+    ~~~~~~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: native workers require an ordinary Thread with the original run method
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.270s
+
+FAILED (errors=5, skipped=1)

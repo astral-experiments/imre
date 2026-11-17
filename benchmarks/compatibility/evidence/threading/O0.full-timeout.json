@@ -1,0 +1,14 @@
+{
+  "tier": "O0",
+  "timeout_seconds": 180,
+  "elapsed_seconds": 180.01,
+  "root_pid": 4899,
+  "pids": [
+    4899,
+    4906,
+    4908,
+    4909
+  ],
+  "signal": "SIGTERM",
+  "root_argv0": "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.exe"
+}

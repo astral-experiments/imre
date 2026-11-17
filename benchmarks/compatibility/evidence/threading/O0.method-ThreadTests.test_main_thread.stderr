@@ -1,0 +1,17 @@
+test_main_thread (test.test_threading.ThreadTests.test_main_thread) ... ERROR
+======================================================================
+ERROR: test_main_thread (test.test_threading.ThreadTests.test_main_thread)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 718, in test_main_thread
+    th.start()
+    ~~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+
+----------------------------------------------------------------------
+Ran 1 test in 0.050s
+
+FAILED (errors=1)

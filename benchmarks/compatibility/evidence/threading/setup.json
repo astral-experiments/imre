@@ -1,0 +1,30 @@
+{
+  "initial_stock_argv": [
+    "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "-B",
+    "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_threading.py",
+    "-v"
+  ],
+  "initial_stock_exit_code": 1,
+  "initial_reported_originals": 228,
+  "initial_parsed_originals": 218,
+  "initial_failure_summary": "11 failures, 7 skips; isolated children lacked the upstream test package, and verbose descriptions spanned lines",
+  "resolution": "stage the complete unchanged Lib/test fixture tree in stock Python and use a unittest TextTestRunner with descriptions=False and buffer=True; retain the harness verbatim in harness.txt",
+  "initial_stdout": "setup-stock.stdout",
+  "initial_stderr": "setup-stock.stderr",
+  "initial_native_attempt": {
+    "tier": "O0",
+    "build_exit_code": 0,
+    "run_exit_code": 1,
+    "reported_originals": 228,
+    "parsed_originals": 225,
+    "reported_summary": "30 failures, 95 errors, 18 skips",
+    "stderr": "setup-O0.stderr",
+    "stdout": "setup-O0.stdout",
+    "build_stderr": "setup-O0.build.stderr",
+    "build_stdout": "setup-O0.build.stdout",
+    "excluded_from_scorecard": true,
+    "reason": "native child CLI could not locate clang; ordinary verbose output did not provide one parseable original row for three methods",
+    "resolution": "prefix native PATH with the bundled toolchain and use the result adapter retained in harness.txt"
+  }
+}

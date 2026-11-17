@@ -1,0 +1,13 @@
+test_enumerate_after_join (test.test_threading.ThreadTests.test_enumerate_after_join) ... ERROR
+======================================================================
+ERROR: test_enumerate_after_join (test.test_threading.ThreadTests.test_enumerate_after_join)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 520, in test_enumerate_after_join
+    old_interval = sys.getswitchinterval()
+AttributeError: module 'sys' has no attribute 'getswitchinterval'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.016s
+
+FAILED (errors=1)

@@ -1,0 +1,57 @@
+{
+  "commands": [
+    {
+      "argv": [
+        "python3",
+        "-B",
+        "benchmarks/compatibility/scorecard.py",
+        "--validate"
+      ],
+      "exit_code": 0
+    },
+    {
+      "method": "jsonschema.Draft202012Validator(schema.json) for every threading JSONL record",
+      "records": 228,
+      "errors": 0
+    }
+  ],
+  "raw": 228,
+  "stock_inventory": 228,
+  "unique_id_occurrences": 228,
+  "repeated_occurrences": [],
+  "paired": 90,
+  "accepted_reasoned_omissions": 0,
+  "outcomes": {
+    "stock": {
+      "pass": 220,
+      "skip": 7,
+      "fail": 1
+    },
+    "O0": {
+      "not_run": 37,
+      "error": 86,
+      "pass": 90,
+      "skip": 15
+    },
+    "O3": {
+      "not_run": 37,
+      "error": 86,
+      "pass": 90,
+      "skip": 15
+    }
+  },
+  "timeouts": {
+    "O0": {
+      "full_suite_timeouts": 1,
+      "class_selector_timeouts": 4,
+      "method_selector_timeouts": 3
+    },
+    "O3": {
+      "full_suite_timeouts": 1,
+      "class_selector_timeouts": 4,
+      "method_selector_timeouts": 3
+    }
+  },
+  "timeout_accounting": "A suite or selector timeout is an invocation event. Only completed per-original verdicts are credited; originals with no reported verdict remain not_run, not individual timeout or pass.",
+  "jsonl_sha256": "e7defbf8a92472a8f6dee4e33e7261a029911b514ed58d72eb05e73a3d872961"
+}

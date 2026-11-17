@@ -1,0 +1,623 @@
+test_atexit_after_shutdown (__main__.AtexitTests.test_atexit_after_shutdown) ... ok
+test_atexit_called_once (__main__.AtexitTests.test_atexit_called_once) ... ok
+test_atexit_output (__main__.AtexitTests.test_atexit_output) ... ok
+test_abort (__main__.BarrierTests.test_abort)
+Test that an abort will put the barrier in a broken state ... ok
+test_abort_and_reset (__main__.BarrierTests.test_abort_and_reset)
+Test that a barrier can be reset after being broken. ... ok
+test_action (__main__.BarrierTests.test_action)
+Test the 'action' callback ... ok
+test_barrier (__main__.BarrierTests.test_barrier)
+Test that a barrier is passed in lockstep ... ok
+test_barrier_10 (__main__.BarrierTests.test_barrier_10)
+Test that a barrier works for 10 consecutive runs ... ok
+test_constructor (__main__.BarrierTests.test_constructor) ... ok
+test_default_timeout (__main__.BarrierTests.test_default_timeout)
+Test the barrier's default timeout ... ok
+test_repr (__main__.BarrierTests.test_repr) ... ok
+test_reset (__main__.BarrierTests.test_reset)
+Test that a 'reset' on a barrier frees the waiting threads ... ok
+test_single_thread (__main__.BarrierTests.test_single_thread) ... ok
+test_timeout (__main__.BarrierTests.test_timeout)
+Test wait(timeout) ... ok
+test_wait_return (__main__.BarrierTests.test_wait_return)
+test the return value from barrier.wait ... ok
+test_acquire (__main__.BoundedSemaphoreTests.test_acquire) ... ok
+test_acquire_contended (__main__.BoundedSemaphoreTests.test_acquire_contended) ... ok
+test_acquire_destroy (__main__.BoundedSemaphoreTests.test_acquire_destroy) ... ok
+test_acquire_timeout (__main__.BoundedSemaphoreTests.test_acquire_timeout) ... ok
+test_constructor (__main__.BoundedSemaphoreTests.test_constructor) ... ok
+test_default_value (__main__.BoundedSemaphoreTests.test_default_value) ... ok
+test_multirelease (__main__.BoundedSemaphoreTests.test_multirelease) ... ok
+test_release_unacquired (__main__.BoundedSemaphoreTests.test_release_unacquired) ... ok
+test_repr (__main__.BoundedSemaphoreTests.test_repr) ... ok
+test_try_acquire (__main__.BoundedSemaphoreTests.test_try_acquire) ... ok
+test_try_acquire_contended (__main__.BoundedSemaphoreTests.test_try_acquire_contended) ... ok
+test_with (__main__.BoundedSemaphoreTests.test_with) ... ok
+test__is_owned (__main__.CRLockTests.test__is_owned) ... ok
+test_acquire_contended (__main__.CRLockTests.test_acquire_contended) ... ok
+test_acquire_destroy (__main__.CRLockTests.test_acquire_destroy) ... ok
+test_acquire_release (__main__.CRLockTests.test_acquire_release) ... ok
+test_constructor (__main__.CRLockTests.test_constructor) ... ok
+test_different_thread (__main__.CRLockTests.test_different_thread) ... ok
+test_locked (__main__.CRLockTests.test_locked) ... ok
+test_locked_repr (__main__.CRLockTests.test_locked_repr) ... ok
+test_locked_with_2threads (__main__.CRLockTests.test_locked_with_2threads) ... ok
+test_reacquire (__main__.CRLockTests.test_reacquire) ... ok
+test_recursion_count (__main__.CRLockTests.test_recursion_count) ... ok
+test_release_save_unacquired (__main__.CRLockTests.test_release_save_unacquired) ... ok
+test_release_unacquired (__main__.CRLockTests.test_release_unacquired) ... ok
+test_repr (__main__.CRLockTests.test_repr) ... ok
+test_repr_count (__main__.CRLockTests.test_repr_count) ... ok
+test_signature (__main__.CRLockTests.test_signature) ... ok
+test_thread_leak (__main__.CRLockTests.test_thread_leak) ... ok
+test_timeout (__main__.CRLockTests.test_timeout) ... ok
+test_try_acquire (__main__.CRLockTests.test_try_acquire) ... ok
+test_try_acquire_contended (__main__.CRLockTests.test_try_acquire_contended) ... ok
+test_weakref_deleted (__main__.CRLockTests.test_weakref_deleted) ... ok
+test_weakref_exists (__main__.CRLockTests.test_weakref_exists) ... ok
+test_with (__main__.CRLockTests.test_with) ... ok
+test__is_owned (__main__.ConditionAsRLockTests.test__is_owned) ... ok
+test_acquire_contended (__main__.ConditionAsRLockTests.test_acquire_contended) ... ok
+test_acquire_destroy (__main__.ConditionAsRLockTests.test_acquire_destroy) ... ok
+test_acquire_release (__main__.ConditionAsRLockTests.test_acquire_release) ... ok
+test_constructor (__main__.ConditionAsRLockTests.test_constructor) ... ok
+test_different_thread (__main__.ConditionAsRLockTests.test_different_thread) ... ok
+test_locked (__main__.ConditionAsRLockTests.test_locked) ... ok
+test_locked_repr (__main__.ConditionAsRLockTests.test_locked_repr) ... ok
+test_locked_with_2threads (__main__.ConditionAsRLockTests.test_locked_with_2threads) ... ok
+test_reacquire (__main__.ConditionAsRLockTests.test_reacquire) ... ok
+test_recursion_count (__main__.ConditionAsRLockTests.test_recursion_count) ... skipped 'Condition does not expose _recursion_count()'
+test_release_save_unacquired (__main__.ConditionAsRLockTests.test_release_save_unacquired) ... ok
+test_release_unacquired (__main__.ConditionAsRLockTests.test_release_unacquired) ... ok
+test_repr (__main__.ConditionAsRLockTests.test_repr) ... ok
+test_repr_count (__main__.ConditionAsRLockTests.test_repr_count) ... ok
+test_thread_leak (__main__.ConditionAsRLockTests.test_thread_leak) ... ok
+test_timeout (__main__.ConditionAsRLockTests.test_timeout) ... ok
+test_try_acquire (__main__.ConditionAsRLockTests.test_try_acquire) ... ok
+test_try_acquire_contended (__main__.ConditionAsRLockTests.test_try_acquire_contended) ... ok
+test_weakref_deleted (__main__.ConditionAsRLockTests.test_weakref_deleted) ... ok
+test_weakref_exists (__main__.ConditionAsRLockTests.test_weakref_exists) ... ok
+test_with (__main__.ConditionAsRLockTests.test_with) ... ok
+test_acquire (__main__.ConditionTests.test_acquire) ... ok
+test_notify (__main__.ConditionTests.test_notify) ... ok
+test_timeout (__main__.ConditionTests.test_timeout) ... ok
+test_unacquired_notify (__main__.ConditionTests.test_unacquired_notify) ... ok
+test_unacquired_wait (__main__.ConditionTests.test_unacquired_wait) ... ok
+test_waitfor (__main__.ConditionTests.test_waitfor) ... ok
+test_waitfor_timeout (__main__.ConditionTests.test_waitfor_timeout) ... ok
+test_at_fork_reinit (__main__.EventTests.test_at_fork_reinit) ... ok
+test_is_set (__main__.EventTests.test_is_set) ... ok
+test_notify (__main__.EventTests.test_notify) ... ok
+test_repr (__main__.EventTests.test_repr) ... ok
+test_set_and_clear (__main__.EventTests.test_set_and_clear) ... ok
+test_timeout (__main__.EventTests.test_timeout) ... ok
+test_custom_excepthook (__main__.ExceptHookTests.test_custom_excepthook) ... ok
+test_custom_excepthook_fail (__main__.ExceptHookTests.test_custom_excepthook_fail) ... ok
+test_excepthook (__main__.ExceptHookTests.test_excepthook) ... ok
+test_excepthook_thread_None (__main__.ExceptHookTests.test_excepthook_thread_None) ... ok
+test_original_excepthook (__main__.ExceptHookTests.test_original_excepthook) ... ok
+test_system_exit (__main__.ExceptHookTests.test_system_exit) ... ok
+test_can_interrupt_tight_loops (__main__.InterruptMainTests.test_can_interrupt_tight_loops) ... ok
+test_interrupt_main_invalid_signal (__main__.InterruptMainTests.test_interrupt_main_invalid_signal) ... ok
+test_interrupt_main_mainthread (__main__.InterruptMainTests.test_interrupt_main_mainthread) ... ok
+test_interrupt_main_noerror (__main__.InterruptMainTests.test_interrupt_main_noerror) ... ok
+test_interrupt_main_subthread (__main__.InterruptMainTests.test_interrupt_main_subthread) ... ok
+test_interrupt_main_with_signal_handler (__main__.InterruptMainTests.test_interrupt_main_with_signal_handler) ... ok
+test_acquire_contended (__main__.LockTests.test_acquire_contended) ... ok
+test_acquire_destroy (__main__.LockTests.test_acquire_destroy) ... ok
+test_acquire_release (__main__.LockTests.test_acquire_release) ... ok
+test_at_fork_reinit (__main__.LockTests.test_at_fork_reinit) ... ok
+test_constructor (__main__.LockTests.test_constructor) ... ok
+test_different_thread (__main__.LockTests.test_different_thread) ... ok
+test_locked_repr (__main__.LockTests.test_locked_repr) ... ok
+test_reacquire (__main__.LockTests.test_reacquire) ... ok
+test_repr (__main__.LockTests.test_repr) ... ok
+test_state_after_timeout (__main__.LockTests.test_state_after_timeout) ... ok
+test_thread_leak (__main__.LockTests.test_thread_leak) ... ok
+test_timeout (__main__.LockTests.test_timeout) ... ok
+test_try_acquire (__main__.LockTests.test_try_acquire) ... ok
+test_try_acquire_contended (__main__.LockTests.test_try_acquire_contended) ... ok
+test_weakref_deleted (__main__.LockTests.test_weakref_deleted) ... ok
+test_weakref_exists (__main__.LockTests.test_weakref_exists) ... ok
+test_with (__main__.LockTests.test_with) ... ok
+test__all__ (__main__.MiscTestCase.test__all__) ... ok
+test_change_name (__main__.MiscTestCase.test_change_name) ... ok
+test_set_name (__main__.MiscTestCase.test_set_name) ... ok
+test__is_owned (__main__.PyRLockTests.test__is_owned) ... ok
+test_acquire_contended (__main__.PyRLockTests.test_acquire_contended) ... ok
+test_acquire_destroy (__main__.PyRLockTests.test_acquire_destroy) ... ok
+test_acquire_release (__main__.PyRLockTests.test_acquire_release) ... ok
+test_constructor (__main__.PyRLockTests.test_constructor) ... ok
+test_different_thread (__main__.PyRLockTests.test_different_thread) ... ok
+test_locked (__main__.PyRLockTests.test_locked) ... ok
+test_locked_repr (__main__.PyRLockTests.test_locked_repr) ... ok
+test_locked_with_2threads (__main__.PyRLockTests.test_locked_with_2threads) ... ok
+test_reacquire (__main__.PyRLockTests.test_reacquire) ... ok
+test_recursion_count (__main__.PyRLockTests.test_recursion_count) ... ok
+test_release_save_unacquired (__main__.PyRLockTests.test_release_save_unacquired) ... ok
+test_release_unacquired (__main__.PyRLockTests.test_release_unacquired) ... ok
+test_repr (__main__.PyRLockTests.test_repr) ... ok
+test_repr_count (__main__.PyRLockTests.test_repr_count) ... ok
+test_thread_leak (__main__.PyRLockTests.test_thread_leak) ... ok
+test_timeout (__main__.PyRLockTests.test_timeout) ... ok
+test_try_acquire (__main__.PyRLockTests.test_try_acquire) ... ok
+test_try_acquire_contended (__main__.PyRLockTests.test_try_acquire_contended) ... ok
+test_weakref_deleted (__main__.PyRLockTests.test_weakref_deleted) ... ok
+test_weakref_exists (__main__.PyRLockTests.test_weakref_exists) ... ok
+test_with (__main__.PyRLockTests.test_with) ... ok
+test_acquire (__main__.SemaphoreTests.test_acquire) ... ok
+test_acquire_contended (__main__.SemaphoreTests.test_acquire_contended) ... ok
+test_acquire_destroy (__main__.SemaphoreTests.test_acquire_destroy) ... ok
+test_acquire_timeout (__main__.SemaphoreTests.test_acquire_timeout) ... ok
+test_constructor (__main__.SemaphoreTests.test_constructor) ... ok
+test_default_value (__main__.SemaphoreTests.test_default_value) ... ok
+test_multirelease (__main__.SemaphoreTests.test_multirelease) ... ok
+test_release_unacquired (__main__.SemaphoreTests.test_release_unacquired) ... ok
+test_repr (__main__.SemaphoreTests.test_repr) ... ok
+test_try_acquire (__main__.SemaphoreTests.test_try_acquire) ... ok
+test_try_acquire_contended (__main__.SemaphoreTests.test_try_acquire_contended) ... ok
+test_with (__main__.SemaphoreTests.test_with) ... ok
+test_daemon_threads_fatal_error (__main__.SubinterpThreadingTests.test_daemon_threads_fatal_error) ... skipped "No module named '_testcapi'"
+test_daemon_threads_not_allowed (__main__.SubinterpThreadingTests.test_daemon_threads_not_allowed) ... 
+  test_daemon_threads_not_allowed (__main__.SubinterpThreadingTests.test_daemon_threads_not_allowed) [via Thread()] ... FAIL
+  test_daemon_threads_not_allowed (__main__.SubinterpThreadingTests.test_daemon_threads_not_allowed) [via Thread.daemon setter] ... FAIL
+test_threads_join (__main__.SubinterpThreadingTests.test_threads_join) ... skipped 'requires _testcapi'
+test_threads_join_2 (__main__.SubinterpThreadingTests.test_threads_join_2) ... skipped 'requires _testcapi'
+test_threads_join_with_no_main (__main__.SubinterpThreadingTests.test_threads_join_with_no_main) ... ok
+test_threads_not_allowed (__main__.SubinterpThreadingTests.test_threads_not_allowed) ... FAIL
+test_1_join_on_shutdown (__main__.ThreadJoinOnShutdown.test_1_join_on_shutdown) ... ok
+test_2_join_in_forked_process (__main__.ThreadJoinOnShutdown.test_2_join_in_forked_process) ... FAIL
+test_3_join_in_forked_from_thread (__main__.ThreadJoinOnShutdown.test_3_join_in_forked_from_thread) ... FAIL
+test_4_daemon_threads (__main__.ThreadJoinOnShutdown.test_4_daemon_threads) ... skipped 'not enough memory: 2.7G minimum needed'
+test_clear_threads_states_after_fork (__main__.ThreadJoinOnShutdown.test_clear_threads_states_after_fork) ... ok
+test_reinit_tls_after_fork (__main__.ThreadJoinOnShutdown.test_reinit_tls_after_fork) ... ok
+test_thread_from_thread (__main__.ThreadJoinOnShutdown.test_thread_from_thread) ... ok
+test_BoundedSemaphore_limit (__main__.ThreadTests.test_BoundedSemaphore_limit) ... ok
+test_PyThreadState_SetAsyncExc (__main__.ThreadTests.test_PyThreadState_SetAsyncExc) ... ok
+test_args_argument (__main__.ThreadTests.test_args_argument) ... ok
+test_boolean_target (__main__.ThreadTests.test_boolean_target) ... ok
+test_daemon_param (__main__.ThreadTests.test_daemon_param) ... ok
+test_dummy_thread_after_fork (__main__.ThreadTests.test_dummy_thread_after_fork) ... ok
+test_enumerate_after_join (__main__.ThreadTests.test_enumerate_after_join) ... ok
+test_finalization_shutdown (__main__.ThreadTests.test_finalization_shutdown) ... ok
+test_finalize_daemon_thread_hang (__main__.ThreadTests.test_finalize_daemon_thread_hang) ... FAIL
+test_finalize_running_thread (__main__.ThreadTests.test_finalize_running_thread) ... ok
+test_finalize_with_trace (__main__.ThreadTests.test_finalize_with_trace) ... ok
+test_foreign_thread (__main__.ThreadTests.test_foreign_thread) ... ok
+test_frame_tstate_tracing (__main__.ThreadTests.test_frame_tstate_tracing) ... skipped "No module named '_testcapi'"
+test_getprofile (__main__.ThreadTests.test_getprofile) ... ok
+test_getprofile_all_threads (__main__.ThreadTests.test_getprofile_all_threads) ... ok
+test_gettrace (__main__.ThreadTests.test_gettrace) ... ok
+test_gettrace_all_threads (__main__.ThreadTests.test_gettrace_all_threads) ... ok
+test_ident_of_no_threading_threads (__main__.ThreadTests.test_ident_of_no_threading_threads) ... ok
+test_import_from_another_thread (__main__.ThreadTests.test_import_from_another_thread) ... ok
+test_is_alive_after_fork (__main__.ThreadTests.test_is_alive_after_fork) ... ok
+test_join_daemon_thread_in_finalization (__main__.ThreadTests.test_join_daemon_thread_in_finalization) ... ok
+test_join_finished_daemon_thread_in_finalization (__main__.ThreadTests.test_join_finished_daemon_thread_in_finalization) ... ok
+test_join_from_multiple_threads (__main__.ThreadTests.test_join_from_multiple_threads) ... skipped 'not enough memory: 1.4G minimum needed'
+test_join_nondaemon_on_shutdown (__main__.ThreadTests.test_join_nondaemon_on_shutdown) ... ok
+test_join_with_timeout (__main__.ThreadTests.test_join_with_timeout) ... ok
+test_lazy_import (__main__.ThreadTests.test_lazy_import) ... ok
+test_leak_without_join (__main__.ThreadTests.test_leak_without_join) ... ok
+test_limbo_cleanup (__main__.ThreadTests.test_limbo_cleanup) ... ok
+test_locals_at_exit (__main__.ThreadTests.test_locals_at_exit) ... ok
+test_lock_no_args (__main__.ThreadTests.test_lock_no_args) ... ok
+test_lock_no_subclass (__main__.ThreadTests.test_lock_no_subclass) ... ok
+test_lock_or_none (__main__.ThreadTests.test_lock_or_none) ... ok
+test_main_thread (__main__.ThreadTests.test_main_thread) ... ok
+test_main_thread_after_fork (__main__.ThreadTests.test_main_thread_after_fork) ... FAIL
+test_main_thread_after_fork_from_dummy_thread (__main__.ThreadTests.test_main_thread_after_fork_from_dummy_thread) ... FAIL
+test_main_thread_after_fork_from_foreign_thread (__main__.ThreadTests.test_main_thread_after_fork_from_foreign_thread) ... FAIL
+test_main_thread_after_fork_from_nonmain_thread (__main__.ThreadTests.test_main_thread_after_fork_from_nonmain_thread) ... FAIL
+test_main_thread_during_shutdown (__main__.ThreadTests.test_main_thread_during_shutdown) ... ok
+test_name (__main__.ThreadTests.test_name) ... ok
+test_native_id_after_fork (__main__.ThreadTests.test_native_id_after_fork) ... FAIL
+test_no_refcycle_through_target (__main__.ThreadTests.test_no_refcycle_through_target) ... ok
+test_old_threading_api (__main__.ThreadTests.test_old_threading_api) ... ok
+test_repr_daemon (__main__.ThreadTests.test_repr_daemon) ... ok
+test_repr_stopped (__main__.ThreadTests.test_repr_stopped) ... ok
+test_start_new_thread_at_finalization (__main__.ThreadTests.test_start_new_thread_at_finalization) ... ok
+test_start_new_thread_failed (__main__.ThreadTests.test_start_new_thread_failed) ... ok
+test_stop_the_world_during_finalization (__main__.ThreadTests.test_stop_the_world_during_finalization) ... ok
+test_various_ops (__main__.ThreadTests.test_various_ops) ... ok
+test_various_ops_large_stack (__main__.ThreadTests.test_various_ops_large_stack) ... ok
+test_various_ops_small_stack (__main__.ThreadTests.test_various_ops_small_stack) ... ok
+test_bare_raise_in_brand_new_thread (__main__.ThreadingExceptionTests.test_bare_raise_in_brand_new_thread) ... ok
+test_daemonize_active_thread (__main__.ThreadingExceptionTests.test_daemonize_active_thread) ... ok
+test_dummy_thread_on_interpreter_shutdown (__main__.ThreadingExceptionTests.test_dummy_thread_on_interpreter_shutdown) ... ok
+test_joining_current_thread (__main__.ThreadingExceptionTests.test_joining_current_thread) ... ok
+test_joining_inactive_thread (__main__.ThreadingExceptionTests.test_joining_inactive_thread) ... ok
+test_multithread_modify_file_noerror (__main__.ThreadingExceptionTests.test_multithread_modify_file_noerror) ... ok
+test_print_exception (__main__.ThreadingExceptionTests.test_print_exception) ... ok
+test_print_exception_gh_102056 (__main__.ThreadingExceptionTests.test_print_exception_gh_102056) ... ok
+test_print_exception_stderr_is_none_1 (__main__.ThreadingExceptionTests.test_print_exception_stderr_is_none_1) ... ok
+test_print_exception_stderr_is_none_2 (__main__.ThreadingExceptionTests.test_print_exception_stderr_is_none_2) ... ok
+test_recursion_limit (__main__.ThreadingExceptionTests.test_recursion_limit) ... ok
+test_releasing_unacquired_lock (__main__.ThreadingExceptionTests.test_releasing_unacquired_lock) ... ok
+test_start_thread_again (__main__.ThreadingExceptionTests.test_start_thread_again) ... ok
+test_init_immutable_default_args (__main__.TimerTests.test_init_immutable_default_args) ... ok
+
+======================================================================
+FAIL: test_daemon_threads_not_allowed (__main__.SubinterpThreadingTests.test_daemon_threads_not_allowed) [via Thread()]
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_threading.py", line 1796, in test_daemon_threads_not_allowed
+    err = self._check_allowed(
+        allowed=True,
+        daemon_allowed=False,
+        daemon=True,
+    )
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_threading.py", line 1781, in _check_allowed
+    _, _, err = assert_python_ok("-c", script)
+                ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14', '-X', 'faulthandler', '-I', '-c', '\nimport test.support\ntest.support.run_in_subinterp_with_config(\n    "\\nimport test.support\\nimport threading\\ndef func():\\n    print(\'this should not have run!\')\\nt = threading.Thread(target=func, daemon=True)\\n\\nt.start()\\n",\n    use_main_obmalloc=True,\n    allow_fork=True,\n    allow_exec=True,\n    allow_threads=True,\n    allow_daemon_threads=False,\n    check_multi_interp_extensions=False,\n    own_gil=False,\n)\n']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Traceback (most recent call last):
+  File "<string>", line 2, in <module>
+    import test.support
+ModuleNotFoundError: No module named 'test'
+---
+
+======================================================================
+FAIL: test_daemon_threads_not_allowed (__main__.SubinterpThreadingTests.test_daemon_threads_not_allowed) [via Thread.daemon setter]
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_threading.py", line 1804, in test_daemon_threads_not_allowed
+    err = self._check_allowed(
+        't.daemon = True',
+    ...<2 lines>...
+        daemon=False,
+    )
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_threading.py", line 1781, in _check_allowed
+    _, _, err = assert_python_ok("-c", script)
+                ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14', '-X', 'faulthandler', '-I', '-c', '\nimport test.support\ntest.support.run_in_subinterp_with_config(\n    "\\nimport test.support\\nimport threading\\ndef func():\\n    print(\'this should not have run!\')\\nt = threading.Thread(target=func, daemon=False)\\nt.daemon = True\\nt.start()\\n",\n    use_main_obmalloc=True,\n    allow_fork=True,\n    allow_exec=True,\n    allow_threads=True,\n    allow_daemon_threads=False,\n    check_multi_interp_extensions=False,\n    own_gil=False,\n)\n']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Traceback (most recent call last):
+  File "<string>", line 2, in <module>
+    import test.support
+ModuleNotFoundError: No module named 'test'
+---
+
+======================================================================
+FAIL: test_threads_not_allowed (__main__.SubinterpThreadingTests.test_threads_not_allowed)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_threading.py", line 1786, in test_threads_not_allowed
+    err = self._check_allowed(
+        allowed=False,
+        daemon_allowed=False,
+        daemon=False,
+    )
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_threading.py", line 1781, in _check_allowed
+    _, _, err = assert_python_ok("-c", script)
+                ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14', '-X', 'faulthandler', '-I', '-c', '\nimport test.support\ntest.support.run_in_subinterp_with_config(\n    "\\nimport test.support\\nimport threading\\ndef func():\\n    print(\'this should not have run!\')\\nt = threading.Thread(target=func, daemon=False)\\n\\nt.start()\\n",\n    use_main_obmalloc=True,\n    allow_fork=True,\n    allow_exec=True,\n    allow_threads=False,\n    allow_daemon_threads=False,\n    check_multi_interp_extensions=False,\n    own_gil=False,\n)\n']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Traceback (most recent call last):
+  File "<string>", line 2, in <module>
+    import test.support
+ModuleNotFoundError: No module named 'test'
+---
+
+======================================================================
+FAIL: test_2_join_in_forked_process (__main__.ThreadJoinOnShutdown.test_2_join_in_forked_process)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_threading.py", line 1460, in test_2_join_in_forked_process
+    self._run_and_join(script)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_threading.py", line 1426, in _run_and_join
+    rc, out, err = assert_python_ok("-c", script)
+                   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14', '-X', 'faulthandler', '-I', '-c', "if 1:\n            import sys, os, time, threading\n\n            # a thread, which waits for the main program to terminate\n            def joiningfunc(mainthread):\n                mainthread.join()\n                print('end of thread')\n                # stdout is fully buffered because not a tty, we have to flush\n                # before exit.\n                sys.stdout.flush()\n        \nif 1:\n            from test import support\n\n            childpid = os.fork()\n            if childpid != 0:\n                # parent process\n                support.wait_process(childpid, exitcode=0)\n                sys.exit(0)\n\n            # child process\n            t = threading.Thread(target=joiningfunc,\n                                 args=(threading.current_thread(),))\n            t.start()\n            print('end of main')\n            "]
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Traceback (most recent call last):
+  File "<string>", line 13, in <module>
+    from test import support
+ModuleNotFoundError: No module named 'test'
+---
+
+======================================================================
+FAIL: test_3_join_in_forked_from_thread (__main__.ThreadJoinOnShutdown.test_3_join_in_forked_from_thread)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_threading.py", line 1488, in test_3_join_in_forked_from_thread
+    self._run_and_join(script)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_threading.py", line 1426, in _run_and_join
+    rc, out, err = assert_python_ok("-c", script)
+                   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14', '-X', 'faulthandler', '-I', '-c', "if 1:\n            import sys, os, time, threading\n\n            # a thread, which waits for the main program to terminate\n            def joiningfunc(mainthread):\n                mainthread.join()\n                print('end of thread')\n                # stdout is fully buffered because not a tty, we have to flush\n                # before exit.\n                sys.stdout.flush()\n        \nif 1:\n            from test import support\n\n            main_thread = threading.current_thread()\n            def worker():\n                childpid = os.fork()\n                if childpid != 0:\n                    # parent process\n                    support.wait_process(childpid, exitcode=0)\n                    sys.exit(0)\n\n                # child process\n                t = threading.Thread(target=joiningfunc,\n                                     args=(main_thread,))\n                print('end of main')\n                t.start()\n                t.join() # Should not block: main_thread is already stopped\n\n            w = threading.Thread(target=worker)\n            w.start()\n            "]
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Traceback (most recent call last):
+  File "<string>", line 13, in <module>
+    from test import support
+ModuleNotFoundError: No module named 'test'
+---
+
+======================================================================
+FAIL: test_finalize_daemon_thread_hang (__main__.ThreadTests.test_finalize_daemon_thread_hang)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_threading.py", line 1353, in test_finalize_daemon_thread_hang
+    assert_python_ok("-c", script)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14', '-X', 'faulthandler', '-I', '-c', "\nimport os\nimport sys\nimport threading\nimport time\nimport _testcapi\n\nlock = threading.Lock()\nlock.acquire()\nthread_started_event = threading.Event()\ndef thread_func():\n    try:\n        thread_started_event.set()\n        _testcapi.finalize_thread_hang(lock.acquire)\n    finally:\n        # Control must not reach here.\n        os._exit(2)\n\nt = threading.Thread(target=thread_func)\nt.daemon = True\nt.start()\nthread_started_event.wait()\n# Sleep to ensure daemon thread is blocked on `lock.acquire`\n#\n# Note: This test is designed so that in the unlikely case that\n# `0.1` seconds is not sufficient time for the thread to become\n# blocked on `lock.acquire`, the test will still pass, it just\n# won't be properly testing the thread behavior during\n# finalization.\ntime.sleep(0.1)\n\ndef run_during_finalization():\n    # Wake up daemon thread\n    lock.release()\n    # Sleep to give the daemon thread time to crash if it is going\n    # to.\n    #\n    # Note: If due to an exceptionally slow execution this delay is\n    # insufficient, the test will still pass but will simply be\n    # ineffective as a test.\n    time.sleep(0.1)\n    # If control reaches here, the test succeeded.\n    os._exit(0)\n\n# Replace sys.stderr.flush as a way to run code during finalization\norig_flush = sys.stderr.flush\ndef do_flush(*args, **kwargs):\n    orig_flush(*args, **kwargs)\n    if not sys.is_finalizing:\n        return\n    sys.stderr.flush = orig_flush\n    run_during_finalization()\n\nsys.stderr.flush = do_flush\n\n# If the follow exit code is retained, `run_during_finalization`\n# did not run.\nsys.exit(1)\n"]
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Traceback (most recent call last):
+  File "<string>", line 6, in <module>
+    import _testcapi
+ModuleNotFoundError: No module named '_testcapi'
+---
+
+======================================================================
+FAIL: test_main_thread_after_fork (__main__.ThreadTests.test_main_thread_after_fork)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_threading.py", line 739, in test_main_thread_after_fork
+    _, out, err = assert_python_ok("-c", code)
+                  ~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14', '-X', 'faulthandler', '-I', '-c', 'if 1:\n            import os, threading\n            from test import support\n\n            ident = threading.get_ident()\n            pid = os.fork()\n            if pid == 0:\n                print("current ident", threading.get_ident() == ident)\n                main = threading.main_thread()\n                print("main", main.name)\n                print("main ident", main.ident == ident)\n                print("current is main", threading.current_thread() is main)\n            else:\n                support.wait_process(pid, exitcode=0)\n        ']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Traceback (most recent call last):
+  File "<string>", line 3, in <module>
+    from test import support
+ModuleNotFoundError: No module named 'test'
+---
+
+======================================================================
+FAIL: test_main_thread_after_fork_from_dummy_thread (__main__.ThreadTests.test_main_thread_after_fork_from_dummy_thread)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_threading.py", line 854, in test_main_thread_after_fork_from_dummy_thread
+    self.test_main_thread_after_fork_from_foreign_thread(create_dummy=True)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_threading.py", line 841, in test_main_thread_after_fork_from_foreign_thread
+    _, out, err = assert_python_ok("-W", "ignore::DeprecationWarning", "-c", code)
+                  ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14', '-X', 'faulthandler', '-I', '-W', 'ignore::DeprecationWarning', '-c', 'if 1:\n            import os, threading, sys, traceback, _thread\n            from test import support\n\n            def func(lock):\n                ident = threading.get_ident()\n                if True:\n                    # call current_thread() before fork to allocate DummyThread\n                    current = threading.current_thread()\n                    print("current", current.name, type(current).__name__)\n                print("ident in _active", ident in threading._active)\n                # flush before fork, so child won\'t flush it again\n                sys.stdout.flush()\n                pid = os.fork()\n                if pid == 0:\n                    print("current ident", threading.get_ident() == ident)\n                    main = threading.main_thread()\n                    print("main", main.name, type(main).__name__)\n                    print("main ident", main.ident == ident)\n                    print("current is main", threading.current_thread() is main)\n                    print("_dangling", [t.name for t in list(threading._dangling)])\n                    # stdout is fully buffered because not a tty,\n                    # we have to flush before exit.\n                    sys.stdout.flush()\n                    try:\n                        threading._shutdown()\n                        os._exit(0)\n                    except:\n                        traceback.print_exc()\n                        sys.stderr.flush()\n                        os._exit(1)\n                else:\n                    try:\n                        support.wait_process(pid, exitcode=0)\n                    except Exception:\n                        # avoid \'could not acquire lock for\n                        # <_io.BufferedWriter name=\'<stderr>\'> at interpreter shutdown,\'\n                        traceback.print_exc()\n                        sys.stderr.flush()\n                    finally:\n                        lock.release()\n\n            join_lock = _thread.allocate_lock()\n            join_lock.acquire()\n            th = _thread.start_new_thread(func, (join_lock,))\n            join_lock.acquire()\n        ']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Traceback (most recent call last):
+  File "<string>", line 3, in <module>
+    from test import support
+ModuleNotFoundError: No module named 'test'
+---
+
+======================================================================
+FAIL: test_main_thread_after_fork_from_foreign_thread (__main__.ThreadTests.test_main_thread_after_fork_from_foreign_thread)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_threading.py", line 841, in test_main_thread_after_fork_from_foreign_thread
+    _, out, err = assert_python_ok("-W", "ignore::DeprecationWarning", "-c", code)
+                  ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14', '-X', 'faulthandler', '-I', '-W', 'ignore::DeprecationWarning', '-c', 'if 1:\n            import os, threading, sys, traceback, _thread\n            from test import support\n\n            def func(lock):\n                ident = threading.get_ident()\n                if False:\n                    # call current_thread() before fork to allocate DummyThread\n                    current = threading.current_thread()\n                    print("current", current.name, type(current).__name__)\n                print("ident in _active", ident in threading._active)\n                # flush before fork, so child won\'t flush it again\n                sys.stdout.flush()\n                pid = os.fork()\n                if pid == 0:\n                    print("current ident", threading.get_ident() == ident)\n                    main = threading.main_thread()\n                    print("main", main.name, type(main).__name__)\n                    print("main ident", main.ident == ident)\n                    print("current is main", threading.current_thread() is main)\n                    print("_dangling", [t.name for t in list(threading._dangling)])\n                    # stdout is fully buffered because not a tty,\n                    # we have to flush before exit.\n                    sys.stdout.flush()\n                    try:\n                        threading._shutdown()\n                        os._exit(0)\n                    except:\n                        traceback.print_exc()\n                        sys.stderr.flush()\n                        os._exit(1)\n                else:\n                    try:\n                        support.wait_process(pid, exitcode=0)\n                    except Exception:\n                        # avoid \'could not acquire lock for\n                        # <_io.BufferedWriter name=\'<stderr>\'> at interpreter shutdown,\'\n                        traceback.print_exc()\n                        sys.stderr.flush()\n                    finally:\n                        lock.release()\n\n            join_lock = _thread.allocate_lock()\n            join_lock.acquire()\n            th = _thread.start_new_thread(func, (join_lock,))\n            join_lock.acquire()\n        ']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Traceback (most recent call last):
+  File "<string>", line 3, in <module>
+    from test import support
+ModuleNotFoundError: No module named 'test'
+---
+
+======================================================================
+FAIL: test_main_thread_after_fork_from_nonmain_thread (__main__.ThreadTests.test_main_thread_after_fork_from_nonmain_thread)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_threading.py", line 779, in test_main_thread_after_fork_from_nonmain_thread
+    _, out, err = assert_python_ok("-c", code)
+                  ~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14', '-X', 'faulthandler', '-I', '-c', 'if 1:\n            import os, threading, sys, warnings\n            from test import support\n\n            def func():\n                ident = threading.get_ident()\n                with warnings.catch_warnings(record=True) as ws:\n                    warnings.filterwarnings(\n                            "always", category=DeprecationWarning)\n                    pid = os.fork()\n                    if pid == 0:\n                        print("current ident", threading.get_ident() == ident)\n                        main = threading.main_thread()\n                        print("main", main.name, type(main).__name__)\n                        print("main ident", main.ident == ident)\n                        print("current is main", threading.current_thread() is main)\n                        # stdout is fully buffered because not a tty,\n                        # we have to flush before exit.\n                        sys.stdout.flush()\n                    else:\n                        assert ws[0].category == DeprecationWarning, ws[0]\n                        assert \'fork\' in str(ws[0].message), ws[0]\n                        support.wait_process(pid, exitcode=0)\n\n            th = threading.Thread(target=func)\n            th.start()\n            th.join()\n        ']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Traceback (most recent call last):
+  File "<string>", line 3, in <module>
+    from test import support
+ModuleNotFoundError: No module named 'test'
+---
+
+======================================================================
+FAIL: test_native_id_after_fork (__main__.ThreadTests.test_native_id_after_fork)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_threading.py", line 1377, in test_native_id_after_fork
+    rc, out, err = assert_python_ok('-c', script)
+                   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14', '-X', 'faulthandler', '-I', '-c', 'if True:\n            import threading\n            import os\n            from test import support\n\n            parent_thread_native_id = threading.current_thread().native_id\n            print(parent_thread_native_id, flush=True)\n            assert parent_thread_native_id == threading.get_native_id()\n            childpid = os.fork()\n            if childpid == 0:\n                print(threading.current_thread().native_id, flush=True)\n                assert threading.current_thread().native_id == threading.get_native_id()\n            else:\n                try:\n                    assert parent_thread_native_id == threading.current_thread().native_id\n                    assert parent_thread_native_id == threading.get_native_id()\n                finally:\n                    support.wait_process(childpid, exitcode=0)\n            ']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Traceback (most recent call last):
+  File "<string>", line 4, in <module>
+    from test import support
+ModuleNotFoundError: No module named 'test'
+---
+
+----------------------------------------------------------------------
+Ran 228 tests in 18.080s
+
+FAILED (failures=11, skipped=7)

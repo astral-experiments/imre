@@ -1,0 +1,13 @@
+test_gettrace (test.test_threading.ThreadTests.test_gettrace) ... ERROR
+======================================================================
+ERROR: test_gettrace (test.test_threading.ThreadTests.test_gettrace)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1010, in test_gettrace
+    old_trace = threading.gettrace()
+AttributeError: module 'threading' has no attribute 'gettrace'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.029s
+
+FAILED (errors=1)

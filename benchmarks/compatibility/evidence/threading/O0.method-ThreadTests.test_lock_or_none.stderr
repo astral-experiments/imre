@@ -1,0 +1,5 @@
+test_lock_or_none (test.test_threading.ThreadTests.test_lock_or_none) ... ok
+----------------------------------------------------------------------
+Ran 1 test in 0.009s
+
+OK

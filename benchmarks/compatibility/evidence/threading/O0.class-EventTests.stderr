@@ -1,0 +1,49 @@
+test_at_fork_reinit (test.test_threading.EventTests.test_at_fork_reinit) ... ok
+test_is_set (test.test_threading.EventTests.test_is_set) ... ok
+test_notify (test.test_threading.EventTests.test_notify) ... ERROR
+test_repr (test.test_threading.EventTests.test_repr) ... ok
+test_set_and_clear (test.test_threading.EventTests.test_set_and_clear) ... ERROR
+test_timeout (test.test_threading.EventTests.test_timeout) ... ERROR
+======================================================================
+ERROR: test_notify (test.test_threading.EventTests.test_notify)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 523, in test_notify
+    self._check_notify(evt)
+    ~~~~~~~~~~~~~~~~~~^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 510, in _check_notify
+    with Bunch(f, N):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_set_and_clear (test.test_threading.EventTests.test_set_and_clear)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 569, in test_set_and_clear
+    with Bunch(f, N):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_timeout (test.test_threading.EventTests.test_timeout)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 541, in test_timeout
+    with Bunch(f, N):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+----------------------------------------------------------------------
+Ran 6 tests in 2.099s
+
+FAILED (errors=3)
