@@ -2849,7 +2849,7 @@ impl Context {
         }
     }
 
-    /// Evaluate a linked annotation expression, or resolve its normalized bare name.
+    /// Evaluate only an annotation expression with a checked AOT body.
     pub(super) fn eval_type_expression(&mut self, text: Id, globals: Id, locals: Id) -> Result<Id> {
         let (globals, locals) = self.source_namespaces(
             self.heap.current_scope(),
@@ -2866,28 +2866,7 @@ impl Context {
             let code = self.native_module_code(entry, filename, None);
             return self.eval_namespace_code(code, globals, locals.unwrap_or(globals));
         }
-        let (checked_locals, builtins) =
-            self.checked_source_namespaces(globals, locals, None, "eval")?;
-        let source = eval_source_text(self.str_value(text)?);
-        if crate::objects::python_isidentifier(source)
-            && !ruff_python_stdlib::keyword::is_keyword(source)
-        {
-            let normalized = crate::objects::normalize_unicode("NFKC", source)?;
-            let name = copy_label(normalized.as_deref().unwrap_or(source))?;
-            if let Some(locals) = checked_locals {
-                match self.load_exec_name(locals, &name) {
-                    Err(error) if self.is_builtin_error(&error, "KeyError") => {}
-                    value => return value,
-                }
-            }
-            return self.source_global(
-                ExecGlobals {
-                    dict: globals,
-                    builtins,
-                },
-                &name,
-            );
-        }
+        self.checked_source_namespaces(globals, locals, None, "eval")?;
         let filename = self.text("<string>");
         self.prepare_source_program(text, filename, "eval", true, self.inherited_compile_flags())?;
         Err(Error::new(
