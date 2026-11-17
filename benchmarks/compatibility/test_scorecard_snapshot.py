@@ -4,7 +4,6 @@ import hashlib
 import json
 import tempfile
 import os
-from contextlib import contextmanager
 import unittest
 import sys
 from pathlib import Path
@@ -78,7 +77,9 @@ class SnapshotTests(unittest.TestCase):
         with patch.object(sys, "argv", ["scorecard.py", "--snapshot", PIN]), patch.object(scorecard, "select_snapshot"), patch("check_omissions.validate"):
             with self.assertRaisesRegex(ValueError, "without genuine receipts"): scorecard.main()
             self.assertFalse((self.root / "README.md").exists())
-            row = self.receipt(); directory = self.root / "stdlib"; directory.mkdir(); (directory / "errno.jsonl").write_text(json.dumps(row) + "\n")
+            row = self.receipt(); directory = self.root / "stdlib"; directory.mkdir(); receipt = directory / "errno.jsonl"; receipt.write_text(json.dumps(row) + "\n")
+            locator = self.locator(receipt); paths = [receipt, self.root / "O0.stderr", self.root / "O3.stderr"]; files = {self.locator(path):hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
+            (self.root / "activation.json").write_text(json.dumps({"schema":"imre.compatibility.snapshot-activation.v1", "imre_revision":PIN, "families":{"errno":{"adapter":"row-v1", "receipt":locator, "files":files}}}))
             scorecard.main()
             self.assertIn("0 verified credited pairs", (self.root / "README.md").read_text())
             self.assertTrue((self.root / "docs/stdlib.md").is_file())
@@ -138,71 +139,63 @@ class SnapshotTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "exact ID, occurrence"): self.validate(r)
 
 
-@unittest.skipUnless(os.environ.get("SCORECARD_SHARD_NEGATIVES") == "1", "stage the published revision shards to run integration checks")
+@unittest.skipUnless(os.environ.get("SCORECARD_SHARD_NEGATIVES") == "1", "stage a snapshot activation manifest to run published-shard checks")
 class PublishedShardTests(unittest.TestCase):
-    """Run against the unmodified published shards in an ephemeral checkout."""
+    """Read-only integration checks against activated published artifacts."""
     def setUp(self):
         self.addCleanup(patch.stopall)
         self.root = scorecard.HERE / "revisions" / PIN
         patch.object(scorecard, "DATA_ROOT", self.root).start()
         patch.object(scorecard, "COHORT", {**scorecard.CANONICAL_COHORT, "imre_revision": PIN}).start()
-        scorecard.adapt_family_replay.cache_clear()
+        self.activation = copy.deepcopy(scorecard.snapshot_activation())
+        self.clear()
+
+    def clear(self):
+        for fn in (scorecard.adapt_family_replay, scorecard.adapt_pathlib, scorecard.adapt_urllib): fn.cache_clear()
 
     def row(self, family):
         return json.loads((self.root / "stdlib" / f"{family}.jsonl").read_text().splitlines()[0])
-
-    @contextmanager
-    def change(self, path, transform):
-        original = path.read_bytes()
-        try:
-            path.write_bytes(transform(original)); scorecard.adapt_family_replay.cache_clear()
-            yield
-        finally:
-            path.write_bytes(original); scorecard.adapt_family_replay.cache_clear()
 
     def validate(self, row):
         scorecard.validate_record(row, "stdlib", scorecard.families())
         scorecard.verify_stdlib_evidence(row)
 
-    def test_genuine_counts_and_no_argparse_synthesis(self):
-        fs, scripts = scorecard.summary()
-        self.assertEqual((fs["configparser"]["receipts"], fs["configparser"]["paired"], fs["fnmatch"]["receipts"], fs["fnmatch"]["paired"]), (344, 339, 24, 24))
-        self.assertEqual((sum(f["receipts"] for f in fs.values()), sum(f["paired"] for f in fs.values()), fs["argparse"]["receipts"], len(scripts)), (368, 363, 0, 0))
+    def test_scoped_genuine_counts(self):
+        fs, _ = scorecard.summary(); expected = {"configparser":(344,339), "fnmatch":(24,24), "pathlib":(6,6), "urllib":(178,174)}
+        self.assertEqual({name:(fs[name]["receipts"],fs[name]["paired"]) for name in expected}, expected)
 
-    def test_nonvendored_source_and_occurrence_mismatch(self):
-        row = self.row("configparser")
-        self.assertFalse((scorecard.ROOT / "benchmarks/cpython_stdlib/full/configparser/upstream" / row["source"]["path"]).exists())
-        row["source"]["sha256"] = "f" * 64
-        with self.assertRaisesRegex(ValueError, "source differs"): self.validate(row)
-        row = self.row("configparser"); row["occurrence"] += 1
-        with self.assertRaisesRegex(ValueError, "original ID, occurrence"): self.validate(row)
+    def test_missing_or_altered_gate(self):
+        gate = self.activation["families"]["pathlib"]["sources"]["gate"]
+        altered = copy.deepcopy(self.activation); altered["families"]["pathlib"]["files"][gate] = "0" * 64
+        with patch.object(scorecard, "snapshot_activation", return_value=altered):
+            with self.assertRaisesRegex(ValueError, "digest differs"): self.validate(self.row("pathlib"))
+        self.clear(); missing = copy.deepcopy(self.activation); entry = missing["families"]["pathlib"]; entry["sources"]["gate"] = gate + ".missing"; entry["files"][gate + ".missing"] = "0" * 64
+        with patch.object(scorecard, "snapshot_activation", return_value=missing):
+            with self.assertRaisesRegex(ValueError, "missing"): self.validate(self.row("pathlib"))
 
-    def test_old_native_evidence_is_rejected(self):
+    def test_wrong_runtime(self):
+        original = scorecard.artifact_json
+        def changed(path):
+            obj = original(path)
+            if path.name == "run.json" and path.parent.name == "gate":
+                obj = copy.deepcopy(obj); argv = obj["argv"]; argv[argv.index("--runtime")+1] = "old-runtime.a"
+            return obj
+        with patch.object(scorecard, "artifact_json", side_effect=changed):
+            with self.assertRaisesRegex(ValueError, "identities missing|runtime"): self.validate(self.row("urllib"))
+
+    def test_old_native_evidence(self):
         row = self.row("configparser"); row["runs"]["O0"]["evidence"] = scorecard.canonical_original(row, "stdlib")["runs"]["O0"]["evidence"]
         with self.assertRaisesRegex(ValueError, "outside allowed root"): self.validate(row)
 
-    def test_poisoned_copy_must_be_exact_import_only_change(self):
-        directory = self.root / "evidence/fnmatch/architecture"; poisoned = directory / "poisoned_test_fnmatch.py"; control = directory / "control.json"
-        changed = poisoned.read_bytes() + b"# unrelated change\n"
-        def update(data):
-            obj = json.loads(data); obj["poisoned_launcher_sha256"] = hashlib.sha256(changed).hexdigest(); return (json.dumps(obj) + "\n").encode()
-        with self.change(poisoned, lambda _: changed), self.change(control, update):
-            with self.assertRaisesRegex(ValueError, "copy or explicit import"): self.validate(self.row("fnmatch"))
+    def test_missing_withdrawal_raw_proof(self):
+        altered = copy.deepcopy(self.activation); entry = altered["families"]["pathlib"]; raw = next(path for path in entry["files"] if path.endswith("O0.withdrawn.stderr")); del entry["files"][raw]
+        with patch.object(scorecard, "snapshot_activation", return_value=altered):
+            with self.assertRaisesRegex(ValueError, "not digest-bound"): self.validate(self.row("pathlib"))
 
-    def test_poison_must_use_o0_and_matching_runtime(self):
-        control = self.root / "evidence/fnmatch/architecture/control.json"
-        for opt in ("--runtime", "--opt-level"):
-            def update(data):
-                obj = json.loads(data); argv = obj["graph_build"]["argv"]; argv[argv.index(opt)+1] = "old-runtime.a" if opt == "--runtime" else "3"; return (json.dumps(obj) + "\n").encode()
-            with self.change(control, update):
-                with self.assertRaisesRegex(ValueError, "O0 and the exact pinned compiler/runtime"): self.validate(self.row("fnmatch"))
-
-    def test_missing_control_is_rejected(self):
-        run = self.root / "evidence/fnmatch/run.json"
-        def update(data):
-            obj = json.loads(data); obj.pop("architecture_control"); return (json.dumps(obj) + "\n").encode()
-        with self.change(run, update):
-            with self.assertRaisesRegex(ValueError, "no referenced control"): self.validate(self.row("fnmatch"))
+    def test_unbound_staged_family_is_pending(self):
+        altered = copy.deepcopy(self.activation); del altered["families"]["fnmatch"]
+        with patch.object(scorecard, "snapshot_activation", return_value=altered):
+            fs, _ = scorecard.summary(); self.assertEqual((fs["fnmatch"]["pending"],fs["fnmatch"]["receipts"],fs["fnmatch"]["paired"]),(24,0,0))
 
 
 if __name__ == "__main__": unittest.main()

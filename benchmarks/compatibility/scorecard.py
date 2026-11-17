@@ -52,6 +52,41 @@ def is_snapshot():
     return DATA_ROOT != HERE
 
 
+def snapshot_activation():
+    """Return only explicitly activated, digest-bound snapshot shards."""
+    if not is_snapshot(): return {"families": {}, "script_shards": {}}
+    path = DATA_ROOT / "activation.json"
+    if not path.is_file(): return {"families": {}, "script_shards": {}}
+    obj = json.loads(path.read_text())
+    require(obj.get("schema") == "imre.compatibility.snapshot-activation.v1" and obj.get("imre_revision") == COHORT["imre_revision"], "invalid snapshot activation revision or schema")
+    require(isinstance(obj.get("families"), dict) and isinstance(obj.get("script_shards", {}), dict), "invalid activated shards")
+    return obj
+
+
+def activation_entry(name, kind="stdlib"):
+    return snapshot_activation().get("families" if kind == "stdlib" else "script_shards", {}).get(name)
+
+
+def binding_digest(entry, locator):
+    files = entry.get("files", {})
+    require(isinstance(files, dict) and isinstance(files.get(locator), str) and bool(HEX64.fullmatch(files[locator])), f"snapshot file is not digest-bound: {locator}")
+    return files[locator]
+
+
+def bound_source(family, role):
+    entry = activation_entry(family)
+    require(isinstance(entry, dict) and isinstance(entry.get("sources"), dict), f"{family}: missing activation sources")
+    locator = entry["sources"].get(role)
+    require(isinstance(locator, str), f"{family}: missing bound {role}")
+    return checked_file(repository_file(locator, DATA_ROOT), binding_digest(entry, locator))
+
+
+def validate_receipt_binding(path, entry):
+    require(isinstance(entry, dict) and entry.get("receipt") == path.relative_to(ROOT).as_posix(), f"receipt is not explicitly activated: {path}")
+    digest = binding_digest(entry, entry["receipt"]); stat = path.stat()
+    require(source_digests(path, stat.st_mtime_ns, stat.st_size)[0] == digest, f"activated receipt digest differs: {path}")
+
+
 def repository_file(locator, root=ROOT):
     require(isinstance(locator, str) and bool(locator), "missing repository-local evidence path")
     path = (ROOT / locator).resolve()
@@ -240,6 +275,13 @@ def accepted_policy_locator(r):
 
 def checked_file(path, digest=None):
     path = repository_file(path.relative_to(ROOT).as_posix(), DATA_ROOT)
+    relative = path.relative_to(DATA_ROOT)
+    if relative.parts[:1] == ("evidence",) and len(relative.parts) >= 3:
+        entry = activation_entry(relative.parts[1])
+        if entry is not None:
+            bound = binding_digest(entry, path.relative_to(ROOT).as_posix())
+            require(digest is None or digest == bound, f"manifest and artifact digest differ: {path}")
+            digest = bound
     if digest is not None:
         stat = path.stat()
         require(isinstance(digest, str) and bool(HEX64.fullmatch(digest)) and source_digests(path, stat.st_mtime_ns, stat.st_size)[0] == digest, f"raw artifact digest differs: {path}")
@@ -289,7 +331,7 @@ def adapt_family_replay(root, family, revision, source_path, source_sha, source_
     manifest layouts with archived launcher/control/withdrawal evidence.
     """
     directory = root / "evidence" / family
-    build_path, run_path = directory / "build.json", directory / "run.json"
+    build_path, run_path = bound_source(family, "toolchain"), bound_source(family, "run")
     build, run = artifact_json(build_path), artifact_json(run_path)
     require(build.get("source_revision") == revision and (build.get("clean_worktree") is True or build.get("source_clean") is True) and run.get("imre_revision") == revision, "family build/run revision or clean source differs from snapshot")
     if "exit_code" in build: require(build["exit_code"] == 0, "family toolchain build failed")
@@ -306,33 +348,31 @@ def adapt_family_replay(root, family, revision, source_path, source_sha, source_
         image = meta.get("image", meta.get("argv", [None])[0]); digest = meta.get("image_sha256", meta.get("executable_sha256"))
         require(option(argv, "-o") == image and image in meta.get("argv", []) and isinstance(digest, str) and bool(HEX64.fullmatch(digest)), f"{tier} saved image identity or invocation differs")
         identity, launcher = current, argv[2]
-    locator = run.get("architecture_control")
-    if locator is None and "launcher_control_passed" in run:
-        locator = (directory / "control.json").relative_to(ROOT).as_posix()
-    require(isinstance(locator, str), "family launcher has no referenced control")
-    control_path = repository_file(locator, root); control = artifact_json(control_path)
+    control_path = bound_source(family, "gate")
+    if run.get("architecture_control") is not None: require(run["architecture_control"] == control_path.relative_to(ROOT).as_posix(), "run references another launcher control")
+    control = artifact_json(control_path)
     copied = "graph_build" in control
     graph = control.get("graph_build", control); argv = graph.get("argv"); runtime = runtime_argument(argv)
     require(argv[0] == identity[0] and runtime == identity[2] and option(argv, "--runtime") == identity[2] and option(argv, "--opt-level") == "0" and "--no-cache" in argv and control.get("imre_revision", revision) == revision, "launcher control did not use O0 and the exact pinned compiler/runtime")
     require(comparable_build(argv, copied) == comparable_build(tiers["O0"]["build_argv"], copied), "poisoned build flags differ from the positive O0 launcher")
-    poison_name = Path(control.get("control_module", "")).name or "fnmatch_poison.py"
-    poison = checked_file(control_path.parent / poison_name, control.get("control_module_sha256", control.get("poison_sha256")))
+    poison = bound_source(family, "poison_source")
+    checked_file(poison, control.get("control_module_sha256", control.get("poison_sha256")))
     require(poison.read_bytes() == b"status: int = True\n", "control source is not the imported bad-type assignment")
     if copied:
         require(control.get("positive_launcher_sha256") == source_sha and control.get("saved_images_copied_before_runner_cleanup") is True, "control does not bind the original positive launcher")
         original = ROOT / "benchmarks/cpython_stdlib/full" / family / "upstream" / source_path
         require(original.is_file() and hashlib.sha256(original.read_bytes()).hexdigest() == source_sha, "positive FILE source is unavailable or altered")
-        poisoned = checked_file(control_path.parent / "poisoned_test_fnmatch.py", control.get("poisoned_launcher_sha256"))
+        poisoned = bound_source(family, "poisoned_launcher"); checked_file(poisoned, control.get("poisoned_launcher_sha256"))
         import_line = f"import {poison.stem}\n".encode(); lines = original.read_bytes().splitlines(keepends=True)
         require(lines and poisoned.read_bytes() == lines[0] + import_line + b"".join(lines[1:]) and control.get("launcher_change") == f"insert import {poison.stem} after the module docstring; otherwise unchanged original launcher", "poisoned FILE copy or explicit import injection differs")
         positive_root, poisoned_root = option(tiers["O0"]["build_argv"], "--module-root"), option(argv, "--module-root")
         require(Path(launcher).is_relative_to(positive_root) and Path(argv[2]).is_relative_to(poisoned_root) and Path(launcher).relative_to(positive_root) == Path(argv[2]).relative_to(poisoned_root), "poisoned FILE copy has a different module entry")
-        stderr = checked_file(control_path.parent / "O0.poison-build.stderr", graph.get("stderr_sha256")).read_text().lower(); image_created = graph.get("executable_exists")
+        stderr = checked_file(bound_source(family, "gate_stderr"), graph.get("stderr_sha256")).read_text().lower(); image_created = graph.get("executable_exists")
     else:
-        positive = checked_file(control_path.parent / Path(launcher).name, control.get("positive_launcher_sha256"))
+        positive = bound_source(family, "positive_launcher"); checked_file(positive, control.get("positive_launcher_sha256"))
         injected = f"import {poison.stem}\n".encode() + positive.read_bytes()
         require(control.get("positive_launcher") == launcher == argv[2] and control.get("launcher_restored_by_hash") is True and control.get("injection") == f"import {poison.stem} prepended to the actual positive launcher, then restored by hash" and hashlib.sha256(injected).hexdigest() == control.get("control_launcher_sha256"), "control does not bind the positive launcher and import injection")
-        stderr = checked_file(control_path.parent / "control.O0.build.stderr").read_text().lower(); image_created = control.get("image_existed")
+        stderr = bound_source(family, "gate_stderr").read_text().lower(); image_created = control.get("image_existed")
     passed = type(graph.get("exit_code")) is int and graph["exit_code"] != 0 and graph.get("timed_out", False) is False and image_created is False and bool(re.search(r"expected\s+.*?int.*?(?:got|found)\s+.*?bool", stderr, re.S))
     stock = tiers.get("stock")
     if stock is None:
@@ -344,21 +384,22 @@ def adapt_family_replay(root, family, revision, source_path, source_sha, source_
     module = source_module(source_path)
     withdrawal = control.get("withdrawal")
     if copied:
+        require(bound_source(family, "withdrawal") == control_path, "embedded withdrawal binding differs")
         require(isinstance(withdrawal, dict) and withdrawal.get("source_absent_during_runs") is True and withdrawal.get("matching_bytecode_absent") is True and withdrawal.get("source_sha256_before") == source_sha == withdrawal.get("source_sha256_restored"), "source withdrawal did not establish the original source")
         for tier in ("O0", "O3"):
             witness = withdrawal.get("runs", {}).get(tier, {}); meta = tiers[tier]; saved = meta.get("saved_image")
             require(witness.get("exit_code") == 0 and witness.get("image_sha256") == meta.get("executable_sha256") and witness.get("image_matches_saved_baseline_hash") is True and saved in witness.get("argv", []) and witness.get("exact_id_occurrence_outcome_sequence_matches_baseline") is True and witness.get("additional_exec_calls") == [] and witness.get("linked_libpython") is False and witness.get("ldd_exit_code") == 0, f"{tier} saved-image check failed")
-            trace_path = checked_file(control_path.parent / f"{tier}.withdrawn.execve", witness.get("trace_sha256")); trace = trace_path.read_text()
+            trace_path = checked_file(bound_source(family, f"withdrawal_{tier}_trace"), witness.get("trace_sha256")); trace = trace_path.read_text()
             calls = [line for line in trace.splitlines() if re.search(r"execve(?:at)?\(", line)]
             require(len(calls) == 1 and re.search(r"= 0(?:\s|$)", calls[0]) and calls == witness.get("exec_calls") and f'"{saved}"' in calls[0], f"{tier} child exec observed or saved image differs")
-            require("libpython" not in checked_file(control_path.parent / f"{tier}.ldd.stdout").read_text().lower(), f"{tier} linked libpython")
-            outcomes = checked_file(control_path.parent / f"{tier}.withdrawn.stderr", witness.get("stderr_sha256")); baseline = directory / f"{tier}.stderr"
+            require("libpython" not in bound_source(family, f"withdrawal_{tier}_link").read_text().lower(), f"{tier} linked libpython")
+            outcomes = checked_file(bound_source(family, f"withdrawal_{tier}_outcomes"), witness.get("stderr_sha256")); baseline = directory / f"{tier}.stderr"
             sequence = raw_sequence(outcomes, module)
             require(sequence and sequence == raw_sequence(baseline, module) and len(sequence) == witness.get("completed_originals"), f"{tier} source-withdrawn outcomes differ")
             references["saved_checks"][tier] = {"binary_sha256": witness["image_sha256"], "outcomes": file_ref(outcomes), "trace": file_ref(trace_path)}
     else:
-        withdrawal_path = directory / "withdrawal.json"; withdrawal = artifact_json(withdrawal_path)
-        require(withdrawal.get("performed") is True and withdrawal.get("source_absent") is True and withdrawal.get("restored_by_hash") is True and withdrawal.get("source_sha256_before") == source_sha == withdrawal.get("source_sha256_after") and set(withdrawal.get("runs", [])) == {"O0", "O3"}, "source withdrawal did not establish the original source")
+        withdrawal_path = bound_source(family, "withdrawal"); withdrawal = artifact_json(withdrawal_path)
+        require(withdrawal.get("performed") is True and withdrawal.get("source_absent") is True and withdrawal.get("bytecode") == [] and withdrawal.get("restored_by_hash") is True and withdrawal.get("source_sha256_before") == source_sha == withdrawal.get("source_sha256_after") and set(withdrawal.get("runs", [])) == {"O0", "O3"}, "source withdrawal did not establish the original source")
         for tier in ("O0", "O3"):
             meta = tiers[tier]; trace_path = checked_file(directory / meta.get("raw_trace", ""), meta.get("trace_sha256")); trace = trace_path.read_text()
             successful = [line for line in trace.splitlines() if re.search(r"execve(?:at)?\(", line)]
@@ -390,13 +431,113 @@ def validate_family_artifact_record(r, eligible, check):
     check(passed or not r.get("omission_reason"), "failed launcher control cannot be an accepted policy omission")
 
 
+def gate_diagnostic(path, digest, exit_code, timed_out, image_created):
+    stderr = checked_file(path, digest).read_text().lower()
+    require(type(exit_code) is int and exit_code != 0 and timed_out is False and image_created is False and bool(re.search(r"expected\s+.*?int.*?(?:got|found)\s+.*?bool", stderr, re.S)), "imported bad-store gate did not reject without an image")
+
+
+def matched_build(argv, tier, compiler, runtime):
+    require(runtime_argument(argv) == runtime and argv[0] == compiler and option(argv, "--runtime") == runtime and option(argv, "--opt-level") == tier[1:] and "--no-cache" in argv, f"{tier} compiler/runtime or build flags differ")
+
+
+def validate_trace(path, digest, image):
+    text = checked_file(path, digest).read_text()
+    calls = [line for line in text.splitlines() if re.search(r"execve(?:at)?\(", line)]
+    require(len(calls) == 1 and f'"{image}"' in calls[0] and re.search(r"= 0(?:\s|$)", calls[0]) and "libpython" not in text.lower(), "saved image spawned a child or accessed libpython")
+
+
+@lru_cache(maxsize=None)
+def adapt_pathlib(root, revision, source_path, source_sha):
+    family = "pathlib"; directory = root / "evidence" / family
+    gate_path, run_path = bound_source(family, "gate"), bound_source(family, "run")
+    require(bound_source(family, "toolchain") == gate_path and bound_source(family, "withdrawal") == run_path, "pathlib toolchain/withdrawal bindings differ")
+    gate, run = artifact_json(gate_path), artifact_json(run_path); control = gate.get("control", {})
+    require(gate.get("imre_revision") == revision == gate.get("build_worktree_head") and gate.get("build_worktree_clean") is True and gate.get("cpython_commit") == COHORT["cpython_commit"], "pathlib toolchain source identity differs")
+    require(all(isinstance(gate.get(k), str) and HEX64.fullmatch(gate[k]) for k in ("imre_sha256", "runtime_sha256")), "pathlib compiler/runtime hashes missing")
+    require(run.get("gate") == gate_path.relative_to(ROOT).as_posix() and run.get("family") == family, "pathlib gate reference differs")
+    argv = control.get("argv"); compiler, runtime = argv[0], runtime_argument(argv); matched_build(argv, "O0", compiler, runtime)
+    poison = bound_source(family, "poison_source"); checked_file(poison, control.get("control_module_sha256"))
+    module = Path(control.get("control_module", "")).stem
+    require(poison.read_bytes() == b"status: int = True\n" and module and control.get("transformation") == f"prepend import {module} followed by newline to the exact positive launcher at the same path" and control.get("positive_launcher_sha256") == source_sha == control.get("restored_launcher_sha256") and bool(HEX64.fullmatch(control.get("launcher_negative_sha256", ""))) and control["launcher_negative_sha256"] != source_sha and control.get("launcher") == argv[2], "pathlib poisoned launcher or import binding differs")
+    gate_diagnostic(directory / "gate.stderr", control.get("stderr_sha256"), control.get("exit_code"), control.get("timed_out"), control.get("image_exists"))
+    w = run.get("withdrawal", {})
+    require(w.get("test_root_absent") is True and w.get("restored_by_hash") is True and w.get("leaf_sha256_before") == source_sha == w.get("leaf_sha256_after") and w.get("sources_before") == w.get("sources_after") and w.get("sources_before", {}).get("files", 0) > 0, "pathlib source/bytecode tree withdrawal missing")
+    mod = source_module(source_path); stock = raw_sequence(directory / "stock.stderr", mod)
+    checked_file(directory / "stock.stderr", run.get("stock", {}).get("stderr_sha256"))
+    for tier in ("O0", "O3"):
+        meta = run.get("tiers", {}).get(tier, {}); build = meta.get("build", {}); pos = build.get("argv"); matched_build(pos, tier, compiler, runtime)
+        require(build.get("exit_code") == 0 and pos[2] == argv[2] and (tier != "O0" or comparable_build(pos) == comparable_build(argv)) and meta.get("image_exists") is True and bool(HEX64.fullmatch(meta.get("image_sha256", ""))), f"{tier} pathlib positive build differs")
+        image = option(pos, "-o"); baseline, withdrawn = meta.get("baseline", {}), meta.get("withdrawn", {})
+        for label, observation in (("baseline", baseline), ("withdrawn", withdrawn)):
+            require(observation.get("exit_code") == 0 and observation.get("timed_out") is False and image in observation.get("argv", []) and observation.get("initial_image_exec_only") is True and observation.get("libpython_access") is False and observation.get("test_source_access") is False, f"{tier} pathlib {label} run differs")
+            trace = repository_file(observation.get("trace"), root); validate_trace(trace, observation.get("trace_sha256"), image)
+            raw = checked_file(directory / f"{tier}.{label}.stderr", observation.get("stderr_sha256"))
+            require(raw_sequence(raw, mod) == stock and stock, f"{tier} pathlib {label} exact outcomes differ")
+        readelf = checked_file(directory / f"{tier}.readelf.stdout", meta.get("readelf", {}).get("stdout_sha256"))
+        require(meta.get("readelf", {}).get("exit_code") == 0 and meta.get("libpython_needed") is False and "libpython" not in readelf.read_text().lower(), f"{tier} pathlib links libpython")
+    return run
+
+
+@lru_cache(maxsize=None)
+def adapt_urllib(root, revision, source_path, source_sha, source_blob):
+    family = "urllib"; directory = root / "evidence" / family
+    build, gate = artifact_json(bound_source(family, "toolchain")), artifact_json(bound_source(family, "gate"))
+    withdrawal, controls = artifact_json(bound_source(family, "withdrawal")), artifact_json(bound_source(family, "controls"))
+    require(build.get("head") == revision and build.get("clean") is True and build.get("exit_code") == 0 and gate.get("imre_revision") == revision and controls.get("cpython_source_commit") == COHORT["cpython_commit"], "urllib toolchain or gate revision differs")
+    argv = gate.get("argv"); compiler, runtime = argv[0], runtime_argument(argv); matched_build(argv, "O0", compiler, runtime)
+    artifacts = build.get("artifacts", {}); require(all(isinstance(artifacts.get(k), str) and HEX64.fullmatch(artifacts[k]) for k in (compiler, runtime)), "urllib compiler/runtime identities missing")
+    positive, poisoned, poison = (bound_source(family, role) for role in ("positive_launcher", "poisoned_launcher", "poison_source"))
+    checked_file(positive, gate.get("positive_launcher_sha256")); checked_file(poisoned, gate.get("poisoned_launcher_sha256")); checked_file(poison, gate.get("poison_source_sha256"))
+    lines = positive.read_bytes().splitlines(keepends=True); injection = f"import {poison.stem}\n".encode()
+    require(poison.read_bytes() == b"status: int = True\n" and lines and poisoned.read_bytes() == lines[0] + injection + b"".join(lines[1:]) and f"import {poison.stem}" in gate.get("change", ""), "urllib poisoned launcher or explicit import differs")
+    gate_diagnostic(directory / "gate/stderr", gate.get("stderr_sha256"), gate.get("exit_code"), gate.get("timed_out"), gate.get("output_exists_after"))
+    name = Path(source_path).name; module_key = "urlparse" if name == "test_urlparse.py" else "urllib" if name == "test_urllib.py" else None
+    require(module_key is not None, "unknown urllib source module")
+    module_run = artifact_json(bound_source(family, "module_" + module_key)); module_dir = directory / module_key
+    require(module_run.get("source") == {"repo":"https://github.com/python/cpython", "commit":COHORT["cpython_commit"], "path":source_path, "sha256":source_sha, "git_blob":source_blob}, "urllib module source differs")
+    require(withdrawal.get("before_source_sha256", {}).get(name) == source_sha == withdrawal.get("restored_source_sha256", {}).get(name) and withdrawal.get("restored_by_hash") is True and withdrawal.get("matching_bytecode_before") == [] and withdrawal.get("fixture_files_before", 0) - withdrawal.get("fixture_files_during", 0) == len(withdrawal.get("before_source_sha256", {})), "urllib source or bytecode withdrawal missing")
+    child, lib = controls.get("child_exec_probe", {}), controls.get("libpython_probe", {})
+    require(child.get("exit_code") == 0 and "EPERM" in child.get("observed", "") and lib.get("exit_code") == 126 and "detected" in lib.get("observed", "") and "denied with EPERM" in checked_file(directory / "controls/probe.denyexec.log").read_text() and "libpython" in checked_file(directory / "controls/probe.auditlibs.log").read_text().lower(), "urllib child-exec/libpython probes missing")
+    mod = source_module(source_path); stock_meta = module_run.get("stock", {}); stock_path = checked_file(module_dir / "stock.stderr", stock_meta.get("stderr_sha256")); stock = raw_sequence(stock_path, mod)
+    require(stock and stock_meta.get("fresh_run") is True and stock_meta.get("version") == COHORT["cpython_version"], "urllib fresh stock evidence missing")
+    for tier in ("O0", "O3"):
+        meta = module_run.get("native", {}).get(tier, {}); pos = meta.get("build_argv"); matched_build(pos, tier, compiler, runtime)
+        image = withdrawal.get("images", {}).get(tier, {}); witness = withdrawal.get("runs", {}).get(f"{tier}.{module_key}", {})
+        require(meta.get("build_exit_code") == 0 and pos[2] == argv[2] and (tier != "O0" or comparable_build(pos) == comparable_build(argv)) and option(pos, "-o") == image.get("path") == meta.get("argv", [None])[0] and image.get("sha256") == meta.get("image_sha256") and bool(HEX64.fullmatch(image.get("sha256", ""))) and witness.get("argv") == meta.get("argv") and witness.get("stderr_sha256") == meta.get("stderr_sha256") and witness.get("source_files_absent") is True and witness.get("matching_bytecode_absent") is True and witness.get("exit_code") == meta.get("exit_code") == stock_meta.get("exit_code") and witness.get("exit_code") in (0, 1) and witness.get("timed_out") is False, f"{tier} urllib saved image or withdrawal differs")
+        raw = checked_file(module_dir / f"{tier}.stderr", witness.get("stderr_sha256")); require(raw_sequence(raw, mod) == stock, f"{tier} urllib exact withdrawn outcomes differ")
+        denial = checked_file(module_dir / f"{tier}.denyexec.log", witness.get("denyexec_sha256")).read_text(); audit = checked_file(module_dir / f"{tier}.auditlibs.log", witness.get("auditlibs_sha256")).read_text().lower()
+        readelf = checked_file(directory / f"{tier}.readelf.stdout")
+        require(denial == "execve and execveat denied with EPERM\n" and "<main executable>" in audit and "libpython" not in audit and image.get("readelf_exit_code") == 0 and image.get("libpython_needed") is False and "libpython" not in readelf.read_text().lower(), f"{tier} urllib child exec or libpython evidence differs")
+    return module_run
+
+
+def validate_activated_family_record(r, eligible, check, entry):
+    adapter = entry.get("adapter"); source = r["source"]; family = r["family"]; d = DATA_ROOT / "evidence" / family
+    if adapter == "shared-family-v1": return validate_family_artifact_record(r, eligible, check)
+    if adapter == "pathlib-leaf-v1":
+        manifest = adapt_pathlib(DATA_ROOT, COHORT["imre_revision"], source["path"], source["sha256"]); stock = manifest["stock"]
+        for tier in ("O0", "O3"):
+            run = r["runs"][tier]; meta = manifest["tiers"][tier]
+            check(run.get("argv") == meta["baseline"].get("argv") and run.get("evidence", "").split("#L")[0] == (d / f"{tier}.baseline.stderr").relative_to(ROOT).as_posix(), f"{tier} pathlib receipt run differs")
+    elif adapter == "urllib-modules-v1":
+        manifest = adapt_urllib(DATA_ROOT, COHORT["imre_revision"], source["path"], source["sha256"], source["git_blob"]); stock = manifest["stock"]; module_dir = d / ("urlparse" if Path(source["path"]).name == "test_urlparse.py" else "urllib")
+        for tier in ("O0", "O3"):
+            run = r["runs"][tier]; meta = manifest["native"][tier]
+            check(run.get("argv") == meta.get("argv") and run.get("build_argv") == meta.get("build_argv") and run.get("evidence", "").split("#L")[0] == (module_dir / f"{tier}.stderr").relative_to(ROOT).as_posix(), f"{tier} urllib receipt run differs")
+    else: check(False, f"unknown snapshot adapter: {adapter}")
+    check(r["runs"]["stock"].get("argv") == stock.get("argv"), "stock receipt launcher differs")
+    check(type(r.get("paired")) is bool and (not r["paired"] or eligible), "credited pair requires exact passing original outcomes")
+    if eligible and not r["paired"]: check(isinstance(r.get("credit_reason"), str) and bool(r["credit_reason"]), "uncredited observed intersection needs a credit reason")
+
+
 def validate_snapshot_record(r, kind, eligible, check):
     canonical_original(r, kind)
     omission = r.get("omission_reason")
     if omission:
         check(kind == "stdlib" and r.get("policy_omission") == accepted_policy_locator(r) and r.get("policy_omission") is not None, "snapshot omission is not an accepted canonical policy omission")
-    if kind == "stdlib" and not r.get("toolchain_evidence") and (DATA_ROOT / "evidence" / r["family"] / "run.json").is_file():
-        validate_family_artifact_record(r, eligible, check)
+    entry = activation_entry(r.get("family")) if kind == "stdlib" else None
+    if entry and entry.get("adapter") != "row-v1":
+        validate_activated_family_record(r, eligible, check, entry)
         return
     native = [r["runs"][tier] for tier in ("O0", "O3")]
     identities = []
@@ -595,7 +736,9 @@ def verify_stdlib_evidence(r):
         match = re.fullmatch(r"(.+)#L([1-9][0-9]*)", evidence)
         require(bool(match), f"{r['id']}: {tier} needs a raw evidence line")
         path = repository_file(match.group(1))
-        if is_snapshot(): validate_snapshot_evidence(r, tier, run, path)
+        if is_snapshot():
+            validate_snapshot_evidence(r, tier, run, path)
+            if path.is_relative_to(DATA_ROOT.resolve()) and activation_entry(r["family"]): checked_file(path, binding_digest(activation_entry(r["family"]), path.relative_to(ROOT).as_posix()))
         stat = path.stat(); line = int(match.group(2))
         if run["outcome"] == "timeout":
             lines = path.read_text().splitlines(); observed = json.loads(lines[line-1]) if line <= len(lines) else {}
@@ -607,6 +750,7 @@ def verify_stdlib_evidence(r):
             match = re.fullmatch(r"(.+)#L([1-9][0-9]*)", raw)
             require(bool(match), f"{r['id']}: {tier} needs a raw evidence line")
             raw_path = repository_file(match.group(1)); validate_snapshot_evidence(r, tier, {**run, "evidence": raw}, raw_path)
+            if raw_path.is_relative_to(DATA_ROOT.resolve()) and activation_entry(r["family"]): checked_file(raw_path, binding_digest(activation_entry(r["family"]), raw_path.relative_to(ROOT).as_posix()))
             stat = raw_path.stat(); observed = raw_evidence_index(raw_path, module, stat.st_mtime_ns, stat.st_size).get(int(match.group(2)))
             require(observed == (r["id"], r["occurrence"], run["outcome"]), f"{r['id']}: {tier} raw evidence does not establish exact ID, occurrence and outcome")
             require(raw_path.suffix not in {".results"} or run.get("raw_evidence"), f"{r['id']}: derived results require a raw evidence reference")
@@ -617,11 +761,16 @@ def load_records(kind, names, frozen_scripts=None):
     seen = set()
     commands = set()
     for path in sorted((DATA_ROOT / ("stdlib" if kind == "stdlib" else "scripts")).glob("*.jsonl")):
-        if is_snapshot(): require(path.resolve().is_relative_to(DATA_ROOT.resolve()), f"receipt file escapes snapshot: {path}")
+        if is_snapshot():
+            require(path.resolve().is_relative_to(DATA_ROOT.resolve()), f"receipt file escapes snapshot: {path}")
+            entry = activation_entry(path.stem, kind)
+            if entry is None: continue
+            validate_receipt_binding(path, entry)
         if kind == "script": require(path.stem in COHORT["scripts"]["shards"], f"unrecognized script shard: {path}")
         for line_num, line in enumerate(path.read_text().splitlines(), 1):
             try: r = validate_record(json.loads(line), kind, names, frozen_scripts)
             except (ValueError, TypeError, KeyError) as e: raise ValueError(f"{path.relative_to(ROOT)}:{line_num}: {e}") from e
+            if is_snapshot() and kind == "stdlib": require(r.get("family") == path.stem, f"receipt family differs from activated shard: {path}")
             key = (r.get("family"), r["id"], r.get("occurrence")) if kind == "stdlib" else r["id"]
             require(key not in seen, f"duplicate {kind} receipt: {key}")
             seen.add(key)
@@ -651,7 +800,11 @@ def summary():
     require(len(scripts) <= COHORT["scripts"]["expected_commands"], "more script receipts than original commands")
     grouped = {name: [] for name in fs}
     for r in stdlib: grouped[r["family"]].append(r)
-    for name, row in fs.items(): summarize_family(row, grouped[name])
+    for name, row in fs.items():
+        summarize_family(row, grouped[name])
+        if is_snapshot():
+            staged = DATA_ROOT / "stdlib" / f"{name}.jsonl"
+            row["pending"] = sum(bool(line.strip()) for line in staged.read_text().splitlines()) if staged.is_file() and activation_entry(name) is None else 0
     return fs, scripts
 
 
@@ -678,11 +831,11 @@ def render(view):
         lines.extend(["", f"#### {title}", "", "| Family | Raw originals | Stock | O0 | O3 | Observed stock/O0/O3 passes | Verified credited pairs | Historical mixed-revision credits |", "| --- | ---: | --- | --- | --- | ---: | --- | ---: |"])
         for name, r in sorted(rows.items()):
             n = r["originals"]
-            pair = "unknown (not run)" if not r["receipts"] else f"{r['paired']:,} verified" + (f"; {n-r['receipts']:,} unknown" if r["receipts"] < n else "")
+            pair = f"pending ({r['pending']:,} staged, unverified)" if is_snapshot() and r.get("pending") else "unknown (not run)" if not r["receipts"] else f"{r['paired']:,} verified" + (f"; {n-r['receipts']:,} unknown" if r["receipts"] < n else "")
             observed_cell = "unknown (not run)" if not r["receipts"] else f"{r['observed']:,}"
             hist = "—" if r["historical"] is None else f"{r['historical']:,}"
             lines.append(f"| `{name}` | {n:,} | " + " | ".join(outcome_text(r["runs"][t], n) for t in TIERS) + f" | {observed_cell} | {pair} | {hist} |")
-    table("Frozen cohort", frozen if view == "stdlib" else {n: r for n, r in frozen.items() if r["receipts"] or n == "argparse"})
+    table("Frozen cohort", frozen if view == "stdlib" else {n: r for n, r in frozen.items() if r["receipts"] or r.get("pending") or n == "argparse"})
     if supplemental: table("Supplemental pilots", supplemental)
     if view == "readme": lines += ["", "The [stdlib report](docs/stdlib.md) lists every frozen family, including those not run."]
     prefix = "../" if view == "stdlib" else ""
