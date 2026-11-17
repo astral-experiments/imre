@@ -1,0 +1,3745 @@
+{
+  "tier": "stock",
+  "fresh": true,
+  "windows": [
+    {
+      "window": 0,
+      "slice": [
+        0,
+        1
+      ],
+      "keys": [
+        [
+          "test.test_json.test_recursion.TestPyRecursion.test_highly_nested_objects_encoding",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-0.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "0",
+        "1"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-0"
+      },
+      "timeout_seconds": 25,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_recursion.TestPyRecursion.test_highly_nested_objects_encoding",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 5
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "819d00924894631c4eeaed73774c0770df066ec0a3714001c84b599380e8df64",
+      "successful_execs": [
+        "14492 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"0\", \"1\"], 0x7ffc1f0014d0 /* 77 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "5aff747a8d8ce238378e727b7955a61d0f516950958d89a0ec0a952b3c66d971"
+    },
+    {
+      "window": 1,
+      "slice": [
+        1,
+        24
+      ],
+      "keys": [
+        [
+          "test.test_json.test_recursion.TestPyRecursion.test_listrecursion",
+          1
+        ],
+        [
+          "test.test_json.test_scanstring.TestCScanstring.test_bad_escapes",
+          1
+        ],
+        [
+          "test.test_json.test_scanstring.TestCScanstring.test_overflow",
+          1
+        ],
+        [
+          "test.test_json.test_scanstring.TestCScanstring.test_scanstring",
+          1
+        ],
+        [
+          "test.test_json.test_scanstring.TestCScanstring.test_surrogates",
+          1
+        ],
+        [
+          "test.test_json.test_scanstring.TestPyScanstring.test_bad_escapes",
+          1
+        ],
+        [
+          "test.test_json.test_scanstring.TestPyScanstring.test_overflow",
+          1
+        ],
+        [
+          "test.test_json.test_scanstring.TestPyScanstring.test_scanstring",
+          1
+        ],
+        [
+          "test.test_json.test_scanstring.TestPyScanstring.test_surrogates",
+          1
+        ],
+        [
+          "test.test_json.test_separators.TestCSeparators.test_illegal_separators",
+          1
+        ],
+        [
+          "test.test_json.test_separators.TestCSeparators.test_separators",
+          1
+        ],
+        [
+          "test.test_json.test_separators.TestPySeparators.test_illegal_separators",
+          1
+        ],
+        [
+          "test.test_json.test_separators.TestPySeparators.test_separators",
+          1
+        ],
+        [
+          "test.test_json.test_speedups.TestDecode.test_bad_bool_args",
+          1
+        ],
+        [
+          "test.test_json.test_speedups.TestDecode.test_make_scanner",
+          1
+        ],
+        [
+          "test.test_json.test_speedups.TestEncode.test_bad_bool_args",
+          1
+        ],
+        [
+          "test.test_json.test_speedups.TestEncode.test_bad_markers_argument_to_encoder",
+          1
+        ],
+        [
+          "test.test_json.test_speedups.TestEncode.test_bad_str_encoder",
+          1
+        ],
+        [
+          "test.test_json.test_speedups.TestEncode.test_current_indent_level",
+          1
+        ],
+        [
+          "test.test_json.test_speedups.TestEncode.test_make_encoder",
+          1
+        ],
+        [
+          "test.test_json.test_speedups.TestEncode.test_unsortable_keys",
+          1
+        ],
+        [
+          "test.test_json.test_speedups.TestSpeedups.test_encode_basestring_ascii",
+          1
+        ],
+        [
+          "test.test_json.test_speedups.TestSpeedups.test_scanstring",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-1.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "1",
+        "24"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-1"
+      },
+      "timeout_seconds": 45,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 23,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_recursion.TestPyRecursion.test_listrecursion",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 26,
+            "evidence_line": 33
+          },
+          {
+            "id": "test.test_json.test_scanstring.TestCScanstring.test_bad_escapes",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 28,
+            "evidence_line": 35
+          },
+          {
+            "id": "test.test_json.test_scanstring.TestCScanstring.test_overflow",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 30,
+            "evidence_line": 37
+          },
+          {
+            "id": "test.test_json.test_scanstring.TestCScanstring.test_scanstring",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 32,
+            "evidence_line": 39
+          },
+          {
+            "id": "test.test_json.test_scanstring.TestCScanstring.test_surrogates",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 34,
+            "evidence_line": 41
+          },
+          {
+            "id": "test.test_json.test_scanstring.TestPyScanstring.test_bad_escapes",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 36,
+            "evidence_line": 43
+          },
+          {
+            "id": "test.test_json.test_scanstring.TestPyScanstring.test_overflow",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 38,
+            "evidence_line": 45
+          },
+          {
+            "id": "test.test_json.test_scanstring.TestPyScanstring.test_scanstring",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 40,
+            "evidence_line": 47
+          },
+          {
+            "id": "test.test_json.test_scanstring.TestPyScanstring.test_surrogates",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 42,
+            "evidence_line": 49
+          },
+          {
+            "id": "test.test_json.test_separators.TestCSeparators.test_illegal_separators",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 44,
+            "evidence_line": 51
+          },
+          {
+            "id": "test.test_json.test_separators.TestCSeparators.test_separators",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 46,
+            "evidence_line": 53
+          },
+          {
+            "id": "test.test_json.test_separators.TestPySeparators.test_illegal_separators",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 48,
+            "evidence_line": 55
+          },
+          {
+            "id": "test.test_json.test_separators.TestPySeparators.test_separators",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 50,
+            "evidence_line": 57
+          },
+          {
+            "id": "test.test_json.test_speedups.TestDecode.test_bad_bool_args",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 52,
+            "evidence_line": 59
+          },
+          {
+            "id": "test.test_json.test_speedups.TestDecode.test_make_scanner",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 54,
+            "evidence_line": 61
+          },
+          {
+            "id": "test.test_json.test_speedups.TestEncode.test_bad_bool_args",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 56,
+            "evidence_line": 63
+          },
+          {
+            "id": "test.test_json.test_speedups.TestEncode.test_bad_markers_argument_to_encoder",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 58,
+            "evidence_line": 65
+          },
+          {
+            "id": "test.test_json.test_speedups.TestEncode.test_bad_str_encoder",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 60,
+            "evidence_line": 67
+          },
+          {
+            "id": "test.test_json.test_speedups.TestEncode.test_current_indent_level",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 62,
+            "evidence_line": 69
+          },
+          {
+            "id": "test.test_json.test_speedups.TestEncode.test_make_encoder",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 64,
+            "evidence_line": 71
+          },
+          {
+            "id": "test.test_json.test_speedups.TestEncode.test_unsortable_keys",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 66,
+            "evidence_line": 73
+          },
+          {
+            "id": "test.test_json.test_speedups.TestSpeedups.test_encode_basestring_ascii",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 68,
+            "evidence_line": 75
+          },
+          {
+            "id": "test.test_json.test_speedups.TestSpeedups.test_scanstring",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 70,
+            "evidence_line": 77
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 23,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "e2ba0102c535b0371e7cc76816ebb3c96991a4a6aa31ba5eb55694ddd2426f23",
+      "successful_execs": [
+        "14490 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"1\", \"24\"], 0x7ffd73591bc0 /* 77 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "f6b70dea838c48609b1990f75d13ba6869d3cbaeac48f69831dd06f73363fce1"
+    },
+    {
+      "window": 2,
+      "slice": [
+        24,
+        25
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestMain.test_broken_pipe_error",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-2.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "24",
+        "25"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-2"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestMain.test_broken_pipe_error",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 83
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "8776652e5c35741be0a53b3edd7054622b328f20c5bb821d60a746c3bcfdb7e1",
+      "successful_execs": [
+        "14496 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"24\", \"25\"], 0x7ffdc30c64d0 /* 77 vars */) = 0",
+        "14505 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-m\", \"json\"], 0x2b4fc090 /* 76 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "c2940b7db03f024f4a8df55f7eb72f09613c1db4f9ec4eb87482fb48ee40af1a"
+    },
+    {
+      "window": 3,
+      "slice": [
+        25,
+        26
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestMain.test_colors",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-3.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "25",
+        "26"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-3"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestMain.test_colors",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 89
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "4373691685bc7a3d3eb62d9a623b9f6bf5300053cc85d645d95bcb6eed0305f5",
+      "successful_execs": [
+        "14494 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"25\", \"26\"], 0x7fff505b87b0 /* 77 vars */) = 0",
+        "14502 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-E\", \"-c\", \"import sys; sys.exit(0)\"], 0x7f71090 /* 76 vars */) = 0",
+        "14503 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json\", \"@test_14494_tmp\\303\\246\"], 0x7e02080 /* 76 vars */) = 0",
+        "14504 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json\", \"@test_14494_tmp\\303\\246\"], 0x7f07a20 /* 76 vars */) = 0",
+        "14510 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json\", \"@test_14494_tmp\\303\\246\"], 0x7e02080 /* 76 vars */) = 0",
+        "14511 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json\", \"@test_14494_tmp\\303\\246\"], 0x7f07a20 /* 76 vars */) = 0",
+        "14512 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json\", \"@test_14494_tmp\\303\\246\"], 0x7e02080 /* 76 vars */) = 0",
+        "14515 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json\", \"@test_14494_tmp\\303\\246\"], 0x7f07a20 /* 76 vars */) = 0",
+        "14521 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json\", \"@test_14494_tmp\\303\\246\"], 0x7e02080 /* 76 vars */) = 0",
+        "14522 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json\", \"@test_14494_tmp\\303\\246\"], 0x7f07a20 /* 76 vars */) = 0",
+        "14533 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json\", \"@test_14494_tmp\\303\\246\"], 0x7e02080 /* 76 vars */) = 0",
+        "14544 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json\", \"@test_14494_tmp\\303\\246\"], 0x7f07a20 /* 76 vars */) = 0",
+        "14546 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json\", \"@test_14494_tmp\\303\\246\"], 0x7e02080 /* 76 vars */) = 0",
+        "14548 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json\", \"@test_14494_tmp\\303\\246\"], 0x7f07a20 /* 76 vars */) = 0",
+        "14549 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json\", \"@test_14494_tmp\\303\\246\"], 0x7e02080 /* 76 vars */) = 0",
+        "14551 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json\", \"@test_14494_tmp\\303\\246\"], 0x7f07a20 /* 76 vars */) = 0",
+        "14560 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json\", \"@test_14494_tmp\\303\\246\"], 0x7e02080 /* 76 vars */) = 0",
+        "14561 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json\", \"@test_14494_tmp\\303\\246\"], 0x7f07a20 /* 76 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "eefda72562b592fa6ba006ab2332118e1f786e98f5f9b6d819449543e5d509d8"
+    },
+    {
+      "window": 4,
+      "slice": [
+        26,
+        27
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestMain.test_compact",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-4.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "26",
+        "27"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-4"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestMain.test_compact",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 95
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "5e8328acb93a3ee726dc829c5eb44029eaf8033187a3ae65cb62b4768da71433",
+      "successful_execs": [
+        "14501 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"26\", \"27\"], 0x7ffe06f145b0 /* 77 vars */) = 0",
+        "14516 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-m\", \"json\", \"--compact\"], 0x1ede3090 /* 76 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "ed868e8d1e35ba0501008b3110685cc5abd6a2fcd65d49f57df28f6014335ad9"
+    },
+    {
+      "window": 5,
+      "slice": [
+        27,
+        28
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestMain.test_ensure_ascii_default",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-5.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "27",
+        "28"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-5"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestMain.test_ensure_ascii_default",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 101
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "dc5dbcb05ae94a73a36b1933ecedb3b40790177e687b63e8591cd9b957b8f9e5",
+      "successful_execs": [
+        "14509 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"27\", \"28\"], 0x7fffa318fcb0 /* 77 vars */) = 0",
+        "14513 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-E\", \"-c\", \"import sys; sys.exit(0)\"], 0x7ffe5c66d9b8 /* 77 vars */) = 0",
+        "14514 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-m\", \"json\", \"@test_14509_tmp\\303\\246\", \"@test_14509_tmp\\303\\246.out\"], 0xa132900 /* 77 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "f7b0d39057489efa6a2f7a41082911d709d418cadc7e6611faf00e0f30314c3a"
+    },
+    {
+      "window": 6,
+      "slice": [
+        28,
+        29
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestMain.test_help_flag",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-6.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "28",
+        "29"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-6"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestMain.test_help_flag",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 107
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "808620e42a3379f9a92201e7cdd7d4e9a1135900d84e4f079a6bda1b61831eac",
+      "successful_execs": [
+        "14520 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"28\", \"29\"], 0x7fffb2b833e0 /* 77 vars */) = 0",
+        "14527 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-E\", \"-c\", \"import sys; sys.exit(0)\"], 0x7ffd4538e0b8 /* 77 vars */) = 0",
+        "14528 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-m\", \"json\", \"-h\"], 0x307d900 /* 77 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "bf9eeb019215e0ea2d0649e096cf3407efd7075c801d6676d040864dd58dc35b"
+    },
+    {
+      "window": 7,
+      "slice": [
+        29,
+        30
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestMain.test_indent",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-7.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "29",
+        "30"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-7"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestMain.test_indent",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 113
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "20089de317ab2702418ae3358f797bc0324f4d6da993acfc9b68b166f9f1b28d",
+      "successful_execs": [
+        "14526 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"29\", \"30\"], 0x7ffe3cdfe060 /* 77 vars */) = 0",
+        "14562 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-m\", \"json\", \"--indent\", \"2\"], 0x3cba9090 /* 76 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "b39c00deb810124146bacafc555b670eec6dd6ebf49756bfdce903cf813d0072"
+    },
+    {
+      "window": 8,
+      "slice": [
+        30,
+        31
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestMain.test_infile_outfile",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-8.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "30",
+        "31"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-8"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestMain.test_infile_outfile",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 119
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "ed2fdd2b2688dd6ac71bed2cb116efdb0510882dc145ead00b9080d03365759b",
+      "successful_execs": [
+        "14532 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"30\", \"31\"], 0x7ffdef98d250 /* 77 vars */) = 0",
+        "14538 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-E\", \"-c\", \"import sys; sys.exit(0)\"], 0x7ffcd584b5f8 /* 77 vars */) = 0",
+        "14539 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-m\", \"json\", \"@test_14532_tmp\\303\\246\", \"@test_14532_tmp\\303\\246.out\"], 0x7b1b900 /* 77 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "f31b1409233f4d32c063b50a93b9d3e3e70dd774a4e6e2bc977a57527c563c03"
+    },
+    {
+      "window": 9,
+      "slice": [
+        31,
+        32
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestMain.test_infile_stdout",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-9.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "31",
+        "32"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-9"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestMain.test_infile_stdout",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 125
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "91267d47aa7968bd9ecbb6f1127cc7da183d359b7f13f0de659711a96cfc27b7",
+      "successful_execs": [
+        "14537 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"31\", \"32\"], 0x7ffcf8250320 /* 77 vars */) = 0",
+        "14545 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-E\", \"-c\", \"import sys; sys.exit(0)\"], 0x7ffe7a8d7d08 /* 77 vars */) = 0",
+        "14547 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-m\", \"json\", \"@test_14537_tmp\\303\\246\"], 0x3e90b900 /* 77 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "24cd0c02ed694abe8e46d030e54773a7b9f62b883d4032df318ced3c77ca39f0"
+    },
+    {
+      "window": 10,
+      "slice": [
+        32,
+        33
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestMain.test_jsonlines",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-10.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "32",
+        "33"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-10"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestMain.test_jsonlines",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 131
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "d1af7b438bf83e5459de7f3ed97fe4af1b682db80d38951f3cadb16cae2ddfda",
+      "successful_execs": [
+        "14543 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"32\", \"33\"], 0x7ffd6ef995b0 /* 77 vars */) = 0",
+        "14550 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-m\", \"json\", \"--json-lines\"], 0x1740a090 /* 76 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "4dd7abe197734cd8432e8e00d0b3fb50d3e7f029443a197a4dabe2d92ae64dbe"
+    },
+    {
+      "window": 11,
+      "slice": [
+        33,
+        34
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestMain.test_jsonlines_from_file",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-11.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "33",
+        "34"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-11"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestMain.test_jsonlines_from_file",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 137
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "944915b24f4c3359fdb3360307ce7b71165e6aab59a90650d27ef8398f913372",
+      "successful_execs": [
+        "14555 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"33\", \"34\"], 0x7ffdcf450690 /* 77 vars */) = 0",
+        "14585 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-m\", \"json\", \"--json-lines\", \"/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/json_lines.jsonl\"], 0x496d090 /* 76 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "24b945b0833e86f754bffcf93a8e6e6a74373c2cf9bd9473d36873dc6ba2c224"
+    },
+    {
+      "window": 12,
+      "slice": [
+        34,
+        35
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestMain.test_no_ensure_ascii_flag",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-12.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "34",
+        "35"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-12"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestMain.test_no_ensure_ascii_flag",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 143
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "bcd2caf083b60e3d6046d542c17978959651b1473c1ec6cc67843e3b66de5b9c",
+      "successful_execs": [
+        "14559 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"34\", \"35\"], 0x7ffcdac937e0 /* 77 vars */) = 0",
+        "14567 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-E\", \"-c\", \"import sys; sys.exit(0)\"], 0x7ffe02be0648 /* 77 vars */) = 0",
+        "14569 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-m\", \"json\", \"--no-ensure-ascii\", \"@test_14559_tmp\\303\\246\", \"@test_14559_tmp\\303\\246.out\"], 0x1f6c7900 /* 77 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "ddd638f75613b73dedaedf731c6393f9fa5d589aff65e405a2ab3634f9a3ead3"
+    },
+    {
+      "window": 13,
+      "slice": [
+        35,
+        36
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestMain.test_no_indent",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-13.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "35",
+        "36"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-13"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestMain.test_no_indent",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 149
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "8119ddd4d580abc67dcaf4d60c0e9a34fe3dc7f3ed230e55c1c2980a20d2a481",
+      "successful_execs": [
+        "14566 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"35\", \"36\"], 0x7ffc695e36f0 /* 77 vars */) = 0",
+        "14573 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-m\", \"json\", \"--no-indent\"], 0x405fa090 /* 76 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "721348f3ee457859b78f669a81e1954832c69ead64449277aa7bb9e94f6e1317"
+    },
+    {
+      "window": 14,
+      "slice": [
+        36,
+        37
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestMain.test_non_ascii_infile",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-14.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "36",
+        "37"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-14"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestMain.test_non_ascii_infile",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 155
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "7ff686c1c90eb5b304b472cd85a5494e50e45064143f7896ac7ba7a039c4a008",
+      "successful_execs": [
+        "14572 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"36\", \"37\"], 0x7ffd7644bc30 /* 77 vars */) = 0",
+        "14583 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-E\", \"-c\", \"import sys; sys.exit(0)\"], 0x7ffebaea47b8 /* 77 vars */) = 0",
+        "14584 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-m\", \"json\", \"@test_14572_tmp\\303\\246\"], 0x3a511900 /* 77 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "ae1c2f1bade638b60cbe88bc67fb4393f99f1c8fab6fa351cec9861a83f8554e"
+    },
+    {
+      "window": 15,
+      "slice": [
+        37,
+        38
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestMain.test_sort_keys_flag",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-15.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "37",
+        "38"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-15"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestMain.test_sort_keys_flag",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 161
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "e4052712abab64db42f5e847fcbac81a43fd47602f6b607bfb96c8e29c1a3590",
+      "successful_execs": [
+        "14577 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"37\", \"38\"], 0x7fff0c3e7f00 /* 77 vars */) = 0",
+        "14586 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-E\", \"-c\", \"import sys; sys.exit(0)\"], 0x7fffc90ab438 /* 77 vars */) = 0",
+        "14591 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-m\", \"json\", \"--sort-keys\", \"@test_14577_tmp\\303\\246\"], 0x2753e900 /* 77 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "13d23c347acd877676bc203ecc84d0e7e65806762f66684c67c4cab7aef0fd58"
+    },
+    {
+      "window": 16,
+      "slice": [
+        38,
+        39
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestMain.test_stdin_stdout",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-16.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "38",
+        "39"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-16"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestMain.test_stdin_stdout",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 167
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "be7650f3b88e0d8de442ce8ab024cc9207a68a9414780d14cdf1e1eb220bb4e8",
+      "successful_execs": [
+        "14582 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"38\", \"39\"], 0x7ffd12a91260 /* 77 vars */) = 0",
+        "14592 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-m\", \"json\"], 0x3bf9c090 /* 76 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "f0dbf7040c89d0edf10fd5c627ffc105cbf8c66dce31b68a33255a7a4fc683fa"
+    },
+    {
+      "window": 17,
+      "slice": [
+        39,
+        40
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestMain.test_tab",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-17.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "39",
+        "40"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-17"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestMain.test_tab",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 173
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "9f46fd9d1fe3b03d00578cf9c437108fdecc26cafab5ed515f765658bd22a549",
+      "successful_execs": [
+        "14590 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"39\", \"40\"], 0x7fffa75dfc30 /* 77 vars */) = 0",
+        "14609 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-m\", \"json\", \"--tab\"], 0x8655090 /* 76 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "30b0ef0e49a8fa9ca94ec88ee482e99820b24edd362c72d7c0b558dabde72f2a"
+    },
+    {
+      "window": 18,
+      "slice": [
+        40,
+        41
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestMain.test_writing_in_place",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-18.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "40",
+        "41"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-18"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestMain.test_writing_in_place",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 179
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "ccad87e4c5eb19fcacb1abcdd4d8416c73811a97ffa0d49c774b85881c6e9d3e",
+      "successful_execs": [
+        "14596 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"40\", \"41\"], 0x7ffc95388520 /* 77 vars */) = 0",
+        "14629 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-E\", \"-c\", \"import sys; sys.exit(0)\"], 0x7ffe8a51c018 /* 77 vars */) = 0",
+        "14630 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-m\", \"json\", \"@test_14596_tmp\\303\\246\", \"@test_14596_tmp\\303\\246\"], 0x2fd2c900 /* 77 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "5ba0f684e31583f7286d65e17a4a01355e5e2f70b1ccbb37f7393eae491fe865"
+    },
+    {
+      "window": 19,
+      "slice": [
+        41,
+        42
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestTool.test_broken_pipe_error",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-19.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "41",
+        "42"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-19"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestTool.test_broken_pipe_error",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 185
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "d5429200ce44555e267e3f2417f1bd3b4da13d993264c12caccb655e13314029",
+      "successful_execs": [
+        "14600 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"41\", \"42\"], 0x7ffe7b895520 /* 77 vars */) = 0",
+        "14607 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-m\", \"json.tool\"], 0x340f0090 /* 76 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "94f1ae02532759b41bc7a6cab6b190250a21df8b614ba92f5fa4a4fe286b47e4"
+    },
+    {
+      "window": 20,
+      "slice": [
+        42,
+        43
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestTool.test_colors",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-20.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "42",
+        "43"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-20"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestTool.test_colors",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 191
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "cdc2cc2b9e012705d6cb0de02d8f22ccdd78865a88ff79d577c5d97958ea376d",
+      "successful_execs": [
+        "14604 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"42\", \"43\"], 0x7ffd042ea6f0 /* 77 vars */) = 0",
+        "14605 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-E\", \"-c\", \"import sys; sys.exit(0)\"], 0x3ab97090 /* 76 vars */) = 0",
+        "14606 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json.tool\", \"@test_14604_tmp\\303\\246\"], 0x3aa28080 /* 76 vars */) = 0",
+        "14608 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json.tool\", \"@test_14604_tmp\\303\\246\"], 0x3ab2da20 /* 76 vars */) = 0",
+        "14614 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json.tool\", \"@test_14604_tmp\\303\\246\"], 0x3aa28080 /* 76 vars */) = 0",
+        "14615 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json.tool\", \"@test_14604_tmp\\303\\246\"], 0x3ab2da20 /* 76 vars */) = 0",
+        "14620 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json.tool\", \"@test_14604_tmp\\303\\246\"], 0x3aa28080 /* 76 vars */) = 0",
+        "14622 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json.tool\", \"@test_14604_tmp\\303\\246\"], 0x3ab2da20 /* 76 vars */) = 0",
+        "14623 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json.tool\", \"@test_14604_tmp\\303\\246\"], 0x3aa28080 /* 76 vars */) = 0",
+        "14628 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json.tool\", \"@test_14604_tmp\\303\\246\"], 0x3ab2da20 /* 76 vars */) = 0",
+        "14633 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json.tool\", \"@test_14604_tmp\\303\\246\"], 0x3aa28080 /* 76 vars */) = 0",
+        "14638 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json.tool\", \"@test_14604_tmp\\303\\246\"], 0x3ab2da20 /* 76 vars */) = 0",
+        "14643 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json.tool\", \"@test_14604_tmp\\303\\246\"], 0x3aa28080 /* 76 vars */) = 0",
+        "14645 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json.tool\", \"@test_14604_tmp\\303\\246\"], 0x3ab2da20 /* 76 vars */) = 0",
+        "14650 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json.tool\", \"@test_14604_tmp\\303\\246\"], 0x3aa28080 /* 76 vars */) = 0",
+        "14660 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json.tool\", \"@test_14604_tmp\\303\\246\"], 0x3ab2da20 /* 76 vars */) = 0",
+        "14665 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json.tool\", \"@test_14604_tmp\\303\\246\"], 0x3aa28080 /* 76 vars */) = 0",
+        "14679 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-I\", \"-m\", \"json.tool\", \"@test_14604_tmp\\303\\246\"], 0x3ab2da20 /* 76 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "d4b4a69b371777df2489acec850b58996f91d0c8b92797b683af383f0e1b5611"
+    },
+    {
+      "window": 21,
+      "slice": [
+        43,
+        44
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestTool.test_compact",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-21.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "43",
+        "44"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-21"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestTool.test_compact",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 197
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "986fa555818a72422c9fe1152d05d9a8bed20ae7e0bd16b7dfa10b1adde7e913",
+      "successful_execs": [
+        "14613 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"43\", \"44\"], 0x7ffdde430ce0 /* 77 vars */) = 0",
+        "14621 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-m\", \"json.tool\", \"--compact\"], 0x3615e090 /* 76 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "9ecc79994017976be23fe7a133abea752afbcd3ca52696a96fa0e1cb2eb37738"
+    },
+    {
+      "window": 22,
+      "slice": [
+        44,
+        45
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestTool.test_ensure_ascii_default",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-22.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "44",
+        "45"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-22"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestTool.test_ensure_ascii_default",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 203
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "515456cfd4ccd412a28e8785313858a05cb1dcbc1a619c0d85fc41f7ee990595",
+      "successful_execs": [
+        "14619 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"44\", \"45\"], 0x7ffd301b2b30 /* 77 vars */) = 0",
+        "14631 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-E\", \"-c\", \"import sys; sys.exit(0)\"], 0x7ffddca7f508 /* 77 vars */) = 0",
+        "14632 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-m\", \"json.tool\", \"@test_14619_tmp\\303\\246\", \"@test_14619_tmp\\303\\246.out\"], 0xb23c900 /* 77 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "01981eabd136cb9dad9dc4935cbe8c6cba81405f362b306b01667c9c305a79af"
+    },
+    {
+      "window": 23,
+      "slice": [
+        45,
+        46
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestTool.test_help_flag",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-23.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "45",
+        "46"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-23"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestTool.test_help_flag",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 209
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "c619c02736dbbc42253b6ba44f52575368855c5e7ef22227b24a992e476897b2",
+      "successful_execs": [
+        "14627 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"45\", \"46\"], 0x7ffef602d1e0 /* 77 vars */) = 0",
+        "14644 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-E\", \"-c\", \"import sys; sys.exit(0)\"], 0x7fff2631bb08 /* 77 vars */) = 0",
+        "14646 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-m\", \"json.tool\", \"-h\"], 0xa7b6900 /* 77 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "1c0987025a7bdc6ede8252bd690aa901b22730fe9cd0691b5857f92f0a334e78"
+    },
+    {
+      "window": 24,
+      "slice": [
+        46,
+        47
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestTool.test_indent",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-24.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "46",
+        "47"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-24"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestTool.test_indent",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 215
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "fd927f8c0a7690481cccc22c78fd3704958b471ee75ca6bb51dd353059291a36",
+      "successful_execs": [
+        "14637 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"46\", \"47\"], 0x7fff39d87200 /* 77 vars */) = 0",
+        "14648 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-m\", \"json.tool\", \"--indent\", \"2\"], 0x33f0090 /* 76 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "172823411b80907524bb2d29f1858b2989a8fe645aa9c03d7108e868c3cd5da2"
+    },
+    {
+      "window": 25,
+      "slice": [
+        47,
+        48
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestTool.test_infile_outfile",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-25.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "47",
+        "48"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-25"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestTool.test_infile_outfile",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 221
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "5194691263fea57b0e87f7dc5ffa1ec9a108566ed6c01e99ef828e44d1447a02",
+      "successful_execs": [
+        "14642 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"47\", \"48\"], 0x7ffd297c6fd0 /* 77 vars */) = 0",
+        "14647 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-E\", \"-c\", \"import sys; sys.exit(0)\"], 0x7ffd75c064f8 /* 77 vars */) = 0",
+        "14649 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-m\", \"json.tool\", \"@test_14642_tmp\\303\\246\", \"@test_14642_tmp\\303\\246.out\"], 0x2075a900 /* 77 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "520398ff56a946924ea30fb09e57b0e133bbe8caa109f0b958d02c12c60b4df2"
+    },
+    {
+      "window": 26,
+      "slice": [
+        48,
+        49
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestTool.test_infile_stdout",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-26.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "48",
+        "49"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-26"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestTool.test_infile_stdout",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 227
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "b45408d1a834922ee1d24783aacc4d1ac0875ae67dc8b2e463eb00ca878b3468",
+      "successful_execs": [
+        "14655 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"48\", \"49\"], 0x7ffca21f1f00 /* 77 vars */) = 0",
+        "14689 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-E\", \"-c\", \"import sys; sys.exit(0)\"], 0x7ffe326250a8 /* 77 vars */) = 0",
+        "14691 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-m\", \"json.tool\", \"@test_14655_tmp\\303\\246\"], 0x3c7e6900 /* 77 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "c74b10c8ba1b2612ded26e3db5f06d0948ad4f5f8fb78ede768c584f17cd0ef9"
+    },
+    {
+      "window": 27,
+      "slice": [
+        49,
+        50
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestTool.test_jsonlines",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-27.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "49",
+        "50"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-27"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestTool.test_jsonlines",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 233
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "ae093111d3fe4aff446a5b28d89004eb6beb0b1cda39d213f46c83e0ab5873ba",
+      "successful_execs": [
+        "14659 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"49\", \"50\"], 0x7ffca5f15f80 /* 77 vars */) = 0",
+        "14680 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-m\", \"json.tool\", \"--json-lines\"], 0xacaf090 /* 76 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "c6587e9df5018b7406e2ba282bea11a38336a82650efdc6aff9a80b4d1c16562"
+    },
+    {
+      "window": 28,
+      "slice": [
+        50,
+        51
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestTool.test_jsonlines_from_file",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-28.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "50",
+        "51"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-28"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestTool.test_jsonlines_from_file",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 239
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "81409792a090c6d0ae838b9e3855fba56c8365176fab6e57eee1de24e8bfc4eb",
+      "successful_execs": [
+        "14664 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"50\", \"51\"], 0x7ffe629b5e20 /* 77 vars */) = 0",
+        "14690 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-m\", \"json.tool\", \"--json-lines\", \"/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/json_lines.jsonl\"], 0x2988f090 /* 76 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "f535bd58d5838e37bf52a9b0f4a8d8127ebd195bd99cc5c9bd6354975c89101a"
+    },
+    {
+      "window": 29,
+      "slice": [
+        51,
+        52
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestTool.test_no_ensure_ascii_flag",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-29.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "51",
+        "52"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-29"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestTool.test_no_ensure_ascii_flag",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 245
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "13521902b9ea89f8348aeb85a912c53f7e7da6d021a0efaa2e06238e5773c627",
+      "successful_execs": [
+        "14684 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"51\", \"52\"], 0x7ffcc9dfb6d0 /* 77 vars */) = 0",
+        "14696 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-E\", \"-c\", \"import sys; sys.exit(0)\"], 0x7ffcbdcfdb08 /* 77 vars */) = 0",
+        "14697 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-m\", \"json.tool\", \"--no-ensure-ascii\", \"@test_14684_tmp\\303\\246\", \"@test_14684_tmp\\303\\246.out\"], 0x29ffe900 /* 77 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e0a83bcff0ef1560ac625310be2d32d5f48d74046dae83a80baa02d6bb95091a"
+    },
+    {
+      "window": 30,
+      "slice": [
+        52,
+        53
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestTool.test_no_indent",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-30.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "52",
+        "53"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-30"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestTool.test_no_indent",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 251
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "462d5da104f0ae499532872e763b68d74c3ece8543e542e00c77639fdaed0489",
+      "successful_execs": [
+        "14688 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"52\", \"53\"], 0x7ffc10131d60 /* 77 vars */) = 0",
+        "14712 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-m\", \"json.tool\", \"--no-indent\"], 0x34386090 /* 76 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "072adabe2f85f4a05b66492b3056ba51ed7f7c7d2d8f2c862f6897f92b9aa678"
+    },
+    {
+      "window": 31,
+      "slice": [
+        53,
+        54
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestTool.test_non_ascii_infile",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-31.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "53",
+        "54"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-31"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestTool.test_non_ascii_infile",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 257
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "ba92899e68a8230018456846308e8ce1f7ec8b313d7938c264c9b09cff06e5d9",
+      "successful_execs": [
+        "14695 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"53\", \"54\"], 0x7ffea7a5bfa0 /* 77 vars */) = 0",
+        "14706 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-E\", \"-c\", \"import sys; sys.exit(0)\"], 0x7ffd46d31b88 /* 77 vars */) = 0",
+        "14707 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-m\", \"json.tool\", \"@test_14695_tmp\\303\\246\"], 0x3e0e1900 /* 77 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "098347c6557c34b087eb8ee738f4a602878aa83d97828d29edf9b6d74dfb5029"
+    },
+    {
+      "window": 32,
+      "slice": [
+        54,
+        55
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestTool.test_sort_keys_flag",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-32.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "54",
+        "55"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-32"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestTool.test_sort_keys_flag",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 263
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "89d4eb34a8ea6dbdebe2d51759d71d20066f76517fe3dd2d00a9ac5ff973c4af",
+      "successful_execs": [
+        "14701 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"54\", \"55\"], 0x7ffcf9f843b0 /* 77 vars */) = 0",
+        "14713 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-E\", \"-c\", \"import sys; sys.exit(0)\"], 0x7ffe06ed21b8 /* 77 vars */) = 0",
+        "14715 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-m\", \"json.tool\", \"--sort-keys\", \"@test_14701_tmp\\303\\246\"], 0x1d9a4900 /* 77 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "cdf035736d408e30eeb62e590742e1db4d52bbbc0582a735d712c0a396af60c2"
+    },
+    {
+      "window": 33,
+      "slice": [
+        55,
+        56
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestTool.test_stdin_stdout",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-33.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "55",
+        "56"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-33"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestTool.test_stdin_stdout",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 269
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "6290a911336bea08682e95c9d95337a30d266545034ba092cc0b40349109409b",
+      "successful_execs": [
+        "14705 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"55\", \"56\"], 0x7fffd08f8490 /* 77 vars */) = 0",
+        "14728 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-m\", \"json.tool\"], 0x3ad7e090 /* 76 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "1e66567a99325e2702a09f01a7ae1046f20f89dc287ef4a4575426a815963db2"
+    },
+    {
+      "window": 34,
+      "slice": [
+        56,
+        57
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestTool.test_tab",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-34.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "56",
+        "57"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-34"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestTool.test_tab",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 275
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "378b3dba9a5481e8f640d2ed632376678cb5ce299675c1981fcda288b20aeb3d",
+      "successful_execs": [
+        "14711 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"56\", \"57\"], 0x7ffdbf0030c0 /* 77 vars */) = 0",
+        "14714 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-m\", \"json.tool\", \"--tab\"], 0x425cd090 /* 76 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "8483685164c3e92393815afde5f91fa9ee259c4749c05ab501ec2145e00de988"
+    },
+    {
+      "window": 35,
+      "slice": [
+        57,
+        58
+      ],
+      "keys": [
+        [
+          "test.test_json.test_tool.TestTool.test_writing_in_place",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-35.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "57",
+        "58"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-35"
+      },
+      "timeout_seconds": 8,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 1,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_tool.TestTool.test_writing_in_place",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 4,
+            "evidence_line": 281
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 1,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "560f26ccf04886b348a0062fe07ef83dc5e411eba3c97a47bf0201386981a839",
+      "successful_execs": [
+        "14719 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"57\", \"58\"], 0x7ffe27f25000 /* 77 vars */) = 0",
+        "14729 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-E\", \"-c\", \"import sys; sys.exit(0)\"], 0x7fff76ff70f8 /* 77 vars */) = 0",
+        "14730 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-X\", \"faulthandler\", \"-m\", \"json.tool\", \"@test_14719_tmp\\303\\246\", \"@test_14719_tmp\\303\\246\"], 0x5f51900 /* 77 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "9051ecb1812dffed9cd6439d6e3178ef01d2a11e345ef57f35cff4208c633401"
+    },
+    {
+      "window": 36,
+      "slice": [
+        58,
+        75
+      ],
+      "keys": [
+        [
+          "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_decode",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_encode",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestCUnicode.test_big_unicode_decode",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestCUnicode.test_big_unicode_encode",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestCUnicode.test_bytes_decode",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestCUnicode.test_bytes_encode",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestCUnicode.test_encoding3",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestCUnicode.test_encoding4",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestCUnicode.test_encoding5",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestCUnicode.test_encoding6",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestCUnicode.test_encoding7",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestCUnicode.test_escaped_decode",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestCUnicode.test_object_pairs_hook_with_unicode",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_decode",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_encode",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestCUnicode.test_unicode_decode",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestCUnicode.test_unicode_preservation",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-36.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "58",
+        "75"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-36"
+      },
+      "timeout_seconds": 45,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 17,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_decode",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 20,
+            "evidence_line": 303
+          },
+          {
+            "id": "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_encode",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 22,
+            "evidence_line": 305
+          },
+          {
+            "id": "test.test_json.test_unicode.TestCUnicode.test_big_unicode_decode",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 24,
+            "evidence_line": 307
+          },
+          {
+            "id": "test.test_json.test_unicode.TestCUnicode.test_big_unicode_encode",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 26,
+            "evidence_line": 309
+          },
+          {
+            "id": "test.test_json.test_unicode.TestCUnicode.test_bytes_decode",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 28,
+            "evidence_line": 311
+          },
+          {
+            "id": "test.test_json.test_unicode.TestCUnicode.test_bytes_encode",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 30,
+            "evidence_line": 313
+          },
+          {
+            "id": "test.test_json.test_unicode.TestCUnicode.test_encoding3",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 32,
+            "evidence_line": 315
+          },
+          {
+            "id": "test.test_json.test_unicode.TestCUnicode.test_encoding4",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 34,
+            "evidence_line": 317
+          },
+          {
+            "id": "test.test_json.test_unicode.TestCUnicode.test_encoding5",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 36,
+            "evidence_line": 319
+          },
+          {
+            "id": "test.test_json.test_unicode.TestCUnicode.test_encoding6",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 38,
+            "evidence_line": 321
+          },
+          {
+            "id": "test.test_json.test_unicode.TestCUnicode.test_encoding7",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 40,
+            "evidence_line": 323
+          },
+          {
+            "id": "test.test_json.test_unicode.TestCUnicode.test_escaped_decode",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 42,
+            "evidence_line": 325
+          },
+          {
+            "id": "test.test_json.test_unicode.TestCUnicode.test_object_pairs_hook_with_unicode",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 44,
+            "evidence_line": 327
+          },
+          {
+            "id": "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_decode",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 46,
+            "evidence_line": 329
+          },
+          {
+            "id": "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_encode",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 48,
+            "evidence_line": 331
+          },
+          {
+            "id": "test.test_json.test_unicode.TestCUnicode.test_unicode_decode",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 50,
+            "evidence_line": 333
+          },
+          {
+            "id": "test.test_json.test_unicode.TestCUnicode.test_unicode_preservation",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 52,
+            "evidence_line": 335
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 17,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "dee2eec203c01a9fe08c6e4caff9cf19473fc390c5cc065ff6581979d8faf7e5",
+      "successful_execs": [
+        "14723 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"58\", \"75\"], 0x7fff78300550 /* 77 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "aded5b1f529ee90cfd712acd15fe54d2ec2a30a2db18ec4fb7707314972ac39f"
+    },
+    {
+      "window": 37,
+      "slice": [
+        75,
+        92
+      ],
+      "keys": [
+        [
+          "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_decode",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_encode",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_decode",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_encode",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestPyUnicode.test_bytes_decode",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestPyUnicode.test_bytes_encode",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding3",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding4",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding5",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding6",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding7",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestPyUnicode.test_escaped_decode",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestPyUnicode.test_object_pairs_hook_with_unicode",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestPyUnicode.test_single_surrogate_decode",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestPyUnicode.test_single_surrogate_encode",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestPyUnicode.test_unicode_decode",
+          1
+        ],
+        [
+          "test.test_json.test_unicode.TestPyUnicode.test_unicode_preservation",
+          1
+        ]
+      ],
+      "argv": [
+        "strace",
+        "-f",
+        "-qq",
+        "-s",
+        "200",
+        "-e",
+        "trace=execve,execveat,openat",
+        "-o",
+        "/workspace/scratch/json-tail-finite/stock-37.trace",
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py",
+        "75",
+        "92"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "TMPDIR": "/workspace/scratch/json-tail-finite/tmp-stock-37"
+      },
+      "timeout_seconds": 45,
+      "exit_code": 0,
+      "timed_out": false,
+      "stack_rlimit": [
+        8388608,
+        -1
+      ],
+      "nproc_rlimit": [
+        71955,
+        71955
+      ],
+      "capture": {
+        "collection": 17,
+        "inventory_complete": true,
+        "originals": [
+          {
+            "id": "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_decode",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 20,
+            "evidence_line": 357
+          },
+          {
+            "id": "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_encode",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 22,
+            "evidence_line": 359
+          },
+          {
+            "id": "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_decode",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 24,
+            "evidence_line": 361
+          },
+          {
+            "id": "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_encode",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 26,
+            "evidence_line": 363
+          },
+          {
+            "id": "test.test_json.test_unicode.TestPyUnicode.test_bytes_decode",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 28,
+            "evidence_line": 365
+          },
+          {
+            "id": "test.test_json.test_unicode.TestPyUnicode.test_bytes_encode",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 30,
+            "evidence_line": 367
+          },
+          {
+            "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding3",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 32,
+            "evidence_line": 369
+          },
+          {
+            "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding4",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 34,
+            "evidence_line": 371
+          },
+          {
+            "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding5",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 36,
+            "evidence_line": 373
+          },
+          {
+            "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding6",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 38,
+            "evidence_line": 375
+          },
+          {
+            "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding7",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 40,
+            "evidence_line": 377
+          },
+          {
+            "id": "test.test_json.test_unicode.TestPyUnicode.test_escaped_decode",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 42,
+            "evidence_line": 379
+          },
+          {
+            "id": "test.test_json.test_unicode.TestPyUnicode.test_object_pairs_hook_with_unicode",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 44,
+            "evidence_line": 381
+          },
+          {
+            "id": "test.test_json.test_unicode.TestPyUnicode.test_single_surrogate_decode",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 46,
+            "evidence_line": 383
+          },
+          {
+            "id": "test.test_json.test_unicode.TestPyUnicode.test_single_surrogate_encode",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 48,
+            "evidence_line": 385
+          },
+          {
+            "id": "test.test_json.test_unicode.TestPyUnicode.test_unicode_decode",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 50,
+            "evidence_line": 387
+          },
+          {
+            "id": "test.test_json.test_unicode.TestPyUnicode.test_unicode_preservation",
+            "occurrence": 1,
+            "outcome": "pass",
+            "details": [],
+            "line": 52,
+            "evidence_line": 389
+          }
+        ],
+        "fixtures": [],
+        "subtest_skips": [],
+        "summary": {
+          "event": "summary",
+          "run": 17,
+          "successful": true
+        },
+        "timed_out": false
+      },
+      "trace_sha256": "3b8fecad72e0108c1397c3d9105829b117ae7a0d1bd3adeae48426adea2cab36",
+      "successful_execs": [
+        "14727 execve(\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", [\"/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14\", \"-B\", \"/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py\", \"75\", \"92\"], 0x7ffc73528540 /* 77 vars */) = 0"
+      ],
+      "no_child_exec": false,
+      "no_libpython_open": true,
+      "targeted_denials": [],
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "53ab482a59d62c060b4eef499e2ad905a677ed444f6a9f980d92dce1cda3bc70"
+    }
+  ],
+  "stderr_sha256": "43f618ee51ed7dc883d06d3d32f6961ceb41a4c25036816b251b83cfbf9f986a",
+  "stdout_sha256": "b46838d4c4951293ddf4ad38fc14aa47e80791eaa01e5eb0ab0ebc9a98e4d29b",
+  "compressed_trace_sha256": "562533429de54b072686370e44b01806b4e5e48a26a65c70659663b034426444",
+  "originals": 92,
+  "counts": {
+    "pass": 92
+  }
+}

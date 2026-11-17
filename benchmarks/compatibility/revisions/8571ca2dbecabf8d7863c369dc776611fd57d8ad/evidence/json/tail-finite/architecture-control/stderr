@@ -1,0 +1,2 @@
+ Compiling /workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/positive_launcher.py (-O0)
+/workspace/imre-json-tail/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/tail-finite/architecture_control.py:1:15: Imre: expected int, got bool; annotations are enforced contracts

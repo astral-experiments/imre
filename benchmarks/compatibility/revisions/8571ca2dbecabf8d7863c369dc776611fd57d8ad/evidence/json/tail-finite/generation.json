@@ -1,0 +1,21 @@
+{
+  "generator": "benchmarks/compatibility/generate_unittest_runner.py",
+  "generator_sha256": "65eaa6138b96ecf0e0e074264875d341203efadcdc16ad03466a6a75416dda1f",
+  "template_sha256": "a2eccf997ef03151c3c7cc1be80707c49785807393e386000f1eee60d1777cc2",
+  "modules": [
+    "test.test_json.test_recursion",
+    "test.test_json.test_scanstring",
+    "test.test_json.test_separators",
+    "test.test_json.test_speedups",
+    "test.test_json.test_tool",
+    "test.test_json.test_unicode"
+  ],
+  "base_sha256": "19f1357805f7159fa5b1a74976219734302fdf56fa7cdfd10878835c7d085911",
+  "positive_sha256": "75a143b66b7cdd5544045abc21cc6e84aa13e3077fb4732fae8e3842d3872cb6",
+  "tail_ids_sha256": "49c43f85a9ad5fdd1fee86096a7e9dc437e052c63be6c12b0f9fac263d9bc6d7",
+  "selection": "exact ID slices from the 92 staged not_run original occurrence rows; original suite ordering and instances retained",
+  "stack_rlimit": [
+    8388608,
+    -1
+  ]
+}

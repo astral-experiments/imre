@@ -1,0 +1,56 @@
+{
+  "revision": "8571ca2dbecabf8d7863c369dc776611fd57d8ad",
+  "base": "85f8f6772ccc8d71b87d9104a28a364d39aeb32a",
+  "receipt_preimage_sha256": "a915837768d403cc5378068c70420905f74c7686b8c39e8cbdbddc71b84da7b8",
+  "receipt_sha256": "d0b3ea2580bb8c2cf92ac55318466c45b33ada4f0e76a865abe79ee1b922b098",
+  "receipt_rows": 216,
+  "original_ids": 212,
+  "tail_occurrences_updated": 92,
+  "tail_ids_sha256": "49c43f85a9ad5fdd1fee86096a7e9dc437e052c63be6c12b0f9fac263d9bc6d7",
+  "gate": "architecture-control/run.json",
+  "launcher_sha256": "75a143b66b7cdd5544045abc21cc6e84aa13e3077fb4732fae8e3842d3872cb6",
+  "compiler_sha256": "b07018ea9eb8e9af234307899c33a6b14e498ba5fded97a26a582a9e2ad9be9e",
+  "runtime_sha256": "6c71c26ec0f9d9a34c56a0b82226574243c189c2854f689ef127b8d92e481fb5",
+  "stack_rlimit": [
+    8388608,
+    -1
+  ],
+  "native_images": {
+    "O0": "cd3af6ea4a291fa5e19e10521f9f3513856130bc380568deadd33241bab67c54",
+    "O3": "724fe82c7cc45f2b40e5e47d67bbcc63e0b79534b4ffe0f13f4f97ebcd9937b5"
+  },
+  "counts": {
+    "stock": {
+      "pass": 215,
+      "skip": 1
+    },
+    "O0": {
+      "fail": 4,
+      "pass": 169,
+      "error": 6,
+      "skip": 1,
+      "timeout": 36
+    },
+    "O3": {
+      "fail": 4,
+      "pass": 169,
+      "error": 6,
+      "skip": 1,
+      "timeout": 36
+    }
+  },
+  "paired": 169,
+  "new_pairs": 55,
+  "observed_triple_pass": 169,
+  "withheld_triple_pass_keys": [],
+  "original_decoding_timeout_unchanged": true,
+  "changed_controls_auxiliary_run": "../tail-window-1/run.json",
+  "evidence": {
+    "stock": "stock.capture.json",
+    "O0": "O0.capture.json",
+    "O3": "O3.capture.json"
+  },
+  "withdrawal": "withdrawal.json",
+  "targeted_deny": "deny-control.json",
+  "validation": "canonical schema.json Draft 2020-12 and scorecard.validate_record with only revision scoped to 8571; exact staged stock inventory order, original ID+occurrence, upstream source Git blob/SHA256, and raw event line evidence checked"
+}

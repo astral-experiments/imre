@@ -1,0 +1,15 @@
+from pathlib import Path
+import subprocess,json,hashlib,os,resource,time
+R=Path('/workspace/imre-json-tail'); V='8571ca2dbecabf8d7863c369dc776611fd57d8ad';W=R/f'benchmarks/compatibility/revisions/{V}/evidence/json/tail-finite';G=json.loads((W/'architecture-control/run.json').read_text());assert G['passed'];C=G['argv'][0]; RT=G['argv'][G['argv'].index('--runtime')+1]; CL=G['argv'][G['argv'].index('--clang')+1];F='/workspace/scratch/imre-cpython-test-fixtures/Lib';D=Path('/workspace/scratch/json-tail-finite');D.mkdir(exist_ok=True)
+def sha(p):
+ h=hashlib.sha256()
+ with open(p,'rb') as f:
+  for b in iter(lambda:f.read(1048576),b''):h.update(b)
+ return h.hexdigest()
+assert sha(C)==G['compiler_sha256'] and sha(RT)==G['runtime_sha256'] and sha(W/'positive_launcher.py')==G['positive_launcher_sha256']
+B={'revision':V,'compiler_sha256':sha(C),'runtime_sha256':sha(RT),'launcher_sha256':sha(W/'positive_launcher.py'),'stack_rlimit':list(resource.getrlimit(resource.RLIMIT_STACK)),'images':{}}
+for t in ('O0','O3'):
+ image=D/f'{t}.exe';assert not image.exists();env=os.environ.copy();env.pop('IMRE_ENCODED_FLAGS',None); rec=G['environment'].copy();rec['IMREFLAGS']='--opt-level '+t[1];env.update(rec);argv=G['argv'].copy();argv[argv.index('--opt-level')+1]=t[1];argv[-1]=str(image);start=time.monotonic();p=subprocess.run(argv,cwd=R,env=env,capture_output=True,timeout=240);(W/f'{t}.build.stdout').write_bytes(p.stdout);(W/f'{t}.build.stderr').write_bytes(p.stderr); assert p.returncode==0 and image.exists(),p.stderr[-500:]; B['images'][t]={'build_argv':argv,'environment':rec,'exit_code':p.returncode,'elapsed_seconds':round(time.monotonic()-start,2),'path':str(image),'sha256':sha(image),'stdout_sha256':sha(W/f'{t}.build.stdout'),'stderr_sha256':sha(W/f'{t}.build.stderr')};
+ for name,args in [('readelf',['readelf','-d',str(image)]),('ldd',['ldd',str(image)])]:
+  q=subprocess.run(args,capture_output=True);(W/f'{t}.{name}.stdout').write_bytes(q.stdout);(W/f'{t}.{name}.stderr').write_bytes(q.stderr);B['images'][t][name]={'argv':args,'exit_code':q.returncode,'stdout_sha256':sha(W/f'{t}.{name}.stdout'),'stderr_sha256':sha(W/f'{t}.{name}.stderr')};assert b'libpython' not in q.stdout.lower()
+ (W/'build.json').write_text(json.dumps(B,indent=2)+'\n');print(t,'built',B['images'][t]['elapsed_seconds'],B['images'][t]['sha256'],flush=True)
