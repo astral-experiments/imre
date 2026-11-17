@@ -1184,7 +1184,8 @@ impl Session {
         )
     }
 
-    /// Check the local, global and receiver-field bindings used by a fixed body.
+    /// Check indexed bindings used by a fixed body. An unclassified member is
+    /// passed as `None`, so callers can leave member semantics to checked operations.
     pub(crate) fn function_reads_only(
         &self,
         module: usize,
@@ -1192,7 +1193,7 @@ impl Session {
         displays: EagerDisplays,
         allowed_local_read: impl Fn(&str) -> bool,
         fixed_global: impl Fn(&str) -> bool,
-        fixed_receiver_field: impl Fn(&str) -> bool,
+        fixed_member: impl Fn(Option<&str>) -> bool,
     ) -> bool {
         use ty_python_core::scope::{NodeWithScopeKind, NodeWithScopeRef};
 
@@ -1203,20 +1204,20 @@ impl Session {
         };
         let fixed = |scope| {
             let places = index.place_table(scope);
-            places.members().all(|member| {
-                member
-                    .as_instance_attribute()
-                    .is_some_and(&fixed_receiver_field)
-            }) && places.symbols().all(|symbol| {
-                if symbol.is_local() {
-                    !symbol.is_used() || allowed_local_read(symbol.name().as_str())
-                } else {
-                    fixed_global(symbol.name().as_str())
-                }
-            }) && !index
-                .use_def_map(scope)
-                .definitions_with_usage()
-                .any(|(_, definition, _)| definition.kind(&self.db).is_import())
+            places
+                .members()
+                .all(|member| fixed_member(member.as_instance_attribute()))
+                && places.symbols().all(|symbol| {
+                    if symbol.is_local() {
+                        !symbol.is_used() || allowed_local_read(symbol.name().as_str())
+                    } else {
+                        fixed_global(symbol.name().as_str())
+                    }
+                })
+                && !index
+                    .use_def_map(scope)
+                    .definitions_with_usage()
+                    .any(|(_, definition, _)| definition.kind(&self.db).is_import())
         };
         let mut children = index.child_scopes(scope).peekable();
         !function.is_async
