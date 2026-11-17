@@ -1,0 +1,32 @@
+{
+  "source": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_userlist.py",
+  "source_sha256": "d196664ae4d499568fbdf45f30456290bdcba4f20b02829db700b8e37d40a0ce",
+  "withdrawn_to": "/workspace/scratch/withdrawn/test_userlist.py",
+  "runs": {
+    "userlist-O0": {
+      "argv": [
+        "strace",
+        "-f",
+        "-e",
+        "trace=execve",
+        "-o",
+        "/workspace/imre-stdlib-data/benchmarks/compatibility/evidence/collections/source-withdrawal/userlist-O0.execve",
+        "/workspace/scratch/userlist-O0-recovery.exe",
+        "-v",
+        "UserListTest.test_reverse"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "IMREFLAGS": "--opt-level 0",
+        "IMRE_PYTHON": "/workspace/scratch/stdlib-sdk/imre"
+      },
+      "exit_code": 0,
+      "timed_out": false,
+      "source_absent_during_run": true,
+      "execve_count": 1,
+      "no_cpython_delegation": true
+    }
+  },
+  "source_restored": true
+}

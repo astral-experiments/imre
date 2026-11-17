@@ -1,0 +1,2 @@
+9403  execve("/workspace/scratch/configparser-O3-recovery.exe", ["/workspace/scratch/configparser-"..., "-v", "test.test_configparser.ConfigPar"...], 0x7ffd84336498 /* 77 vars */) = 0
+9403  +++ exited with 0 +++
