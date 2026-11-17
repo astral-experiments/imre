@@ -8,7 +8,13 @@ def current(mode):
 
         sink = Sink()
         sink.parts = []
-        sink.write = sink.parts.append
+        if mode == 3:
+            def write(*chunks):
+                sink.parts.append(chunks[0])
+
+            sink.write = write
+        else:
+            sink.write = sink.parts.append
         payload = True if mode == 3 else {"k": True}
         expected = 'true' if mode == 3 else '{"k": true}'
         marker = 'arm JSON default argument refusal'

@@ -1315,7 +1315,7 @@ def check_boxed_json_callback_allocation(imre, root, run):
     subprocess.run(["cc", "-c", fixtures / "refuse_json_callback_arguments.c", "-o", wrapper], check=True)
     flags = "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_scoped_call_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_scoped_call_at,--wrap=imre_dyn_positional_call_at,--wrap=imre_dyn_keyword_call_at,--wrap=imre_dyn_lit,--wrap=imre_dyn_linked_string,--wrap=malloc,--wrap=realloc,--wrap=calloc",
     ])
     imports = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_json_callback_arguments as fixture; "
     source = root / "json_callback_probe.py"
@@ -1328,8 +1328,8 @@ def check_boxed_json_callback_allocation(imre, root, run):
     # Refuse the singleton arguments for default, float repr, writer and sorting.
     # Native allocation traces distinguish these from earlier output-buffer growth.
     for mode in range(5):
-        target = (2, 2, 3, 2, 6)[mode]
-        for ordinal in (0, target, 37):
+        target = (14, 14, 15, 38, 44)[mode]
+        for ordinal in (0, target, 1000):
             result = run(executable, str(mode), extra={
                 "IMRE_TEST_JSON_CALLBACK_NTH": str(ordinal),
             })
