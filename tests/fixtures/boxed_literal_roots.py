@@ -1,5 +1,8 @@
+import sys
+
+
 def answer(row):
-    # Repeated interned literals need temporary roots even when the strings exist.
+    # Repeated interned literals must stay rooted while their cold slot is loaded.
     keys = [
         "repeated_interned_string_literal",
         "repeated_interned_string_literal",
@@ -12,13 +15,14 @@ def answer(row):
 
 
 def allocation():
-    row = {"repeated_interned_string_literal": 1}
+    key = sys.intern("".join(("repeated_", "interned_", "string_literal")))
+    row = {key: 1}
     handler = MemoryError
-    assert answer(row) == 3
-    marker = {"start formatter allocation probe 2332": None}
+    assert row[key] == 1
+    marker = "start formatter allocation probe 2332"
     try:
         value = answer(row)
         print("value", value)
     except handler as error:
         print("caught", error.args)
-    print("retry", answer(row), row == {"repeated_interned_string_literal": 1})
+    print("retry", answer(row), row == {key: 1})

@@ -1200,7 +1200,7 @@ def check_boxed_literal_roots_allocation(imre, root, run):
     subprocess.run(["cc", "-c", fixtures / "literal_roots_refuse.c", "-o", wrapper], check=True)
     flags = "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_lit,--wrap=imre_dyn_linked_string,--wrap=malloc,--wrap=realloc",
     ])
     source = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_literal_roots as fixture; fixture.allocation()"
     for ordinal in (0, 1):
