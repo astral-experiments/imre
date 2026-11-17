@@ -1,7 +1,7 @@
 # ID suffix 	 native disposition 	 specific outstanding behavior (proposals remain in the denominator)
 DisplayHookTest.test_custom_displayhook	blocked	Assigning a Python callable to sys.displayhook must affect eval of code compiled in single mode.
 DisplayHookTest.test_gh130163	blocked	The hook must hold the active output stream while an object's __repr__ replaces sys.stdout and forces collection.
-DisplayHookTest.test_lost_displayhook	blocked	Deleting the displayhook must cause single-mode eval to raise RuntimeError; neither mutable sys hooks nor single-mode eval exist.
+DisplayHookTest.test_lost_displayhook	failed	The original RuntimeError assertion also accepts the unlinked-code NotImplementedError; a stricter control must observe lost sys.displayhook.
 ExceptHookTest.test_excepthook	failed	The native child stops at the staged import of test.support before it can exercise sys.excepthook.
 ExceptHookTest.test_excepthook_bytes_filename	blocked	Rendering a SyntaxError with a bytes filename needs structured exception args, line data and a replaceable stderr.
 ExceptHookTest.test_original_excepthook	blocked	Formatted frames, sys.exc_info unpacking, and the callable original hook must work in the captured-stderr fixture.
