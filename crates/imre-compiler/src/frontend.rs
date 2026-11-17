@@ -10966,8 +10966,12 @@ impl<'a> Checker<'a> {
                     }
                     if self.can_mix_list_items(element, item.ty) {
                         mixed |= item.ty != element;
-                    } else {
-                        self.expect(element, item.ty, value)?;
+                    } else if element != item.ty && element != Type::PythonObject {
+                        return Err(self.classified_error(
+                            Kind::ScopedObject,
+                            list,
+                            "this list requires heterogeneous Python object storage",
+                        ));
                     }
                     values.push(item);
                 }
