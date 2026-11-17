@@ -42,7 +42,8 @@
         "O3_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/raw-control/O3.stdout",
         "O3_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/raw-control/O3.trace",
         "O3_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/O3.readelf.stdout"
-      }
+      },
+      "kind": "stock-only"
     },
     "finite-metavar": {
       "platform": {
@@ -83,8 +84,11 @@
         "O3_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/raw-control/O3.stderr",
         "O3_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/raw-control/O3.stdout",
         "O3_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/raw-control/O3.trace",
-        "O3_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/O3.readelf.stdout"
-      }
+        "O3_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/O3.readelf.stdout",
+        "stock_capture": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/stock.finite.capture.json",
+        "stock_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/stock.finite.stdout"
+      },
+      "kind": "finite"
     }
   },
   "originals": [
