@@ -1160,7 +1160,8 @@ fn pkgutil_resource_selects_a_placed_initializer_and_keeps_checked_functions() {
         assert!(functions.is_empty() && initializers.is_empty());
     }
     assert_eq!(
-        control_frames[0], control_frames[1],
+        control_frames,
+        [0, 0],
         "unused import changed score frame retention"
     );
     for (import, call) in [
@@ -1213,4 +1214,23 @@ fn pkgutil_resource_selects_a_placed_initializer_and_keeps_checked_functions() {
         assert_eq!(score.function.returns, ir::Type::Int);
         assert!(!score.fixed_sites.is_empty());
     }
+}
+
+#[test]
+fn reached_pkgutil_iteration_keeps_its_finder_class_participating() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    std::fs::write(&entry, "from pkgutil import iter_modules\nfor info in iter_modules(['.']):\n    print(info.name)\n").unwrap();
+    let mut graph = modules::SourceGraph::load(&entry, None, &[]).unwrap();
+    let module = graph
+        .modules
+        .iter()
+        .position(|module| module.is_bundled("pkgutil"))
+        .unwrap();
+    let statement = graph.modules[module].parsed.syntax().body.iter().position(|statement| matches!(statement, ruff_python_ast::Stmt::ClassDef(class) if class.name.as_str() == "FileFinder")).unwrap();
+    assert!(graph.entry_may_call()(&modules::DefinitionId {
+        module,
+        statement
+    }));
+    checked_lower_with(&mut graph, None, None).unwrap();
 }
