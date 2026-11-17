@@ -1,0 +1,70 @@
+{
+  "original_id": "test.test_json.test_decode.TestPyDecode.test_bytes",
+  "withdrawn_source": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json",
+  "withdrawn_launcher": "/workspace/scratch/imre-cpython-test-fixtures/Lib/receipt_runner.py",
+  "runs": {
+    "O0": {
+      "argv": [
+        "strace",
+        "-f",
+        "-e",
+        "trace=execve",
+        "-o",
+        "/workspace/imre-data/benchmarks/compatibility/evidence/json/source-withdrawal/O0.execve",
+        "/workspace/scratch/json-O0-saved.exe",
+        "test.test_json.test_decode.TestPyDecode.test_bytes"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "IMREFLAGS": "--opt-level 0",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+        "TMPDIR": "/workspace/scratch/replay-tmp/json",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1"
+      },
+      "exit_code": 0,
+      "timed_out": false,
+      "artifact_sha256": "e5941266d17b25e7ea86e3727888f6e17ca449257e6ea67152ea0153e80cf54b",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e85726dc46cfba8a6af4174339e7fd0c9ba4f138719b20fbb48f975c6b010c64",
+      "execve_sha256": "16a4d6f9420f4e0a0738af67fd68cd1221795fd81c22800b8c2355534ab2aff5",
+      "execve_trace": "O0.execve",
+      "python_delegation_observed": false,
+      "withdrawn_source_absent": true,
+      "withdrawn_launcher_absent": true
+    },
+    "O3": {
+      "argv": [
+        "strace",
+        "-f",
+        "-e",
+        "trace=execve",
+        "-o",
+        "/workspace/imre-data/benchmarks/compatibility/evidence/json/source-withdrawal/O3.execve",
+        "/workspace/scratch/json-O3-saved.exe",
+        "test.test_json.test_decode.TestPyDecode.test_bytes"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "IMREFLAGS": "--opt-level 3",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+        "TMPDIR": "/workspace/scratch/replay-tmp/json",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1"
+      },
+      "exit_code": 0,
+      "timed_out": false,
+      "artifact_sha256": "c7e12ae9dc3dcbd532a06d62eb1dbd7d7711efb647b6f550d7426921e4764b09",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "ffff0aae9c94e2ac576891834805947caa4e24a8438c07a02601d2bf92d22319",
+      "execve_sha256": "57511654e8393b89f7ba249a540561c6c8224561286df19958d9d6880f585d0f",
+      "execve_trace": "O3.execve",
+      "python_delegation_observed": false,
+      "withdrawn_source_absent": true,
+      "withdrawn_launcher_absent": true
+    }
+  },
+  "note": "This observation does not override a failed architecture control."
+}

@@ -1,0 +1,1610 @@
+{
+  "imre_revision": "49f0dc2ef78b82692e333252faf71b4fc7730949",
+  "source_blob": "bb51ddd38e2cade5a8112678b434948305756db2",
+  "platform": {
+    "os": "linux",
+    "arch": "x86_64",
+    "release": "6.18.57"
+  },
+  "timeouts_seconds": {
+    "native_compile": 600,
+    "full_suite": 180,
+    "class_selector": 30
+  },
+  "runs": {
+    "stock": {
+      "argv": [
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/scratch/threading-harness/entry.py",
+        "-v",
+        "test.test_threading"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "TMPDIR": "/workspace/scratch/imre-tmp"
+      },
+      "exit_code": 1,
+      "version": "3.14.5",
+      "full_version": "Python 3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]"
+    },
+    "O0": {
+      "build": {
+        "argv": [
+          "/workspace/imre/target/release/imre",
+          "build",
+          "/workspace/scratch/threading-harness/entry.py",
+          "--module-root",
+          "/workspace/scratch/threading-harness",
+          "--no-cache",
+          "--opt-level",
+          "0",
+          "--runtime",
+          "/workspace/imre/target/release/libimre_runtime.a",
+          "--clang",
+          "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+          "-o",
+          "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.exe",
+          "--include-module",
+          "test.test_threading",
+          "--extension-path",
+          "/workspace/scratch/imre-cpython-test-fixtures/Lib"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 600,
+        "stdout": "benchmarks/compatibility/evidence/threading/O0.build.stdout",
+        "stderr": "benchmarks/compatibility/evidence/threading/O0.build.stderr"
+      },
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "TMPDIR": "/workspace/scratch/imre-tmp",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+        "IMREFLAGS": "--opt-level 0",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+      },
+      "environment_unset": [
+        "IMRE_ENCODED_FLAGS"
+      ],
+      "full_suite": {
+        "argv": [
+          "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.exe",
+          "-v",
+          "test.test_threading"
+        ],
+        "exit_code": -15,
+        "timed_out": true,
+        "timeout_seconds": 180,
+        "elapsed_seconds": 180.01,
+        "stdout": "benchmarks/compatibility/evidence/threading/O0.full.stdout",
+        "stderr": "benchmarks/compatibility/evidence/threading/O0.full.stderr",
+        "watchdog": "benchmarks/compatibility/evidence/threading/O0.full-timeout.json"
+      },
+      "selectors": [
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.exe",
+            "-v",
+            "test.test_threading.AtexitTests"
+          ],
+          "exit_code": -15,
+          "timed_out": true,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 30.007,
+          "stdout": "benchmarks/compatibility/evidence/threading/O0.class-AtexitTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O0.class-AtexitTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.exe",
+            "-v",
+            "test.test_threading.BarrierTests"
+          ],
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 5.435,
+          "stdout": "benchmarks/compatibility/evidence/threading/O0.class-BarrierTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O0.class-BarrierTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.exe",
+            "-v",
+            "test.test_threading.BoundedSemaphoreTests"
+          ],
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 3.657,
+          "stdout": "benchmarks/compatibility/evidence/threading/O0.class-BoundedSemaphoreTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O0.class-BoundedSemaphoreTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.exe",
+            "-v",
+            "test.test_threading.CRLockTests"
+          ],
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 6.287,
+          "stdout": "benchmarks/compatibility/evidence/threading/O0.class-CRLockTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O0.class-CRLockTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.exe",
+            "-v",
+            "test.test_threading.ConditionAsRLockTests"
+          ],
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 6.892,
+          "stdout": "benchmarks/compatibility/evidence/threading/O0.class-ConditionAsRLockTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O0.class-ConditionAsRLockTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.exe",
+            "-v",
+            "test.test_threading.ConditionTests"
+          ],
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 3.124,
+          "stdout": "benchmarks/compatibility/evidence/threading/O0.class-ConditionTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O0.class-ConditionTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.exe",
+            "-v",
+            "test.test_threading.EventTests"
+          ],
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 2.572,
+          "stdout": "benchmarks/compatibility/evidence/threading/O0.class-EventTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O0.class-EventTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.exe",
+            "-v",
+            "test.test_threading.ExceptHookTests"
+          ],
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 0.767,
+          "stdout": "benchmarks/compatibility/evidence/threading/O0.class-ExceptHookTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O0.class-ExceptHookTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.exe",
+            "-v",
+            "test.test_threading.InterruptMainTests"
+          ],
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 0.717,
+          "stdout": "benchmarks/compatibility/evidence/threading/O0.class-InterruptMainTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O0.class-InterruptMainTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.exe",
+            "-v",
+            "test.test_threading.LockTests"
+          ],
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 4.727,
+          "stdout": "benchmarks/compatibility/evidence/threading/O0.class-LockTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O0.class-LockTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.exe",
+            "-v",
+            "test.test_threading.MiscTestCase"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 0.466,
+          "stdout": "benchmarks/compatibility/evidence/threading/O0.class-MiscTestCase.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O0.class-MiscTestCase.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.exe",
+            "-v",
+            "test.test_threading.PyRLockTests"
+          ],
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 6.564,
+          "stdout": "benchmarks/compatibility/evidence/threading/O0.class-PyRLockTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O0.class-PyRLockTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.exe",
+            "-v",
+            "test.test_threading.SemaphoreTests"
+          ],
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 3.675,
+          "stdout": "benchmarks/compatibility/evidence/threading/O0.class-SemaphoreTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O0.class-SemaphoreTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.exe",
+            "-v",
+            "test.test_threading.SubinterpThreadingTests"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 0.518,
+          "stdout": "benchmarks/compatibility/evidence/threading/O0.class-SubinterpThreadingTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O0.class-SubinterpThreadingTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.exe",
+            "-v",
+            "test.test_threading.ThreadJoinOnShutdown"
+          ],
+          "exit_code": -15,
+          "timed_out": true,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 30.009,
+          "stdout": "benchmarks/compatibility/evidence/threading/O0.class-ThreadJoinOnShutdown.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O0.class-ThreadJoinOnShutdown.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.exe",
+            "-v",
+            "test.test_threading.ThreadTests"
+          ],
+          "exit_code": -15,
+          "timed_out": true,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 30.005,
+          "stdout": "benchmarks/compatibility/evidence/threading/O0.class-ThreadTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O0.class-ThreadTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.exe",
+            "-v",
+            "test.test_threading.ThreadingExceptionTests"
+          ],
+          "exit_code": -15,
+          "timed_out": true,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 30.01,
+          "stdout": "benchmarks/compatibility/evidence/threading/O0.class-ThreadingExceptionTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O0.class-ThreadingExceptionTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.exe",
+            "-v",
+            "test.test_threading.TimerTests"
+          ],
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 0.516,
+          "stdout": "benchmarks/compatibility/evidence/threading/O0.class-TimerTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O0.class-TimerTests.stderr"
+        }
+      ],
+      "executable_sha256": "242e19e59923d1fd45107fcf318e62d5b41e3e480f31838abc1884e77e800a51",
+      "recovery": {
+        "build": {
+          "argv": [
+            "/workspace/imre/target/release/imre",
+            "build",
+            "/workspace/scratch/threading-harness/entry.py",
+            "--module-root",
+            "/workspace/scratch/threading-harness",
+            "--no-cache",
+            "--opt-level",
+            "0",
+            "--runtime",
+            "/workspace/imre/target/release/libimre_runtime.a",
+            "--clang",
+            "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+            "-o",
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+            "--include-module",
+            "test.test_threading",
+            "--extension-path",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "timeout_seconds": 600,
+          "elapsed_seconds": 17.359,
+          "stdout": "benchmarks/compatibility/evidence/threading/O0.recovery-build.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O0.recovery-build.stderr"
+        },
+        "selectors": [
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadJoinOnShutdown.test_1_join_on_shutdown"
+            ],
+            "exit_code": -15,
+            "timed_out": true,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 5.004,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadJoinOnShutdown.test_1_join_on_shutdown.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadJoinOnShutdown.test_1_join_on_shutdown.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_enumerate_after_join"
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.516,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_enumerate_after_join.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_enumerate_after_join.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_foreign_thread"
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.567,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_foreign_thread.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_foreign_thread.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_frame_tstate_tracing"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.465,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_frame_tstate_tracing.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_frame_tstate_tracing.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_getprofile"
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.467,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_getprofile.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_getprofile.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_getprofile_all_threads"
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.466,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_getprofile_all_threads.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_getprofile_all_threads.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_gettrace"
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.515,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_gettrace.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_gettrace.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_gettrace_all_threads"
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.465,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_gettrace_all_threads.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_gettrace_all_threads.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_ident_of_no_threading_threads"
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.515,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_ident_of_no_threading_threads.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_ident_of_no_threading_threads.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_join_from_multiple_threads"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.465,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_join_from_multiple_threads.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_join_from_multiple_threads.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_join_with_timeout"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.515,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_join_with_timeout.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_join_with_timeout.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_lazy_import"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.52,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_lazy_import.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_lazy_import.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_leak_without_join"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.515,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_leak_without_join.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_leak_without_join.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_limbo_cleanup"
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.515,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_limbo_cleanup.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_limbo_cleanup.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_lock_no_args"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.466,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_lock_no_args.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_lock_no_args.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_lock_no_subclass"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.566,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_lock_no_subclass.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_lock_no_subclass.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_lock_or_none"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.466,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_lock_or_none.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_lock_or_none.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_main_thread"
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.466,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_main_thread.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_main_thread.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_main_thread_after_fork_from_dummy_thread"
+            ],
+            "exit_code": -15,
+            "timed_out": true,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 5.008,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_main_thread_after_fork_from_dummy_thread.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_main_thread_after_fork_from_dummy_thread.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_name"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.465,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_name.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_name.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_no_refcycle_through_target"
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 1.067,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_no_refcycle_through_target.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_no_refcycle_through_target.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_old_threading_api"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.518,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_old_threading_api.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_old_threading_api.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_repr_daemon"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.466,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_repr_daemon.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_repr_daemon.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_repr_stopped"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.567,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_repr_stopped.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_repr_stopped.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_various_ops"
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.516,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_various_ops.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_various_ops.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_various_ops_large_stack"
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.468,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_various_ops_large_stack.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_various_ops_large_stack.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_various_ops_small_stack"
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.467,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_various_ops_small_stack.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadTests.test_various_ops_small_stack.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadingExceptionTests.test_joining_current_thread"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.465,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadingExceptionTests.test_joining_current_thread.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadingExceptionTests.test_joining_current_thread.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadingExceptionTests.test_joining_inactive_thread"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.465,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadingExceptionTests.test_joining_inactive_thread.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadingExceptionTests.test_joining_inactive_thread.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadingExceptionTests.test_multithread_modify_file_noerror"
+            ],
+            "exit_code": -15,
+            "timed_out": true,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 5.004,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadingExceptionTests.test_multithread_modify_file_noerror.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadingExceptionTests.test_multithread_modify_file_noerror.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadingExceptionTests.test_releasing_unacquired_lock"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.519,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadingExceptionTests.test_releasing_unacquired_lock.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadingExceptionTests.test_releasing_unacquired_lock.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O0.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadingExceptionTests.test_start_thread_again"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.466,
+            "stdout": "benchmarks/compatibility/evidence/threading/O0.method-ThreadingExceptionTests.test_start_thread_again.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O0.method-ThreadingExceptionTests.test_start_thread_again.stderr"
+          }
+        ],
+        "executable_sha256": "2f3174a850104fee96ba77708925da8f4c3d283c4ef69cd71502515532f1167f"
+      }
+    },
+    "O3": {
+      "build": {
+        "argv": [
+          "/workspace/imre/target/release/imre",
+          "build",
+          "/workspace/scratch/threading-harness/entry.py",
+          "--module-root",
+          "/workspace/scratch/threading-harness",
+          "--no-cache",
+          "--opt-level",
+          "3",
+          "--runtime",
+          "/workspace/imre/target/release/libimre_runtime.a",
+          "--clang",
+          "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+          "-o",
+          "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.exe",
+          "--include-module",
+          "test.test_threading",
+          "--extension-path",
+          "/workspace/scratch/imre-cpython-test-fixtures/Lib"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 600,
+        "elapsed_seconds": 71.709,
+        "stdout": "benchmarks/compatibility/evidence/threading/O3.build.stdout",
+        "stderr": "benchmarks/compatibility/evidence/threading/O3.build.stderr"
+      },
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "TMPDIR": "/workspace/scratch/imre-tmp",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+        "IMREFLAGS": "--opt-level 3",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+      },
+      "environment_unset": [
+        "IMRE_ENCODED_FLAGS"
+      ],
+      "full_suite": {
+        "argv": [
+          "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.exe",
+          "-v",
+          "test.test_threading"
+        ],
+        "exit_code": -15,
+        "timed_out": true,
+        "timeout_seconds": 180,
+        "elapsed_seconds": 180.009,
+        "stdout": "benchmarks/compatibility/evidence/threading/O3.full.stdout",
+        "stderr": "benchmarks/compatibility/evidence/threading/O3.full.stderr"
+      },
+      "selectors": [
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.exe",
+            "-v",
+            "test.test_threading.AtexitTests"
+          ],
+          "exit_code": -15,
+          "timed_out": true,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 30.006,
+          "stdout": "benchmarks/compatibility/evidence/threading/O3.class-AtexitTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O3.class-AtexitTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.exe",
+            "-v",
+            "test.test_threading.BarrierTests"
+          ],
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 5.997,
+          "stdout": "benchmarks/compatibility/evidence/threading/O3.class-BarrierTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O3.class-BarrierTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.exe",
+            "-v",
+            "test.test_threading.BoundedSemaphoreTests"
+          ],
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 3.628,
+          "stdout": "benchmarks/compatibility/evidence/threading/O3.class-BoundedSemaphoreTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O3.class-BoundedSemaphoreTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.exe",
+            "-v",
+            "test.test_threading.CRLockTests"
+          ],
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 6.639,
+          "stdout": "benchmarks/compatibility/evidence/threading/O3.class-CRLockTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O3.class-CRLockTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.exe",
+            "-v",
+            "test.test_threading.ConditionAsRLockTests"
+          ],
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 6.811,
+          "stdout": "benchmarks/compatibility/evidence/threading/O3.class-ConditionAsRLockTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O3.class-ConditionAsRLockTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.exe",
+            "-v",
+            "test.test_threading.ConditionTests"
+          ],
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 3.127,
+          "stdout": "benchmarks/compatibility/evidence/threading/O3.class-ConditionTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O3.class-ConditionTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.exe",
+            "-v",
+            "test.test_threading.EventTests"
+          ],
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 2.473,
+          "stdout": "benchmarks/compatibility/evidence/threading/O3.class-EventTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O3.class-EventTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.exe",
+            "-v",
+            "test.test_threading.ExceptHookTests"
+          ],
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 0.767,
+          "stdout": "benchmarks/compatibility/evidence/threading/O3.class-ExceptHookTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O3.class-ExceptHookTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.exe",
+            "-v",
+            "test.test_threading.InterruptMainTests"
+          ],
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 0.717,
+          "stdout": "benchmarks/compatibility/evidence/threading/O3.class-InterruptMainTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O3.class-InterruptMainTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.exe",
+            "-v",
+            "test.test_threading.LockTests"
+          ],
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 4.638,
+          "stdout": "benchmarks/compatibility/evidence/threading/O3.class-LockTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O3.class-LockTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.exe",
+            "-v",
+            "test.test_threading.MiscTestCase"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 0.516,
+          "stdout": "benchmarks/compatibility/evidence/threading/O3.class-MiscTestCase.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O3.class-MiscTestCase.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.exe",
+            "-v",
+            "test.test_threading.PyRLockTests"
+          ],
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 7.537,
+          "stdout": "benchmarks/compatibility/evidence/threading/O3.class-PyRLockTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O3.class-PyRLockTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.exe",
+            "-v",
+            "test.test_threading.SemaphoreTests"
+          ],
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 3.576,
+          "stdout": "benchmarks/compatibility/evidence/threading/O3.class-SemaphoreTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O3.class-SemaphoreTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.exe",
+            "-v",
+            "test.test_threading.SubinterpThreadingTests"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 0.47,
+          "stdout": "benchmarks/compatibility/evidence/threading/O3.class-SubinterpThreadingTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O3.class-SubinterpThreadingTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.exe",
+            "-v",
+            "test.test_threading.ThreadJoinOnShutdown"
+          ],
+          "exit_code": -15,
+          "timed_out": true,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 30.005,
+          "stdout": "benchmarks/compatibility/evidence/threading/O3.class-ThreadJoinOnShutdown.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O3.class-ThreadJoinOnShutdown.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.exe",
+            "-v",
+            "test.test_threading.ThreadTests"
+          ],
+          "exit_code": -15,
+          "timed_out": true,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 30.009,
+          "stdout": "benchmarks/compatibility/evidence/threading/O3.class-ThreadTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O3.class-ThreadTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.exe",
+            "-v",
+            "test.test_threading.ThreadingExceptionTests"
+          ],
+          "exit_code": -15,
+          "timed_out": true,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 30.012,
+          "stdout": "benchmarks/compatibility/evidence/threading/O3.class-ThreadingExceptionTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O3.class-ThreadingExceptionTests.stderr"
+        },
+        {
+          "argv": [
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.exe",
+            "-v",
+            "test.test_threading.TimerTests"
+          ],
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 0.465,
+          "stdout": "benchmarks/compatibility/evidence/threading/O3.class-TimerTests.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O3.class-TimerTests.stderr"
+        }
+      ],
+      "executable_sha256": "67d0edc4d51ca96229cb00add31d30a5d4324209187362db932693ba90c31e50",
+      "recovery": {
+        "build": {
+          "argv": [
+            "/workspace/imre/target/release/imre",
+            "build",
+            "/workspace/scratch/threading-harness/entry.py",
+            "--module-root",
+            "/workspace/scratch/threading-harness",
+            "--no-cache",
+            "--opt-level",
+            "3",
+            "--runtime",
+            "/workspace/imre/target/release/libimre_runtime.a",
+            "--clang",
+            "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+            "-o",
+            "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+            "--include-module",
+            "test.test_threading",
+            "--extension-path",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "timeout_seconds": 600,
+          "elapsed_seconds": 69.865,
+          "stdout": "benchmarks/compatibility/evidence/threading/O3.recovery-build.stdout",
+          "stderr": "benchmarks/compatibility/evidence/threading/O3.recovery-build.stderr"
+        },
+        "selectors": [
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadJoinOnShutdown.test_1_join_on_shutdown"
+            ],
+            "exit_code": -15,
+            "timed_out": true,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 5.004,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadJoinOnShutdown.test_1_join_on_shutdown.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadJoinOnShutdown.test_1_join_on_shutdown.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_enumerate_after_join"
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.516,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_enumerate_after_join.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_enumerate_after_join.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_foreign_thread"
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.466,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_foreign_thread.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_foreign_thread.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_frame_tstate_tracing"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.566,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_frame_tstate_tracing.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_frame_tstate_tracing.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_getprofile"
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.565,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_getprofile.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_getprofile.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_getprofile_all_threads"
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.566,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_getprofile_all_threads.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_getprofile_all_threads.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_gettrace"
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.566,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_gettrace.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_gettrace.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_gettrace_all_threads"
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.566,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_gettrace_all_threads.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_gettrace_all_threads.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_ident_of_no_threading_threads"
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.566,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_ident_of_no_threading_threads.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_ident_of_no_threading_threads.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_join_from_multiple_threads"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.52,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_join_from_multiple_threads.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_join_from_multiple_threads.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_join_with_timeout"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.566,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_join_with_timeout.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_join_with_timeout.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_lazy_import"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.516,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_lazy_import.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_lazy_import.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_leak_without_join"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.666,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_leak_without_join.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_leak_without_join.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_limbo_cleanup"
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.469,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_limbo_cleanup.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_limbo_cleanup.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_lock_no_args"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.565,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_lock_no_args.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_lock_no_args.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_lock_no_subclass"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.565,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_lock_no_subclass.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_lock_no_subclass.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_lock_or_none"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.566,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_lock_or_none.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_lock_or_none.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_main_thread"
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.465,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_main_thread.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_main_thread.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_main_thread_after_fork_from_dummy_thread"
+            ],
+            "exit_code": -15,
+            "timed_out": true,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 5.009,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_main_thread_after_fork_from_dummy_thread.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_main_thread_after_fork_from_dummy_thread.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_name"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.515,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_name.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_name.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_no_refcycle_through_target"
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 1.017,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_no_refcycle_through_target.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_no_refcycle_through_target.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_old_threading_api"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.616,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_old_threading_api.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_old_threading_api.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_repr_daemon"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.617,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_repr_daemon.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_repr_daemon.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_repr_stopped"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.517,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_repr_stopped.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_repr_stopped.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_various_ops"
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.465,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_various_ops.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_various_ops.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_various_ops_large_stack"
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.565,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_various_ops_large_stack.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_various_ops_large_stack.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadTests.test_various_ops_small_stack"
+            ],
+            "exit_code": 1,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.62,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_various_ops_small_stack.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadTests.test_various_ops_small_stack.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadingExceptionTests.test_joining_current_thread"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.467,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadingExceptionTests.test_joining_current_thread.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadingExceptionTests.test_joining_current_thread.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadingExceptionTests.test_joining_inactive_thread"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.565,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadingExceptionTests.test_joining_inactive_thread.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadingExceptionTests.test_joining_inactive_thread.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadingExceptionTests.test_multithread_modify_file_noerror"
+            ],
+            "exit_code": -15,
+            "timed_out": true,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 5.005,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadingExceptionTests.test_multithread_modify_file_noerror.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadingExceptionTests.test_multithread_modify_file_noerror.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadingExceptionTests.test_releasing_unacquired_lock"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.519,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadingExceptionTests.test_releasing_unacquired_lock.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadingExceptionTests.test_releasing_unacquired_lock.stderr"
+          },
+          {
+            "argv": [
+              "/workspace/scratch/imre-threading/benchmarks/compatibility/evidence/threading/O3.recovery.exe",
+              "-v",
+              "test.test_threading.ThreadingExceptionTests.test_start_thread_again"
+            ],
+            "exit_code": 0,
+            "timed_out": false,
+            "timeout_seconds": 5,
+            "elapsed_seconds": 0.466,
+            "stdout": "benchmarks/compatibility/evidence/threading/O3.method-ThreadingExceptionTests.test_start_thread_again.stdout",
+            "stderr": "benchmarks/compatibility/evidence/threading/O3.method-ThreadingExceptionTests.test_start_thread_again.stderr"
+          }
+        ],
+        "executable_sha256": "67d0edc4d51ca96229cb00add31d30a5d4324209187362db932693ba90c31e50"
+      }
+    }
+  },
+  "classes": [
+    "test.test_threading.AtexitTests",
+    "test.test_threading.BarrierTests",
+    "test.test_threading.BoundedSemaphoreTests",
+    "test.test_threading.CRLockTests",
+    "test.test_threading.ConditionAsRLockTests",
+    "test.test_threading.ConditionTests",
+    "test.test_threading.EventTests",
+    "test.test_threading.ExceptHookTests",
+    "test.test_threading.InterruptMainTests",
+    "test.test_threading.LockTests",
+    "test.test_threading.MiscTestCase",
+    "test.test_threading.PyRLockTests",
+    "test.test_threading.SemaphoreTests",
+    "test.test_threading.SubinterpThreadingTests",
+    "test.test_threading.ThreadJoinOnShutdown",
+    "test.test_threading.ThreadTests",
+    "test.test_threading.ThreadingExceptionTests",
+    "test.test_threading.TimerTests"
+  ],
+  "distribution": {
+    "stock": {
+      "pass": 220,
+      "skip": 7,
+      "fail": 1
+    },
+    "O0": {
+      "not_run": 37,
+      "error": 86,
+      "pass": 90,
+      "skip": 15
+    },
+    "O3": {
+      "not_run": 37,
+      "error": 86,
+      "pass": 90,
+      "skip": 15
+    }
+  },
+  "paired": 0,
+  "raw": 228,
+  "stock_inventory": 228,
+  "recovery_selection": {
+    "method": "select unreported original methods whose unchanged source body does not contain the listed child-process patterns",
+    "excluded_patterns": [
+      "assert_python",
+      "subprocess",
+      "sys.executable",
+      "run_in_subinterp",
+      "spawn_python",
+      "os.fork",
+      "fork("
+    ],
+    "selected_ids": [
+      "test.test_threading.ThreadJoinOnShutdown.test_1_join_on_shutdown",
+      "test.test_threading.ThreadTests.test_enumerate_after_join",
+      "test.test_threading.ThreadTests.test_foreign_thread",
+      "test.test_threading.ThreadTests.test_frame_tstate_tracing",
+      "test.test_threading.ThreadTests.test_getprofile",
+      "test.test_threading.ThreadTests.test_getprofile_all_threads",
+      "test.test_threading.ThreadTests.test_gettrace",
+      "test.test_threading.ThreadTests.test_gettrace_all_threads",
+      "test.test_threading.ThreadTests.test_ident_of_no_threading_threads",
+      "test.test_threading.ThreadTests.test_join_from_multiple_threads",
+      "test.test_threading.ThreadTests.test_join_with_timeout",
+      "test.test_threading.ThreadTests.test_lazy_import",
+      "test.test_threading.ThreadTests.test_leak_without_join",
+      "test.test_threading.ThreadTests.test_limbo_cleanup",
+      "test.test_threading.ThreadTests.test_lock_no_args",
+      "test.test_threading.ThreadTests.test_lock_no_subclass",
+      "test.test_threading.ThreadTests.test_lock_or_none",
+      "test.test_threading.ThreadTests.test_main_thread",
+      "test.test_threading.ThreadTests.test_main_thread_after_fork_from_dummy_thread",
+      "test.test_threading.ThreadTests.test_name",
+      "test.test_threading.ThreadTests.test_no_refcycle_through_target",
+      "test.test_threading.ThreadTests.test_old_threading_api",
+      "test.test_threading.ThreadTests.test_repr_daemon",
+      "test.test_threading.ThreadTests.test_repr_stopped",
+      "test.test_threading.ThreadTests.test_various_ops",
+      "test.test_threading.ThreadTests.test_various_ops_large_stack",
+      "test.test_threading.ThreadTests.test_various_ops_small_stack",
+      "test.test_threading.ThreadingExceptionTests.test_joining_current_thread",
+      "test.test_threading.ThreadingExceptionTests.test_joining_inactive_thread",
+      "test.test_threading.ThreadingExceptionTests.test_multithread_modify_file_noerror",
+      "test.test_threading.ThreadingExceptionTests.test_releasing_unacquired_lock",
+      "test.test_threading.ThreadingExceptionTests.test_start_thread_again"
+    ],
+    "timeout_seconds": 5
+  },
+  "observed_all_pass": 90,
+  "accepted_reasoned_omissions": 90,
+  "architecture_control": "benchmarks/compatibility/evidence/threading/control.json",
+  "source_withdrawal_probe": "benchmarks/compatibility/evidence/threading/withdrawal.json"
+}

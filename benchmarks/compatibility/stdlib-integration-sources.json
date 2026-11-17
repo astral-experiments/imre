@@ -1,0 +1,68 @@
+{
+  "base_main": "626b6b4586a97858a3bd34634ad301c71c7bc2c6",
+  "imre_revision": "49f0dc2ef78b82692e333252faf71b4fc7730949",
+  "sources": [
+    {
+      "head": "79b36791213413c0622ed203f95797fa43d21afa",
+      "families": [
+        "pathlib",
+        "tempfile"
+      ]
+    },
+    {
+      "head": "4460b79977c10750cef5a5f0e5dea51a14dcbbf7",
+      "families": [
+        "base64",
+        "csv",
+        "struct",
+        "unittest",
+        "weakref"
+      ]
+    },
+    {
+      "head": "256402747d2f0c4fccc55af94edb345f65c2e2bd",
+      "families": [
+        "gzip",
+        "io",
+        "itertools",
+        "json"
+      ]
+    },
+    {
+      "head": "71bf9a208b27bd0a784fc4fc8bcdfd1c00a97bac",
+      "families": [
+        "contextlib",
+        "functools",
+        "hashlib",
+        "netrc",
+        "typing",
+        "warnings"
+      ]
+    },
+    {
+      "head": "67739aae83b5d7623930ca4ad9c138ba4b547bf8",
+      "families": [
+        "collections"
+      ],
+      "updated_overlaps": [
+        "configparser",
+        "textwrap",
+        "tokenize",
+        "tomllib"
+      ]
+    },
+    {
+      "head": "7ee35e4beeae267e518da870da9819bf22b190e6",
+      "families": [
+        "threading"
+      ]
+    }
+  ],
+  "absent_slots": {
+    "collections": 1,
+    "functools": 4,
+    "types": 12,
+    "zipfile": 5
+  },
+  "note": "No absent original ID was synthesized. Source heads provide receipt and launcher-control evidence; textwrap credit is withheld because its saved images were deleted before source withdrawal."
+}

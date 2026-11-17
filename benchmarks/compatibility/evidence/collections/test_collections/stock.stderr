@@ -1,0 +1,138 @@
+test_basics (test.test_collections.TestChainMap.test_basics) ... ok
+test_bool (test.test_collections.TestChainMap.test_bool) ... ok
+test_constructor (test.test_collections.TestChainMap.test_constructor) ... ok
+test_dict_coercion (test.test_collections.TestChainMap.test_dict_coercion) ... ok
+test_iter_not_calling_getitem_on_maps (test.test_collections.TestChainMap.test_iter_not_calling_getitem_on_maps) ... ok
+test_missing (test.test_collections.TestChainMap.test_missing) ... ok
+test_new_child (test.test_collections.TestChainMap.test_new_child)
+Tests for changes for issue #16613. ... ok
+test_order_preservation (test.test_collections.TestChainMap.test_order_preservation) ... ok
+test_ordering (test.test_collections.TestChainMap.test_ordering) ... ok
+test_union_operators (test.test_collections.TestChainMap.test_union_operators) ... ok
+test_Buffer (test.test_collections.TestCollectionABCs.test_Buffer) ... ok
+test_ByteString (test.test_collections.TestCollectionABCs.test_ByteString) ... ok
+test_Mapping (test.test_collections.TestCollectionABCs.test_Mapping) ... ok
+test_MutableMapping (test.test_collections.TestCollectionABCs.test_MutableMapping) ... ok
+test_MutableMapping_subclass (test.test_collections.TestCollectionABCs.test_MutableMapping_subclass) ... ok
+test_MutableSequence (test.test_collections.TestCollectionABCs.test_MutableSequence) ... ok
+test_MutableSequence_mixins (test.test_collections.TestCollectionABCs.test_MutableSequence_mixins) ... ok
+test_MutableSet (test.test_collections.TestCollectionABCs.test_MutableSet) ... ok
+test_Sequence (test.test_collections.TestCollectionABCs.test_Sequence) ... ok
+test_Sequence_mixins (test.test_collections.TestCollectionABCs.test_Sequence_mixins) ... ok
+test_Set (test.test_collections.TestCollectionABCs.test_Set) ... ok
+test_Set_from_iterable (test.test_collections.TestCollectionABCs.test_Set_from_iterable)
+Verify _from_iterable overridden to an instance method works. ... ok
+test_Set_hash_matches_frozenset (test.test_collections.TestCollectionABCs.test_Set_hash_matches_frozenset) ... ok
+test_Set_interoperability_with_real_sets (test.test_collections.TestCollectionABCs.test_Set_interoperability_with_real_sets) ... ok
+test_arithmetic_Set (test.test_collections.TestCollectionABCs.test_arithmetic_Set) ... ok
+test_equality_Set (test.test_collections.TestCollectionABCs.test_equality_Set) ... ok
+test_hash_Set (test.test_collections.TestCollectionABCs.test_hash_Set) ... ok
+test_illegal_patma_flags (test.test_collections.TestCollectionABCs.test_illegal_patma_flags) ... ok
+test_isdisjoint_Set (test.test_collections.TestCollectionABCs.test_isdisjoint_Set) ... ok
+test_issue16373 (test.test_collections.TestCollectionABCs.test_issue16373) ... ok
+test_issue26915 (test.test_collections.TestCollectionABCs.test_issue26915) ... ok
+test_issue8750 (test.test_collections.TestCollectionABCs.test_issue8750) ... ok
+test_issue_4920 (test.test_collections.TestCollectionABCs.test_issue_4920) ... ok
+test_issue_5647 (test.test_collections.TestCollectionABCs.test_issue_5647) ... ok
+test_basics (test.test_collections.TestCounter.test_basics) ... ok
+test_conversions (test.test_collections.TestCounter.test_conversions) ... ok
+test_copy_subclass (test.test_collections.TestCounter.test_copy_subclass) ... ok
+test_copying (test.test_collections.TestCounter.test_copying) ... ok
+test_eq (test.test_collections.TestCounter.test_eq) ... ok
+test_ge (test.test_collections.TestCounter.test_ge) ... ok
+test_gt (test.test_collections.TestCounter.test_gt) ... ok
+test_helper_function (test.test_collections.TestCounter.test_helper_function) ... ok
+test_init (test.test_collections.TestCounter.test_init) ... ok
+test_inplace_operations (test.test_collections.TestCounter.test_inplace_operations) ... ok
+test_invariant_for_the_in_operator (test.test_collections.TestCounter.test_invariant_for_the_in_operator) ... ok
+test_le (test.test_collections.TestCounter.test_le) ... ok
+test_lt (test.test_collections.TestCounter.test_lt) ... ok
+test_multiset_operations (test.test_collections.TestCounter.test_multiset_operations) ... ok
+test_multiset_operations_equivalent_to_set_operations (test.test_collections.TestCounter.test_multiset_operations_equivalent_to_set_operations) ... ok
+test_order_preservation (test.test_collections.TestCounter.test_order_preservation) ... ok
+test_repr_nonsortable (test.test_collections.TestCounter.test_repr_nonsortable) ... ok
+test_subtract (test.test_collections.TestCounter.test_subtract) ... ok
+test_total (test.test_collections.TestCounter.test_total) ... ok
+test_unary (test.test_collections.TestCounter.test_unary) ... ok
+test_update (test.test_collections.TestCounter.test_update) ... ok
+test_update_reentrant_add_clears_counter (test.test_collections.TestCounter.test_update_reentrant_add_clears_counter) ... ok
+test_copy (test.test_collections.TestNamedTuple.test_copy) ... ok
+test_defaults (test.test_collections.TestNamedTuple.test_defaults) ... ok
+test_factory (test.test_collections.TestNamedTuple.test_factory) ... ok
+test_factory_doc_attr (test.test_collections.TestNamedTuple.test_factory_doc_attr) ... ok
+test_field_descriptor (test.test_collections.TestNamedTuple.test_field_descriptor) ... ok
+test_field_doc (test.test_collections.TestNamedTuple.test_field_doc) ... ok
+test_field_doc_reuse (test.test_collections.TestNamedTuple.test_field_doc_reuse) ... ok
+test_field_repr (test.test_collections.TestNamedTuple.test_field_repr) ... ok
+test_instance (test.test_collections.TestNamedTuple.test_instance) ... ok
+test_keyword_only_arguments (test.test_collections.TestNamedTuple.test_keyword_only_arguments) ... ok
+test_large_size (test.test_collections.TestNamedTuple.test_large_size) ... ok
+test_match_args (test.test_collections.TestNamedTuple.test_match_args) ... ok
+test_module_parameter (test.test_collections.TestNamedTuple.test_module_parameter) ... ok
+test_name_conflicts (test.test_collections.TestNamedTuple.test_name_conflicts) ... ok
+test_name_fixer (test.test_collections.TestNamedTuple.test_name_fixer) ... ok
+test_namedtuple_subclass_issue_24931 (test.test_collections.TestNamedTuple.test_namedtuple_subclass_issue_24931) ... ok
+test_new_builtins_issue_43102 (test.test_collections.TestNamedTuple.test_new_builtins_issue_43102) ... ok
+test_non_generic_subscript (test.test_collections.TestNamedTuple.test_non_generic_subscript) ... ok
+test_odd_sizes (test.test_collections.TestNamedTuple.test_odd_sizes) ... ok
+test_pickle (test.test_collections.TestNamedTuple.test_pickle) ... ok
+test_readonly (test.test_collections.TestNamedTuple.test_readonly) ... ok
+test_repr (test.test_collections.TestNamedTuple.test_repr) ... ok
+test_tupleness (test.test_collections.TestNamedTuple.test_tupleness) ... ok
+test_AsyncGenerator (test.test_collections.TestOneTrickPonyABCs.test_AsyncGenerator) ... ok
+test_AsyncIterable (test.test_collections.TestOneTrickPonyABCs.test_AsyncIterable) ... ok
+test_AsyncIterator (test.test_collections.TestOneTrickPonyABCs.test_AsyncIterator) ... ok
+test_Awaitable (test.test_collections.TestOneTrickPonyABCs.test_Awaitable) ... ok
+test_Callable (test.test_collections.TestOneTrickPonyABCs.test_Callable) ... ok
+test_Collection (test.test_collections.TestOneTrickPonyABCs.test_Collection) ... ok
+test_Container (test.test_collections.TestOneTrickPonyABCs.test_Container) ... ok
+test_Coroutine (test.test_collections.TestOneTrickPonyABCs.test_Coroutine) ... ok
+test_Generator (test.test_collections.TestOneTrickPonyABCs.test_Generator) ... ok
+test_Hashable (test.test_collections.TestOneTrickPonyABCs.test_Hashable) ... ok
+test_Iterable (test.test_collections.TestOneTrickPonyABCs.test_Iterable) ... ok
+test_Iterator (test.test_collections.TestOneTrickPonyABCs.test_Iterator) ... ok
+test_Reversible (test.test_collections.TestOneTrickPonyABCs.test_Reversible) ... ok
+test_Sized (test.test_collections.TestOneTrickPonyABCs.test_Sized) ... ok
+test_direct_subclassing (test.test_collections.TestOneTrickPonyABCs.test_direct_subclassing) ... ok
+test_registration (test.test_collections.TestOneTrickPonyABCs.test_registration) ... ok
+test_dict_copy (test.test_collections.TestUserObjects.test_dict_copy) ... ok
+test_dict_missing (test.test_collections.TestUserObjects.test_dict_missing) ... ok
+test_dict_protocol (test.test_collections.TestUserObjects.test_dict_protocol) ... ok
+test_list_copy (test.test_collections.TestUserObjects.test_list_copy) ... ok
+test_list_protocol (test.test_collections.TestUserObjects.test_list_protocol) ... ok
+test_str_protocol (test.test_collections.TestUserObjects.test_str_protocol) ... ok
+Counter (collections)
+Doctest: collections.Counter ... ok
+__add__ (collections.Counter)
+Doctest: collections.Counter.__add__ ... ok
+__and__ (collections.Counter)
+Doctest: collections.Counter.__and__ ... ok
+__iadd__ (collections.Counter)
+Doctest: collections.Counter.__iadd__ ... ok
+__iand__ (collections.Counter)
+Doctest: collections.Counter.__iand__ ... ok
+__init__ (collections.Counter)
+Doctest: collections.Counter.__init__ ... ok
+__ior__ (collections.Counter)
+Doctest: collections.Counter.__ior__ ... ok
+__isub__ (collections.Counter)
+Doctest: collections.Counter.__isub__ ... ok
+__or__ (collections.Counter)
+Doctest: collections.Counter.__or__ ... ok
+__sub__ (collections.Counter)
+Doctest: collections.Counter.__sub__ ... ok
+elements (collections.Counter)
+Doctest: collections.Counter.elements ... ok
+most_common (collections.Counter)
+Doctest: collections.Counter.most_common ... ok
+subtract (collections.Counter)
+Doctest: collections.Counter.subtract ... ok
+update (collections.Counter)
+Doctest: collections.Counter.update ... ok
+namedtuple (collections)
+Doctest: collections.namedtuple ... ok
+
+----------------------------------------------------------------------
+Ran 116 tests in 3.422s
+
+OK

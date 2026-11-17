@@ -1,0 +1,5 @@
+test_leak_without_join (test.test_threading.ThreadTests.test_leak_without_join) ... ok
+----------------------------------------------------------------------
+Ran 1 test in 0.049s
+
+OK

@@ -1,0 +1,70 @@
+{
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "TMPDIR": "/workspace/scratch/imre-tmp",
+    "IMREFLAGS": "--opt-level 0",
+    "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+  },
+  "timeout_seconds": 240,
+  "build": {
+    "argv": [
+      "/workspace/imre/target/release/imre",
+      "build",
+      "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/entry.py",
+      "--module-root",
+      "/workspace/imre-data",
+      "--extension-path",
+      "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "--no-cache",
+      "--quiet",
+      "--opt-level",
+      "0",
+      "--runtime",
+      "/workspace/imre/target/release/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "-o",
+      "/workspace/scratch/replay/weakref/O0.exe",
+      "--include-module",
+      "test.test_weakref",
+      "--include-module",
+      "test.test_weakset"
+    ],
+    "exit_code": 0,
+    "timed_out": false,
+    "seconds": 42.254,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "exe_sha256": "4f70974ab57e6254e61b1b55d565b67381b9f4d2c611776c39aef21d4a326a43"
+  },
+  "argv": [
+    "/workspace/scratch/replay/weakref/O0.exe"
+  ],
+  "exit_code": -9,
+  "timed_out": true,
+  "seconds": 240.107,
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "a4e8e7ea9862578e7a75281e960cbac9c4e9ef7576369c5fba3dda1cb85abbf4",
+  "stderr_bytes": 1537,
+  "public_stderr": "exact",
+  "parsed_results": 12,
+  "reported_totals": [],
+  "result_raw_lines": [
+    1,
+    2,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14
+  ],
+  "reason": "suite timed out before this original reported an outcome"
+}

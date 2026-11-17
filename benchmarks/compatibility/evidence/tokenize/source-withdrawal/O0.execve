@@ -1,0 +1,2 @@
+9407  execve("/workspace/scratch/tokenize-file-O0.exe", ["/workspace/scratch/tokenize-file"..., "-v", "CTokenizeTest.test_additive"], 0x7fff0208a9b8 /* 77 vars */) = 0
+9407  +++ exited with 0 +++

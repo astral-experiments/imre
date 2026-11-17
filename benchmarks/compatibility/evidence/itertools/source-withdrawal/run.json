@@ -1,0 +1,70 @@
+{
+  "original_id": "test.test_itertools.LengthTransparency.test_repeat",
+  "withdrawn_source": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_itertools.py",
+  "withdrawn_launcher": "/workspace/scratch/imre-cpython-test-fixtures/Lib/receipt_runner.py",
+  "runs": {
+    "O0": {
+      "argv": [
+        "strace",
+        "-f",
+        "-e",
+        "trace=execve",
+        "-o",
+        "/workspace/imre-data/benchmarks/compatibility/evidence/itertools/source-withdrawal/O0.execve",
+        "/workspace/scratch/itertools-O0-saved.exe",
+        "test.test_itertools.LengthTransparency.test_repeat"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "IMREFLAGS": "--opt-level 0",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+        "TMPDIR": "/workspace/scratch/replay-tmp/itertools",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1"
+      },
+      "exit_code": 0,
+      "timed_out": false,
+      "artifact_sha256": "6bfebae6397931c09b11fda4e729ed0ebe258c8039e0e520a1e69d18872fed7c",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "198b0e97a80155c1513643b687bd65588faa1b51282ee3b7c7cd76f48e195dea",
+      "execve_sha256": "912a6f98a504ad009ea2092c8d3a4f177d66df0869e72699bc760c026d27f7c5",
+      "execve_trace": "O0.execve",
+      "python_delegation_observed": false,
+      "withdrawn_source_absent": true,
+      "withdrawn_launcher_absent": true
+    },
+    "O3": {
+      "argv": [
+        "strace",
+        "-f",
+        "-e",
+        "trace=execve",
+        "-o",
+        "/workspace/imre-data/benchmarks/compatibility/evidence/itertools/source-withdrawal/O3.execve",
+        "/workspace/scratch/itertools-O3-saved.exe",
+        "test.test_itertools.LengthTransparency.test_repeat"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "IMREFLAGS": "--opt-level 3",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+        "TMPDIR": "/workspace/scratch/replay-tmp/itertools",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1"
+      },
+      "exit_code": 0,
+      "timed_out": false,
+      "artifact_sha256": "892b3a4b3f98789b0835cc65676f74186631b64ca74a2b67827e953bca3fd41a",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "198b0e97a80155c1513643b687bd65588faa1b51282ee3b7c7cd76f48e195dea",
+      "execve_sha256": "0c99913a1530b12556237ba8f8e76d544b73afe07103fa0b4a1e7f5ce080eaae",
+      "execve_trace": "O3.execve",
+      "python_delegation_observed": false,
+      "withdrawn_source_absent": true,
+      "withdrawn_launcher_absent": true
+    }
+  },
+  "note": "This observation does not override a failed architecture control."
+}

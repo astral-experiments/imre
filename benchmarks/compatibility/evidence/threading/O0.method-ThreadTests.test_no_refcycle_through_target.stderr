@@ -1,0 +1,19 @@
+test_no_refcycle_through_target (test.test_threading.ThreadTests.test_no_refcycle_through_target) ... ERROR
+======================================================================
+ERROR: test_no_refcycle_through_target (test.test_threading.ThreadTests.test_no_refcycle_through_target)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 592, in test_no_refcycle_through_target
+    cyclic_object = RunSelfFunction(should_raise=False)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 584, in __init__
+    self.thread.start()
+    ~~~~~~~~~~~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+
+----------------------------------------------------------------------
+Ran 1 test in 0.345s
+
+FAILED (errors=1)

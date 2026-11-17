@@ -1,0 +1,2 @@
+test_bare_raise_in_brand_new_thread (test.test_threading.ThreadingExceptionTests.test_bare_raise_in_brand_new_thread) ... ERROR
+test_daemonize_active_thread (test.test_threading.ThreadingExceptionTests.test_daemonize_active_thread) ... ok

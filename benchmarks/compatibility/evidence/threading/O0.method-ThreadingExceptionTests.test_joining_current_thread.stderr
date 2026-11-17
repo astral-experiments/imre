@@ -1,0 +1,5 @@
+test_joining_current_thread (test.test_threading.ThreadingExceptionTests.test_joining_current_thread) ... ok
+----------------------------------------------------------------------
+Ran 1 test in 0.012s
+
+OK

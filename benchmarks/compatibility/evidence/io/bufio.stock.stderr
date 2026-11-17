@@ -1,0 +1,9 @@
+test_nullpat (test.test_bufio.CBufferSizeTest.test_nullpat) ... ok
+test_primepat (test.test_bufio.CBufferSizeTest.test_primepat) ... ok
+test_nullpat (test.test_bufio.PyBufferSizeTest.test_nullpat) ... ok
+test_primepat (test.test_bufio.PyBufferSizeTest.test_primepat) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 1.195s
+
+OK

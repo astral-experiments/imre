@@ -1,0 +1,10 @@
+test_daemon_threads_fatal_error (test.test_threading.SubinterpThreadingTests.test_daemon_threads_fatal_error) ... skipped 'implementation detail specific to cpython'
+test_daemon_threads_not_allowed (test.test_threading.SubinterpThreadingTests.test_daemon_threads_not_allowed) ... skipped 'implementation detail specific to cpython'
+test_threads_join (test.test_threading.SubinterpThreadingTests.test_threads_join) ... skipped 'requires _testcapi'
+test_threads_join_2 (test.test_threading.SubinterpThreadingTests.test_threads_join_2) ... skipped 'requires _testcapi'
+test_threads_join_with_no_main (test.test_threading.SubinterpThreadingTests.test_threads_join_with_no_main) ... skipped 'subinterpreters required'
+test_threads_not_allowed (test.test_threading.SubinterpThreadingTests.test_threads_not_allowed) ... skipped 'implementation detail specific to cpython'
+----------------------------------------------------------------------
+Ran 6 tests in 0.023s
+
+OK (skipped=6)

@@ -1,0 +1,6 @@
+test_add_section_default (test.test_configparser.ConfigParserTestCase.test_add_section_default) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.008s
+
+OK

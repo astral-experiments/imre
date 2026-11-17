@@ -1,0 +1,113 @@
+test_anchor (__main__.LexicalPathJoinTest.test_anchor) ... ok
+test_constructor (__main__.LexicalPathJoinTest.test_constructor) ... ok
+test_div (__main__.LexicalPathJoinTest.test_div) ... ok
+test_full_match (__main__.LexicalPathJoinTest.test_full_match) ... ok
+test_is_joinable (__main__.LexicalPathJoinTest.test_is_joinable) ... ok
+test_join (__main__.LexicalPathJoinTest.test_join) ... ok
+test_name (__main__.LexicalPathJoinTest.test_name) ... ok
+test_parent (__main__.LexicalPathJoinTest.test_parent) ... ok
+test_parents (__main__.LexicalPathJoinTest.test_parents) ... ok
+test_parser (__main__.LexicalPathJoinTest.test_parser) ... ok
+test_parts (__main__.LexicalPathJoinTest.test_parts) ... ok
+test_parts_multithreaded (__main__.LexicalPathJoinTest.test_parts_multithreaded) ... ERROR
+test_stem (__main__.LexicalPathJoinTest.test_stem) ... ok
+test_suffix (__main__.LexicalPathJoinTest.test_suffix) ... ok
+test_suffixes (__main__.LexicalPathJoinTest.test_suffixes) ... ok
+test_with_name (__main__.LexicalPathJoinTest.test_with_name) ... ok
+test_with_segments (__main__.LexicalPathJoinTest.test_with_segments) ... ok
+test_with_stem (__main__.LexicalPathJoinTest.test_with_stem) ... ok
+test_with_suffix (__main__.LexicalPathJoinTest.test_with_suffix) ... ok
+test_anchor (__main__.PathJoinTest.test_anchor) ... ok
+test_constructor (__main__.PathJoinTest.test_constructor) ... ok
+test_div (__main__.PathJoinTest.test_div) ... ok
+test_full_match (__main__.PathJoinTest.test_full_match) ... ok
+test_is_joinable (__main__.PathJoinTest.test_is_joinable) ... ok
+test_join (__main__.PathJoinTest.test_join) ... ok
+test_name (__main__.PathJoinTest.test_name) ... ok
+test_parent (__main__.PathJoinTest.test_parent) ... ok
+test_parents (__main__.PathJoinTest.test_parents) ... ok
+test_parser (__main__.PathJoinTest.test_parser) ... ok
+test_parts (__main__.PathJoinTest.test_parts) ... ok
+test_parts_multithreaded (__main__.PathJoinTest.test_parts_multithreaded) ... ERROR
+test_stem (__main__.PathJoinTest.test_stem) ... ok
+test_suffix (__main__.PathJoinTest.test_suffix) ... ok
+test_suffixes (__main__.PathJoinTest.test_suffixes) ... ok
+test_with_name (__main__.PathJoinTest.test_with_name) ... ok
+test_with_segments (__main__.PathJoinTest.test_with_segments) ... ok
+test_with_stem (__main__.PathJoinTest.test_with_stem) ... ok
+test_with_suffix (__main__.PathJoinTest.test_with_suffix) ... ok
+test_anchor (__main__.PurePathJoinTest.test_anchor) ... ok
+test_constructor (__main__.PurePathJoinTest.test_constructor) ... ok
+test_div (__main__.PurePathJoinTest.test_div) ... ok
+test_full_match (__main__.PurePathJoinTest.test_full_match) ... ok
+test_is_joinable (__main__.PurePathJoinTest.test_is_joinable) ... ok
+test_join (__main__.PurePathJoinTest.test_join) ... ok
+test_name (__main__.PurePathJoinTest.test_name) ... ok
+test_parent (__main__.PurePathJoinTest.test_parent) ... ok
+test_parents (__main__.PurePathJoinTest.test_parents) ... ok
+test_parser (__main__.PurePathJoinTest.test_parser) ... ok
+test_parts (__main__.PurePathJoinTest.test_parts) ... ok
+test_parts_multithreaded (__main__.PurePathJoinTest.test_parts_multithreaded) ... ERROR
+test_stem (__main__.PurePathJoinTest.test_stem) ... ok
+test_suffix (__main__.PurePathJoinTest.test_suffix) ... ok
+test_suffixes (__main__.PurePathJoinTest.test_suffixes) ... ok
+test_with_name (__main__.PurePathJoinTest.test_with_name) ... ok
+test_with_segments (__main__.PurePathJoinTest.test_with_segments) ... ok
+test_with_stem (__main__.PurePathJoinTest.test_with_stem) ... ok
+test_with_suffix (__main__.PurePathJoinTest.test_with_suffix) ... ok
+
+======================================================================
+ERROR: test_parts_multithreaded (__main__.LexicalPathJoinTest.test_parts_multithreaded)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_join.py", line 180, in test_parts_multithreaded
+    with threading_helper.start_threads(threads):
+         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "<imre stdlib>/contextlib.py", line 486, in __enter__
+    return next(self.gen)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/threading_helper.py", line 131, in start_threads
+    t.start()
+    ~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+
+======================================================================
+ERROR: test_parts_multithreaded (__main__.PathJoinTest.test_parts_multithreaded)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_join.py", line 180, in test_parts_multithreaded
+    with threading_helper.start_threads(threads):
+         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "<imre stdlib>/contextlib.py", line 486, in __enter__
+    return next(self.gen)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/threading_helper.py", line 131, in start_threads
+    t.start()
+    ~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+
+======================================================================
+ERROR: test_parts_multithreaded (__main__.PurePathJoinTest.test_parts_multithreaded)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_join.py", line 180, in test_parts_multithreaded
+    with threading_helper.start_threads(threads):
+         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "<imre stdlib>/contextlib.py", line 486, in __enter__
+    return next(self.gen)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/threading_helper.py", line 131, in start_threads
+    t.start()
+    ~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+
+----------------------------------------------------------------------
+Ran 57 tests in 61.861s
+
+FAILED (errors=3)

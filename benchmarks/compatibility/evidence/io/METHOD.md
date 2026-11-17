@@ -1,0 +1,7 @@
+Frozen row offsets identify seven intact modules: test_bufio (4), test_file (36), test_largefile (16), test_memoryio (182), test_io (667), test_univnewlines (34), and test_fileio (99), totaling 1,038. The stock interpreter exposes the complete pinned test tree in its stdlib so isolated subprocesses can import test.support. The combined native build is blocked by test_fileio.py:771; the supplementary build excludes only that declaration and runs the other suites separately with bounded timeouts. Manually stopped runs have an observed negative exit code and are not described as automatic timeouts.
+
+`run.json` records the pinned source/build hashes, exact commands, flags, environments, process results, and raw stream hashes. `receipt_runner.py` only changes unittest result descriptions and limits printed failure details; the original test files and complete fixtures are unchanged.
+
+The fresh O0 architecture control imported a separate first-party module containing `status: int = True` from the actual positive launcher, with the same finite suite declarations. It exited 0, produced an image, and emitted no expected int/got bool diagnostic. All prospective pairs from this launcher are unverified and have `omission_reason` set; observed native outcomes remain intact. See `architecture-control/run.json`.
+
+The positive artifacts had already been removed after their bounded runs, so source withdrawal would require another expensive build and was not attempted.

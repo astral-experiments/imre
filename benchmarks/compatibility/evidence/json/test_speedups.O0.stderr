@@ -1,0 +1,15 @@
+test_bad_bool_args (test.test_json.test_speedups.TestDecode.test_bad_bool_args) ... ok
+test_make_scanner (test.test_json.test_speedups.TestDecode.test_make_scanner) ... ok
+test_bad_bool_args (test.test_json.test_speedups.TestEncode.test_bad_bool_args) ... ok
+test_bad_markers_argument_to_encoder (test.test_json.test_speedups.TestEncode.test_bad_markers_argument_to_encoder) ... ok
+test_bad_str_encoder (test.test_json.test_speedups.TestEncode.test_bad_str_encoder) ... ok
+test_current_indent_level (test.test_json.test_speedups.TestEncode.test_current_indent_level) ... ok
+test_make_encoder (test.test_json.test_speedups.TestEncode.test_make_encoder) ... ok
+test_unsortable_keys (test.test_json.test_speedups.TestEncode.test_unsortable_keys) ... ok
+test_encode_basestring_ascii (test.test_json.test_speedups.TestSpeedups.test_encode_basestring_ascii) ... ok
+test_scanstring (test.test_json.test_speedups.TestSpeedups.test_scanstring) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 0.072s
+
+OK

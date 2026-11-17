@@ -9,6 +9,7 @@ import hashlib
 import json
 import re
 from collections import Counter
+from functools import lru_cache
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -190,12 +191,30 @@ def source_module(source_path):
     return ".".join(parts)
 
 
+@lru_cache(maxsize=None)
+def evidence_index(path, module, mtime_ns, size):
+    occurrences = Counter(); results = {}
+    for line, text in enumerate(path.read_text().splitlines(), 1):
+        result = parse_result(text, module)
+        if result:
+            test_id, outcome = result
+            occurrences[test_id] += 1
+            results[line] = (test_id, occurrences[test_id], outcome)
+    return results
+
+
+@lru_cache(maxsize=None)
+def source_digests(path, mtime_ns, size):
+    data = path.read_bytes()
+    return hashlib.sha256(data).hexdigest(), hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest()
+
+
 def verify_stdlib_evidence(r):
     source = r["source"]
     vendored = ROOT / "benchmarks/cpython_stdlib/full" / r["family"] / "upstream" / source["path"]
     if vendored.is_file():
-        data = vendored.read_bytes()
-        require(hashlib.sha256(data).hexdigest() == source["sha256"] and hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest() == source["git_blob"], f"{r['id']}: source hash differs from vendored upstream")
+        stat = vendored.stat()
+        require(source_digests(vendored, stat.st_mtime_ns, stat.st_size) == (source["sha256"], source["git_blob"]), f"{r['id']}: source hash differs from vendored upstream")
     module = source_module(source["path"])
     for tier, run in r["runs"].items():
         if run["outcome"] not in {"pass", "fail", "error", "skip"}: continue
@@ -204,10 +223,9 @@ def verify_stdlib_evidence(r):
         require(bool(match), f"{r['id']}: {tier} needs a raw evidence line")
         path = (ROOT / match.group(1)).resolve()
         require(path.is_relative_to(ROOT.resolve()) and path.is_file(), f"{r['id']}: missing evidence {evidence}")
-        lines = path.read_text().splitlines(); line = int(match.group(2))
-        result = parse_result(lines[line-1], module) if line <= len(lines) else None
-        occurrence = sum(parsed is not None and parsed[0] == r["id"] for parsed in (parse_result(text, module) for text in lines[:line]))
-        require(result == (r["id"], run["outcome"]) and occurrence == r["occurrence"], f"{r['id']}: {tier} evidence does not establish exact ID, occurrence and outcome")
+        stat = path.stat(); line = int(match.group(2))
+        result = evidence_index(path, module, stat.st_mtime_ns, stat.st_size).get(line)
+        require(result == (r["id"], r["occurrence"], run["outcome"]), f"{r['id']}: {tier} evidence does not establish exact ID, occurrence and outcome")
 
 
 def load_records(kind, names, frozen_scripts=None):
@@ -232,18 +250,23 @@ def load_records(kind, names, frozen_scripts=None):
     return records
 
 
+def summarize_family(row, records):
+    require(len(records) <= row["originals"], "receipts exceed raw denominator")
+    row["receipts"] = len(records)
+    row["observed"] = sum(all(r["runs"][t]["outcome"] == "pass" for t in TIERS) for r in records)
+    row["paired"] = sum(r["paired"] for r in records)
+    row["runs"] = {t: Counter(r["runs"][t]["outcome"] for r in records) for t in TIERS}
+    for t in TIERS: row["runs"][t]["not_run"] += row["originals"] - len(records)
+
+
 def summary():
     fs = families()
     stdlib = load_records("stdlib", fs)
     scripts = load_records("script", fs, load_frozen_scripts())
     require(len(scripts) <= COHORT["scripts"]["expected_commands"], "more script receipts than original commands")
-    for name, row in fs.items():
-        rs = [r for r in stdlib if r["family"] == name]
-        require(len(rs) <= row["originals"], f"{name}: receipts exceed raw denominator")
-        row["receipts"] = len(rs)
-        row["paired"] = sum(r["paired"] for r in rs)
-        row["runs"] = {t: Counter(r["runs"][t]["outcome"] for r in rs) for t in TIERS}
-        for t in TIERS: row["runs"][t]["not_run"] += row["originals"] - len(rs)
+    grouped = {name: [] for name in fs}
+    for r in stdlib: grouped[r["family"]].append(r)
+    for name, row in fs.items(): summarize_family(row, grouped[name])
     return fs, scripts
 
 
@@ -258,23 +281,24 @@ def render(view):
     frozen = {n: r for n, r in fs.items() if r["cohort"] == "frozen"}
     supplemental = {n: r for n, r in fs.items() if r["cohort"] == "supplemental"}
     def totals(rows):
-        return tuple(sum(r[k] for r in rows.values()) for k in ("originals", "receipts", "paired"))
-    raw, received, paired = totals(frozen)
-    sup_raw, sup_received, sup_paired = totals(supplemental)
+        return tuple(sum(r[k] for r in rows.values()) for k in ("originals", "receipts", "observed", "paired"))
+    raw, received, observed, paired = totals(frozen)
+    sup_raw, sup_received, sup_observed, sup_paired = totals(supplemental)
     expected = COHORT["scripts"]["expected_commands"]
-    lines = [START, "### Pinned compatibility scorecard", "", f"Revision `{COHORT['imre_revision']}` · CPython **{COHORT['cpython_version']}** · Linux x86-64. These are original-test receipts at this revision, not cumulative credits.", "", f"Frozen {len(frozen)}-family cohort: **{received:,} pinned receipts** of **{raw:,} raw upstream originals**, **{paired:,} verified paired passes**; **{raw-received:,} originals have no receipt**.", "", f"Supplemental pilots, outside the frozen cohort: **{sup_received:,} receipts** of **{sup_raw:,} originals**, **{sup_paired:,} verified paired passes**.", "", f"Scripts: **{len(scripts)} of {expected} original commands have receipts**, **{sum(r['paired'] for r in scripts)} verified paired passes**; **{expected-len(scripts)} not run**."]
+    lines = [START, "### Pinned compatibility scorecard", "", f"Revision `{COHORT['imre_revision']}` · CPython **{COHORT['cpython_version']}** · Linux x86-64. These are original-test receipts at this revision, not cumulative credits.", "", f"Frozen {len(frozen)}-family cohort: **{received:,} pinned receipts** of **{raw:,} raw upstream originals**, **{observed:,} observed stock/O0/O3 pass intersections**, **{paired:,} verified credited pairs**; **{raw-received:,} originals have no receipt**.", "", f"Supplemental pilots, outside the frozen cohort: **{sup_received:,} receipts** of **{sup_raw:,} originals**, **{sup_observed:,} observed intersections**, **{sup_paired:,} verified credited pairs**.", "", f"Scripts: **{len(scripts)} of {expected} original commands have receipts**, **{sum(r['paired'] for r in scripts)} verified paired passes**; **{expected-len(scripts)} not run**."]
     def table(title, rows):
-        lines.extend(["", f"#### {title}", "", "| Family | Raw originals | Stock | O0 | O3 | Paired at pin | Historical mixed-revision credits |", "| --- | ---: | --- | --- | --- | --- | ---: |"])
+        lines.extend(["", f"#### {title}", "", "| Family | Raw originals | Stock | O0 | O3 | Observed stock/O0/O3 passes | Verified credited pairs | Historical mixed-revision credits |", "| --- | ---: | --- | --- | --- | ---: | --- | ---: |"])
         for name, r in sorted(rows.items()):
             n = r["originals"]
             pair = "unknown (not run)" if not r["receipts"] else f"{r['paired']:,} verified" + (f"; {n-r['receipts']:,} unknown" if r["receipts"] < n else "")
+            observed_cell = "unknown (not run)" if not r["receipts"] else f"{r['observed']:,}"
             hist = "—" if r["historical"] is None else f"{r['historical']:,}"
-            lines.append(f"| `{name}` | {n:,} | " + " | ".join(outcome_text(r["runs"][t], n) for t in TIERS) + f" | {pair} | {hist} |")
+            lines.append(f"| `{name}` | {n:,} | " + " | ".join(outcome_text(r["runs"][t], n) for t in TIERS) + f" | {observed_cell} | {pair} | {hist} |")
     table("Frozen cohort", frozen if view == "stdlib" else {n: r for n, r in frozen.items() if r["receipts"] or n == "argparse"})
     if supplemental: table("Supplemental pilots", supplemental)
     if view == "readme": lines += ["", "The [stdlib report](docs/stdlib.md) lists every frozen family, including those not run."]
     prefix = "../" if view == "stdlib" else ""
-    lines += ["", f"A paired pass requires the same original to pass stock, O0 and O3; script passes also require independently anchored frozen preimages and reference observations, plus exact exit, stdout, stderr and effect comparisons. Skips, omissions, unsupported diagnostics, exclusions, timeouts and non-stock successes never count. Historical credits come from the [frozen mixed-revision ledger]({prefix}{COHORT['historical_families']}) and are separate from the pinned result. [Receipts and replay instructions]({prefix}benchmarks/compatibility/README.md).", END]
+    lines += ["", f"An observed intersection means the same original passed stock, O0 and O3; frozen credited pairs also require the launcher to pass its imported bad-type control and any required source-withdrawal check. Script passes also require independently anchored frozen preimages and reference observations, plus exact exit, stdout, stderr and effect comparisons. Skips, omissions, unsupported diagnostics, exclusions, timeouts and non-stock successes never earn credited pairs. Historical credits come from the [frozen mixed-revision ledger]({prefix}{COHORT['historical_families']}) and are separate from the pinned result. [Receipts and replay instructions]({prefix}benchmarks/compatibility/README.md).", END]
     return "\n".join(lines)
 
 

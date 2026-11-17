@@ -1,0 +1,68 @@
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_userdict.py:102:34
+    |
+100 |         # SF bug #476616 -- copy() of UserDict subclass shared data
+101 |         m2['foo'] = 'bar'
+102 |         self.assertNotEqual(m2a, m2)
+    |                                  ^^ Expected `int`, found `MyUserDict`
+103 |
+104 |         # Test keys, items, values
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+  --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/mapping_tests.py:66:29
+   |
+64 |         self.assertEqual(p, p)
+65 |         self.assertEqual(d, d)
+66 |         self.assertNotEqual(p, d)
+   |                             ^ Expected `int`, found `Unknown | dict[Unknown, Unknown]`
+67 |         self.assertNotEqual(d, p)
+68 |         #bool
+   |
+info: element `dict[Unknown, Unknown]` of union `Unknown | dict[Unknown, Unknown]` is not assignable to `int`
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^       ---------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+  --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/mapping_tests.py:67:32
+   |
+65 |         self.assertEqual(d, d)
+66 |         self.assertNotEqual(p, d)
+67 |         self.assertNotEqual(d, p)
+   |                                ^ Expected `int`, found `Unknown | dict[Unknown, Unknown]`
+68 |         #bool
+69 |         if p: self.fail("Empty mapping must compare to False")
+   |
+info: element `dict[Unknown, Unknown]` of union `Unknown | dict[Unknown, Unknown]` is not assignable to `int`
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+

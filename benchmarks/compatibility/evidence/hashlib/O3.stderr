@@ -1,0 +1,101 @@
+test_algorithms_available (test.test_hashlib.HashLibTestCase.test_algorithms_available) ... ok
+test_algorithms_guaranteed (test.test_hashlib.HashLibTestCase.test_algorithms_guaranteed) ... ok
+test_blake2_update_over_4gb (test.test_hashlib.HashLibTestCase.test_blake2_update_over_4gb) ... skipped "resource 'cpu' is not enabled"
+test_blake2b (test.test_hashlib.HashLibTestCase.test_blake2b) ... ok
+test_blake2b_vectors (test.test_hashlib.HashLibTestCase.test_blake2b_vectors) ... skipped "Use of the 'urlfetch' resource not enabled"
+test_blake2s (test.test_hashlib.HashLibTestCase.test_blake2s) ... ok
+test_blake2s_vectors (test.test_hashlib.HashLibTestCase.test_blake2s_vectors) ... skipped "Use of the 'urlfetch' resource not enabled"
+test_blocksize_and_name (test.test_hashlib.HashLibTestCase.test_blocksize_and_name) ... ok
+test_blocksize_name_blake2 (test.test_hashlib.HashLibTestCase.test_blocksize_name_blake2) ... ok
+test_blocksize_name_sha3 (test.test_hashlib.HashLibTestCase.test_blocksize_name_sha3) ... ok
+test_case_blake2b_0 (test.test_hashlib.HashLibTestCase.test_case_blake2b_0) ... ok
+test_case_blake2b_1 (test.test_hashlib.HashLibTestCase.test_case_blake2b_1) ... ok
+test_case_blake2b_all_parameters (test.test_hashlib.HashLibTestCase.test_case_blake2b_all_parameters) ... ok
+test_case_blake2s_0 (test.test_hashlib.HashLibTestCase.test_case_blake2s_0) ... ok
+test_case_blake2s_1 (test.test_hashlib.HashLibTestCase.test_case_blake2s_1) ... ok
+test_case_blake2s_all_parameters (test.test_hashlib.HashLibTestCase.test_case_blake2s_all_parameters) ... ok
+test_case_md5_0 (test.test_hashlib.HashLibTestCase.test_case_md5_0) ... ok
+test_case_md5_1 (test.test_hashlib.HashLibTestCase.test_case_md5_1) ... ok
+test_case_md5_2 (test.test_hashlib.HashLibTestCase.test_case_md5_2) ... ok
+test_case_md5_huge (test.test_hashlib.HashLibTestCase.test_case_md5_huge) ... skipped 'not enough memory: 4.0G minimum needed'
+test_case_md5_uintmax (test.test_hashlib.HashLibTestCase.test_case_md5_uintmax) ... skipped 'not enough memory: 4.0G minimum needed'
+test_case_sha1_0 (test.test_hashlib.HashLibTestCase.test_case_sha1_0) ... ok
+test_case_sha1_1 (test.test_hashlib.HashLibTestCase.test_case_sha1_1) ... ok
+test_case_sha1_2 (test.test_hashlib.HashLibTestCase.test_case_sha1_2) ... ok
+test_case_sha1_3 (test.test_hashlib.HashLibTestCase.test_case_sha1_3) ... ok
+test_case_sha224_0 (test.test_hashlib.HashLibTestCase.test_case_sha224_0) ... ok
+test_case_sha224_1 (test.test_hashlib.HashLibTestCase.test_case_sha224_1) ... ok
+test_case_sha224_2 (test.test_hashlib.HashLibTestCase.test_case_sha224_2) ... ok
+test_case_sha224_3 (test.test_hashlib.HashLibTestCase.test_case_sha224_3) ... ok
+test_case_sha256_0 (test.test_hashlib.HashLibTestCase.test_case_sha256_0) ... ok
+test_case_sha256_1 (test.test_hashlib.HashLibTestCase.test_case_sha256_1) ... ok
+test_case_sha256_2 (test.test_hashlib.HashLibTestCase.test_case_sha256_2) ... ok
+test_case_sha256_3 (test.test_hashlib.HashLibTestCase.test_case_sha256_3) ... ok
+test_case_sha384_0 (test.test_hashlib.HashLibTestCase.test_case_sha384_0) ... ok
+test_case_sha384_1 (test.test_hashlib.HashLibTestCase.test_case_sha384_1) ... ok
+test_case_sha384_2 (test.test_hashlib.HashLibTestCase.test_case_sha384_2) ... ok
+test_case_sha384_3 (test.test_hashlib.HashLibTestCase.test_case_sha384_3) ... ok
+test_case_sha3_224_0 (test.test_hashlib.HashLibTestCase.test_case_sha3_224_0) ... ok
+test_case_sha3_224_vector (test.test_hashlib.HashLibTestCase.test_case_sha3_224_vector) ... skipped "Use of the 'urlfetch' resource not enabled"
+test_case_sha3_256_0 (test.test_hashlib.HashLibTestCase.test_case_sha3_256_0) ... ok
+test_case_sha3_256_vector (test.test_hashlib.HashLibTestCase.test_case_sha3_256_vector) ... skipped "Use of the 'urlfetch' resource not enabled"
+test_case_sha3_384_0 (test.test_hashlib.HashLibTestCase.test_case_sha3_384_0) ... ok
+test_case_sha3_384_vector (test.test_hashlib.HashLibTestCase.test_case_sha3_384_vector) ... skipped "Use of the 'urlfetch' resource not enabled"
+test_case_sha3_512_0 (test.test_hashlib.HashLibTestCase.test_case_sha3_512_0) ... ok
+test_case_sha3_512_vector (test.test_hashlib.HashLibTestCase.test_case_sha3_512_vector) ... skipped "Use of the 'urlfetch' resource not enabled"
+test_case_sha512_0 (test.test_hashlib.HashLibTestCase.test_case_sha512_0) ... ok
+test_case_sha512_1 (test.test_hashlib.HashLibTestCase.test_case_sha512_1) ... ok
+test_case_sha512_2 (test.test_hashlib.HashLibTestCase.test_case_sha512_2) ... ok
+test_case_sha512_3 (test.test_hashlib.HashLibTestCase.test_case_sha512_3) ... ok
+test_case_shake128_vector (test.test_hashlib.HashLibTestCase.test_case_shake128_vector) ... skipped "Use of the 'urlfetch' resource not enabled"
+test_case_shake256_vector (test.test_hashlib.HashLibTestCase.test_case_shake256_vector) ... skipped "Use of the 'urlfetch' resource not enabled"
+test_case_shake_128_0 (test.test_hashlib.HashLibTestCase.test_case_shake_128_0) ... ok
+test_case_shake_256_0 (test.test_hashlib.HashLibTestCase.test_case_shake_256_0) ... ok
+test_clinic_signature (test.test_hashlib.HashLibTestCase.test_clinic_signature) ... ok
+test_clinic_signature_errors (test.test_hashlib.HashLibTestCase.test_clinic_signature_errors) ... ok
+test_digest_length_overflow (test.test_hashlib.HashLibTestCase.test_digest_length_overflow) ... ok
+test_disallow_instantiation (test.test_hashlib.HashLibTestCase.test_disallow_instantiation) ... skipped 'implementation detail specific to cpython'
+test_extra_sha3 (test.test_hashlib.HashLibTestCase.test_extra_sha3) ... ok
+test_get_builtin_constructor (test.test_hashlib.HashLibTestCase.test_get_builtin_constructor) ... ok
+test_get_fips_mode (test.test_hashlib.HashLibTestCase.test_get_fips_mode) ... ok
+test_gil (test.test_hashlib.HashLibTestCase.test_gil) ... ok
+test_hash_array (test.test_hashlib.HashLibTestCase.test_hash_array) ... ok
+test_hash_disallow_instantiation (test.test_hashlib.HashLibTestCase.test_hash_disallow_instantiation) ... ok
+test_hexdigest (test.test_hashlib.HashLibTestCase.test_hexdigest) ... ok
+test_large_update (test.test_hashlib.HashLibTestCase.test_large_update) ... ok
+test_name_attribute (test.test_hashlib.HashLibTestCase.test_name_attribute) ... ok
+test_new_upper_to_lower (test.test_hashlib.HashLibTestCase.test_new_upper_to_lower) ... ok
+test_no_unicode (test.test_hashlib.HashLibTestCase.test_no_unicode) ... ok
+test_no_unicode_blake2 (test.test_hashlib.HashLibTestCase.test_no_unicode_blake2) ... ok
+test_no_unicode_sha3 (test.test_hashlib.HashLibTestCase.test_no_unicode_sha3) ... ok
+test_readonly_types (test.test_hashlib.HashLibTestCase.test_readonly_types) ... ok
+test_sha256_gil (test.test_hashlib.HashLibTestCase.test_sha256_gil) ... ok
+test_sha256_update_over_4gb (test.test_hashlib.HashLibTestCase.test_sha256_update_over_4gb) ... skipped "resource 'cpu' is not enabled"
+test_sha3_256_update_over_4gb (test.test_hashlib.HashLibTestCase.test_sha3_256_update_over_4gb) ... skipped "resource 'cpu' is not enabled"
+test_threaded_hashing (test.test_hashlib.HashLibTestCase.test_threaded_hashing) ... ERROR
+test_unknown_hash (test.test_hashlib.HashLibTestCase.test_unknown_hash) ... ok
+test_usedforsecurity_false (test.test_hashlib.HashLibTestCase.test_usedforsecurity_false) ... ok
+test_usedforsecurity_true (test.test_hashlib.HashLibTestCase.test_usedforsecurity_true) ... ok
+test_file_digest (test.test_hashlib.KDFTests.test_file_digest) ... ok
+test_normalized_name (test.test_hashlib.KDFTests.test_normalized_name) ... ok
+test_pbkdf2_hmac_c (test.test_hashlib.KDFTests.test_pbkdf2_hmac_c) ... ok
+test_scrypt (test.test_hashlib.KDFTests.test_scrypt) ... ok
+
+======================================================================
+ERROR: test_threaded_hashing (test.test_hashlib.HashLibTestCase.test_threaded_hashing)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/threading_helper.py", line 66, in decorator
+    return func(*args)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_hashlib.py", line 1065, in test_threaded_hashing
+    thread.start()
+    ~~~~~~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+
+----------------------------------------------------------------------
+Ran 82 tests in 36.279s
+
+FAILED (errors=1, skipped=14)

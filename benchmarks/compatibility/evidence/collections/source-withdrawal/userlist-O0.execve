@@ -1,0 +1,2 @@
+9415  execve("/workspace/scratch/userlist-O0-recovery.exe", ["/workspace/scratch/userlist-O0-r"..., "-v", "UserListTest.test_reverse"], 0x7ffe8f7acc88 /* 77 vars */) = 0
+9415  +++ exited with 0 +++

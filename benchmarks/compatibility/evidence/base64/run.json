@@ -1,0 +1,137 @@
+{
+  "imre_revision": "49f0dc2ef78b82692e333252faf71b4fc7730949",
+  "source_blob": "9fe69f4f692d8f5782bdf33270d08070a0a580ad",
+  "platform": {
+    "os": "linux",
+    "arch": "x86_64",
+    "release": "6.18.57"
+  },
+  "runs": {
+    "stock": {
+      "argv": [
+        "/workspace/scratch/cpython-build/python",
+        "-B",
+        "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_base64.py",
+        "-v"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "TMPDIR": "/workspace/scratch/imre-tmp"
+      },
+      "exit_code": 0,
+      "version": "3.14.5",
+      "full_version": "Python 3.14.5 (main, Nov 17 2026, 11:15:15) [GCC 14.2.0]"
+    },
+    "O0": {
+      "argv": [
+        "/workspace/imre-data/benchmarks/compatibility/evidence/base64/O0.exe",
+        "-v"
+      ],
+      "build_argv": [
+        "/workspace/imre/target/release/imre",
+        "build",
+        "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_base64.py",
+        "--module-root",
+        "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "--no-cache",
+        "--opt-level",
+        "0",
+        "--runtime",
+        "/workspace/imre/target/release/libimre_runtime.a",
+        "--clang",
+        "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+        "-o",
+        "/workspace/imre-data/benchmarks/compatibility/evidence/base64/O0.exe",
+        "--include-module",
+        "test.test_base64"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "TMPDIR": "/workspace/scratch/imre-tmp"
+      },
+      "build_exit_code": 0,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    "O3": {
+      "argv": [
+        "/workspace/imre-data/benchmarks/compatibility/evidence/base64/O3.exe",
+        "-v"
+      ],
+      "build_argv": [
+        "/workspace/imre/target/release/imre",
+        "build",
+        "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_base64.py",
+        "--module-root",
+        "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "--no-cache",
+        "--opt-level",
+        "3",
+        "--runtime",
+        "/workspace/imre/target/release/libimre_runtime.a",
+        "--clang",
+        "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+        "-o",
+        "/workspace/imre-data/benchmarks/compatibility/evidence/base64/O3.exe",
+        "--include-module",
+        "test.test_base64"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "TMPDIR": "/workspace/scratch/imre-tmp"
+      },
+      "build_exit_code": 0,
+      "exit_code": 0,
+      "timed_out": false
+    }
+  },
+  "provenance": {
+    "imre_revision": "49f0dc2ef78b82692e333252faf71b4fc7730949",
+    "imre_tree": "c91e13458003aaf0d1dde4b6302fef2fcfc429a2",
+    "worktree_clean": true,
+    "imre_sha256": "64ba7192b3fe8124f271e81bb5226cade0bb024c5ecbfd85b338bc2a26fa30f8",
+    "runtime_sha256": "c113e721e7550653a42a9419cef5cfbef84b161df113dad2ffb971e29326e37a",
+    "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+    "stock_python_sha256": "090cf853d1b4785355b0b268cb26311f0027d1067bdc866fddd48f0a19868c97",
+    "cpython_source_archive_sha256": "0d838be32b52da92a4293ecd99bc91f7be8b4acc573423665bd1a1428be46e47",
+    "cargo_build": [
+      "cargo",
+      "build",
+      "--offline",
+      "--release",
+      "--locked",
+      "-p",
+      "imre-compiler",
+      "-p",
+      "imre-runtime",
+      "--target-dir",
+      "/workspace/imre/target",
+      "-j",
+      "2"
+    ],
+    "cargo_environment": {
+      "CARGO_HOME": "/workspace/.toolchains/cargo",
+      "RUSTUP_HOME": "/workspace/.toolchains/rustup",
+      "PATH_prefix": "/workspace/.toolchains/cargo/bin"
+    },
+    "cargo_result": "    Finished `release` profile [optimized + debuginfo] target(s) in 6m 24s",
+    "cpython_build": [
+      "configure --without-ensurepip",
+      "make -j4"
+    ]
+  },
+  "architecture_controls": {
+    "file": {
+      "receipt": "benchmarks/compatibility/evidence/base64/architecture-control-file.json",
+      "passed": false,
+      "image_produced": true,
+      "expected_diagnostic": false
+    }
+  },
+  "pair_credit_withheld": 40,
+  "source_withdrawal": "Not performed: the replay removed its positive images, and rebuilding and rerunning full suites was outside the conservative finish instruction.",
+  "native_execution": "Native observations came from the pinned Imre-built image. No stock CPython was used to execute a native launcher; native child interpreter selection was IMRE_PYTHON where configured."
+}

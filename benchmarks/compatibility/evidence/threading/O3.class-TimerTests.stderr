@@ -1,0 +1,17 @@
+test_init_immutable_default_args (test.test_threading.TimerTests.test_init_immutable_default_args) ... ERROR
+======================================================================
+ERROR: test_init_immutable_default_args (test.test_threading.TimerTests.test_init_immutable_default_args)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 2172, in test_init_immutable_default_args
+    timer1.start()
+    ~~~~~~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: native workers require an ordinary Thread with the original run method
+
+----------------------------------------------------------------------
+Ran 1 test in 0.051s
+
+FAILED (errors=1)

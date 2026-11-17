@@ -1,0 +1,46 @@
+test_ErrorHeritage (__main__.BaseXYTestCase.test_ErrorHeritage) ... ok
+test_RFC4648_test_cases (__main__.BaseXYTestCase.test_RFC4648_test_cases) ... ok
+test_a85_padding (__main__.BaseXYTestCase.test_a85_padding) ... ok
+test_a85decode (__main__.BaseXYTestCase.test_a85decode) ... ok
+test_a85decode_errors (__main__.BaseXYTestCase.test_a85decode_errors) ... ok
+test_a85encode (__main__.BaseXYTestCase.test_a85encode) ... ok
+test_b16decode (__main__.BaseXYTestCase.test_b16decode) ... ok
+test_b16encode (__main__.BaseXYTestCase.test_b16encode) ... ok
+test_b32decode (__main__.BaseXYTestCase.test_b32decode) ... ok
+test_b32decode_casefold (__main__.BaseXYTestCase.test_b32decode_casefold) ... ok
+test_b32decode_error (__main__.BaseXYTestCase.test_b32decode_error) ... ok
+test_b32decode_map01 (__main__.BaseXYTestCase.test_b32decode_map01) ... ok
+test_b32encode (__main__.BaseXYTestCase.test_b32encode) ... ok
+test_b32hexdecode (__main__.BaseXYTestCase.test_b32hexdecode) ... ok
+test_b32hexdecode_error (__main__.BaseXYTestCase.test_b32hexdecode_error) ... ok
+test_b32hexdecode_other_types (__main__.BaseXYTestCase.test_b32hexdecode_other_types) ... ok
+test_b32hexencode (__main__.BaseXYTestCase.test_b32hexencode) ... ok
+test_b32hexencode_other_types (__main__.BaseXYTestCase.test_b32hexencode_other_types) ... ok
+test_b64decode (__main__.BaseXYTestCase.test_b64decode) ... ok
+test_b64decode_altchars (__main__.BaseXYTestCase.test_b64decode_altchars) ... ok
+test_b64decode_invalid_chars (__main__.BaseXYTestCase.test_b64decode_invalid_chars) ... ok
+test_b64decode_padding_error (__main__.BaseXYTestCase.test_b64decode_padding_error) ... ok
+test_b64encode (__main__.BaseXYTestCase.test_b64encode) ... ok
+test_b85_padding (__main__.BaseXYTestCase.test_b85_padding) ... ok
+test_b85decode (__main__.BaseXYTestCase.test_b85decode) ... ok
+test_b85decode_errors (__main__.BaseXYTestCase.test_b85decode_errors) ... ok
+test_b85encode (__main__.BaseXYTestCase.test_b85encode) ... ok
+test_decode_nonascii_str (__main__.BaseXYTestCase.test_decode_nonascii_str) ... ok
+test_z85decode (__main__.BaseXYTestCase.test_z85decode) ... ok
+test_z85decode_errors (__main__.BaseXYTestCase.test_z85decode_errors) ... ok
+test_z85encode (__main__.BaseXYTestCase.test_z85encode) ... ok
+test_lazy_import (__main__.LazyImportTest.test_lazy_import) ... ok
+test_decode (__main__.LegacyBase64TestCase.test_decode) ... ok
+test_decodebytes (__main__.LegacyBase64TestCase.test_decodebytes) ... ok
+test_encode (__main__.LegacyBase64TestCase.test_encode) ... ok
+test_encodebytes (__main__.LegacyBase64TestCase.test_encodebytes) ... ok
+test_decode (__main__.TestMain.test_decode) ... ok
+test_encode_file (__main__.TestMain.test_encode_file) ... ok
+test_encode_from_stdin (__main__.TestMain.test_encode_from_stdin) ... ok
+test_prints_usage_with_help_flag (__main__.TestMain.test_prints_usage_with_help_flag) ... ok
+test_prints_usage_with_invalid_flag (__main__.TestMain.test_prints_usage_with_invalid_flag) ... ok
+
+----------------------------------------------------------------------
+Ran 41 tests in 0.143s
+
+OK

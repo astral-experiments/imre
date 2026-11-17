@@ -1,0 +1,223 @@
+test_all_freed (test.test_weakref.FinalizeTestCase.test_all_freed) ... ok
+test_arg_errors (test.test_weakref.FinalizeTestCase.test_arg_errors) ... ok
+test_atexit (test.test_weakref.FinalizeTestCase.test_atexit) ... FAIL
+test_finalize (test.test_weakref.FinalizeTestCase.test_finalize) ... ok
+test_order (test.test_weakref.FinalizeTestCase.test_order) ... ok
+test_make_weak_keyed_dict_from_dict (test.test_weakref.MappingTestCase.test_make_weak_keyed_dict_from_dict) ... ok
+test_make_weak_keyed_dict_from_weak_keyed_dict (test.test_weakref.MappingTestCase.test_make_weak_keyed_dict_from_weak_keyed_dict) ... ok
+test_make_weak_keyed_dict_repr (test.test_weakref.MappingTestCase.test_make_weak_keyed_dict_repr) ... ok
+test_make_weak_valued_dict_from_dict (test.test_weakref.MappingTestCase.test_make_weak_valued_dict_from_dict) ... ok
+test_make_weak_valued_dict_from_weak_valued_dict (test.test_weakref.MappingTestCase.test_make_weak_valued_dict_from_weak_valued_dict) ... ok
+test_make_weak_valued_dict_misc (test.test_weakref.MappingTestCase.test_make_weak_valued_dict_misc) ... ok
+test_make_weak_valued_dict_repr (test.test_weakref.MappingTestCase.test_make_weak_valued_dict_repr) ... ok
+test_remove_closure (test.test_weakref.MappingTestCase.test_remove_closure) ... skipped 'implementation detail specific to cpython'
+test_threaded_weak_key_dict_copy (test.test_weakref.MappingTestCase.test_threaded_weak_key_dict_copy) ... skipped "resource 'cpu' is not enabled"
+test_threaded_weak_key_dict_deepcopy (test.test_weakref.MappingTestCase.test_threaded_weak_key_dict_deepcopy) ... skipped "resource 'cpu' is not enabled"
+test_threaded_weak_value_dict_copy (test.test_weakref.MappingTestCase.test_threaded_weak_value_dict_copy) ... skipped "resource 'cpu' is not enabled"
+test_threaded_weak_value_dict_deepcopy (test.test_weakref.MappingTestCase.test_threaded_weak_value_dict_deepcopy) ... skipped "resource 'cpu' is not enabled"
+test_threaded_weak_valued_consistency (test.test_weakref.MappingTestCase.test_threaded_weak_valued_consistency) ... ERROR
+test_threaded_weak_valued_pop (test.test_weakref.MappingTestCase.test_threaded_weak_valued_pop) ... ERROR
+test_threaded_weak_valued_setdefault (test.test_weakref.MappingTestCase.test_threaded_weak_valued_setdefault) ... ERROR
+test_weak_keyed_bad_delitem (test.test_weakref.MappingTestCase.test_weak_keyed_bad_delitem) ... ok
+test_weak_keyed_cascading_deletes (test.test_weakref.MappingTestCase.test_weak_keyed_cascading_deletes) ... ok
+test_weak_keyed_delitem (test.test_weakref.MappingTestCase.test_weak_keyed_delitem) ... ok
+test_weak_keyed_dict_popitem (test.test_weakref.MappingTestCase.test_weak_keyed_dict_popitem) ... ok
+test_weak_keyed_dict_setdefault (test.test_weakref.MappingTestCase.test_weak_keyed_dict_setdefault) ... ok
+test_weak_keyed_dict_update (test.test_weakref.MappingTestCase.test_weak_keyed_dict_update) ... ok
+test_weak_keyed_iters (test.test_weakref.MappingTestCase.test_weak_keyed_iters) ... ok
+test_weak_keyed_len_cycles (test.test_weakref.MappingTestCase.test_weak_keyed_len_cycles) ... ok
+test_weak_keyed_len_race (test.test_weakref.MappingTestCase.test_weak_keyed_len_race) ... ok
+test_weak_keyed_union_operators (test.test_weakref.MappingTestCase.test_weak_keyed_union_operators) ... ok
+test_weak_keys (test.test_weakref.MappingTestCase.test_weak_keys) ... ok
+test_weak_keys_destroy_while_iterating (test.test_weakref.MappingTestCase.test_weak_keys_destroy_while_iterating) ... ok
+test_weak_valued_consistency (test.test_weakref.MappingTestCase.test_weak_valued_consistency) ... skipped 'implementation detail specific to cpython'
+test_weak_valued_delitem (test.test_weakref.MappingTestCase.test_weak_valued_delitem) ... ok
+test_weak_valued_dict_popitem (test.test_weakref.MappingTestCase.test_weak_valued_dict_popitem) ... ok
+test_weak_valued_dict_setdefault (test.test_weakref.MappingTestCase.test_weak_valued_dict_setdefault) ... ok
+test_weak_valued_dict_update (test.test_weakref.MappingTestCase.test_weak_valued_dict_update) ... ok
+test_weak_valued_iters (test.test_weakref.MappingTestCase.test_weak_valued_iters) ... ok
+test_weak_valued_len_cycles (test.test_weakref.MappingTestCase.test_weak_valued_len_cycles) ... ok
+test_weak_valued_len_race (test.test_weakref.MappingTestCase.test_weak_valued_len_race) ... ok
+test_weak_valued_union_operators (test.test_weakref.MappingTestCase.test_weak_valued_union_operators) ... ok
+test_weak_values (test.test_weakref.MappingTestCase.test_weak_values) ... ok
+test_weak_values_destroy_while_iterating (test.test_weakref.MappingTestCase.test_weak_values_destroy_while_iterating) ... ok
+test_names (test.test_weakref.ModuleTestCase.test_names) ... ok
+test_basic_callback (test.test_weakref.ReferencesTestCase.test_basic_callback) ... ok
+test_basic_proxy (test.test_weakref.ReferencesTestCase.test_basic_proxy) ... ok
+test_basic_ref (test.test_weakref.ReferencesTestCase.test_basic_ref) ... ok
+test_callable_proxy (test.test_weakref.ReferencesTestCase.test_callable_proxy) ... ok
+test_callback_attribute (test.test_weakref.ReferencesTestCase.test_callback_attribute) ... ok
+test_callback_attribute_after_deletion (test.test_weakref.ReferencesTestCase.test_callback_attribute_after_deletion) ... ok
+test_callback_different_classes (test.test_weakref.ReferencesTestCase.test_callback_different_classes) ... ok
+test_callback_gcs (test.test_weakref.ReferencesTestCase.test_callback_gcs) ... ok
+test_callback_in_cycle (test.test_weakref.ReferencesTestCase.test_callback_in_cycle) ... ok
+test_callback_in_cycle_resurrection (test.test_weakref.ReferencesTestCase.test_callback_in_cycle_resurrection) ... ok
+test_callback_reachable_one_way (test.test_weakref.ReferencesTestCase.test_callback_reachable_one_way) ... ok
+test_callbacks_on_callback (test.test_weakref.ReferencesTestCase.test_callbacks_on_callback) ... ok
+test_callbacks_protected (test.test_weakref.ReferencesTestCase.test_callbacks_protected) ... ok
+test_cfunction (test.test_weakref.ReferencesTestCase.test_cfunction) ... skipped 'implementation detail specific to cpython'
+test_classes (test.test_weakref.ReferencesTestCase.test_classes) ... ok
+test_constructor_kwargs (test.test_weakref.ReferencesTestCase.test_constructor_kwargs) ... ok
+test_equality (test.test_weakref.ReferencesTestCase.test_equality) ... ok
+test_gc_during_proxy_creation (test.test_weakref.ReferencesTestCase.test_gc_during_proxy_creation) ... ok
+test_gc_during_ref_creation (test.test_weakref.ReferencesTestCase.test_gc_during_ref_creation) ... ok
+test_getweakrefcount (test.test_weakref.ReferencesTestCase.test_getweakrefcount) ... ok
+test_getweakrefs (test.test_weakref.ReferencesTestCase.test_getweakrefs) ... ok
+test_hashing (test.test_weakref.ReferencesTestCase.test_hashing) ... ok
+test_init (test.test_weakref.ReferencesTestCase.test_init) ... ok
+test_multiple_callbacks (test.test_weakref.ReferencesTestCase.test_multiple_callbacks) ... ok
+test_multiple_selfref_callbacks (test.test_weakref.ReferencesTestCase.test_multiple_selfref_callbacks) ... ok
+test_newstyle_number_ops (test.test_weakref.ReferencesTestCase.test_newstyle_number_ops) ... ok
+test_no_memory_when_clearing (test.test_weakref.ReferencesTestCase.test_no_memory_when_clearing) ... skipped 'implementation detail specific to cpython'
+test_ordering (test.test_weakref.ReferencesTestCase.test_ordering) ... ok
+test_proxy_bad_next (test.test_weakref.ReferencesTestCase.test_proxy_bad_next) ... ok
+test_proxy_bool (test.test_weakref.ReferencesTestCase.test_proxy_bool) ... ok
+test_proxy_deletion (test.test_weakref.ReferencesTestCase.test_proxy_deletion) ... ok
+test_proxy_div (test.test_weakref.ReferencesTestCase.test_proxy_div) ... ok
+test_proxy_hash (test.test_weakref.ReferencesTestCase.test_proxy_hash) ... ok
+test_proxy_index (test.test_weakref.ReferencesTestCase.test_proxy_index) ... ok
+test_proxy_iter (test.test_weakref.ReferencesTestCase.test_proxy_iter) ... ok
+test_proxy_matmul (test.test_weakref.ReferencesTestCase.test_proxy_matmul) ... ok
+test_proxy_next (test.test_weakref.ReferencesTestCase.test_proxy_next) ... ok
+test_proxy_ref (test.test_weakref.ReferencesTestCase.test_proxy_ref) ... ok
+test_proxy_repr (test.test_weakref.ReferencesTestCase.test_proxy_repr) ... skipped 'implementation detail specific to cpython'
+test_proxy_reuse (test.test_weakref.ReferencesTestCase.test_proxy_reuse) ... ok
+test_proxy_reversed (test.test_weakref.ReferencesTestCase.test_proxy_reversed) ... ok
+test_proxy_unicode (test.test_weakref.ReferencesTestCase.test_proxy_unicode) ... ok
+test_ref_created_during_del (test.test_weakref.ReferencesTestCase.test_ref_created_during_del) ... ok
+test_ref_repr (test.test_weakref.ReferencesTestCase.test_ref_repr) ... skipped 'implementation detail specific to cpython'
+test_ref_reuse (test.test_weakref.ReferencesTestCase.test_ref_reuse) ... ok
+test_repr_failure_gh99184 (test.test_weakref.ReferencesTestCase.test_repr_failure_gh99184) ... ok
+test_set_callback_attribute (test.test_weakref.ReferencesTestCase.test_set_callback_attribute) ... ok
+test_sf_bug_840829 (test.test_weakref.ReferencesTestCase.test_sf_bug_840829) ... ok
+test_shared_proxy_without_callback (test.test_weakref.ReferencesTestCase.test_shared_proxy_without_callback) ... ok
+test_shared_ref_without_callback (test.test_weakref.ReferencesTestCase.test_shared_ref_without_callback) ... ok
+test_trashcan_16602 (test.test_weakref.ReferencesTestCase.test_trashcan_16602) ... 
+
+# selectors O0.selectors-01.txt
+test_trashcan_16602 (test.test_weakref.ReferencesTestCase.test_trashcan_16602) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 3.533s
+
+OK
+
+
+# selectors O0.selectors-02.txt
+test_subclass_refs (test.test_weakref.SubclassableWeakrefTestCase.test_subclass_refs) ... ok
+test_subclass_refs_dont_conflate_callbacks (test.test_weakref.SubclassableWeakrefTestCase.test_subclass_refs_dont_conflate_callbacks) ... ok
+test_subclass_refs_dont_replace_standard_refs (test.test_weakref.SubclassableWeakrefTestCase.test_subclass_refs_dont_replace_standard_refs) ... ok
+test_subclass_refs_with_cycle (test.test_weakref.SubclassableWeakrefTestCase.test_subclass_refs_with_cycle)
+Confirm https://bugs.python.org/issue3100 is fixed. ... ok
+test_subclass_refs_with_slots (test.test_weakref.SubclassableWeakrefTestCase.test_subclass_refs_with_slots) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.245s
+
+OK
+
+
+# selectors O0.selectors-03.txt
+test_bool (test.test_weakref.WeakKeyDictionaryTestCase.test_bool) ... ok
+test_constructor (test.test_weakref.WeakKeyDictionaryTestCase.test_constructor) ... ok
+test_get (test.test_weakref.WeakKeyDictionaryTestCase.test_get) ... ok
+test_getitem (test.test_weakref.WeakKeyDictionaryTestCase.test_getitem) ... ok
+test_items (test.test_weakref.WeakKeyDictionaryTestCase.test_items) ... ok
+test_keys (test.test_weakref.WeakKeyDictionaryTestCase.test_keys) ... ok
+test_len (test.test_weakref.WeakKeyDictionaryTestCase.test_len) ... ok
+test_pop (test.test_weakref.WeakKeyDictionaryTestCase.test_pop) ... ok
+test_popitem (test.test_weakref.WeakKeyDictionaryTestCase.test_popitem) ... ok
+test_read (test.test_weakref.WeakKeyDictionaryTestCase.test_read) ... ok
+test_setdefault (test.test_weakref.WeakKeyDictionaryTestCase.test_setdefault) ... ok
+test_update (test.test_weakref.WeakKeyDictionaryTestCase.test_update) ... ok
+test_values (test.test_weakref.WeakKeyDictionaryTestCase.test_values) ... ok
+test_write (test.test_weakref.WeakKeyDictionaryTestCase.test_write) ... ok
+
+----------------------------------------------------------------------
+Ran 14 tests in 1.585s
+
+OK
+
+
+# selectors O0.selectors-04.txt
+test_alive (test.test_weakref.WeakMethodTestCase.test_alive) ... ok
+test_callback_when_method_dead (test.test_weakref.WeakMethodTestCase.test_callback_when_method_dead) ... ok
+test_callback_when_object_dead (test.test_weakref.WeakMethodTestCase.test_callback_when_object_dead) ... ok
+test_equality (test.test_weakref.WeakMethodTestCase.test_equality) ... ok
+test_hashing (test.test_weakref.WeakMethodTestCase.test_hashing) ... ok
+test_method_dead (test.test_weakref.WeakMethodTestCase.test_method_dead) ... ok
+test_no_cycles (test.test_weakref.WeakMethodTestCase.test_no_cycles) ... skipped 'implementation detail specific to cpython'
+test_object_dead (test.test_weakref.WeakMethodTestCase.test_object_dead) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.793s
+
+OK (skipped=1)
+
+
+# selectors O0.selectors-05.txt
+test_bool (test.test_weakref.WeakValueDictionaryTestCase.test_bool) ... ok
+test_constructor (test.test_weakref.WeakValueDictionaryTestCase.test_constructor) ... ok
+test_get (test.test_weakref.WeakValueDictionaryTestCase.test_get) ... ok
+test_getitem (test.test_weakref.WeakValueDictionaryTestCase.test_getitem) ... ok
+test_items (test.test_weakref.WeakValueDictionaryTestCase.test_items) ... ok
+test_keys (test.test_weakref.WeakValueDictionaryTestCase.test_keys) ... ok
+test_len (test.test_weakref.WeakValueDictionaryTestCase.test_len) ... ok
+test_pop (test.test_weakref.WeakValueDictionaryTestCase.test_pop) ... ok
+test_popitem (test.test_weakref.WeakValueDictionaryTestCase.test_popitem) ... ok
+test_read (test.test_weakref.WeakValueDictionaryTestCase.test_read) ... ok
+test_setdefault (test.test_weakref.WeakValueDictionaryTestCase.test_setdefault) ... ok
+test_update (test.test_weakref.WeakValueDictionaryTestCase.test_update) ... ok
+test_values (test.test_weakref.WeakValueDictionaryTestCase.test_values) ... ok
+test_write (test.test_weakref.WeakValueDictionaryTestCase.test_write) ... ok
+
+----------------------------------------------------------------------
+Ran 14 tests in 3.016s
+
+OK
+
+
+# selectors O0.selectors-06.txt
+Traceback (most recent call last):
+  File "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/entry-selectors.py", line 21, in <module>
+    main()
+    ~~~~^^
+  File "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/entry-selectors.py", line 15, in main
+    raise RuntimeError("\n".join(loader.errors))
+RuntimeError: Failed to access attribute:
+Traceback (most recent call last):
+  File "<imre stdlib>/unittest/loader.py", line 73, in loadTestsFromName
+    parent, obj = obj, getattr(obj, part)
+                       ~~~~~~~^^^^^^^^^^^
+AttributeError: 'dict' object has no attribute 'libreftest'
+
+
+
+# selectors O0.selectors-07.txt
+test_abc (test.test_weakset.TestWeakSet.test_abc) ... ok
+test_add (test.test_weakset.TestWeakSet.test_add) ... ok
+test_and (test.test_weakset.TestWeakSet.test_and) ... ok
+test_clear (test.test_weakset.TestWeakSet.test_clear) ... ok
+test_constructor_identity (test.test_weakset.TestWeakSet.test_constructor_identity) ... ok
+test_contains (test.test_weakset.TestWeakSet.test_contains) ... ok
+test_copy (test.test_weakset.TestWeakSet.test_copy) ... ok
+test_copying (test.test_weakset.TestWeakSet.test_copying) ... ok
+test_difference (test.test_weakset.TestWeakSet.test_difference) ... ok
+test_difference_update (test.test_weakset.TestWeakSet.test_difference_update) ... ok
+test_discard (test.test_weakset.TestWeakSet.test_discard) ... ok
+test_eq (test.test_weakset.TestWeakSet.test_eq) ... ok
+test_gc (test.test_weakset.TestWeakSet.test_gc) ... ok
+test_gt (test.test_weakset.TestWeakSet.test_gt) ... ok
+test_hash (test.test_weakset.TestWeakSet.test_hash) ... ok
+test_iand (test.test_weakset.TestWeakSet.test_iand) ... ok
+test_init (test.test_weakset.TestWeakSet.test_init) ... ok
+test_inplace_on_self (test.test_weakset.TestWeakSet.test_inplace_on_self) ... ok
+test_intersection (test.test_weakset.TestWeakSet.test_intersection) ... ok
+test_intersection_update (test.test_weakset.TestWeakSet.test_intersection_update) ... ok
+test_ior (test.test_weakset.TestWeakSet.test_ior) ... ok
+test_isdisjoint (test.test_weakset.TestWeakSet.test_isdisjoint) ... ok
+test_isub (test.test_weakset.TestWeakSet.test_isub) ... ok
+test_ixor (test.test_weakset.TestWeakSet.test_ixor) ... ok
+test_len (test.test_weakset.TestWeakSet.test_len) ... ok
+test_len_cycles (test.test_weakset.TestWeakSet.test_len_cycles) ... ok
+test_len_race (test.test_weakset.TestWeakSet.test_len_race) ... 

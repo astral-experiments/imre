@@ -1,0 +1,5 @@
+test_BoundedSemaphore_limit (test.test_threading.ThreadTests.test_BoundedSemaphore_limit) ... ERROR
+test_PyThreadState_SetAsyncExc (test.test_threading.ThreadTests.test_PyThreadState_SetAsyncExc) ... skipped "No module named 'ctypes'"
+test_args_argument (test.test_threading.ThreadTests.test_args_argument) ... ERROR
+test_boolean_target (test.test_threading.ThreadTests.test_boolean_target) ... ERROR
+test_daemon_param (test.test_threading.ThreadTests.test_daemon_param) ... ok

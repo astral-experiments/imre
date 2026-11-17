@@ -1,0 +1,25 @@
+Traceback (most recent call last):
+  File "<frozen runpy>", line 203, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/unittest/__main__.py", line 18, in <module>
+    main(module=None)
+    ~~~~^^^^^^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/unittest/main.py", line 103, in __init__
+    self.parseArgs(argv)
+    ~~~~~~~~~~~~~~^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/unittest/main.py", line 142, in parseArgs
+    self.createTests()
+    ~~~~~~~~~~~~~~~~^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/unittest/main.py", line 153, in createTests
+    self.test = self.testLoader.loadTestsFromNames(self.testNames,
+                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^
+                                                   self.module)
+                                                   ^^^^^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/unittest/loader.py", line 207, in loadTestsFromNames
+    suites = [self.loadTestsFromName(name, module) for name in names]
+              ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/unittest/loader.py", line 137, in loadTestsFromName
+    module = __import__(module_name)
+  File "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_free_threading/__init__.py", line 8, in <module>
+    raise unittest.SkipTest("GIL enabled")
+unittest.case.SkipTest: GIL enabled

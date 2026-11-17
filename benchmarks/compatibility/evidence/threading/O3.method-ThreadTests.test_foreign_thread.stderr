@@ -1,0 +1,13 @@
+test_foreign_thread (test.test_threading.ThreadTests.test_foreign_thread) ... ERROR
+======================================================================
+ERROR: test_foreign_thread (test.test_threading.ThreadTests.test_foreign_thread)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 301, in test_foreign_thread
+    tid = _thread.start_new_thread(f, (mutex,))
+NotImplementedError: this thread callback requires the boxed Python heap
+
+----------------------------------------------------------------------
+Ran 1 test in 0.041s
+
+FAILED (errors=1)

@@ -1,0 +1,64 @@
+test_acquire (test.test_threading.BoundedSemaphoreTests.test_acquire) ... ok
+test_acquire_contended (test.test_threading.BoundedSemaphoreTests.test_acquire_contended) ... ERROR
+test_acquire_destroy (test.test_threading.BoundedSemaphoreTests.test_acquire_destroy) ... ok
+test_acquire_timeout (test.test_threading.BoundedSemaphoreTests.test_acquire_timeout) ... ok
+test_constructor (test.test_threading.BoundedSemaphoreTests.test_constructor) ... ok
+test_default_value (test.test_threading.BoundedSemaphoreTests.test_default_value) ... ERROR
+test_multirelease (test.test_threading.BoundedSemaphoreTests.test_multirelease) ... ERROR
+test_release_unacquired (test.test_threading.BoundedSemaphoreTests.test_release_unacquired) ... ok
+test_repr (test.test_threading.BoundedSemaphoreTests.test_repr) ... ok
+test_try_acquire (test.test_threading.BoundedSemaphoreTests.test_try_acquire) ... ok
+test_try_acquire_contended (test.test_threading.BoundedSemaphoreTests.test_try_acquire_contended) ... ERROR
+test_with (test.test_threading.BoundedSemaphoreTests.test_with) ... ok
+======================================================================
+ERROR: test_acquire_contended (test.test_threading.BoundedSemaphoreTests.test_acquire_contended)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 845, in test_acquire_contended
+    with Bunch(func, N):
+         ~~~~~^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_default_value (test.test_threading.BoundedSemaphoreTests.test_default_value)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 968, in test_default_value
+    with Bunch(f, 1) as bunch:
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_multirelease (test.test_threading.BoundedSemaphoreTests.test_multirelease)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 898, in test_multirelease
+    with Bunch(func, 10):
+         ~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_try_acquire_contended (test.test_threading.BoundedSemaphoreTests.test_try_acquire_contended)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 940, in test_try_acquire_contended
+    with Bunch(f, 5):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+----------------------------------------------------------------------
+Ran 12 tests in 3.152s
+
+FAILED (errors=4)

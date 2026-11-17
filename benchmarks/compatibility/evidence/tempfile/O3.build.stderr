@@ -1,0 +1,121 @@
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_tempfile.py:617:29
+    |
+616 |         self.assertTrue(a is b)
+617 |         self.assertNotEqual(type(a), type(c))
+    |                             ^^^^^^^ Expected `int`, found `type[Unknown]`
+618 |         self.assertEqual(a, os.fsdecode(c))
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^       ---------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_tempfile.py:617:38
+    |
+616 |         self.assertTrue(a is b)
+617 |         self.assertNotEqual(type(a), type(c))
+    |                                      ^^^^^^^ Expected `int`, found `type[Unknown]`
+618 |         self.assertEqual(a, os.fsdecode(c))
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_tempfile.py:1182:14
+     |
+1180 |         dir = tempfile.mkdtemp()
+1181 |         self.addCleanup(os_helper.rmtree, dir)
+1182 |         with mock.patch('tempfile._TemporaryFileWrapper') as mock_ntf, \
+     |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1183 |              mock.patch('io.open', mock.mock_open()) as mock_open:
+1184 |             mock_ntf.side_effect = KeyboardInterrupt()
+     |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_tempfile.py:1183:14
+     |
+1181 |         self.addCleanup(os_helper.rmtree, dir)
+1182 |         with mock.patch('tempfile._TemporaryFileWrapper') as mock_ntf, \
+1183 |              mock.patch('io.open', mock.mock_open()) as mock_open:
+     |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1184 |             mock_ntf.side_effect = KeyboardInterrupt()
+1185 |             with self.assertRaises(KeyboardInterrupt):
+     |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_tempfile.py:1606:18
+     |
+1604 |             dir = tempfile.mkdtemp()
+1605 |             self.addCleanup(os_helper.rmtree, dir)
+1606 |             with mock.patch('tempfile._O_TMPFILE_WORKS', False), \
+     |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1607 |                  mock.patch('os.unlink') as mock_unlink, \
+1608 |                  mock.patch('os.open') as mock_open, \
+     |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_tempfile.py:1607:18
+     |
+1605 |             self.addCleanup(os_helper.rmtree, dir)
+1606 |             with mock.patch('tempfile._O_TMPFILE_WORKS', False), \
+1607 |                  mock.patch('os.unlink') as mock_unlink, \
+     |                  ^^^^^^^^^^^^^^^^^^^^^^^
+1608 |                  mock.patch('os.open') as mock_open, \
+1609 |                  mock.patch('os.close') as mock_close:
+     |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_tempfile.py:1608:18
+     |
+1606 |             with mock.patch('tempfile._O_TMPFILE_WORKS', False), \
+1607 |                  mock.patch('os.unlink') as mock_unlink, \
+1608 |                  mock.patch('os.open') as mock_open, \
+     |                  ^^^^^^^^^^^^^^^^^^^^^
+1609 |                  mock.patch('os.close') as mock_close:
+1610 |                 mock_unlink.side_effect = KeyboardInterrupt()
+     |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_tempfile.py:1609:18
+     |
+1607 |                  mock.patch('os.unlink') as mock_unlink, \
+1608 |                  mock.patch('os.open') as mock_open, \
+1609 |                  mock.patch('os.close') as mock_close:
+     |                  ^^^^^^^^^^^^^^^^^^^^^^
+1610 |                 mock_unlink.side_effect = KeyboardInterrupt()
+1611 |                 with self.assertRaises(KeyboardInterrupt):
+     |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/import_helper.py:290:12
+    |
+288 |     # memory.
+289 |     from unittest import mock
+290 |     return mock.patch('os.register_at_fork', create=True)(func)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+

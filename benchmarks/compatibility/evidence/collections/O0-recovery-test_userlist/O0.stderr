@@ -1,0 +1,18 @@
+test_reverse (__main__.UserListTest.test_reverse) ... ok
+test_reversed (__main__.UserListTest.test_reversed) ... ok
+test_set_subscript (__main__.UserListTest.test_set_subscript) ... ok
+test_setitem (__main__.UserListTest.test_setitem) ... ok
+test_setitem_error (__main__.UserListTest.test_setitem_error) ... ok
+test_setslice (__main__.UserListTest.test_setslice) ... ok
+test_slice (__main__.UserListTest.test_slice) ... ok
+test_slice_assign_iterator (__main__.UserListTest.test_slice_assign_iterator) ... ok
+test_slice_type (__main__.UserListTest.test_slice_type) ... ok
+test_sort (__main__.UserListTest.test_sort) ... ok
+test_subscript (__main__.UserListTest.test_subscript) ... ok
+test_truth (__main__.UserListTest.test_truth) ... ok
+test_userlist_copy (__main__.UserListTest.test_userlist_copy) ... ok
+
+----------------------------------------------------------------------
+Ran 13 tests in 0.387s
+
+OK

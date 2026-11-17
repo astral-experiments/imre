@@ -1,0 +1,833 @@
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.LengthTransparency.test_repeat"]
+test_repeat (test.test_itertools.LengthTransparency.test_repeat) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.006s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.LengthTransparency.test_repeat_with_negative_times"]
+test_repeat_with_negative_times (test.test_itertools.LengthTransparency.test_repeat_with_negative_times) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.002s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.RegressionTests.test_issue30347_1"]
+test_issue30347_1 (test.test_itertools.RegressionTests.test_issue30347_1) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.003s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.RegressionTests.test_issue30347_2"]
+test_issue30347_2 (test.test_itertools.RegressionTests.test_issue30347_2) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.RegressionTests.test_long_chain_of_empty_iterables"]
+test_long_chain_of_empty_iterables (test.test_itertools.RegressionTests.test_long_chain_of_empty_iterables) ... # individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.RegressionTests.test_sf_793826"]
+test_sf_793826 (test.test_itertools.RegressionTests.test_sf_793826) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.002s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.RegressionTests.test_sf_950057"]
+test_sf_950057 (test.test_itertools.RegressionTests.test_sf_950057) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.024s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.SizeofTest.test_combinations_sizeof"]
+test_combinations_sizeof (test.test_itertools.SizeofTest.test_combinations_sizeof) ... skipped 'implementation detail specific to cpython'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+OK (skipped=1)
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.SizeofTest.test_combinations_with_replacement_sizeof"]
+test_combinations_with_replacement_sizeof (test.test_itertools.SizeofTest.test_combinations_with_replacement_sizeof) ... skipped 'implementation detail specific to cpython'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+OK (skipped=1)
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.SizeofTest.test_permutations_sizeof"]
+test_permutations_sizeof (test.test_itertools.SizeofTest.test_permutations_sizeof) ... skipped 'implementation detail specific to cpython'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+OK (skipped=1)
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.SizeofTest.test_product_sizeof"]
+test_product_sizeof (test.test_itertools.SizeofTest.test_product_sizeof) ... skipped 'implementation detail specific to cpython'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+OK (skipped=1)
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.SubclassWithKwargsTest.test_keywords_in_subclass"]
+test_keywords_in_subclass (test.test_itertools.SubclassWithKwargsTest.test_keywords_in_subclass) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.051s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_StopIteration"]
+test_StopIteration (test.test_itertools.TestBasicOps.test_StopIteration) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.073s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_accumulate"]
+test_accumulate (test.test_itertools.TestBasicOps.test_accumulate) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.016s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_batched"]
+test_batched (test.test_itertools.TestBasicOps.test_batched) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.122s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_bug_7244"]
+test_bug_7244 (test.test_itertools.TestBasicOps.test_bug_7244) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.020s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_chain"]
+test_chain (test.test_itertools.TestBasicOps.test_chain) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.020s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_chain_from_iterable"]
+test_chain_from_iterable (test.test_itertools.TestBasicOps.test_chain_from_iterable) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.005s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_combinations"]
+test_combinations (test.test_itertools.TestBasicOps.test_combinations) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.700s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_combinations_result_gc"]
+test_combinations_result_gc (test.test_itertools.TestBasicOps.test_combinations_result_gc) ... skipped 'implementation detail specific to cpython'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+OK (skipped=1)
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_combinations_tuple_reuse"]
+test_combinations_tuple_reuse (test.test_itertools.TestBasicOps.test_combinations_tuple_reuse) ... skipped 'tuple reuse is specific to CPython'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+OK (skipped=1)
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_combinations_with_replacement"]
+test_combinations_with_replacement (test.test_itertools.TestBasicOps.test_combinations_with_replacement) ... # individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_combinations_with_replacement_result_gc"]
+test_combinations_with_replacement_result_gc (test.test_itertools.TestBasicOps.test_combinations_with_replacement_result_gc) ... skipped 'implementation detail specific to cpython'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+OK (skipped=1)
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_combinations_with_replacement_tuple_reuse"]
+test_combinations_with_replacement_tuple_reuse (test.test_itertools.TestBasicOps.test_combinations_with_replacement_tuple_reuse) ... skipped 'tuple reuse is specific to CPython'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+OK (skipped=1)
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_combinatorics"]
+test_combinatorics (test.test_itertools.TestBasicOps.test_combinatorics) ... # individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_compress"]
+test_compress (test.test_itertools.TestBasicOps.test_compress) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.796s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_count"]
+test_count (test.test_itertools.TestBasicOps.test_count) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.009s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_count_threading"]
+test_count_threading (test.test_itertools.TestBasicOps.test_count_threading) ... ERROR
+
+ERROR: test.test_itertools.TestBasicOps.test_count_threading
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+----------------------------------------------------------------------
+Ran 1 test in 0.086s
+
+FAILED (errors=1)
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_count_with_step"]
+test_count_with_step (test.test_itertools.TestBasicOps.test_count_with_step) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.010s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_count_with_step_threading"]
+test_count_with_step_threading (test.test_itertools.TestBasicOps.test_count_with_step_threading) ... ERROR
+
+ERROR: test.test_itertools.TestBasicOps.test_count_with_step_threading
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+----------------------------------------------------------------------
+Ran 1 test in 0.092s
+
+FAILED (errors=1)
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_cycle"]
+test_cycle (test.test_itertools.TestBasicOps.test_cycle) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.100s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_dropwhile"]
+test_dropwhile (test.test_itertools.TestBasicOps.test_dropwhile) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.017s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_filter"]
+test_filter (test.test_itertools.TestBasicOps.test_filter) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 1.257s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_filterfalse"]
+test_filterfalse (test.test_itertools.TestBasicOps.test_filterfalse) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.025s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_groupby"]
+test_groupby (test.test_itertools.TestBasicOps.test_groupby) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.046s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_groupby_reentrant_eq_does_not_crash"]
+test_groupby_reentrant_eq_does_not_crash (test.test_itertools.TestBasicOps.test_groupby_reentrant_eq_does_not_crash) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.403s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_grouper_reentrant_eq_does_not_crash"]
+test_grouper_reentrant_eq_does_not_crash (test.test_itertools.TestBasicOps.test_grouper_reentrant_eq_does_not_crash) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.002s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_immutable_types"]
+test_immutable_types (test.test_itertools.TestBasicOps.test_immutable_types) ... skipped 'implementation detail specific to cpython'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.002s
+
+OK (skipped=1)
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_islice"]
+test_islice (test.test_itertools.TestBasicOps.test_islice) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.109s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_map"]
+test_map (test.test_itertools.TestBasicOps.test_map) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.016s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_pairwise"]
+test_pairwise (test.test_itertools.TestBasicOps.test_pairwise) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.103s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_pairwise_reenter"]
+test_pairwise_reenter (test.test_itertools.TestBasicOps.test_pairwise_reenter) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.003s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_pairwise_reenter2"]
+test_pairwise_reenter2 (test.test_itertools.TestBasicOps.test_pairwise_reenter2) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.003s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_pairwise_result_gc"]
+test_pairwise_result_gc (test.test_itertools.TestBasicOps.test_pairwise_result_gc) ... skipped 'implementation detail specific to cpython'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.023s
+
+OK (skipped=1)
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_permutations"]
+test_permutations (test.test_itertools.TestBasicOps.test_permutations) ... # individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_permutations_result_gc"]
+test_permutations_result_gc (test.test_itertools.TestBasicOps.test_permutations_result_gc) ... skipped 'implementation detail specific to cpython'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+OK (skipped=1)
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_permutations_tuple_reuse"]
+test_permutations_tuple_reuse (test.test_itertools.TestBasicOps.test_permutations_tuple_reuse) ... skipped 'tuple reuse is specific to CPython'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+OK (skipped=1)
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_product"]
+test_product (test.test_itertools.TestBasicOps.test_product) ... # individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_product_result_gc"]
+test_product_result_gc (test.test_itertools.TestBasicOps.test_product_result_gc) ... skipped 'implementation detail specific to cpython'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+OK (skipped=1)
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_product_tuple_reuse"]
+test_product_tuple_reuse (test.test_itertools.TestBasicOps.test_product_tuple_reuse) ... skipped 'tuple reuse is specific to CPython'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+OK (skipped=1)
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_repeat"]
+test_repeat (test.test_itertools.TestBasicOps.test_repeat) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.006s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_repeat_with_negative_times"]
+test_repeat_with_negative_times (test.test_itertools.TestBasicOps.test_repeat_with_negative_times) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_starmap"]
+test_starmap (test.test_itertools.TestBasicOps.test_starmap) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.036s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_takewhile"]
+test_takewhile (test.test_itertools.TestBasicOps.test_takewhile) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.029s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_tee"]
+test_tee (test.test_itertools.TestBasicOps.test_tee) ... # individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_tee_concurrent"]
+test_tee_concurrent (test.test_itertools.TestBasicOps.test_tee_concurrent) ... ERROR
+
+ERROR: test.test_itertools.TestBasicOps.test_tee_concurrent
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+----------------------------------------------------------------------
+Ran 1 test in 0.156s
+
+FAILED (errors=1)
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_tee_dealloc_segfault"]
+test_tee_dealloc_segfault (test.test_itertools.TestBasicOps.test_tee_dealloc_segfault) ... # individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_tee_del_backward"]
+test_tee_del_backward (test.test_itertools.TestBasicOps.test_tee_del_backward) ... # individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_tee_reenter"]
+test_tee_reenter (test.test_itertools.TestBasicOps.test_tee_reenter) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.031s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_zip"]
+test_zip (test.test_itertools.TestBasicOps.test_zip) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.041s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_zip_longest_bad_iterable"]
+test_zip_longest_bad_iterable (test.test_itertools.TestBasicOps.test_zip_longest_bad_iterable) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.013s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_zip_longest_result_gc"]
+test_zip_longest_result_gc (test.test_itertools.TestBasicOps.test_zip_longest_result_gc) ... skipped 'implementation detail specific to cpython'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+OK (skipped=1)
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_zip_longest_tuple_reuse"]
+test_zip_longest_tuple_reuse (test.test_itertools.TestBasicOps.test_zip_longest_tuple_reuse) ... skipped 'tuple reuse is specific to CPython'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.002s
+
+OK (skipped=1)
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_zip_tuple_reuse"]
+test_zip_tuple_reuse (test.test_itertools.TestBasicOps.test_zip_tuple_reuse) ... skipped 'tuple reuse is specific to CPython'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+OK (skipped=1)
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestBasicOps.test_ziplongest"]
+test_ziplongest (test.test_itertools.TestBasicOps.test_ziplongest) ... ERROR
+
+ERROR: test.test_itertools.TestBasicOps.test_ziplongest
+    eval(stmt, globals(), locals())
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: no compiled Python body for <module> (<string>:1)
+----------------------------------------------------------------------
+Ran 1 test in 1.964s
+
+FAILED (errors=1)
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestExamples.test_accumulate"]
+test_accumulate (test.test_itertools.TestExamples.test_accumulate) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.002s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestExamples.test_chain"]
+test_chain (test.test_itertools.TestExamples.test_chain) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.006s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestExamples.test_chain_from_iterable"]
+test_chain_from_iterable (test.test_itertools.TestExamples.test_chain_from_iterable) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.003s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestExamples.test_combinations"]
+test_combinations (test.test_itertools.TestExamples.test_combinations) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.003s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestExamples.test_combinations_with_replacement"]
+test_combinations_with_replacement (test.test_itertools.TestExamples.test_combinations_with_replacement) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.003s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestExamples.test_compress"]
+test_compress (test.test_itertools.TestExamples.test_compress) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.007s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestExamples.test_count"]
+test_count (test.test_itertools.TestExamples.test_count) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.006s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestExamples.test_cycle"]
+test_cycle (test.test_itertools.TestExamples.test_cycle) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.067s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestExamples.test_dropwhile"]
+test_dropwhile (test.test_itertools.TestExamples.test_dropwhile) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.007s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestExamples.test_filter"]
+test_filter (test.test_itertools.TestExamples.test_filter) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.002s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestExamples.test_filterfalse"]
+test_filterfalse (test.test_itertools.TestExamples.test_filterfalse) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.009s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestExamples.test_groupby"]
+test_groupby (test.test_itertools.TestExamples.test_groupby) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.009s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestExamples.test_islice"]
+test_islice (test.test_itertools.TestExamples.test_islice) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.008s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestExamples.test_map"]
+test_map (test.test_itertools.TestExamples.test_map) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.002s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestExamples.test_permutations"]
+test_permutations (test.test_itertools.TestExamples.test_permutations) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.030s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestExamples.test_product"]
+test_product (test.test_itertools.TestExamples.test_product) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.009s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestExamples.test_repeat"]
+test_repeat (test.test_itertools.TestExamples.test_repeat) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.002s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestExamples.test_stapmap"]
+test_stapmap (test.test_itertools.TestExamples.test_stapmap) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.007s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestExamples.test_takewhile"]
+test_takewhile (test.test_itertools.TestExamples.test_takewhile) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.008s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestExamples.test_zip"]
+test_zip (test.test_itertools.TestExamples.test_zip) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.037s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestExamples.test_zip_longest"]
+test_zip_longest (test.test_itertools.TestExamples.test_zip_longest) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.003s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestGC.test_accumulate"]
+test_accumulate (test.test_itertools.TestGC.test_accumulate) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.015s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestGC.test_batched"]
+test_batched (test.test_itertools.TestGC.test_batched) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.019s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestGC.test_chain"]
+test_chain (test.test_itertools.TestGC.test_chain) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.013s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestGC.test_chain_from_iterable"]
+test_chain_from_iterable (test.test_itertools.TestGC.test_chain_from_iterable) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.014s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestGC.test_combinations"]
+test_combinations (test.test_itertools.TestGC.test_combinations) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.028s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestGC.test_combinations_with_replacement"]
+test_combinations_with_replacement (test.test_itertools.TestGC.test_combinations_with_replacement) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.010s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestGC.test_compress"]
+test_compress (test.test_itertools.TestGC.test_compress) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.031s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestGC.test_count"]
+test_count (test.test_itertools.TestGC.test_count) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.014s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestGC.test_cycle"]
+test_cycle (test.test_itertools.TestGC.test_cycle) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.010s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestGC.test_dropwhile"]
+test_dropwhile (test.test_itertools.TestGC.test_dropwhile) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.015s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestGC.test_filter"]
+test_filter (test.test_itertools.TestGC.test_filter) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.008s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestGC.test_filterfalse"]
+test_filterfalse (test.test_itertools.TestGC.test_filterfalse) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.008s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestGC.test_groupby"]
+test_groupby (test.test_itertools.TestGC.test_groupby) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.017s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestGC.test_islice"]
+test_islice (test.test_itertools.TestGC.test_islice) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.034s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestGC.test_issue2246"]
+test_issue2246 (test.test_itertools.TestGC.test_issue2246) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.007s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestGC.test_map"]
+test_map (test.test_itertools.TestGC.test_map) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.019s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestGC.test_pairwise"]
+test_pairwise (test.test_itertools.TestGC.test_pairwise) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.010s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestGC.test_permutations"]
+test_permutations (test.test_itertools.TestGC.test_permutations) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.010s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestGC.test_product"]
+test_product (test.test_itertools.TestGC.test_product) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.035s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestGC.test_repeat"]
+test_repeat (test.test_itertools.TestGC.test_repeat) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.014s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestGC.test_starmap"]
+test_starmap (test.test_itertools.TestGC.test_starmap) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.010s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestGC.test_takewhile"]
+test_takewhile (test.test_itertools.TestGC.test_takewhile) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.014s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestGC.test_zip"]
+test_zip (test.test_itertools.TestGC.test_zip) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.017s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestGC.test_zip_longest"]
+test_zip_longest (test.test_itertools.TestGC.test_zip_longest) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.044s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestPurePythonRoughEquivalents.test_batched_recipe"]
+test_batched_recipe (test.test_itertools.TestPurePythonRoughEquivalents.test_batched_recipe) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.581s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestPurePythonRoughEquivalents.test_groupby_recipe"]
+test_groupby_recipe (test.test_itertools.TestPurePythonRoughEquivalents.test_groupby_recipe) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 4.327s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestPurePythonRoughEquivalents.test_islice_recipe"]
+test_islice_recipe (test.test_itertools.TestPurePythonRoughEquivalents.test_islice_recipe) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.008s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestPurePythonRoughEquivalents.test_tee_recipe"]
+test_tee_recipe (test.test_itertools.TestPurePythonRoughEquivalents.test_tee_recipe) ... # individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestVariousIteratorArgs.test_accumulate"]
+test_accumulate (test.test_itertools.TestVariousIteratorArgs.test_accumulate) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.116s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestVariousIteratorArgs.test_batched"]
+test_batched (test.test_itertools.TestVariousIteratorArgs.test_batched) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.287s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestVariousIteratorArgs.test_chain"]
+test_chain (test.test_itertools.TestVariousIteratorArgs.test_chain) ... # individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestVariousIteratorArgs.test_compress"]
+test_compress (test.test_itertools.TestVariousIteratorArgs.test_compress) ... # individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestVariousIteratorArgs.test_cycle"]
+test_cycle (test.test_itertools.TestVariousIteratorArgs.test_cycle) ... # individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestVariousIteratorArgs.test_dropwhile"]
+test_dropwhile (test.test_itertools.TestVariousIteratorArgs.test_dropwhile) ... # individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestVariousIteratorArgs.test_filter"]
+test_filter (test.test_itertools.TestVariousIteratorArgs.test_filter) ... # individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestVariousIteratorArgs.test_filterfalse"]
+test_filterfalse (test.test_itertools.TestVariousIteratorArgs.test_filterfalse) ... # individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestVariousIteratorArgs.test_groupby"]
+test_groupby (test.test_itertools.TestVariousIteratorArgs.test_groupby) ... # individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestVariousIteratorArgs.test_islice"]
+test_islice (test.test_itertools.TestVariousIteratorArgs.test_islice) ... # individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestVariousIteratorArgs.test_map"]
+test_map (test.test_itertools.TestVariousIteratorArgs.test_map) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 2.146s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestVariousIteratorArgs.test_pairwise"]
+test_pairwise (test.test_itertools.TestVariousIteratorArgs.test_pairwise) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 1.433s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestVariousIteratorArgs.test_product"]
+test_product (test.test_itertools.TestVariousIteratorArgs.test_product) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.135s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestVariousIteratorArgs.test_starmap"]
+test_starmap (test.test_itertools.TestVariousIteratorArgs.test_starmap) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 3.652s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestVariousIteratorArgs.test_takewhile"]
+test_takewhile (test.test_itertools.TestVariousIteratorArgs.test_takewhile) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.607s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestVariousIteratorArgs.test_tee"]
+test_tee (test.test_itertools.TestVariousIteratorArgs.test_tee) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 2.502s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestVariousIteratorArgs.test_zip"]
+test_zip (test.test_itertools.TestVariousIteratorArgs.test_zip) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 5.786s
+
+OK
+# individual argv: ["/workspace/scratch/itertools-O3-saved.exe", "test.test_itertools.TestVariousIteratorArgs.test_ziplongest"]
+test_ziplongest (test.test_itertools.TestVariousIteratorArgs.test_ziplongest) ... 

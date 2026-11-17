@@ -1,0 +1,2 @@
+ Compiling /workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_netrc.py (-O3)
+/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_netrc.py:1:1: Imre: standard-library imports and shadowing are unsupported: "netrc"

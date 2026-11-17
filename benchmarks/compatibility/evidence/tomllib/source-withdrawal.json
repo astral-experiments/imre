@@ -1,0 +1,4 @@
+{
+  "performed": false,
+  "reason": "The canonical replay runner removed the saved native images after the original run. A source-withdrawal check would require rebuilding; the coordinator instructed no expansion of expensive retests."
+}

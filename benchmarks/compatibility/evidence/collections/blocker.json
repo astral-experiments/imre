@@ -1,0 +1,11 @@
+{
+  "frozen_raw_originals": 659,
+  "stock_registered_originals": 658,
+  "stock_collection_blocker": {
+    "argv": ["/workspace/scratch/stdlib-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14", "-B", "-m", "unittest", "-v", "test.test_free_threading.test_collections"],
+    "environment": {"PYTHONPATH": "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib", "PYTHONDONTWRITEBYTECODE": "1"},
+    "exit_code": 1,
+    "reason": "The GIL-enabled stock interpreter raises unittest.SkipTest during import of test.test_free_threading, before registering an original ID. No receipt or pair is invented for the missing frozen original.",
+    "evidence": "free-threading-collection.stderr"
+  }
+}

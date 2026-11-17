@@ -1,0 +1,5 @@
+   Compiling imre-ast v0.1.5 (/workspace/scratch/imre-pin/crates/imre-ast)
+   Compiling imre-regex v0.1.5 (/workspace/scratch/imre-pin/crates/imre-regex)
+   Compiling imre-compiler v0.1.5 (/workspace/scratch/imre-pin/crates/imre-compiler)
+   Compiling imre-runtime v0.1.5 (/workspace/scratch/imre-pin/crates/imre-runtime)
+    Finished `release` profile [optimized + debuginfo] target(s) in 3m 53s

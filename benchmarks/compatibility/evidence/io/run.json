@@ -1,0 +1,1473 @@
+{
+  "imre_revision": "49f0dc2ef78b82692e333252faf71b4fc7730949",
+  "imre_tree": "c91e13458003aaf0d1dde4b6302fef2fcfc429a2",
+  "build_cwd": "/workspace/imre-pinned",
+  "build_argv": [
+    "cargo",
+    "build",
+    "--offline",
+    "--release",
+    "--locked",
+    "-p",
+    "imre-compiler",
+    "-p",
+    "imre-runtime",
+    "--target-dir",
+    "/workspace/imre/target"
+  ],
+  "build_environment": {
+    "CARGO_HOME": "/workspace/.toolchains/cargo",
+    "RUSTUP_HOME": "/workspace/.toolchains/rustup",
+    "PATH_prefix": "/workspace/.toolchains/cargo/bin"
+  },
+  "build_log_sha256": "af04248ea57d0fac4d54fb340c81c266c72ad6bd53a8c7323c492749da05ca74",
+  "compiler_sha256": "b015262cf0eac5c7a34c246233a739d719da37b89f799db68180f48c9595d923",
+  "runtime_sha256": "06d94c2a85e75c10c0b070fbf26b8e16c8bc419d35189c376264f242438259d2",
+  "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+  "cargo_lock_sha256": "07e72b769bef48e18ebbaf02d58b2d3d5d4df5dd045a7aa63e3fd9e7e07fd04c",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "cpython_archive_sha256": "0d838be32b52da92a4293ecd99bc91f7be8b4acc573423665bd1a1428be46e47",
+  "python_version": "Python 3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+  "python_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+  "runner_sha256": "2fc6acea91ed6bcd4381eb5b466249cf738e0f61bd288a1d9bc552381a98a65c",
+  "fixture_staging": "Complete unchanged pinned Lib/test tree; stock interpreter also exposes that tree for isolated child processes. Only receipt_runner.py was added outside test/.",
+  "timeout_build_seconds": 300,
+  "timeout_suite_seconds": 240,
+  "includes": [
+    "test.test_bufio",
+    "test.test_file",
+    "test.test_largefile",
+    "test.test_memoryio",
+    "test.test_io",
+    "test.test_univnewlines",
+    "test.test_fileio"
+  ],
+  "suites": {
+    "bufio": {
+      "stock": {
+        "argv": [
+          "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "-B",
+          "/workspace/scratch/imre-cpython-test-fixtures/Lib/receipt_runner.py",
+          "test.test_bufio"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch/replay-tmp/io",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1"
+        },
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 240,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "0f3640f1fced946fef458b586a3422cb5162c43e6a3bf5d2d783fbb541d0ca3e"
+      },
+      "O0": {
+        "build": {
+          "argv": [
+            "/workspace/imre/target/release/imre",
+            "build",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib/receipt_runner.py",
+            "--module-root",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "--no-cache",
+            "--opt-level",
+            "0",
+            "--runtime",
+            "/workspace/imre/target/release/libimre_runtime.a",
+            "--clang",
+            "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+            "-o",
+            "/workspace/scratch/replay-tmp/io/O0.exe",
+            "--include-module",
+            "test.test_bufio",
+            "--include-module",
+            "test.test_file",
+            "--include-module",
+            "test.test_largefile",
+            "--include-module",
+            "test.test_memoryio",
+            "--include-module",
+            "test.test_io",
+            "--include-module",
+            "test.test_univnewlines",
+            "--include-module",
+            "test.test_fileio"
+          ],
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": "/workspace/scratch/replay-tmp/io",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+          },
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 300,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "2056eca091f0a645ca521e70d17bee006749310aa981ab170314d0ca6c5c9be0",
+          "artifact_sha256": null
+        },
+        "argv": [
+          "/workspace/scratch/replay-tmp/io/O0.exe",
+          "test.test_bufio"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch/replay-tmp/io",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "IMREFLAGS": "--opt-level 0",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+        },
+        "reason": "build failed before collection"
+      },
+      "O3": {
+        "build": {
+          "argv": [
+            "/workspace/imre/target/release/imre",
+            "build",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib/receipt_runner.py",
+            "--module-root",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "--no-cache",
+            "--opt-level",
+            "3",
+            "--runtime",
+            "/workspace/imre/target/release/libimre_runtime.a",
+            "--clang",
+            "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+            "-o",
+            "/workspace/scratch/replay-tmp/io/O3.exe",
+            "--include-module",
+            "test.test_bufio",
+            "--include-module",
+            "test.test_file",
+            "--include-module",
+            "test.test_largefile",
+            "--include-module",
+            "test.test_memoryio",
+            "--include-module",
+            "test.test_io",
+            "--include-module",
+            "test.test_univnewlines",
+            "--include-module",
+            "test.test_fileio"
+          ],
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": "/workspace/scratch/replay-tmp/io",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+          },
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 300,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "93829be46373b83425247ffa29d59e5b8c6901a7da78c88df8cf3283f05018bd",
+          "artifact_sha256": null
+        },
+        "argv": [
+          "/workspace/scratch/replay-tmp/io/O3.exe",
+          "test.test_bufio"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch/replay-tmp/io",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "IMREFLAGS": "--opt-level 3",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+        },
+        "reason": "build failed before collection"
+      }
+    },
+    "file": {
+      "stock": {
+        "argv": [
+          "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "-B",
+          "/workspace/scratch/imre-cpython-test-fixtures/Lib/receipt_runner.py",
+          "test.test_file"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch/replay-tmp/io",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1"
+        },
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 240,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "29643e186959b3fc2c15e82a60b53c0ff0340f9a820d420fe0af08a69710996c"
+      },
+      "O0": {
+        "build": {
+          "argv": [
+            "/workspace/imre/target/release/imre",
+            "build",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib/receipt_runner.py",
+            "--module-root",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "--no-cache",
+            "--opt-level",
+            "0",
+            "--runtime",
+            "/workspace/imre/target/release/libimre_runtime.a",
+            "--clang",
+            "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+            "-o",
+            "/workspace/scratch/replay-tmp/io/O0.exe",
+            "--include-module",
+            "test.test_bufio",
+            "--include-module",
+            "test.test_file",
+            "--include-module",
+            "test.test_largefile",
+            "--include-module",
+            "test.test_memoryio",
+            "--include-module",
+            "test.test_io",
+            "--include-module",
+            "test.test_univnewlines",
+            "--include-module",
+            "test.test_fileio"
+          ],
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": "/workspace/scratch/replay-tmp/io",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+          },
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 300,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "2056eca091f0a645ca521e70d17bee006749310aa981ab170314d0ca6c5c9be0",
+          "artifact_sha256": null
+        },
+        "argv": [
+          "/workspace/scratch/replay-tmp/io/O0.exe",
+          "test.test_file"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch/replay-tmp/io",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "IMREFLAGS": "--opt-level 0",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+        },
+        "reason": "build failed before collection"
+      },
+      "O3": {
+        "build": {
+          "argv": [
+            "/workspace/imre/target/release/imre",
+            "build",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib/receipt_runner.py",
+            "--module-root",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "--no-cache",
+            "--opt-level",
+            "3",
+            "--runtime",
+            "/workspace/imre/target/release/libimre_runtime.a",
+            "--clang",
+            "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+            "-o",
+            "/workspace/scratch/replay-tmp/io/O3.exe",
+            "--include-module",
+            "test.test_bufio",
+            "--include-module",
+            "test.test_file",
+            "--include-module",
+            "test.test_largefile",
+            "--include-module",
+            "test.test_memoryio",
+            "--include-module",
+            "test.test_io",
+            "--include-module",
+            "test.test_univnewlines",
+            "--include-module",
+            "test.test_fileio"
+          ],
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": "/workspace/scratch/replay-tmp/io",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+          },
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 300,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "93829be46373b83425247ffa29d59e5b8c6901a7da78c88df8cf3283f05018bd",
+          "artifact_sha256": null
+        },
+        "argv": [
+          "/workspace/scratch/replay-tmp/io/O3.exe",
+          "test.test_file"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch/replay-tmp/io",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "IMREFLAGS": "--opt-level 3",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+        },
+        "reason": "build failed before collection"
+      }
+    },
+    "largefile": {
+      "stock": {
+        "argv": [
+          "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "-B",
+          "/workspace/scratch/imre-cpython-test-fixtures/Lib/receipt_runner.py",
+          "test.test_largefile"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch/replay-tmp/io",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1"
+        },
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 240,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "2bb32f4681b9269fe52ae154c47eb65a756f5f65298978aafd4f89300a1a22a1"
+      },
+      "O0": {
+        "build": {
+          "argv": [
+            "/workspace/imre/target/release/imre",
+            "build",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib/receipt_runner.py",
+            "--module-root",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "--no-cache",
+            "--opt-level",
+            "0",
+            "--runtime",
+            "/workspace/imre/target/release/libimre_runtime.a",
+            "--clang",
+            "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+            "-o",
+            "/workspace/scratch/replay-tmp/io/O0.exe",
+            "--include-module",
+            "test.test_bufio",
+            "--include-module",
+            "test.test_file",
+            "--include-module",
+            "test.test_largefile",
+            "--include-module",
+            "test.test_memoryio",
+            "--include-module",
+            "test.test_io",
+            "--include-module",
+            "test.test_univnewlines",
+            "--include-module",
+            "test.test_fileio"
+          ],
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": "/workspace/scratch/replay-tmp/io",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+          },
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 300,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "2056eca091f0a645ca521e70d17bee006749310aa981ab170314d0ca6c5c9be0",
+          "artifact_sha256": null
+        },
+        "argv": [
+          "/workspace/scratch/replay-tmp/io/O0.exe",
+          "test.test_largefile"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch/replay-tmp/io",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "IMREFLAGS": "--opt-level 0",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+        },
+        "reason": "build failed before collection"
+      },
+      "O3": {
+        "build": {
+          "argv": [
+            "/workspace/imre/target/release/imre",
+            "build",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib/receipt_runner.py",
+            "--module-root",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "--no-cache",
+            "--opt-level",
+            "3",
+            "--runtime",
+            "/workspace/imre/target/release/libimre_runtime.a",
+            "--clang",
+            "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+            "-o",
+            "/workspace/scratch/replay-tmp/io/O3.exe",
+            "--include-module",
+            "test.test_bufio",
+            "--include-module",
+            "test.test_file",
+            "--include-module",
+            "test.test_largefile",
+            "--include-module",
+            "test.test_memoryio",
+            "--include-module",
+            "test.test_io",
+            "--include-module",
+            "test.test_univnewlines",
+            "--include-module",
+            "test.test_fileio"
+          ],
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": "/workspace/scratch/replay-tmp/io",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+          },
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 300,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "93829be46373b83425247ffa29d59e5b8c6901a7da78c88df8cf3283f05018bd",
+          "artifact_sha256": null
+        },
+        "argv": [
+          "/workspace/scratch/replay-tmp/io/O3.exe",
+          "test.test_largefile"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch/replay-tmp/io",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "IMREFLAGS": "--opt-level 3",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+        },
+        "reason": "build failed before collection"
+      }
+    },
+    "memoryio": {
+      "stock": {
+        "argv": [
+          "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "-B",
+          "/workspace/scratch/imre-cpython-test-fixtures/Lib/receipt_runner.py",
+          "test.test_memoryio"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch/replay-tmp/io",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1"
+        },
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 240,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "b72b808e8e0206148602b78e827520c566f6e5a9a1317871577b934a3b4e146e"
+      },
+      "O0": {
+        "build": {
+          "argv": [
+            "/workspace/imre/target/release/imre",
+            "build",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib/receipt_runner.py",
+            "--module-root",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "--no-cache",
+            "--opt-level",
+            "0",
+            "--runtime",
+            "/workspace/imre/target/release/libimre_runtime.a",
+            "--clang",
+            "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+            "-o",
+            "/workspace/scratch/replay-tmp/io/O0.exe",
+            "--include-module",
+            "test.test_bufio",
+            "--include-module",
+            "test.test_file",
+            "--include-module",
+            "test.test_largefile",
+            "--include-module",
+            "test.test_memoryio",
+            "--include-module",
+            "test.test_io",
+            "--include-module",
+            "test.test_univnewlines",
+            "--include-module",
+            "test.test_fileio"
+          ],
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": "/workspace/scratch/replay-tmp/io",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+          },
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 300,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "2056eca091f0a645ca521e70d17bee006749310aa981ab170314d0ca6c5c9be0",
+          "artifact_sha256": null
+        },
+        "argv": [
+          "/workspace/scratch/replay-tmp/io/O0.exe",
+          "test.test_memoryio"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch/replay-tmp/io",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "IMREFLAGS": "--opt-level 0",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+        },
+        "reason": "build failed before collection"
+      },
+      "O3": {
+        "build": {
+          "argv": [
+            "/workspace/imre/target/release/imre",
+            "build",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib/receipt_runner.py",
+            "--module-root",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "--no-cache",
+            "--opt-level",
+            "3",
+            "--runtime",
+            "/workspace/imre/target/release/libimre_runtime.a",
+            "--clang",
+            "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+            "-o",
+            "/workspace/scratch/replay-tmp/io/O3.exe",
+            "--include-module",
+            "test.test_bufio",
+            "--include-module",
+            "test.test_file",
+            "--include-module",
+            "test.test_largefile",
+            "--include-module",
+            "test.test_memoryio",
+            "--include-module",
+            "test.test_io",
+            "--include-module",
+            "test.test_univnewlines",
+            "--include-module",
+            "test.test_fileio"
+          ],
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": "/workspace/scratch/replay-tmp/io",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+          },
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 300,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "93829be46373b83425247ffa29d59e5b8c6901a7da78c88df8cf3283f05018bd",
+          "artifact_sha256": null
+        },
+        "argv": [
+          "/workspace/scratch/replay-tmp/io/O3.exe",
+          "test.test_memoryio"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch/replay-tmp/io",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "IMREFLAGS": "--opt-level 3",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+        },
+        "reason": "build failed before collection"
+      }
+    },
+    "io": {
+      "stock": {
+        "argv": [
+          "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "-B",
+          "/workspace/scratch/imre-cpython-test-fixtures/Lib/receipt_runner.py",
+          "test.test_io"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch/replay-tmp/io",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1"
+        },
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 240,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "24a619065f18c17e659ef1d52c96fa09fe4483d7c0d08d304cd7f4d7e0a794dd"
+      },
+      "O0": {
+        "build": {
+          "argv": [
+            "/workspace/imre/target/release/imre",
+            "build",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib/receipt_runner.py",
+            "--module-root",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "--no-cache",
+            "--opt-level",
+            "0",
+            "--runtime",
+            "/workspace/imre/target/release/libimre_runtime.a",
+            "--clang",
+            "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+            "-o",
+            "/workspace/scratch/replay-tmp/io/O0.exe",
+            "--include-module",
+            "test.test_bufio",
+            "--include-module",
+            "test.test_file",
+            "--include-module",
+            "test.test_largefile",
+            "--include-module",
+            "test.test_memoryio",
+            "--include-module",
+            "test.test_io",
+            "--include-module",
+            "test.test_univnewlines",
+            "--include-module",
+            "test.test_fileio"
+          ],
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": "/workspace/scratch/replay-tmp/io",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+          },
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 300,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "2056eca091f0a645ca521e70d17bee006749310aa981ab170314d0ca6c5c9be0",
+          "artifact_sha256": null
+        },
+        "argv": [
+          "/workspace/scratch/replay-tmp/io/O0.exe",
+          "test.test_io"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch/replay-tmp/io",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "IMREFLAGS": "--opt-level 0",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+        },
+        "reason": "build failed before collection"
+      },
+      "O3": {
+        "build": {
+          "argv": [
+            "/workspace/imre/target/release/imre",
+            "build",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib/receipt_runner.py",
+            "--module-root",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "--no-cache",
+            "--opt-level",
+            "3",
+            "--runtime",
+            "/workspace/imre/target/release/libimre_runtime.a",
+            "--clang",
+            "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+            "-o",
+            "/workspace/scratch/replay-tmp/io/O3.exe",
+            "--include-module",
+            "test.test_bufio",
+            "--include-module",
+            "test.test_file",
+            "--include-module",
+            "test.test_largefile",
+            "--include-module",
+            "test.test_memoryio",
+            "--include-module",
+            "test.test_io",
+            "--include-module",
+            "test.test_univnewlines",
+            "--include-module",
+            "test.test_fileio"
+          ],
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": "/workspace/scratch/replay-tmp/io",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+          },
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 300,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "93829be46373b83425247ffa29d59e5b8c6901a7da78c88df8cf3283f05018bd",
+          "artifact_sha256": null
+        },
+        "argv": [
+          "/workspace/scratch/replay-tmp/io/O3.exe",
+          "test.test_io"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch/replay-tmp/io",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "IMREFLAGS": "--opt-level 3",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+        },
+        "reason": "build failed before collection"
+      }
+    },
+    "univnewlines": {
+      "stock": {
+        "argv": [
+          "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "-B",
+          "/workspace/scratch/imre-cpython-test-fixtures/Lib/receipt_runner.py",
+          "test.test_univnewlines"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch/replay-tmp/io",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1"
+        },
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 240,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "5d25cd41d16627e62005f1766a176e2b630edebec620dc276d2c8ec7e52199bc"
+      },
+      "O0": {
+        "build": {
+          "argv": [
+            "/workspace/imre/target/release/imre",
+            "build",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib/receipt_runner.py",
+            "--module-root",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "--no-cache",
+            "--opt-level",
+            "0",
+            "--runtime",
+            "/workspace/imre/target/release/libimre_runtime.a",
+            "--clang",
+            "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+            "-o",
+            "/workspace/scratch/replay-tmp/io/O0.exe",
+            "--include-module",
+            "test.test_bufio",
+            "--include-module",
+            "test.test_file",
+            "--include-module",
+            "test.test_largefile",
+            "--include-module",
+            "test.test_memoryio",
+            "--include-module",
+            "test.test_io",
+            "--include-module",
+            "test.test_univnewlines",
+            "--include-module",
+            "test.test_fileio"
+          ],
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": "/workspace/scratch/replay-tmp/io",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+          },
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 300,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "2056eca091f0a645ca521e70d17bee006749310aa981ab170314d0ca6c5c9be0",
+          "artifact_sha256": null
+        },
+        "argv": [
+          "/workspace/scratch/replay-tmp/io/O0.exe",
+          "test.test_univnewlines"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch/replay-tmp/io",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "IMREFLAGS": "--opt-level 0",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+        },
+        "reason": "build failed before collection"
+      },
+      "O3": {
+        "build": {
+          "argv": [
+            "/workspace/imre/target/release/imre",
+            "build",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib/receipt_runner.py",
+            "--module-root",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "--no-cache",
+            "--opt-level",
+            "3",
+            "--runtime",
+            "/workspace/imre/target/release/libimre_runtime.a",
+            "--clang",
+            "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+            "-o",
+            "/workspace/scratch/replay-tmp/io/O3.exe",
+            "--include-module",
+            "test.test_bufio",
+            "--include-module",
+            "test.test_file",
+            "--include-module",
+            "test.test_largefile",
+            "--include-module",
+            "test.test_memoryio",
+            "--include-module",
+            "test.test_io",
+            "--include-module",
+            "test.test_univnewlines",
+            "--include-module",
+            "test.test_fileio"
+          ],
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": "/workspace/scratch/replay-tmp/io",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+          },
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 300,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "93829be46373b83425247ffa29d59e5b8c6901a7da78c88df8cf3283f05018bd",
+          "artifact_sha256": null
+        },
+        "argv": [
+          "/workspace/scratch/replay-tmp/io/O3.exe",
+          "test.test_univnewlines"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch/replay-tmp/io",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "IMREFLAGS": "--opt-level 3",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+        },
+        "reason": "build failed before collection"
+      }
+    },
+    "fileio": {
+      "stock": {
+        "argv": [
+          "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "-B",
+          "/workspace/scratch/imre-cpython-test-fixtures/Lib/receipt_runner.py",
+          "test.test_fileio"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch/replay-tmp/io",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1"
+        },
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 240,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "ab2fdb8c5229b1946ec4abf94a5bb0a968f36a11fc15fa362cddf9aff555ac8b"
+      },
+      "O0": {
+        "build": {
+          "argv": [
+            "/workspace/imre/target/release/imre",
+            "build",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib/receipt_runner.py",
+            "--module-root",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "--no-cache",
+            "--opt-level",
+            "0",
+            "--runtime",
+            "/workspace/imre/target/release/libimre_runtime.a",
+            "--clang",
+            "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+            "-o",
+            "/workspace/scratch/replay-tmp/io/O0.exe",
+            "--include-module",
+            "test.test_bufio",
+            "--include-module",
+            "test.test_file",
+            "--include-module",
+            "test.test_largefile",
+            "--include-module",
+            "test.test_memoryio",
+            "--include-module",
+            "test.test_io",
+            "--include-module",
+            "test.test_univnewlines",
+            "--include-module",
+            "test.test_fileio"
+          ],
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": "/workspace/scratch/replay-tmp/io",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+          },
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 300,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "2056eca091f0a645ca521e70d17bee006749310aa981ab170314d0ca6c5c9be0",
+          "artifact_sha256": null
+        },
+        "argv": [
+          "/workspace/scratch/replay-tmp/io/O0.exe",
+          "test.test_fileio"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch/replay-tmp/io",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "IMREFLAGS": "--opt-level 0",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+        },
+        "reason": "build failed before collection"
+      },
+      "O3": {
+        "build": {
+          "argv": [
+            "/workspace/imre/target/release/imre",
+            "build",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib/receipt_runner.py",
+            "--module-root",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "--no-cache",
+            "--opt-level",
+            "3",
+            "--runtime",
+            "/workspace/imre/target/release/libimre_runtime.a",
+            "--clang",
+            "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+            "-o",
+            "/workspace/scratch/replay-tmp/io/O3.exe",
+            "--include-module",
+            "test.test_bufio",
+            "--include-module",
+            "test.test_file",
+            "--include-module",
+            "test.test_largefile",
+            "--include-module",
+            "test.test_memoryio",
+            "--include-module",
+            "test.test_io",
+            "--include-module",
+            "test.test_univnewlines",
+            "--include-module",
+            "test.test_fileio"
+          ],
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": "/workspace/scratch/replay-tmp/io",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+          },
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 300,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "93829be46373b83425247ffa29d59e5b8c6901a7da78c88df8cf3283f05018bd",
+          "artifact_sha256": null
+        },
+        "argv": [
+          "/workspace/scratch/replay-tmp/io/O3.exe",
+          "test.test_fileio"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch/replay-tmp/io",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "IMREFLAGS": "--opt-level 3",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+        },
+        "reason": "build failed before collection"
+      }
+    }
+  },
+  "supplementary": {
+    "O0": {
+      "build": {
+        "argv": [
+          "/workspace/imre/target/release/imre",
+          "build",
+          "/workspace/scratch/imre-cpython-test-fixtures/Lib/receipt_runner.py",
+          "--module-root",
+          "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "--no-cache",
+          "--opt-level",
+          "0",
+          "--runtime",
+          "/workspace/imre/target/release/libimre_runtime.a",
+          "--clang",
+          "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+          "-o",
+          "/workspace/scratch/replay-tmp/io/nofileio.O0.exe",
+          "--include-module",
+          "test.test_bufio",
+          "--include-module",
+          "test.test_file",
+          "--include-module",
+          "test.test_largefile",
+          "--include-module",
+          "test.test_memoryio",
+          "--include-module",
+          "test.test_univnewlines",
+          "--include-module",
+          "test.test_io"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch/replay-tmp/io",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "IMREFLAGS": "--opt-level 0",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+        },
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 300,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "0b941909008e3afbce628bac9f86275216165eaef2e4aa4a37f8765f9fb2712c",
+        "artifact_sha256": "2635442da74fc20bc7d9e5d6e93689a129c566cacc21f81349dd888163b5fac4"
+      },
+      "suites": {
+        "bufio": {
+          "argv": [
+            "/workspace/scratch/replay-tmp/io/nofileio.O0.exe",
+            "test.test_bufio"
+          ],
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": "/workspace/scratch/replay-tmp/io",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+          },
+          "exit_code": -9,
+          "timed_out": false,
+          "timeout_seconds": 90,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e21a14879fb97d97788e1392f9b8805e5eb30866aee3012c53f3536460f3a12f"
+        },
+        "file": {
+          "argv": [
+            "/workspace/scratch/replay-tmp/io/nofileio.O0.exe",
+            "test.test_file"
+          ],
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": "/workspace/scratch/replay-tmp/io",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+          },
+          "exit_code": 0,
+          "timed_out": false,
+          "timeout_seconds": 90,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "0f852dc30748d2b99dfd915e5ea9fd4af429ecda7da2da826b1d06d4645ce591"
+        },
+        "largefile": {
+          "argv": [
+            "/workspace/scratch/replay-tmp/io/nofileio.O0.exe",
+            "test.test_largefile"
+          ],
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": "/workspace/scratch/replay-tmp/io",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+          },
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 90,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "532a06fd39c1f51347ed03f2ba6be0262d4caa9f9e3b078cd9d868b0a2ea996f"
+        },
+        "memoryio": {
+          "argv": [
+            "/workspace/scratch/replay-tmp/io/nofileio.O0.exe",
+            "test.test_memoryio"
+          ],
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": "/workspace/scratch/replay-tmp/io",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+          },
+          "exit_code": null,
+          "timed_out": true,
+          "timeout_seconds": 90,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "aa0d9d990cfe779550e91c08cedc5e37481d71b72556d105de20cfdba4c94506"
+        },
+        "univnewlines": {
+          "argv": [
+            "/workspace/scratch/replay-tmp/io/nofileio.O0.exe",
+            "test.test_univnewlines"
+          ],
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": "/workspace/scratch/replay-tmp/io",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+          },
+          "exit_code": 0,
+          "timed_out": false,
+          "timeout_seconds": 90,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "ad6351802842811e83e00c7792d6379f1f763a515c0c59f51853731f23926b6d"
+        },
+        "io": {
+          "argv": [
+            "/workspace/scratch/replay-tmp/io/nofileio.O0.exe",
+            "test.test_io"
+          ],
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": "/workspace/scratch/replay-tmp/io",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+          },
+          "exit_code": null,
+          "timed_out": true,
+          "timeout_seconds": 150,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "4daf63e9587002cf637dce927f8d84a49e1e096bd232b9cf7c25a4bda7e227b7"
+        }
+      }
+    },
+    "O3": {
+      "build": {
+        "argv": [
+          "/workspace/imre/target/release/imre",
+          "build",
+          "/workspace/scratch/imre-cpython-test-fixtures/Lib/receipt_runner.py",
+          "--module-root",
+          "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "--no-cache",
+          "--opt-level",
+          "3",
+          "--runtime",
+          "/workspace/imre/target/release/libimre_runtime.a",
+          "--clang",
+          "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+          "-o",
+          "/workspace/scratch/replay-tmp/io/nofileio.O3.exe",
+          "--include-module",
+          "test.test_bufio",
+          "--include-module",
+          "test.test_file",
+          "--include-module",
+          "test.test_largefile",
+          "--include-module",
+          "test.test_memoryio",
+          "--include-module",
+          "test.test_univnewlines",
+          "--include-module",
+          "test.test_io"
+        ],
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/workspace/scratch/replay-tmp/io",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "IMREFLAGS": "--opt-level 3",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+        },
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 300,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "88b5832dddbd61ca3df75cac556830a53aa0ae172b5e4a26f7eb94b33417fd51",
+        "artifact_sha256": "cf25bed19355e808db3274fa2aadb29d84140accc8eaf686f3172ed1659345bf"
+      },
+      "suites": {
+        "bufio": {
+          "argv": [
+            "/workspace/scratch/replay-tmp/io/nofileio.O3.exe",
+            "test.test_bufio"
+          ],
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": "/workspace/scratch/replay-tmp/io",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+          },
+          "exit_code": -9,
+          "timed_out": false,
+          "timeout_seconds": 90,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "9d1c8bee13b07ee004421969f387289f02db591eb54da1b8def3969e8a3c834d"
+        },
+        "file": {
+          "argv": [
+            "/workspace/scratch/replay-tmp/io/nofileio.O3.exe",
+            "test.test_file"
+          ],
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": "/workspace/scratch/replay-tmp/io",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+          },
+          "exit_code": 0,
+          "timed_out": false,
+          "timeout_seconds": 90,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "15120a51261b11048b5c4b4df8afd313b7e6c5b7317b91cd8fe32d9ddfa67aa4"
+        },
+        "largefile": {
+          "argv": [
+            "/workspace/scratch/replay-tmp/io/nofileio.O3.exe",
+            "test.test_largefile"
+          ],
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": "/workspace/scratch/replay-tmp/io",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+          },
+          "exit_code": 1,
+          "timed_out": false,
+          "timeout_seconds": 90,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "4fdc37f8f09a413c0fa153a4d3d1ff78bf01520ddb29d0345d2aa78ec04bdeb6"
+        },
+        "memoryio": {
+          "argv": [
+            "/workspace/scratch/replay-tmp/io/nofileio.O3.exe",
+            "test.test_memoryio"
+          ],
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": "/workspace/scratch/replay-tmp/io",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+          },
+          "exit_code": 0,
+          "timed_out": false,
+          "timeout_seconds": 90,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "ad97b6007d5c5c8206973188690c02352a3437201c642755bf135ee94d6a6f18"
+        },
+        "univnewlines": {
+          "argv": [
+            "/workspace/scratch/replay-tmp/io/nofileio.O3.exe",
+            "test.test_univnewlines"
+          ],
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": "/workspace/scratch/replay-tmp/io",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+          },
+          "exit_code": 0,
+          "timed_out": false,
+          "timeout_seconds": 90,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "a26e61874d1e0c5517309509c70cd30561885e4db9f310d0c1b288bd46307103"
+        },
+        "io": {
+          "argv": [
+            "/workspace/scratch/replay-tmp/io/nofileio.O3.exe",
+            "test.test_io"
+          ],
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "TMPDIR": "/workspace/scratch/replay-tmp/io",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+          },
+          "exit_code": -9,
+          "timed_out": false,
+          "timeout_seconds": 150,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "429c820a705bda11a7342ace9f54accfb61950c81393ff162753b0476b4c8ce8"
+        }
+      }
+    }
+  },
+  "architecture_control": {
+    "evidence": "architecture-control/run.json",
+    "control_passed": false,
+    "exit_code": 0,
+    "expected_int_got_bool": false,
+    "image_exists": true
+  },
+  "stop_note": "The remaining core io O3 invocation was manually stopped (exit -9) on coordinator instruction to avoid further expensive full retests."
+}
