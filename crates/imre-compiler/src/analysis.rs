@@ -13,6 +13,7 @@ pub(crate) use initializer_calls::{
     InitializerCheck, inert_declaration, passive_function, unambiguous_file_module,
 };
 mod run_path;
+mod scalar_stores;
 mod shipped_exports;
 mod tuple_displays;
 
@@ -3634,6 +3635,7 @@ impl Session {
                 overloads[id].as_slice(),
                 FileChecks::FallbackCalls,
                 checked_modules.is_some_and(|modules| !modules[id].bundled),
+                checked_modules.is_some_and(|modules| modules[id].checks_source_contracts()),
                 self.explicit_check,
                 None,
                 &[][..],
@@ -3989,12 +3991,25 @@ impl Session {
                     continue;
                 }
             }
-            let mut dormant = Vec::new();
+            let mut dormant = scalar_stores::scalar_stores(&self.db, file)
+                .iter()
+                .filter(|store| {
+                    !skipped.is_some_and(|ranges| {
+                        ranges[index].iter().any(|r| r.contains_range(store.value))
+                    })
+                })
+                .filter_map(|store| {
+                    store
+                        .exact_error
+                        .clone()
+                        .map(|error| (store.value.start(), error))
+                })
+                .collect::<Vec<_>>();
             if !declarations.parameters(&self.db).is_empty() {
                 self.dormant_call_errors(index, path, declarations, &mut dormant);
-                // Parameter order can differ from the order of the written arguments.
-                dormant.sort_by_key(|(start, _)| *start);
             }
+            // Parameter order can differ from the order of the written arguments.
+            dormant.sort_by_key(|(start, _)| *start);
             let mut dormant = dormant.into_iter().peekable();
             // The default body check covers ty's declaration rules on the same bindings.
             if checked_bodies
@@ -4011,15 +4026,22 @@ impl Session {
                 overloads.get(index).map_or(&[][..], Vec::as_slice),
                 FileChecks::DeclaredSignatures,
                 true,
+                true,
                 self.explicit_check,
                 Some(declarations),
                 result_scopes.get(&file).map_or(&[][..], Vec::as_slice),
             );
             for error in file_errors(&self.db, checked) {
                 while let Some((_, message)) =
-                    dormant.next_if(|(start, _)| error.range.is_none_or(|r| *start <= r.start()))
+                    dormant.next_if(|(start, _)| error.range.is_none_or(|r| *start < r.start()))
                 {
                     errors.push(message);
+                }
+                if error.rule.is_lint_named("invalid-assignment")
+                    && let Some(range) = error.range
+                {
+                    // A real ty assignment error at this operand keeps its original rendering.
+                    dormant.next_if(|(start, _)| *start == range.start());
                 }
                 let original =
                     native.and_then(|report| self.original_operand(error, modules, index, report));
@@ -4089,6 +4111,7 @@ impl Session {
                     overloads.get(index).map_or(&[][..], Vec::as_slice),
                     checks,
                     checked_modules.is_some_and(|modules| !modules[index].bundled),
+                    checked_modules.is_some_and(|modules| modules[index].checks_source_contracts()),
                     self.explicit_check,
                     None,
                     &[][..],
@@ -4123,6 +4146,8 @@ struct CheckedFile<'db> {
     checks: FileChecks,
     #[returns(copy)]
     first_party: bool,
+    #[returns(copy)]
+    scalar_stores: bool,
     #[returns(copy)]
     explicit_check: bool,
     #[returns(copy)]
@@ -4670,7 +4695,8 @@ fn file_errors<'db>(db: &'db dyn LiteralSourceDb, checked: CheckedFile<'db>) -> 
     });
     let skipped = checked.skipped(db);
     let overloads = checked.overloads(db);
-    db.check_file(file)
+    let mut errors: Vec<_> = db
+        .check_file(file)
         .iter()
         .filter(|diagnostic| {
             let rule = diagnostic.id().as_str();
@@ -4727,8 +4753,13 @@ fn file_errors<'db>(db: &'db dyn LiteralSourceDb, checked: CheckedFile<'db>) -> 
                     parameter
                 }
                 Some(sources) if diagnostic.id().is_lint_named("invalid-assignment") => {
-                    let scalar =
-                        range.and_then(|range| contract_initializer(db, file, &parse(), range));
+                    let scalar = range.and_then(|range| {
+                        scalar_stores::scalar_stores(db, file)
+                            .iter()
+                            .find(|store| store.value == range)
+                            .map(|store| store.annotation)
+                            .or_else(|| contract_initializer(db, file, &parse(), range))
+                    });
                     if scalar.is_none()
                         && !has_declared_nominal_target(
                             db,
@@ -4796,7 +4827,29 @@ fn file_errors<'db>(db: &'db dyn LiteralSourceDb, checked: CheckedFile<'db>) -> 
                     .to_string(),
             })
         })
-        .collect()
+        .collect();
+    if !full && checked.scalar_stores(db) {
+        for store in scalar_stores::scalar_stores(db, file) {
+            if skipped.iter().any(|r| r.contains_range(store.value))
+                || errors.iter().any(|error| {
+                    error.rule.is_lint_named("invalid-assignment")
+                        && error.range == Some(store.value)
+                })
+            {
+                continue;
+            }
+            if let Some(rendered) = &store.exact_error {
+                errors.push(CheckedError {
+                    rule: DiagnosticId::lint("invalid-assignment"),
+                    range: Some(store.value),
+                    declaration: Some((file, store.annotation)),
+                    rendered: rendered.clone(),
+                });
+            }
+        }
+        errors.sort_by_key(|error| error.range.map(|range| range.start()));
+    }
+    errors
 }
 
 /// Retain ty's failed import at the original binding when a written signature uses it.
@@ -5246,6 +5299,18 @@ fn concrete_scalar<'db>(
         .into_iter().any(|class| declared == scalar(class))
         // ty widens a float annotation to float | int.
         || declared == UnionType::from_two_elements(db, env, scalar(KnownClass::Float), scalar(KnownClass::Int))
+}
+
+fn scalar_store_type<'db>(
+    db: &'db dyn Db,
+    env: &ty_python_semantic::types::ProgramEnvironment<'db>,
+    declared: ty_python_semantic::types::Type<'db>,
+) -> bool {
+    use ty_python_semantic::types::Type;
+    concrete_scalar(db, env, declared)
+        || matches!(declared, Type::Union(union) if union.elements(db).iter().all(|&arm| {
+            arm.is_none(db) || concrete_scalar(db, env, arm)
+        }))
 }
 
 fn primary_range(diagnostic: &Diagnostic, file: File) -> Option<TextRange> {
