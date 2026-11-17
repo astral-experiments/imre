@@ -15244,6 +15244,16 @@ impl<'a> Checker<'a> {
             {
                 return self.expandtabs(Self::string_value(receiver), call);
             }
+            if receiver.ty == Type::BuiltinClass
+                && matches!(attribute.attr.as_str(), "removeprefix" | "removesuffix")
+                && self.graph.session.is_known_class(
+                    self.module,
+                    &attribute.value,
+                    ty_python_semantic::types::KnownClass::Str,
+                )
+            {
+                return self.registered_method_call(call, attribute, receiver, Type::Str);
+            }
             if matches!(attribute.attr.as_str(), "lower" | "upper")
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             {
@@ -15254,11 +15264,25 @@ impl<'a> Checker<'a> {
             if matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
                 && let Some(method) = stdlib::registered_string_method(call)
             {
+                let result = if receiver.ty == Type::Str
+                    && matches!(method.attr.as_str(), "removeprefix" | "removesuffix")
+                    && self.graph.modules[self.module].parsed.syntax().body.iter().any(|stmt| {
+                        matches!(stmt, ast::Stmt::ClassDef(class)
+                            if class.arguments.as_ref().is_some_and(|args| args.args.iter().any(|base|
+                                self.graph.session.is_known_class(self.module, base, ty_python_semantic::types::KnownClass::Str)))
+                            && class.body.iter().any(|stmt|
+                                matches!(stmt, ast::Stmt::FunctionDef(function) if function.name.as_str() == method.attr.as_str())))
+                    })
+                {
+                    Type::PythonObject
+                } else {
+                    Type::Str
+                };
                 return self.registered_method_call(
                     call,
                     method,
                     Self::string_value(receiver),
-                    Type::Str,
+                    result,
                 );
             }
             if attribute.attr.as_str() == "format"
@@ -16770,6 +16794,9 @@ impl<'a> Checker<'a> {
             && self.unshadowed_builtin(&call.func, name)
             && registered::values::fixed_positional_arguments(call)
             && ((matches!(name, "type" | "str") && args.len() == 1)
+                || (name == "memoryview"
+                    && args.len() == 1
+                    && matches!(args[0].ty, Type::Bytes | Type::ByteArray))
                 || args
                     .iter()
                     .any(|value| self.types.stores_python_object(value.ty)))
