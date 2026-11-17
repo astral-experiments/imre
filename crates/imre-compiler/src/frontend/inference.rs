@@ -94,7 +94,7 @@ impl Checker<'_> {
         if let Some(ty) = self.graph.session.scalar_type(self.module, insertion.value) {
             return Some(ty);
         }
-        if !set || self.graph.layout_hint.get() == crate::modules::LayoutHint::Disabled {
+        if !set {
             return None;
         }
         let for_loop = insertion.for_loop?;
@@ -113,30 +113,263 @@ impl Checker<'_> {
         {
             return None;
         }
-        // Only follow consecutive direct writes to the original set. A call,
-        // alias, exit or another suite ends the straight-line evidence.
-        let mut suite = later.iter().filter(|stmt| !stmt.is_pass_stmt());
-        if for_loop.orelse.is_empty()
-            && !assigned.contains(name)
-            && matches!(suite.next(), Some(ast::Stmt::For(stmt)) if std::ptr::eq(stmt, for_loop))
-        {
-            for stmt in suite {
-                let Some(value) = insertion_operand(stmt, name, "add")
-                    .and_then(|value| calls::scalar_literal(value, self.source).ok())
-                else {
-                    break;
+        (!assigned.contains(name)
+            && !["len", "sorted", "list", "tuple"]
+                .iter()
+                .any(|builtin| assigned.contains(*builtin))
+            && self.local_set_storage(name, element, for_loop, item.id.as_str(), later))
+        .then_some(element)
+    }
+
+    /// Select iteration-derived native storage only when the fresh set cannot escape
+    /// or receive an incompatible value. This runs before resolved IR exists, so it
+    /// accepts only source operations whose exact receiver and operands prove that
+    /// they cannot call Python code. Unknown operations require ordinary storage.
+    ///
+    /// ```python
+    /// values = set()
+    /// for char in text:
+    ///     values.add(char)
+    /// return sorted(values)
+    /// ```
+    fn local_set_storage(
+        &self,
+        name: &str,
+        element: Type,
+        insertion_loop: &ast::StmtFor,
+        item: &str,
+        later: &[ast::Stmt],
+    ) -> bool {
+        struct Uses<'checker, 'graph, 'ast> {
+            checker: &'checker Checker<'graph>,
+            name: &'checker str,
+            element: Type,
+            insertion_loop: &'ast ast::StmtFor,
+            item: &'checker str,
+            in_insertion_loop: bool,
+            safe: bool,
+        }
+
+        impl Uses<'_, '_, '_> {
+            fn owner(&self, value: &ast::Expr) -> bool {
+                value
+                    .as_name_expr()
+                    .is_some_and(|name| name.id == self.name)
+            }
+
+            fn fits(&self, value: &ast::Expr) -> bool {
+                self.exact_scalar(value) == Some(self.element)
+            }
+
+            /// A native scalar or intrinsic result cannot dispatch an overloaded
+            /// Python operator. ty assignability alone does not establish that fact.
+            fn exact_scalar(&self, value: &ast::Expr) -> Option<Type> {
+                let scalar = |ty| {
+                    matches!(
+                        ty,
+                        Type::Bool | Type::Int | Type::Float | Type::Str | Type::Bytes
+                    )
+                    .then_some(ty)
                 };
-                if value.ty != element {
-                    return None;
+                match value {
+                    ast::Expr::Name(name) if self.in_insertion_loop && name.id == self.item => {
+                        scalar(self.element)
+                    }
+                    ast::Expr::Name(name) => self
+                        .checker
+                        .names
+                        .get(name.id.as_str())
+                        .and_then(|&slot| scalar(self.checker.locals[slot])),
+                    ast::Expr::NumberLiteral(_)
+                    | ast::Expr::BooleanLiteral(_)
+                    | ast::Expr::StringLiteral(_)
+                    | ast::Expr::BytesLiteral(_) => self
+                        .checker
+                        .graph
+                        .session
+                        .scalar_type(self.checker.module, value)
+                        .and_then(scalar),
+                    ast::Expr::Call(call)
+                        if self.checker.unshadowed_builtin(&call.func, "len")
+                            && matches!(call.arguments.args.as_slice(), [arg] if self.owner(arg))
+                            && call.arguments.keywords.is_empty() =>
+                    {
+                        Some(Type::Int)
+                    }
+                    ast::Expr::BinOp(binary)
+                        if self.exact_scalar(&binary.left).is_some()
+                            && self.exact_scalar(&binary.right).is_some() =>
+                    {
+                        self.checker
+                            .graph
+                            .session
+                            .scalar_type(self.checker.module, value)
+                            .and_then(scalar)
+                    }
+                    ast::Expr::UnaryOp(unary) if self.exact_scalar(&unary.operand).is_some() => {
+                        self.checker
+                            .graph
+                            .session
+                            .scalar_type(self.checker.module, value)
+                            .and_then(scalar)
+                    }
+                    ast::Expr::Compare(compare)
+                        if compare.ops.len() == 1
+                            && matches!(compare.ops[0], ast::CmpOp::In | ast::CmpOp::NotIn)
+                            && self.owner(&compare.operands[1])
+                            && self.fits(&compare.operands[0]) =>
+                    {
+                        Some(Type::Bool)
+                    }
+                    ast::Expr::Compare(compare)
+                        if compare
+                            .operands
+                            .iter()
+                            .all(|operand| self.exact_scalar(operand).is_some()) =>
+                    {
+                        Some(Type::Bool)
+                    }
+                    ast::Expr::BoolOp(boolean)
+                        if boolean
+                            .values
+                            .iter()
+                            .all(|operand| self.exact_scalar(operand).is_some()) =>
+                    {
+                        self.checker
+                            .graph
+                            .session
+                            .scalar_type(self.checker.module, value)
+                            .and_then(scalar)
+                    }
+                    _ => None,
                 }
             }
         }
-        // Later uses may need heterogeneous storage. A failed native attempt
-        // must recover the ordinary diagnostics and object fallback for set().
-        self.graph
-            .layout_hint
-            .set(crate::modules::LayoutHint::Applied);
-        Some(element)
+
+        impl<'ast> Visitor<'ast> for Uses<'_, '_, 'ast> {
+            fn visit_stmt(&mut self, stmt: &'ast ast::Stmt) {
+                if !self.safe {
+                    return;
+                }
+                match stmt {
+                    ast::Stmt::For(loop_) if std::ptr::eq(loop_, self.insertion_loop) => {
+                        self.visit_expr(&loop_.iter);
+                        self.in_insertion_loop = true;
+                        self.visit_body(&loop_.body);
+                        self.in_insertion_loop = false;
+                        self.visit_body(&loop_.orelse);
+                    }
+                    ast::Stmt::Expr(stmt) => self.visit_expr(&stmt.value),
+                    ast::Stmt::Return(stmt) => {
+                        if let Some(value) = &stmt.value {
+                            self.visit_expr(value);
+                        }
+                    }
+                    ast::Stmt::Assign(stmt) if stmt.targets.iter().all(ast::Expr::is_name_expr) => {
+                        for target in &stmt.targets {
+                            self.visit_expr(target);
+                        }
+                        self.visit_expr(&stmt.value);
+                    }
+                    ast::Stmt::If(branch) => {
+                        for test in std::iter::once(&*branch.test).chain(
+                            branch
+                                .elif_else_clauses
+                                .iter()
+                                .filter_map(|clause| clause.test.as_ref()),
+                        ) {
+                            if self.exact_scalar(test).is_none() {
+                                self.safe = false;
+                                return;
+                            }
+                            self.visit_expr(test);
+                        }
+                        self.visit_body(&branch.body);
+                        for clause in &branch.elif_else_clauses {
+                            self.visit_body(&clause.body);
+                        }
+                    }
+                    ast::Stmt::Pass(_) | ast::Stmt::Break(_) | ast::Stmt::Continue(_) => {}
+                    _ => self.safe = false,
+                }
+            }
+
+            fn visit_expr(&mut self, expr: &'ast ast::Expr) {
+                if !self.safe {
+                    return;
+                }
+                match expr {
+                    ast::Expr::Call(call) => {
+                        if let ast::Expr::Attribute(attr) = &*call.func
+                            && self.owner(&attr.value)
+                            && matches!(attr.attr.as_str(), "add" | "discard")
+                            && let [value] = call.arguments.args.as_ref()
+                            && call.arguments.keywords.is_empty()
+                            && self.fits(value)
+                        {
+                            self.visit_expr(value);
+                        } else if let [value] = call.arguments.args.as_ref()
+                            && self.owner(value)
+                            && call.arguments.keywords.is_empty()
+                            && ["len", "sorted", "list", "tuple"]
+                                .iter()
+                                .any(|builtin| self.checker.unshadowed_builtin(&call.func, builtin))
+                        {
+                            // These builtins read the set without exposing it to Python code.
+                        } else {
+                            self.safe = false;
+                        }
+                    }
+                    ast::Expr::Compare(compare)
+                        if compare.ops.len() == 1
+                            && matches!(compare.ops[0], ast::CmpOp::In | ast::CmpOp::NotIn)
+                            && self.owner(&compare.operands[1])
+                            && self.fits(&compare.operands[0]) =>
+                    {
+                        self.visit_expr(&compare.operands[0]);
+                    }
+                    ast::Expr::BinOp(binary) if self.exact_scalar(expr).is_some() => {
+                        self.visit_expr(&binary.left);
+                        self.visit_expr(&binary.right);
+                    }
+                    ast::Expr::Compare(compare) if self.exact_scalar(expr).is_some() => {
+                        for operand in &compare.operands {
+                            self.visit_expr(operand);
+                        }
+                    }
+                    ast::Expr::UnaryOp(unary) if self.exact_scalar(expr).is_some() => {
+                        self.visit_expr(&unary.operand);
+                    }
+                    ast::Expr::BoolOp(boolean) if self.exact_scalar(expr).is_some() => {
+                        for operand in &boolean.values {
+                            self.visit_expr(operand);
+                        }
+                    }
+                    ast::Expr::Name(name) => self.safe &= name.id != self.name,
+                    ast::Expr::NumberLiteral(_)
+                    | ast::Expr::BooleanLiteral(_)
+                    | ast::Expr::StringLiteral(_)
+                    | ast::Expr::BytesLiteral(_)
+                    | ast::Expr::NoneLiteral(_) => {}
+                    ast::Expr::List(_) | ast::Expr::Tuple(_) => {
+                        ruff_python_ast::visitor::walk_expr(self, expr);
+                    }
+                    _ => self.safe = false,
+                }
+            }
+        }
+
+        let mut uses = Uses {
+            checker: self,
+            name,
+            element,
+            insertion_loop,
+            item,
+            in_insertion_loop: false,
+            safe: true,
+        };
+        uses.visit_body(later);
+        uses.safe
     }
 
     /// A later direct call can supply the same Callable context as an inline lambda.
