@@ -478,27 +478,10 @@ pub(super) fn retain_generator(
     )
 }
 
-/// Check queued declarations through the same independent source checker used during inference.
-pub(super) fn finish_source_checks(graph: &SourceGraph, mut checks: SourceChecks) {
-    for ((module, range), source) in checks
-        .solved
-        .take()
-        .into_iter()
-        .flat_map(std::cell::RefCell::into_inner)
-    {
-        if !checks.accepts(graph, module, range) {
-            graph.defer_registered_function(
-                module,
-                range.start(),
-                !matches!(source, SourceFrame::Fixed) || {
-                    let functions = graph.registered_functions();
-                    functions[&module][&range.start()].owns_lookup_errors(graph, module, range)
-                },
-            );
-        }
-    }
+/// Preserve unresolved generator bodies after inference releases its graph borrow.
+pub(super) fn retain_unresolved_generators(graph: &SourceGraph, checks: &SourceChecks) {
     for &owner in &checks.unresolved {
-        let _ = retain_generator(graph, owner, &checks);
+        let _ = retain_generator(graph, owner, checks);
     }
 }
 
@@ -644,7 +627,7 @@ pub(super) fn prepare_checked_definition(
         return Ok(None);
     }
     // A settled signature can use the source check that already owns this module.
-    let provisional = checks.solved.as_ref().filter(|_| contract.is_none());
+    let provisional = checks.pending_arguments && contract.is_none();
     let helpers = Helpers::new(inference.len());
     let values = ModuleValues::default();
     let mut checker = Checker::new(
@@ -667,7 +650,7 @@ pub(super) fn prepare_checked_definition(
         checker.inference = original.inference;
         if live {
             checker.frame_arguments = original.frame_arguments;
-        } else if provisional.is_some() || original.frame_arguments == FrameArguments::Pending {
+        } else if provisional || original.frame_arguments == FrameArguments::Pending {
             // A provisional launch frame still needs to bind live arguments after admission.
             checker.frame_arguments = FrameArguments::Pending;
         }
@@ -786,13 +769,6 @@ fn checked_definition(
     Ok(frame.map(|frame| (body.facts, frame)))
 }
 
-/// A rejected fixed placement must fall back to its original source. A registered
-/// body can still serve a Python call when its live argument layout permits it.
-pub(super) enum SourceFrame {
-    Fixed,
-    Registered,
-}
-
 /// A registered body can supply an unresolved calling convention only if its other
 /// operations satisfy the first-party source contract. Cache the check per physical module.
 #[derive(Default)]
@@ -800,8 +776,8 @@ pub(super) struct SourceChecks {
     /// Named startup checks these unresolved definitions for a generator body.
     pub(super) unresolved: Vec<DefinitionId>,
     session: std::cell::OnceCell<Option<crate::analysis::RegisteredBodyChecks>>,
-    /// A later placement replaces the frame at the same physical definition.
-    pub(super) solved: Option<std::cell::RefCell<HashMap<(ModuleId, TextRange), SourceFrame>>>,
+    /// A provisional source frame must bind its live arguments after admission.
+    pub(super) pending_arguments: bool,
 }
 
 impl SourceChecks {
@@ -1055,10 +1031,9 @@ pub(super) fn capture(
             continue;
         }
         let checks = &inference.source_checks;
-        let deferred = checks
-            .solved
-            .as_ref()
-            .filter(|_| contract.is_none() && matches!(source, Capture::Solved(None)));
+        let provisional = checks.pending_arguments
+            && contract.is_none()
+            && matches!(source, Capture::Solved(None));
         let helpers = Helpers::new(inference.len());
         // A solved definition reads names from the Python namespace. Its trial
         // must not establish a native caller or consume a missing binding.
@@ -1123,7 +1098,7 @@ pub(super) fn capture(
                     FrameArguments::Python
                 }
                 Capture::Solved(_) if method.is_some() => FrameArguments::Python,
-                Capture::Solved(_) if deferred.is_some() => FrameArguments::Pending,
+                Capture::Solved(_) if provisional => FrameArguments::Pending,
                 Capture::Solved(_) => FrameArguments::Checked,
             };
             let mut body = graph
@@ -1138,21 +1113,12 @@ pub(super) fn capture(
             }
             Some(body)
         });
-        if let Some(body) = body
-            && contract.unwrap_or_else(|| {
-                // No unresolved caller can depend on a solved frame's ABI. The fixed sibling
-                // placement only checks occupancy for the same physical source range.
-                if let Some(solved) = deferred {
-                    solved
-                        .borrow_mut()
-                        .insert((id, function.range()), SourceFrame::Registered);
-                    true
-                } else {
-                    checks.accepts(graph, id, function.range())
-                }
-            })
-        {
-            graph.register_function(id, function.start(), body);
+        if let Some(body) = body {
+            if contract.unwrap_or_else(|| checks.accepts(graph, id, function.range())) {
+                graph.register_function(id, function.start(), body);
+            } else if provisional && !matches!(body.inputs, FrameInputs::Protocol { .. }) {
+                graph.retain_lexical_function(id, function.start(), body);
+            }
         }
     }
 }
