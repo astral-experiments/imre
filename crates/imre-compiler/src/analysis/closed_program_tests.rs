@@ -4,6 +4,32 @@ use std::fs;
 use tempfile::tempdir;
 
 #[test]
+fn explicitly_written_bool_and_int_union_arms_keep_both_contracts() {
+    let dir = tempdir().unwrap();
+    let entry = dir.path().join("main.py");
+    for annotation in ["int | bool", "bool | int", "Union[int, bool]"] {
+        fs::write(
+            &entry,
+            format!("from typing import Union\ndef population(value: {annotation}) -> int:\n    return value.bit_count()\nprint(population(False), population(True), population(2))\n"),
+        )
+        .unwrap();
+        crate::check_file(&entry, None).unwrap_or_else(|e| panic!("{annotation}: {e}"));
+    }
+    for (annotation, argument, expected) in [
+        ("int", "False", "expected int, got bool"),
+        ("int | bool", "'bad'", "str"),
+    ] {
+        fs::write(
+            &entry,
+            format!("def take(value: {annotation}) -> int: return 0\nprint(take({argument}))\n"),
+        )
+        .unwrap();
+        let error = crate::check_file(&entry, None).unwrap_err();
+        assert!(error.contains(expected), "{error}");
+    }
+}
+
+#[test]
 fn module_qualified_class_value_uses_its_python_binding() {
     let project = tempdir().unwrap();
     let main = project.path().join("main.py");
