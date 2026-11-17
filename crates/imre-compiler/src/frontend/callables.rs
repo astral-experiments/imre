@@ -325,6 +325,13 @@ impl<'a> Checker<'a> {
                 ParameterKind::KeywordOnly | ParameterKind::Variadic | ParameterKind::KeywordRest
             )
         }) {
+            if expected.is_none() && receiver.is_none() {
+                return Err(self.classified_error(
+                    Kind::ScopedObject,
+                    node,
+                    "using this function as a value requires Python argument binding",
+                ));
+            }
             return Err(error(
                 self.source,
                 node,
@@ -1065,6 +1072,23 @@ impl<'a> Checker<'a> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_keyword_only_function_value_keeps_its_python_binder_and_checked_body() {
+        let project = tempfile::tempdir().unwrap();
+        let main = project.path().join("app.py");
+        let source = include_str!("../../../../tests/fixtures/boxed_methodcaller.py");
+        std::fs::write(&main, source).unwrap();
+        crate::check_file(&main, None).unwrap();
+
+        let invalid = source.replace(
+            "    return values[:], label",
+            "    checked: list[int] = []\n    checked.append(True)\n    return values[:], label",
+        );
+        std::fs::write(&main, invalid).unwrap();
+        let error = crate::check_file(&main, None).unwrap_err();
+        assert!(error.contains("expected int, got bool"), "{error}");
+    }
+
     #[test]
     fn a_trailing_declaration_preserves_a_raising_call_operand() {
         let project = tempfile::tempdir().unwrap();
