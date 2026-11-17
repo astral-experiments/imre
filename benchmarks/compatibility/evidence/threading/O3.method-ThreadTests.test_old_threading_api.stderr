@@ -1,0 +1,5 @@
+test_old_threading_api (test.test_threading.ThreadTests.test_old_threading_api) ... ok
+----------------------------------------------------------------------
+Ran 1 test in 0.071s
+
+OK

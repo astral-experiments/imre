@@ -1,0 +1,5 @@
+test_repr_daemon (test.test_threading.ThreadTests.test_repr_daemon) ... ok
+----------------------------------------------------------------------
+Ran 1 test in 0.028s
+
+OK

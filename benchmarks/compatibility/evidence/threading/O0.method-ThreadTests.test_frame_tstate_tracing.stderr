@@ -1,0 +1,5 @@
+test_frame_tstate_tracing (test.test_threading.ThreadTests.test_frame_tstate_tracing) ... skipped 'implementation detail specific to cpython'
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+OK (skipped=1)

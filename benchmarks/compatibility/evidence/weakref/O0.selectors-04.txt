@@ -1,0 +1,8 @@
+test.test_weakref.WeakMethodTestCase.test_alive
+test.test_weakref.WeakMethodTestCase.test_callback_when_method_dead
+test.test_weakref.WeakMethodTestCase.test_callback_when_object_dead
+test.test_weakref.WeakMethodTestCase.test_equality
+test.test_weakref.WeakMethodTestCase.test_hashing
+test.test_weakref.WeakMethodTestCase.test_method_dead
+test.test_weakref.WeakMethodTestCase.test_no_cycles
+test.test_weakref.WeakMethodTestCase.test_object_dead

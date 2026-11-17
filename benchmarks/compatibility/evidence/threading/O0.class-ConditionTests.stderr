@@ -1,0 +1,62 @@
+test_acquire (test.test_threading.ConditionTests.test_acquire) ... ok
+test_notify (test.test_threading.ConditionTests.test_notify) ... ERROR
+test_timeout (test.test_threading.ConditionTests.test_timeout) ... ERROR
+test_unacquired_notify (test.test_threading.ConditionTests.test_unacquired_notify) ... ok
+test_unacquired_wait (test.test_threading.ConditionTests.test_unacquired_wait) ... ok
+test_waitfor (test.test_threading.ConditionTests.test_waitfor) ... ERROR
+test_waitfor_timeout (test.test_threading.ConditionTests.test_waitfor_timeout) ... ERROR
+======================================================================
+ERROR: test_notify (test.test_threading.ConditionTests.test_notify)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 728, in test_notify
+    self._check_notify(cond)
+    ~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 660, in _check_notify
+    with Bunch(f, N):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_timeout (test.test_threading.ConditionTests.test_timeout)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 745, in test_timeout
+    with Bunch(f, N):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_waitfor (test.test_threading.ConditionTests.test_waitfor)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 767, in test_waitfor
+    with Bunch(f, 1):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_waitfor_timeout (test.test_threading.ConditionTests.test_waitfor_timeout)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 787, in test_waitfor_timeout
+    with Bunch(f, 1):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+----------------------------------------------------------------------
+Ran 7 tests in 2.588s
+
+FAILED (errors=4)

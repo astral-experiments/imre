@@ -1,0 +1,32 @@
+{
+  "source": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_collections.py",
+  "source_sha256": "05cbe2cffea715ba614dee640048134de3e06411f7a987acfe0451348b2ca0bb",
+  "withdrawn_to": "/workspace/scratch/withdrawn/test_collections.py",
+  "runs": {
+    "collections-O0": {
+      "argv": [
+        "strace",
+        "-f",
+        "-e",
+        "trace=execve",
+        "-o",
+        "/workspace/imre-stdlib-data/benchmarks/compatibility/evidence/collections/source-withdrawal/collections-O0.execve",
+        "/workspace/scratch/collections-O0-recovery.exe",
+        "-v",
+        "test.test_collections.TestCounter.test_helper_function"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "IMREFLAGS": "--opt-level 0",
+        "IMRE_PYTHON": "/workspace/scratch/stdlib-sdk/imre"
+      },
+      "exit_code": 0,
+      "timed_out": false,
+      "source_absent_during_run": true,
+      "execve_count": 1,
+      "no_cpython_delegation": true
+    }
+  },
+  "source_restored": true
+}

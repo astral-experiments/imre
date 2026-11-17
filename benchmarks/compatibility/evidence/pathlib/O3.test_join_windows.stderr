@@ -1,0 +1,33 @@
+test_anchor (__main__.LexicalWindowsPathJoinTest.test_anchor) ... ok
+test_div (__main__.LexicalWindowsPathJoinTest.test_div) ... ok
+test_join (__main__.LexicalWindowsPathJoinTest.test_join) ... ok
+test_name (__main__.LexicalWindowsPathJoinTest.test_name) ... ok
+test_parent (__main__.LexicalWindowsPathJoinTest.test_parent) ... ok
+test_parents (__main__.LexicalWindowsPathJoinTest.test_parents) ... ok
+test_parts (__main__.LexicalWindowsPathJoinTest.test_parts) ... ok
+test_stem (__main__.LexicalWindowsPathJoinTest.test_stem) ... ok
+test_str (__main__.LexicalWindowsPathJoinTest.test_str) ... ok
+test_suffix (__main__.LexicalWindowsPathJoinTest.test_suffix) ... ok
+test_suffixes (__main__.LexicalWindowsPathJoinTest.test_suffixes) ... ok
+test_with_name (__main__.LexicalWindowsPathJoinTest.test_with_name) ... ok
+test_with_stem (__main__.LexicalWindowsPathJoinTest.test_with_stem) ... ok
+test_with_suffix (__main__.LexicalWindowsPathJoinTest.test_with_suffix) ... ok
+test_anchor (__main__.PureWindowsPathJoinTest.test_anchor) ... ok
+test_div (__main__.PureWindowsPathJoinTest.test_div) ... ok
+test_join (__main__.PureWindowsPathJoinTest.test_join) ... ok
+test_name (__main__.PureWindowsPathJoinTest.test_name) ... ok
+test_parent (__main__.PureWindowsPathJoinTest.test_parent) ... ok
+test_parents (__main__.PureWindowsPathJoinTest.test_parents) ... ok
+test_parts (__main__.PureWindowsPathJoinTest.test_parts) ... ok
+test_stem (__main__.PureWindowsPathJoinTest.test_stem) ... ok
+test_str (__main__.PureWindowsPathJoinTest.test_str) ... ok
+test_suffix (__main__.PureWindowsPathJoinTest.test_suffix) ... ok
+test_suffixes (__main__.PureWindowsPathJoinTest.test_suffixes) ... ok
+test_with_name (__main__.PureWindowsPathJoinTest.test_with_name) ... ok
+test_with_stem (__main__.PureWindowsPathJoinTest.test_with_stem) ... ok
+test_with_suffix (__main__.PureWindowsPathJoinTest.test_with_suffix) ... ok
+
+----------------------------------------------------------------------
+Ran 28 tests in 0.182s
+
+OK

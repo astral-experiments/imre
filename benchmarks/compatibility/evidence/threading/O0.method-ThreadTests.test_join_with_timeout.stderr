@@ -1,0 +1,5 @@
+test_join_with_timeout (test.test_threading.ThreadTests.test_join_with_timeout) ... ok
+----------------------------------------------------------------------
+Ran 1 test in 0.043s
+
+OK

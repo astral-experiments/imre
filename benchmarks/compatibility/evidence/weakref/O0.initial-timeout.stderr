@@ -1,0 +1,15 @@
+test_all_freed (test.test_weakref.FinalizeTestCase.test_all_freed) ... ok
+test_arg_errors (test.test_weakref.FinalizeTestCase.test_arg_errors) ... ok
+test_atexit (test.test_weakref.FinalizeTestCase.test_atexit) ... Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+FAIL
+test_finalize (test.test_weakref.FinalizeTestCase.test_finalize) ... ok
+test_order (test.test_weakref.FinalizeTestCase.test_order) ... ok
+test_make_weak_keyed_dict_from_dict (test.test_weakref.MappingTestCase.test_make_weak_keyed_dict_from_dict) ... ok
+test_make_weak_keyed_dict_from_weak_keyed_dict (test.test_weakref.MappingTestCase.test_make_weak_keyed_dict_from_weak_keyed_dict) ... ok
+test_make_weak_keyed_dict_repr (test.test_weakref.MappingTestCase.test_make_weak_keyed_dict_repr) ... ok
+test_make_weak_valued_dict_from_dict (test.test_weakref.MappingTestCase.test_make_weak_valued_dict_from_dict) ... ok
+test_make_weak_valued_dict_from_weak_valued_dict (test.test_weakref.MappingTestCase.test_make_weak_valued_dict_from_weak_valued_dict) ... ok
+test_make_weak_valued_dict_misc (test.test_weakref.MappingTestCase.test_make_weak_valued_dict_misc) ... ok
+test_make_weak_valued_dict_repr (test.test_weakref.MappingTestCase.test_make_weak_valued_dict_repr) ... ok
+test_remove_closure (test.test_weakref.MappingTestCase.test_remove_closure) ... skipped 'implementation detail specific to cpython'
+test_threaded_weak_key_dict_copy (test.test_weakref.MappingTestCase.test_threaded_weak_key_dict_copy) ... 

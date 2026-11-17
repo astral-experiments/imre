@@ -1,0 +1,2 @@
+10304 execve("/workspace/scratch/itertools-O0-saved.exe", ["/workspace/scratch/itertools-O0-"..., "test.test_itertools.LengthTransp"...], 0x7ffd494ae140 /* 79 vars */) = 0
+10304 +++ exited with 0 +++

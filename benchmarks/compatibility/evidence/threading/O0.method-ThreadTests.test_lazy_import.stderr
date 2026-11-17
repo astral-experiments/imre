@@ -1,0 +1,5 @@
+test_lazy_import (test.test_threading.ThreadTests.test_lazy_import) ... skipped 'implementation detail specific to cpython'
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+OK (skipped=1)

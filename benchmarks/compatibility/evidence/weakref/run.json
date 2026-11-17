@@ -1,0 +1,1641 @@
+{
+  "imre_revision": "49f0dc2ef78b82692e333252faf71b4fc7730949",
+  "imre_tree": "c91e13458003aaf0d1dde4b6302fef2fcfc429a2",
+  "imre_sha256": "64ba7192b3fe8124f271e81bb5226cade0bb024c5ecbfd85b338bc2a26fa30f8",
+  "runtime_sha256": "c113e721e7550653a42a9419cef5cfbef84b161df113dad2ffb971e29326e37a",
+  "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+  "stock_python_sha256": "090cf853d1b4785355b0b268cb26311f0027d1067bdc866fddd48f0a19868c97",
+  "cpython_source_archive_sha256": "0d838be32b52da92a4293ecd99bc91f7be8b4acc573423665bd1a1428be46e47",
+  "cargo_build": [
+    "cargo",
+    "build",
+    "--offline",
+    "--release",
+    "--locked",
+    "-p",
+    "imre-compiler",
+    "-p",
+    "imre-runtime",
+    "--target-dir",
+    "/workspace/imre/target",
+    "-j",
+    "2"
+  ],
+  "cargo_environment": {
+    "CARGO_HOME": "/workspace/.toolchains/cargo",
+    "RUSTUP_HOME": "/workspace/.toolchains/rustup",
+    "PATH_prefix": "/workspace/.toolchains/cargo/bin"
+  },
+  "historical_raw_originals": 183,
+  "stock_inventory": 183,
+  "stock_ids_equal_frozen_reference": true,
+  "result_evidence": "results.stderr contains exact normal unittest lines; multiline descriptions and doctests are joined into the canonical one-line ID format. result_raw_lines maps each result to its raw stderr line. Large stderr files are excerpted; original raw hashes and sizes are retained.",
+  "runs": {
+    "stock": {
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "TMPDIR": "/workspace/scratch/imre-tmp",
+        "PATH": "/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+      },
+      "timeout_seconds": 120,
+      "argv": [
+        "/workspace/scratch/cpython-build/python",
+        "-B",
+        "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/entry.py"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "seconds": 1.876,
+      "full_version": "Python 3.14.5 (main, Nov 17 2026, 11:15:15) [GCC 14.2.0]",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "959e822bbfd254a33c0fb8858917487bd0a550bfb20d3e6e03e86f080f33ac9e",
+      "stderr_bytes": 15963,
+      "public_stderr": "exact",
+      "parsed_results": 183,
+      "reported_totals": [
+        "183"
+      ],
+      "result_raw_lines": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72,
+        73,
+        74,
+        75,
+        76,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        95,
+        96,
+        97,
+        98,
+        99,
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111,
+        112,
+        113,
+        114,
+        115,
+        116,
+        117,
+        118,
+        119,
+        120,
+        121,
+        122,
+        123,
+        124,
+        125,
+        126,
+        127,
+        128,
+        129,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        137,
+        138,
+        140,
+        141,
+        142,
+        143,
+        144,
+        145,
+        146,
+        147,
+        148,
+        149,
+        150,
+        151,
+        152,
+        153,
+        154,
+        155,
+        156,
+        157,
+        158,
+        159,
+        160,
+        161,
+        162,
+        163,
+        164,
+        165,
+        166,
+        167,
+        168,
+        169,
+        170,
+        171,
+        172,
+        173,
+        174,
+        175,
+        176,
+        177,
+        178,
+        179,
+        180,
+        181,
+        182,
+        183,
+        184,
+        185
+      ]
+    },
+    "O0": {
+      "build": {
+        "argv": [
+          "/workspace/imre/target/release/imre",
+          "build",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/entry-selectors.py",
+          "--module-root",
+          "/workspace/imre-data",
+          "--extension-path",
+          "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "--quiet",
+          "--opt-level",
+          "0",
+          "--runtime",
+          "/workspace/imre/target/release/libimre_runtime.a",
+          "--clang",
+          "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+          "-o",
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "--include-module",
+          "test.test_weakref",
+          "--include-module",
+          "test.test_weakset"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "seconds": 30.06,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exe_sha256": "8a488aefa68812627c08031b982a60d3adeccea6a2c7c21c1cb6f8bb17286c9b"
+      },
+      "initial_attempt": {
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "TMPDIR": "/workspace/scratch/imre-tmp",
+          "IMREFLAGS": "--opt-level 0",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+        },
+        "timeout_seconds": 240,
+        "build": {
+          "argv": [
+            "/workspace/imre/target/release/imre",
+            "build",
+            "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/entry.py",
+            "--module-root",
+            "/workspace/imre-data",
+            "--extension-path",
+            "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "--quiet",
+            "--opt-level",
+            "0",
+            "--runtime",
+            "/workspace/imre/target/release/libimre_runtime.a",
+            "--clang",
+            "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+            "-o",
+            "/workspace/scratch/replay/weakref/O0.exe",
+            "--include-module",
+            "test.test_weakref",
+            "--include-module",
+            "test.test_weakset"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "seconds": 19.507,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "exe_sha256": "d650e53e6568bab9aa79e0110491246657af15a413a9dbc6c0caa02ca27d36c7"
+        },
+        "argv": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "exit_code": -15,
+        "timed_out": false,
+        "seconds": 111.793,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "6ce9cae0374bd00aa8004b4b5b8723afacd1a503e5296a350cbc67139ed69114",
+        "stderr_bytes": 9406,
+        "public_stderr": "exact",
+        "parsed_results": 94,
+        "reported_totals": [],
+        "result_raw_lines": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46,
+          47,
+          48,
+          49,
+          50,
+          51,
+          52,
+          53,
+          54,
+          55,
+          56,
+          57,
+          58,
+          59,
+          60,
+          61,
+          62,
+          63,
+          64,
+          65,
+          66,
+          67,
+          68,
+          69,
+          70,
+          71,
+          72,
+          73,
+          74,
+          75,
+          76,
+          77,
+          78,
+          79,
+          80,
+          81,
+          82,
+          83,
+          84,
+          85,
+          86,
+          87,
+          88,
+          89,
+          90,
+          91,
+          92,
+          93,
+          94
+        ],
+        "reason": "suite exited before reporting a unittest summary"
+      },
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "TMPDIR": "/workspace/scratch/imre-tmp",
+        "IMREFLAGS": "--opt-level 0",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+      },
+      "argv": [
+        "/workspace/scratch/replay/weakref/O0.exe"
+      ],
+      "id_argv": {
+        "test.test_weakref.MappingTestCase.test_weak_keyed_dict_update": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_callbacks_protected": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_threaded_weak_key_dict_deepcopy": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_proxy_bad_next": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_make_weak_keyed_dict_repr": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_proxy_unicode": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_threaded_weak_value_dict_deepcopy": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_callback_attribute_after_deletion": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_weak_keyed_iters": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_hashing": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_cfunction": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_callable_proxy": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_callback_reachable_one_way": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_weak_keyed_dict_setdefault": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_gc_during_ref_creation": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.FinalizeTestCase.test_all_freed": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_proxy_div": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_proxy_hash": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_weak_keyed_len_race": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_shared_ref_without_callback": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_shared_proxy_without_callback": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_threaded_weak_valued_consistency": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_weak_keyed_bad_delitem": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.FinalizeTestCase.test_finalize": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_weak_valued_dict_update": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_threaded_weak_valued_setdefault": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_make_weak_valued_dict_from_dict": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_ref_reuse": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_weak_keys_destroy_while_iterating": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_weak_valued_dict_popitem": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_weak_keyed_len_cycles": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_repr_failure_gh99184": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_threaded_weak_value_dict_copy": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_callback_different_classes": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_weak_keyed_union_operators": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_weak_valued_consistency": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_getweakrefs": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_getweakrefcount": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_callback_in_cycle_resurrection": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ModuleTestCase.test_names": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_weak_values_destroy_while_iterating": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.FinalizeTestCase.test_atexit": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_proxy_bool": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_weak_values": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.FinalizeTestCase.test_arg_errors": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_basic_proxy": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_proxy_reversed": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_newstyle_number_ops": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_ref_created_during_del": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_sf_bug_840829": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_weak_valued_union_operators": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_equality": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_callback_gcs": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_callback_attribute": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_ref_repr": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_make_weak_keyed_dict_from_weak_keyed_dict": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_basic_callback": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_proxy_iter": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_callback_in_cycle": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_proxy_next": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_proxy_ref": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_remove_closure": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_weak_valued_dict_setdefault": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_proxy_repr": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_classes": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_weak_keyed_cascading_deletes": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_ordering": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_make_weak_valued_dict_from_weak_valued_dict": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_constructor_kwargs": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_weak_keys": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_set_callback_attribute": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_make_weak_keyed_dict_from_dict": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_threaded_weak_key_dict_copy": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_no_memory_when_clearing": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_basic_ref": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_proxy_deletion": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_callbacks_on_callback": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.FinalizeTestCase.test_order": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_make_weak_valued_dict_misc": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_weak_valued_iters": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_make_weak_valued_dict_repr": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_proxy_matmul": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_multiple_callbacks": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_threaded_weak_valued_pop": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_weak_valued_len_race": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_multiple_selfref_callbacks": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_weak_valued_len_cycles": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_weak_keyed_delitem": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_init": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_weak_valued_delitem": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_gc_during_proxy_creation": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.MappingTestCase.test_weak_keyed_dict_popitem": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_proxy_reuse": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_proxy_index": [
+          "/workspace/scratch/replay/weakref/O0.exe"
+        ],
+        "test.test_weakref.ReferencesTestCase.test_trashcan_16602": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-01.txt"
+        ],
+        "test.test_weakref.SubclassableWeakrefTestCase.test_subclass_refs": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-02.txt"
+        ],
+        "test.test_weakref.SubclassableWeakrefTestCase.test_subclass_refs_dont_conflate_callbacks": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-02.txt"
+        ],
+        "test.test_weakref.SubclassableWeakrefTestCase.test_subclass_refs_dont_replace_standard_refs": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-02.txt"
+        ],
+        "test.test_weakref.SubclassableWeakrefTestCase.test_subclass_refs_with_cycle": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-02.txt"
+        ],
+        "test.test_weakref.SubclassableWeakrefTestCase.test_subclass_refs_with_slots": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-02.txt"
+        ],
+        "test.test_weakref.WeakKeyDictionaryTestCase.test_bool": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-03.txt"
+        ],
+        "test.test_weakref.WeakKeyDictionaryTestCase.test_constructor": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-03.txt"
+        ],
+        "test.test_weakref.WeakKeyDictionaryTestCase.test_get": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-03.txt"
+        ],
+        "test.test_weakref.WeakKeyDictionaryTestCase.test_getitem": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-03.txt"
+        ],
+        "test.test_weakref.WeakKeyDictionaryTestCase.test_items": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-03.txt"
+        ],
+        "test.test_weakref.WeakKeyDictionaryTestCase.test_keys": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-03.txt"
+        ],
+        "test.test_weakref.WeakKeyDictionaryTestCase.test_len": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-03.txt"
+        ],
+        "test.test_weakref.WeakKeyDictionaryTestCase.test_pop": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-03.txt"
+        ],
+        "test.test_weakref.WeakKeyDictionaryTestCase.test_popitem": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-03.txt"
+        ],
+        "test.test_weakref.WeakKeyDictionaryTestCase.test_read": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-03.txt"
+        ],
+        "test.test_weakref.WeakKeyDictionaryTestCase.test_setdefault": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-03.txt"
+        ],
+        "test.test_weakref.WeakKeyDictionaryTestCase.test_update": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-03.txt"
+        ],
+        "test.test_weakref.WeakKeyDictionaryTestCase.test_values": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-03.txt"
+        ],
+        "test.test_weakref.WeakKeyDictionaryTestCase.test_write": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-03.txt"
+        ],
+        "test.test_weakref.WeakMethodTestCase.test_alive": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-04.txt"
+        ],
+        "test.test_weakref.WeakMethodTestCase.test_callback_when_method_dead": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-04.txt"
+        ],
+        "test.test_weakref.WeakMethodTestCase.test_callback_when_object_dead": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-04.txt"
+        ],
+        "test.test_weakref.WeakMethodTestCase.test_equality": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-04.txt"
+        ],
+        "test.test_weakref.WeakMethodTestCase.test_hashing": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-04.txt"
+        ],
+        "test.test_weakref.WeakMethodTestCase.test_method_dead": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-04.txt"
+        ],
+        "test.test_weakref.WeakMethodTestCase.test_no_cycles": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-04.txt"
+        ],
+        "test.test_weakref.WeakMethodTestCase.test_object_dead": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-04.txt"
+        ],
+        "test.test_weakref.WeakValueDictionaryTestCase.test_bool": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-05.txt"
+        ],
+        "test.test_weakref.WeakValueDictionaryTestCase.test_constructor": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-05.txt"
+        ],
+        "test.test_weakref.WeakValueDictionaryTestCase.test_get": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-05.txt"
+        ],
+        "test.test_weakref.WeakValueDictionaryTestCase.test_getitem": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-05.txt"
+        ],
+        "test.test_weakref.WeakValueDictionaryTestCase.test_items": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-05.txt"
+        ],
+        "test.test_weakref.WeakValueDictionaryTestCase.test_keys": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-05.txt"
+        ],
+        "test.test_weakref.WeakValueDictionaryTestCase.test_len": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-05.txt"
+        ],
+        "test.test_weakref.WeakValueDictionaryTestCase.test_pop": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-05.txt"
+        ],
+        "test.test_weakref.WeakValueDictionaryTestCase.test_popitem": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-05.txt"
+        ],
+        "test.test_weakref.WeakValueDictionaryTestCase.test_read": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-05.txt"
+        ],
+        "test.test_weakref.WeakValueDictionaryTestCase.test_setdefault": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-05.txt"
+        ],
+        "test.test_weakref.WeakValueDictionaryTestCase.test_update": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-05.txt"
+        ],
+        "test.test_weakref.WeakValueDictionaryTestCase.test_values": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-05.txt"
+        ],
+        "test.test_weakref.WeakValueDictionaryTestCase.test_write": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-05.txt"
+        ],
+        "test.test_weakref.__test__.libreftest": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-06.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_abc": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_add": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_and": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_clear": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_constructor_identity": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_contains": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_copy": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_copying": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_difference": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_difference_update": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_discard": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_eq": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_gc": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_gt": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_hash": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_iand": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_init": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_inplace_on_self": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_intersection": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_intersection_update": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_ior": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_isdisjoint": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_isub": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_ixor": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_len": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_len_cycles": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_len_race": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_lt": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_methods": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_ne": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_new_or_init": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_or": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_pop": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_remove": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_repr": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_sub": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_sub_and_super": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_subclass_with_custom_hash": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_symmetric_difference": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_symmetric_difference_update": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_union": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_update": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_update_set": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_weak_destroy_and_mutate_while_iterating": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_weak_destroy_while_iterating": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ],
+        "test.test_weakset.TestWeakSet.test_xor": [
+          "/workspace/scratch/replay/weakref/O0.selector.exe",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+        ]
+      },
+      "id_reason": {
+        "test.test_weakset.TestWeakSet.test_abc": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_add": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_and": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_clear": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_constructor_identity": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_contains": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_copy": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_copying": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_difference": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_difference_update": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_discard": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_eq": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_gc": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_gt": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_hash": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_iand": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_init": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_inplace_on_self": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_intersection": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_intersection_update": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_ior": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_isdisjoint": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_isub": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_ixor": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_len": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_len_cycles": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_len_race": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_lt": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_methods": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_ne": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_new_or_init": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_or": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_pop": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_remove": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_repr": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_sub": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_sub_and_super": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_subclass_with_custom_hash": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_symmetric_difference": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_symmetric_difference_update": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_union": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_update": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_update_set": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_weak_destroy_and_mutate_while_iterating": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_weak_destroy_while_iterating": "selector group timed out before this original reported an outcome",
+        "test.test_weakset.TestWeakSet.test_xor": "selector group timed out before this original reported an outcome",
+        "test.test_weakref.__test__.libreftest": "selector could not collect the original doctest ID; no original result"
+      },
+      "selector_runs": {
+        "trashcan": {
+          "argv": [
+            "/workspace/scratch/replay/weakref/O0.selector.exe",
+            "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-01.txt"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "seconds": 5.189,
+          "timeout_seconds": 30,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "0f12736e8a8fd658334f88b61ab6446d25bec399c4ac55168b8e245d8a0cc86c"
+        },
+        "test.test_weakref.SubclassableWeakrefTestCase": {
+          "argv": [
+            "/workspace/scratch/replay/weakref/O0.selector.exe",
+            "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-02.txt"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "seconds": 1.751,
+          "timeout_seconds": 90,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "9f633429087890f9dd417e1ff7c56c56f510a03b6dfc75869fafc929f6c4d85c"
+        },
+        "test.test_weakref.WeakKeyDictionaryTestCase": {
+          "argv": [
+            "/workspace/scratch/replay/weakref/O0.selector.exe",
+            "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-03.txt"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "seconds": 2.668,
+          "timeout_seconds": 90,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "79daea18a2d4965c90b904fdc326782272c0b9fa77e41fa7e1790f56c7becedc"
+        },
+        "test.test_weakref.WeakMethodTestCase": {
+          "argv": [
+            "/workspace/scratch/replay/weakref/O0.selector.exe",
+            "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-04.txt"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "seconds": 1.59,
+          "timeout_seconds": 90,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "02610f90c45ddff5121a811744c81a7986a174fc9154dc87c6e0313523f24f34"
+        },
+        "test.test_weakref.WeakValueDictionaryTestCase": {
+          "argv": [
+            "/workspace/scratch/replay/weakref/O0.selector.exe",
+            "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-05.txt"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "seconds": 4.913,
+          "timeout_seconds": 90,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "d4d8411dc8509a8dfcf4bc32129767043ef5c2399466c109a9d6accb4363ab74"
+        },
+        "test.test_weakref.__test__": {
+          "argv": [
+            "/workspace/scratch/replay/weakref/O0.selector.exe",
+            "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-06.txt"
+          ],
+          "exit_code": 1,
+          "timed_out": false,
+          "seconds": 1.501,
+          "timeout_seconds": 90,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "06409938db5930e68e21a5a7fa73bf602e4ca6c9622c0124a3cb78ecb56f455f"
+        },
+        "test.test_weakset.TestWeakSet": {
+          "argv": [
+            "/workspace/scratch/replay/weakref/O0.selector.exe",
+            "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/O0.selectors-07.txt"
+          ],
+          "exit_code": -9,
+          "timed_out": true,
+          "seconds": 90.054,
+          "timeout_seconds": 90,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "bf9ec9d16e81eeb9b5b594d497c56a8190810e5fcac728318f348873ea910c37"
+        }
+      },
+      "timeout_seconds": 600,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "cf69659bc96488a0aacb4b3b52a0128b41a46bfc164b9877a8ffb88352d21601",
+      "stderr_bytes": 16155,
+      "public_stderr": "exact",
+      "parsed_results": 162,
+      "reported_totals": [
+        "1",
+        "5",
+        "14",
+        "8",
+        "14"
+      ],
+      "result_raw_lines": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72,
+        73,
+        74,
+        75,
+        76,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        98,
+        107,
+        108,
+        109,
+        110,
+        112,
+        121,
+        122,
+        123,
+        124,
+        125,
+        126,
+        127,
+        128,
+        129,
+        130,
+        131,
+        132,
+        133,
+        134,
+        143,
+        144,
+        145,
+        146,
+        147,
+        148,
+        149,
+        150,
+        159,
+        160,
+        161,
+        162,
+        163,
+        164,
+        165,
+        166,
+        167,
+        168,
+        169,
+        170,
+        171,
+        172,
+        197,
+        198,
+        199,
+        200,
+        201,
+        202,
+        203,
+        204,
+        205,
+        206,
+        207,
+        208,
+        209,
+        210,
+        211,
+        212,
+        213,
+        214,
+        215,
+        216,
+        217,
+        218,
+        219,
+        220,
+        221,
+        222
+      ]
+    },
+    "O3": {
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "TMPDIR": "/workspace/scratch/imre-tmp",
+        "IMREFLAGS": "--opt-level 3",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+      },
+      "timeout_seconds": 600,
+      "build": {
+        "argv": [
+          "/workspace/imre/target/release/imre",
+          "build",
+          "/workspace/imre-data/benchmarks/compatibility/evidence/weakref/entry.py",
+          "--module-root",
+          "/workspace/imre-data",
+          "--extension-path",
+          "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "--quiet",
+          "--opt-level",
+          "3",
+          "--runtime",
+          "/workspace/imre/target/release/libimre_runtime.a",
+          "--clang",
+          "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+          "-o",
+          "/workspace/scratch/replay/weakref/O3.exe",
+          "--include-module",
+          "test.test_weakref",
+          "--include-module",
+          "test.test_weakset"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "seconds": 103.537,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "exe_sha256": "7d3cacaae4ab770ec8245f4894619baed2703f69a12501690ff227ab460368e2"
+      },
+      "argv": [
+        "/workspace/scratch/replay/weakref/O3.exe"
+      ],
+      "exit_code": -15,
+      "timed_out": false,
+      "seconds": 200.966,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "ab02e47deb7f4a03ecd9cc28e662ace13b1706cc2b2882739720ae58feea241d",
+      "stderr_bytes": 14754,
+      "public_stderr": "exact",
+      "parsed_results": 163,
+      "reported_totals": [],
+      "result_raw_lines": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72,
+        73,
+        74,
+        75,
+        76,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        95,
+        96,
+        97,
+        98,
+        99,
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111,
+        112,
+        113,
+        114,
+        115,
+        116,
+        117,
+        118,
+        119,
+        120,
+        121,
+        122,
+        123,
+        124,
+        125,
+        126,
+        127,
+        128,
+        129,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        142,
+        143,
+        144,
+        145,
+        146,
+        147,
+        148,
+        149,
+        150,
+        151,
+        152,
+        153,
+        154,
+        155,
+        156,
+        157,
+        158,
+        159,
+        160,
+        161,
+        162,
+        163,
+        164
+      ],
+      "reason": "suite stopped after conservative-receipt instruction before this original reported an outcome",
+      "non_original_results": [
+        [
+          "doctest.DocTestCase.runTest",
+          1
+        ]
+      ]
+    }
+  },
+  "architecture_controls": {
+    "full": {
+      "receipt": "benchmarks/compatibility/evidence/weakref/architecture-control-full.json",
+      "passed": false,
+      "image_produced": true,
+      "expected_diagnostic": false
+    },
+    "selectors": {
+      "receipt": "benchmarks/compatibility/evidence/weakref/architecture-control-selectors.json",
+      "passed": false,
+      "image_produced": true,
+      "expected_diagnostic": false
+    }
+  },
+  "pair_credit_withheld": 147,
+  "source_withdrawal": "Not performed: the replay removed its positive images, and rebuilding and rerunning full suites was outside the conservative finish instruction.",
+  "native_execution": "Native observations came from the pinned Imre-built image. No stock CPython was used to execute a native launcher; native child interpreter selection was IMRE_PYTHON where configured."
+}

@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_free_threading/__init__.py", line 8, in <module>
+    raise unittest.SkipTest("GIL enabled")
+unittest.SkipTest: GIL enabled

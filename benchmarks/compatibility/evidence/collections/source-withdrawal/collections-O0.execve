@@ -1,0 +1,2 @@
+9419  execve("/workspace/scratch/collections-O0-recovery.exe", ["/workspace/scratch/collections-O"..., "-v", "test.test_collections.TestCounte"...], 0x7ffcbdecf4f8 /* 77 vars */) = 0
+9419  +++ exited with 0 +++

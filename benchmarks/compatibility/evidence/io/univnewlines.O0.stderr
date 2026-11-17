@@ -1,0 +1,39 @@
+test_read (test.test_univnewlines.CTestCRLFNewlines.test_read) ... ok
+test_readline (test.test_univnewlines.CTestCRLFNewlines.test_readline) ... ok
+test_readlines (test.test_univnewlines.CTestCRLFNewlines.test_readlines) ... ok
+test_seek (test.test_univnewlines.CTestCRLFNewlines.test_seek) ... ok
+test_tell (test.test_univnewlines.CTestCRLFNewlines.test_tell) ... ok
+test_read (test.test_univnewlines.CTestCRNewlines.test_read) ... ok
+test_readline (test.test_univnewlines.CTestCRNewlines.test_readline) ... ok
+test_readlines (test.test_univnewlines.CTestCRNewlines.test_readlines) ... ok
+test_seek (test.test_univnewlines.CTestCRNewlines.test_seek) ... ok
+test_read (test.test_univnewlines.CTestLFNewlines.test_read) ... ok
+test_readline (test.test_univnewlines.CTestLFNewlines.test_readline) ... ok
+test_readlines (test.test_univnewlines.CTestLFNewlines.test_readlines) ... ok
+test_seek (test.test_univnewlines.CTestLFNewlines.test_seek) ... ok
+test_read (test.test_univnewlines.CTestMixedNewlines.test_read) ... ok
+test_readline (test.test_univnewlines.CTestMixedNewlines.test_readline) ... ok
+test_readlines (test.test_univnewlines.CTestMixedNewlines.test_readlines) ... ok
+test_seek (test.test_univnewlines.CTestMixedNewlines.test_seek) ... ok
+test_read (test.test_univnewlines.PyTestCRLFNewlines.test_read) ... ok
+test_readline (test.test_univnewlines.PyTestCRLFNewlines.test_readline) ... ok
+test_readlines (test.test_univnewlines.PyTestCRLFNewlines.test_readlines) ... ok
+test_seek (test.test_univnewlines.PyTestCRLFNewlines.test_seek) ... ok
+test_tell (test.test_univnewlines.PyTestCRLFNewlines.test_tell) ... ok
+test_read (test.test_univnewlines.PyTestCRNewlines.test_read) ... ok
+test_readline (test.test_univnewlines.PyTestCRNewlines.test_readline) ... ok
+test_readlines (test.test_univnewlines.PyTestCRNewlines.test_readlines) ... ok
+test_seek (test.test_univnewlines.PyTestCRNewlines.test_seek) ... ok
+test_read (test.test_univnewlines.PyTestLFNewlines.test_read) ... ok
+test_readline (test.test_univnewlines.PyTestLFNewlines.test_readline) ... ok
+test_readlines (test.test_univnewlines.PyTestLFNewlines.test_readlines) ... ok
+test_seek (test.test_univnewlines.PyTestLFNewlines.test_seek) ... ok
+test_read (test.test_univnewlines.PyTestMixedNewlines.test_read) ... ok
+test_readline (test.test_univnewlines.PyTestMixedNewlines.test_readline) ... ok
+test_readlines (test.test_univnewlines.PyTestMixedNewlines.test_readlines) ... ok
+test_seek (test.test_univnewlines.PyTestMixedNewlines.test_seek) ... ok
+
+----------------------------------------------------------------------
+Ran 34 tests in 2.202s
+
+OK

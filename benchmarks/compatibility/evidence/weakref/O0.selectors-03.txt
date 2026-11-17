@@ -1,0 +1,14 @@
+test.test_weakref.WeakKeyDictionaryTestCase.test_bool
+test.test_weakref.WeakKeyDictionaryTestCase.test_constructor
+test.test_weakref.WeakKeyDictionaryTestCase.test_get
+test.test_weakref.WeakKeyDictionaryTestCase.test_getitem
+test.test_weakref.WeakKeyDictionaryTestCase.test_items
+test.test_weakref.WeakKeyDictionaryTestCase.test_keys
+test.test_weakref.WeakKeyDictionaryTestCase.test_len
+test.test_weakref.WeakKeyDictionaryTestCase.test_pop
+test.test_weakref.WeakKeyDictionaryTestCase.test_popitem
+test.test_weakref.WeakKeyDictionaryTestCase.test_read
+test.test_weakref.WeakKeyDictionaryTestCase.test_setdefault
+test.test_weakref.WeakKeyDictionaryTestCase.test_update
+test.test_weakref.WeakKeyDictionaryTestCase.test_values
+test.test_weakref.WeakKeyDictionaryTestCase.test_write

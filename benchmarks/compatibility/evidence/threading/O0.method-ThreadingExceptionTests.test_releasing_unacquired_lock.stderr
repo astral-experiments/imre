@@ -1,0 +1,5 @@
+test_releasing_unacquired_lock (test.test_threading.ThreadingExceptionTests.test_releasing_unacquired_lock) ... ok
+----------------------------------------------------------------------
+Ran 1 test in 0.010s
+
+OK

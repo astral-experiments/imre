@@ -1,0 +1,175 @@
+{
+  "stock": {
+    "argv": [
+      "/workspace/scratch/stdlib-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+      "-B",
+      "-m",
+      "unittest",
+      "-v",
+      "test.test_collections"
+    ],
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1"
+    },
+    "exit_code": 0,
+    "version": "3.14.5",
+    "full_version": "Python 3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]"
+  },
+  "normalization": "One-line results are preserved; two-line unittest descriptions are joined with the preceding exact ID. Raw stderr is retained separately.",
+  "O0": {
+    "argv": [
+      "/workspace/scratch/finite-logs/collections/test_collections/O0.exe",
+      "-v",
+      "test.test_collections"
+    ],
+    "build_argv": [
+      "/workspace/scratch/stdlib-sdk/imre",
+      "build",
+      "/workspace/scratch/finite_unittest.py",
+      "--module-root",
+      "/workspace/scratch",
+      "--extension-path",
+      "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "--quiet",
+      "--opt-level",
+      "0",
+      "--runtime",
+      "/workspace/scratch/stdlib-sdk/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "-o",
+      "/workspace/scratch/finite-logs/collections/test_collections/O0.exe",
+      "--include-module",
+      "test.test_collections"
+    ],
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "TMPDIR": "/workspace/scratch/imre-tmp",
+      "IMRE_PYTHON": "/workspace/scratch/stdlib-sdk/imre",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_CACHE_DIR": "/workspace/scratch/stdlib-native-cache"
+    },
+    "build_exit_code": 0,
+    "exit_code": 1,
+    "reported_total": 116,
+    "matched_original_ids": 101,
+    "unmatched_native_results": [
+      {
+        "id": "doctest.DocTestCase.runTest",
+        "occurrence": 1,
+        "outcome": "fail"
+      },
+      {
+        "id": "doctest.DocTestCase.runTest",
+        "occurrence": 2,
+        "outcome": "fail"
+      },
+      {
+        "id": "doctest.DocTestCase.runTest",
+        "occurrence": 3,
+        "outcome": "fail"
+      },
+      {
+        "id": "doctest.DocTestCase.runTest",
+        "occurrence": 4,
+        "outcome": "fail"
+      },
+      {
+        "id": "doctest.DocTestCase.runTest",
+        "occurrence": 5,
+        "outcome": "fail"
+      },
+      {
+        "id": "doctest.DocTestCase.runTest",
+        "occurrence": 6,
+        "outcome": "fail"
+      },
+      {
+        "id": "doctest.DocTestCase.runTest",
+        "occurrence": 7,
+        "outcome": "fail"
+      },
+      {
+        "id": "doctest.DocTestCase.runTest",
+        "occurrence": 8,
+        "outcome": "fail"
+      },
+      {
+        "id": "doctest.DocTestCase.runTest",
+        "occurrence": 9,
+        "outcome": "fail"
+      },
+      {
+        "id": "doctest.DocTestCase.runTest",
+        "occurrence": 10,
+        "outcome": "fail"
+      },
+      {
+        "id": "doctest.DocTestCase.runTest",
+        "occurrence": 11,
+        "outcome": "fail"
+      },
+      {
+        "id": "doctest.DocTestCase.runTest",
+        "occurrence": 12,
+        "outcome": "fail"
+      },
+      {
+        "id": "doctest.DocTestCase.runTest",
+        "occurrence": 13,
+        "outcome": "fail"
+      },
+      {
+        "id": "doctest.DocTestCase.runTest",
+        "occurrence": 14,
+        "outcome": "fail"
+      },
+      {
+        "id": "doctest.DocTestCase.runTest",
+        "occurrence": 15,
+        "outcome": "fail"
+      }
+    ],
+    "note": "Explicit clang disabled the attempted cache. Generic doctest failures do not establish stock doctest IDs."
+  },
+  "O3": {
+    "argv": [],
+    "build_argv": [
+      "/workspace/scratch/stdlib-sdk/imre",
+      "build",
+      "/workspace/scratch/finite_unittest.py",
+      "--module-root",
+      "/workspace/scratch",
+      "--extension-path",
+      "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "--quiet",
+      "--opt-level",
+      "3",
+      "--runtime",
+      "/workspace/scratch/stdlib-sdk/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "-o",
+      "/workspace/scratch/finite-logs/collections/test_collections/O3.exe",
+      "--include-module",
+      "test.test_collections"
+    ],
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "TMPDIR": "/workspace/scratch/imre-tmp",
+      "IMRE_PYTHON": "/workspace/scratch/stdlib-sdk/imre",
+      "IMREFLAGS": "--opt-level 3",
+      "IMRE_CACHE_DIR": "/workspace/scratch/stdlib-native-cache"
+    },
+    "build_exit_code": null,
+    "interrupted": true,
+    "reason": "Coordinator instructed stopping expensive retests before build completion; no native test outcome."
+  }
+}

@@ -1,0 +1,3 @@
+ Compiling /workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_free_threading/test_itertools_batched.py (-O0)
+   Linking 296 objects compiled
+  Finished /workspace/imre-data/benchmarks/compatibility/evidence/itertools/companion/evidence/itertools/O0.exe in 49.11 s

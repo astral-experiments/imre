@@ -1,0 +1,20 @@
+ Compiling /workspace/scratch/imre-cpython-test-fixtures/Lib/receipt_runner.py (-O3)
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_fileio.py:771:45
+    |
+769 |                 actual = f.read()
+770 |             self.assertEqual(expected, actual)
+771 |             self.assertNotEqual(w.warnings, [])
+    |                                             ^^ Expected `int`, found `list[Unknown]`
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+

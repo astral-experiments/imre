@@ -1,0 +1,48 @@
+
+# selector test.test_unittest.test_assertions
+
+# selector test.test_unittest.test_async_case
+
+# selector test.test_unittest.test_break
+
+# selector test.test_unittest.test_case
+
+# selector test.test_unittest.test_discovery
+
+# selector test.test_unittest.test_functiontestcase
+
+# selector test.test_unittest.test_loader
+
+# selector test.test_unittest.test_program
+
+# selector test.test_unittest.test_result
+
+# selector test.test_unittest.test_runner
+
+# selector test.test_unittest.test_setups
+
+# selector test.test_unittest.test_skipping
+
+# selector test.test_unittest.test_suite
+
+# selector test.test_unittest.test_util
+
+# selector test.test_unittest.testmock.testasync
+
+# selector test.test_unittest.testmock.testcallable
+
+# selector test.test_unittest.testmock.testhelpers
+
+# selector test.test_unittest.testmock.testmagicmethods
+
+# selector test.test_unittest.testmock.testmock
+
+# selector test.test_unittest.testmock.testpatch
+
+# selector test.test_unittest.testmock.testsealable
+
+# selector test.test_unittest.testmock.testsentinel
+
+# selector test.test_unittest.testmock.testthreadingmock
+
+# selector test.test_unittest.testmock.testwith

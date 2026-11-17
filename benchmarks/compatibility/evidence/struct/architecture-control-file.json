@@ -1,0 +1,47 @@
+{
+  "launcher": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_struct.py",
+  "launcher_original_sha256": "979fe89854de8e178d5b4a9b07b035230ea7068f3d80c0f44cd0f407ad7ec04b",
+  "launcher_instrumented_sha256": "d7f221f5273f4e7349ece27956940d3621f360de45200f358061f3bf97b2cb1b",
+  "launcher_change": "prepend import compat_arch_control_struct_file\\n",
+  "first_party_module": "/workspace/scratch/imre-cpython-test-fixtures/Lib/compat_arch_control_struct_file.py",
+  "module_evidence": "benchmarks/compatibility/evidence/struct/architecture-control-file.py",
+  "module_sha256": "14841721c7b84f57d26a6a38a53827c683daf10930b9f297cfc15335bd1257b5",
+  "command": {
+    "argv": [
+      "/workspace/imre/target/release/imre",
+      "build",
+      "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_struct.py",
+      "--module-root",
+      "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "--no-cache",
+      "--opt-level",
+      "0",
+      "--runtime",
+      "/workspace/imre/target/release/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "-o",
+      "/workspace/scratch/compat_arch_control_struct_file.exe",
+      "--include-module",
+      "test.test_struct"
+    ],
+    "exit_code": 0,
+    "timed_out": false,
+    "seconds": 16.188
+  },
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "NO_COLOR": "1",
+    "TMPDIR": "/workspace/scratch/imre-tmp",
+    "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+  },
+  "fresh_no_cache": true,
+  "image_produced": true,
+  "image_sha256": "37fe784c16a16940a47a8c0df00180feda0b558b5ffe9c874d85a272312c1f6a",
+  "expected_diagnostic": false,
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "40d001aba0c1ac3d2ebd3402e367e42104f453b8fd787512820223eb9c8d36a8",
+  "passed": false,
+  "launcher_restored_sha256": "979fe89854de8e178d5b4a9b07b035230ea7068f3d80c0f44cd0f407ad7ec04b"
+}

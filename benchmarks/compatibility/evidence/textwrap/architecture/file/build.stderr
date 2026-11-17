@@ -1,0 +1,2 @@
+ Compiling /workspace/scratch/architecture/direct/Lib/test/test_textwrap.py (-O0)
+/workspace/scratch/architecture/direct/Lib/receipt_arch_control.py:1:15: Imre: expected int, got bool; annotations are enforced contracts

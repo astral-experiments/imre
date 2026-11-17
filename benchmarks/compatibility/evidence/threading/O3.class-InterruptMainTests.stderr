@@ -1,0 +1,36 @@
+test_can_interrupt_tight_loops (test.test_threading.InterruptMainTests.test_can_interrupt_tight_loops) ... ERROR
+test_interrupt_main_invalid_signal (test.test_threading.InterruptMainTests.test_interrupt_main_invalid_signal) ... ok
+test_interrupt_main_mainthread (test.test_threading.InterruptMainTests.test_interrupt_main_mainthread) ... ok
+test_interrupt_main_noerror (test.test_threading.InterruptMainTests.test_interrupt_main_noerror) ... ok
+test_interrupt_main_subthread (test.test_threading.InterruptMainTests.test_interrupt_main_subthread) ... ERROR
+test_interrupt_main_with_signal_handler (test.test_threading.InterruptMainTests.test_interrupt_main_with_signal_handler) ... ok
+======================================================================
+ERROR: test_can_interrupt_tight_loops (test.test_threading.InterruptMainTests.test_can_interrupt_tight_loops)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/threading_helper.py", line 66, in decorator
+    return func(*args)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 2441, in test_can_interrupt_tight_loops
+    t.start()
+    ~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+
+======================================================================
+ERROR: test_interrupt_main_subthread (test.test_threading.InterruptMainTests.test_interrupt_main_subthread)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 2400, in test_interrupt_main_subthread
+    t.start()
+    ~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.231s
+
+FAILED (errors=2)
