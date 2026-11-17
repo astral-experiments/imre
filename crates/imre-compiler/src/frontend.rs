@@ -731,11 +731,6 @@ fn lower_current(
     }
 }
 
-/// The file driver checks this graph again before it can place a registered body.
-fn retries_failed_layout(graph: &SourceGraph) -> bool {
-    graph.layout_hint.get() == crate::modules::LayoutHint::Applied && !graph.reachable_only()
-}
-
 /// A body without its native representation still has checked neighbors. Keep its
 /// original diagnostic for backend selection after their source contracts have run.
 fn checked_region<T>(
@@ -749,12 +744,6 @@ fn checked_region<T>(
         Ok(body) => return Ok(Some(body)),
         Err(failure) => failure,
     };
-    // A failed layout trial is discarded. Finish checking and capture any
-    // registered siblings in the ordinary pass. Reachable key formatters
-    // have their own retry inside the layout trial.
-    if retries_failed_layout(graph) {
-        return Err(failure.terminal_in(graph, module));
-    }
     capture_on_object(&failure);
     // A selected Python class still executes in its imported module. Its layout
     // cannot invalidate the constructor contracts of other declarations.
@@ -806,7 +795,7 @@ fn lower_graph(
     let types = Types::default();
     typing::collect_sites(graph, &types);
     namedtuples::collect(graph, &types)?;
-    let can_bind = graph.command_startup.is_some() && !retries_failed_layout(graph);
+    let can_bind = graph.command_startup.is_some();
     let mut declarations = Classes::collect_layouts(graph, can_bind.then_some(&mut *layout_error))?;
     let (mut classes, mut initializer_defaults) = ClassInfo::new(graph, &types, &mut declarations)?;
     dataclass_values::validate(&classes, graph, &types)?;
@@ -1310,12 +1299,6 @@ fn lower_graph(
                     .map(|value| (value, signature.returns, true)),
             );
         for (annotation, ty, is_return) in annotated {
-            if is_return
-                && graph.layout_hint.get() == crate::modules::LayoutHint::Available
-                && callables::invalid_aggregate(ty, &types)
-            {
-                graph.layout_hint.set(crate::modules::LayoutHint::Disabled);
-            }
             let mismatch = if let Some(definition) =
                 namedtuples::annotation(graph, *module, annotation, &types)
                 && types.namedtuple_definition(ty) != Some(definition)
@@ -1553,8 +1536,7 @@ fn lower_graph(
         if recover_completed.get() {
             register(std::mem::take(completed), owners);
             capture();
-        } else if !retries_failed_layout(graph) {
-            // The ordinary retry clears lexical frames before its source checks.
+        } else {
             std::mem::take(completed).retain_lexical(graph, owners, defer_capture);
         }
     };
@@ -2277,13 +2259,10 @@ fn lower_graph(
         Ok(())
     };
     validate_calls(functions).inspect_err(|reason| {
-        // A failed layout trial goes through ordinary lowering before registration.
-        if graph.layout_hint.get() != crate::modules::LayoutHint::Applied {
-            if reason.kind.is_object() {
-                capture_on_object(&Failure::from(reason.clone()));
-            }
-            place_completed(&mut completed, &owners);
+        if reason.kind.is_object() {
+            capture_on_object(&Failure::from(reason.clone()));
         }
+        place_completed(&mut completed, &owners);
     })?;
     let functions = &mut completed.functions;
     python_frames.push(true); // The program entry runs a Python module body.
@@ -6247,6 +6226,14 @@ impl<'a> Checker<'a> {
         match &value.kind {
             ExprKind::Local(slot) => self.assigned.value_source(*slot),
             ExprKind::Builtin(Builtin::StaticFunction(id), _) => Some(ValueSource::Function(*id)),
+            ExprKind::Call(id, _)
+                if self.types.element(value.ty).is_some()
+                    && self
+                        .inference
+                        .is_some_and(|inference| inference.inferred_return(*id)) =>
+            {
+                Some(ValueSource::InferredListReturn(*id))
+            }
             ExprKind::Bind(_, inner) | ExprKind::Present(inner) | ExprKind::Unwrap(inner) => {
                 self.value_source(inner)
             }
@@ -6282,6 +6269,7 @@ impl<'a> Checker<'a> {
             | ValueSource::PythonCall
             | ValueSource::LiteralStrings(_)
             | ValueSource::InferredList(_)
+            | ValueSource::InferredListReturn(_)
             | ValueSource::InferredListParameter { .. }
             | ValueSource::Function(_)
             | ValueSource::ReboundMethod => None,
@@ -15893,6 +15881,20 @@ impl<'a> Checker<'a> {
                             },
                             declaration,
                         )?
+                    } else if let Some(ValueSource::InferredListReturn(function)) = self.value_source(&receiver)
+                        && let Some(inference) = self.inference
+                        && element != Type::ObjectValue
+                        && self.graph.session.unreachable_range(self.module, call.range())
+                            != Some(ty_python_semantic::types::ide_support::UnreachableKind::Unconditional)
+                    {
+                        let value = self.expr_expected_if(arg, element, |checker, actual| {
+                            actual != element && checker.object_value_supported(element)
+                                && checker.object_value_supported(actual)
+                        })?;
+                        if value.ty != element {
+                            inference.demand_list_return(function, receiver.ty, self.types.list(Type::ObjectValue), None);
+                        }
+                        coerce_item(self, value, element, arg)?
                     } else if let Some(ValueSource::InferredListParameter { function, index }) =
                         self.value_source(&receiver)
                         && let Some(inference) = self.inference
@@ -16971,9 +16973,11 @@ impl<'a> Checker<'a> {
                 || (name == "memoryview"
                     && args.len() == 1
                     && matches!(args[0].ty, Type::Bytes | Type::ByteArray))
-                || args
-                    .iter()
-                    .any(|value| self.types.stores_python_object(value.ty)))
+                || args.iter().any(|value| {
+                    self.types.stores_python_object(value.ty)
+                        || name == "print"
+                            && self.types.element(value.ty) == Some(Type::ObjectValue)
+                }))
         {
             if self.placing_module_call(call) {
                 // The argument operations are already in the checked tail. Insert the callee

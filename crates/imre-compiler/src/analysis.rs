@@ -3679,15 +3679,6 @@ impl Session {
             .to(Arc::new(rules));
     }
 
-    /// Resume layout inference on this same set of parsed files. A cached hint
-    /// database stays quiet; only a cold, completed scopes check changed its rules.
-    pub(crate) fn resume_layout_queries(&mut self) {
-        let rules = DiagnosticRules::get(&self.db);
-        if rules.rules(&self.db).enabled().next().is_some() {
-            rules.set_rules(&mut self.db).to(Arc::default());
-        }
-    }
-
     /// Checks every loaded file, including unused functions and inactive main guards.
     pub(crate) fn check_scopes(
         &mut self,
@@ -3903,20 +3894,20 @@ impl Session {
                     DefinitionKind::Assignment(a)
                         if a.unpack().is_none() && a.target(&parsed).is_name_expr() =>
                     {
-                        let mut annotations = definitions
-                            .declarations_at_binding(definition)
-                            .filter_map(|d| d.declaration.definition())
-                            .filter_map(|d| match d.kind(db) {
+                        let mut declarations = definitions.declarations_at_binding(definition);
+                        let annotation = declarations
+                            .next()
+                            .filter(|_| declarations.next().is_none())
+                            .and_then(|d| d.declaration.definition())
+                            .filter(|d| d.file(db) == file)
+                            .and_then(|d| match d.kind(db) {
                                 DefinitionKind::AnnotatedAssignment(a) => {
                                     Some(a.annotation(&parsed))
                                 }
+                                DefinitionKind::Parameter(p) => p.annotation(&parsed),
                                 _ => None,
                             });
-                        let first = annotations.next();
-                        (
-                            first.filter(|_| annotations.next().is_none()),
-                            Some(a.value(&parsed)),
-                        )
+                        (annotation, Some(a.value(&parsed)))
                     }
                     _ => continue,
                 };
