@@ -216,7 +216,7 @@
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/O3.stderr": "dcb38033e8517947941333501d7f6605729833af677518ff478a1c763277ffb3",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/O3.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/O3.trace": "fd9d729034972c7d27728ab595a184131a2b18d82fe2b0d1c757210459c9cdbb",
-        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/binding.json": "e9acf44af3d05fe33c63565500ed202534028508a0ed47963510e842271f153e",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/binding.json": "ba342b6aac88e3f028aefc1683cc28da919a22873253dd37629e28b9f374404c",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/cargo.raw": "408e4d5b895cd3b965b15ec4f64e0d2f2e70588048ac6d5ea98e98ceaefe808f",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/clean.raw": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/gate-files.raw": "8a9057670f17f1cf679af036513ae8ca88349e355d5e5eb4a88d093979f926f9",
@@ -232,7 +232,13 @@
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/run.json": "1012f00cbea64db7220a24f6beb37584c230fc31cd964587a64b47d00d452666",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/stock.launcher.py": "535636d1237b92f6045e910b2ccfd847bb36059a0053f6b4f5e9ce420925dd0b",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/stock.stderr": "7236723958ab33f3c5775ddc75d00113eb33e005759892c5c27478a02e55f3ca",
-        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/stdlib/base64.jsonl": "db38f15ce7938ae6ef70219b9457aea2637358afc02abcf20b671e45cd47fbe9"
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/stdlib/base64.jsonl": "5d0b1ebbe696f3ac3c5665c4872ca4e6a8245d59e20e4af4537858c2329ec7fd",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/finite.run.json": "1e7a147411d9f388a1ccfec56206b7fbc59f21f46354e114c9a8c3efc1395287",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/finite.stock.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/finite.stock.stderr": "8e1f04ddff35c32ed6942f363ef7f15dba1950057a08642b9f24d4155ee157ca",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/finite.stock.version.raw": "8ec626acd0d3353bb4a7e0f367270a241b0025c9daac7743e9c0b18454c538c4",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/finite.stock.identity.raw": "51c3c471a9f8e08d6c601b15c9db7751b555a6c502527943262ef5d0363c50c6",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/finite.stock.capture.json": "6ced83dbedb14569ee7cab76223a6900e7337b03b6e42effe8be879e0b535dcb"
       }
     }
   },
