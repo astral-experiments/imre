@@ -177,7 +177,8 @@ struct Imports {
     invalid_executable: Option<Box<ModuleSyntaxError>>,
     uses_import_builtin: bool,
     uses_exec: bool,
-    literal_calls: Vec<TextRange>,
+    literal_calls: Vec<literal::LiteralCandidate>,
+    file_write_targets: HashMap<String, PathBuf>,
     has_open_exec: bool,
     computed_import: bool,
     argument_imports: Vec<usize>,
@@ -235,7 +236,7 @@ fn literal_path(expr: &Expr) -> Option<PathBuf> {
 #[derive(Default)]
 struct LiteralImports {
     forest: literal::LiteralForest,
-    pending_roots: Vec<(usize, u32, Vec<TextRange>)>,
+    pending_roots: Vec<(usize, u32, Vec<literal::LiteralCandidate>)>,
     origins: HashMap<usize, (bool, bool, ImportOrigin)>,
     seeded_winners: usize,
     open_exec: HashSet<usize>,
@@ -266,6 +267,39 @@ impl LiteralImports {
 }
 
 impl Imports {
+    /// Select a fixed text-mode Python file opened by a `with` item, such as
+    /// `with open('settings.py', 'w') as stream`. Its native body is tied to this cwd.
+    fn file_write_target(item: &ast::WithItem) -> Option<(String, PathBuf)> {
+        let alias = item.optional_vars.as_ref()?.as_name_expr()?;
+        let call = item.context_expr.as_call_expr()?;
+        if !call
+            .func
+            .as_name_expr()
+            .is_some_and(|name| name.id == "open")
+        {
+            return None;
+        }
+        let file = call
+            .arguments
+            .find_argument_value("file", 0)?
+            .as_string_literal_expr()?;
+        let mode = call
+            .arguments
+            .find_argument_value("mode", 1)?
+            .as_string_literal_expr()?;
+        let file = Path::new(file.value.to_str());
+        if !mode.value.to_str().starts_with('w')
+            || mode.value.to_str().contains('b')
+            || file.extension().is_none_or(|ext| ext != "py")
+        {
+            return None;
+        }
+        Some((
+            alias.id.to_string(),
+            std::env::current_dir().ok()?.join(file),
+        ))
+    }
+
     fn argument_index(&self, expression: &Expr) -> Option<usize> {
         let operand = expression.as_subscript_expr()?;
         let argv = operand.value.as_attribute_expr()?;
@@ -479,6 +513,27 @@ impl<'a> Visitor<'a> for GetterHeader<'_> {
 
 impl<'a> Visitor<'a> for Imports {
     fn visit_stmt(&mut self, s: &'a Stmt) {
+        if let Stmt::With(statement) = s
+            && !statement.is_async
+        {
+            let mut previous = Vec::new();
+            for item in &statement.items {
+                let Some((name, file)) = Self::file_write_target(item) else {
+                    continue;
+                };
+                let old = self.file_write_targets.insert(name.clone(), file);
+                previous.push((name, old));
+            }
+            visitor::walk_stmt(self, s);
+            for (name, old) in previous.into_iter().rev() {
+                if let Some(old) = old {
+                    self.file_write_targets.insert(name, old);
+                } else {
+                    self.file_write_targets.remove(&name);
+                }
+            }
+            return;
+        }
         match s {
             Stmt::Import(imp) => {
                 for alias in &imp.names {
@@ -644,10 +699,27 @@ impl<'a> Visitor<'a> for Imports {
         {
             let source = crate::frontend::exec_source_operand(call);
             if source.is_some() {
-                self.literal_calls.push(call.range());
+                self.literal_calls.push(literal::LiteralCandidate {
+                    call: call.range(),
+                    file: None,
+                });
             }
             // Until binding resolution, a name can still hold arbitrary source.
             self.has_open_exec |= !source.is_some_and(Expr::is_string_literal_expr);
+        }
+        if let Expr::Call(call) = e
+            && let Some(function) = call.func.as_attribute_expr()
+            && function.attr.as_str() == "write"
+            && let Some(receiver) = function.value.as_name_expr()
+            && let Some(file) = self.file_write_targets.get(receiver.id.as_str())
+            && call.arguments.args.len() == 1
+            && call.arguments.keywords.is_empty()
+            && call.arguments.args[0].is_string_literal_expr()
+        {
+            self.literal_calls.push(literal::LiteralCandidate {
+                call: call.range(),
+                file: Some(file.clone()),
+            });
         }
         // A literal __import__ call cannot select a different provider at execution.
         if let Expr::Call(call) = e
@@ -1705,11 +1777,12 @@ pub(crate) fn compile(
                         (&options.launcher_arguments, &[]),
                     );
                     if !options.launcher_arguments.is_empty() && !sites.is_empty() {
-                        literals
-                            .linked_exec
-                            .entry(unit)
-                            .or_default()
-                            .extend(sites.iter().map(|(site, _)| site.call));
+                        literals.linked_exec.entry(unit).or_default().extend(
+                            sites
+                                .iter()
+                                .filter(|(site, _)| site.file.is_none())
+                                .map(|(site, _)| site.call),
+                        );
                     }
                     let names = literals.forest.record_root(unit, sites);
                     imports.push((unit, names));

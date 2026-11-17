@@ -1,7 +1,7 @@
 //! Source-local exec occurrences selected by registered import resolution.
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use ruff_db::{files::File, parsed::ParsedModuleRef};
 use ruff_python_ast::visitor::Visitor;
@@ -18,12 +18,20 @@ pub(crate) struct LiteralSite {
     pub(crate) call: TextRange,
     pub(crate) operand: TextSize,
     pub(crate) optional: bool,
+    pub(crate) file: Option<PathBuf>,
+}
+
+/// A call with a fixed source operand; a write candidate also names its prospective file.
+pub(crate) struct LiteralCandidate {
+    pub(crate) call: TextRange,
+    pub(crate) file: Option<PathBuf>,
 }
 
 pub(super) struct PreparedLiteral {
     pub(super) body: PreparedBody<'static>,
-    /// Present only when the decoded operand differs from the body's normalized source.
+    /// Original operand bytes when source decoding or normalization changed the checked text.
     pub(super) original_text: Option<Box<str>>,
+    pub(super) file: Option<PathBuf>,
 }
 
 /// One source slot's checked operands. Different modules named "<string>" have
@@ -36,7 +44,8 @@ pub(crate) struct LiteralSites {
 impl LiteralSites {
     fn insert(&mut self, site: LiteralSite, body: Result<PreparedLiteral, String>) {
         match body {
-            Ok(body) => {
+            Ok(mut body) => {
+                body.file = site.file;
                 if let Ok(bodies) = self
                     .sites
                     .entry(site.call)
@@ -102,7 +111,7 @@ pub(crate) struct ParsedLiteral {
     pub(crate) parsed: ParsedModuleRef,
     pub(crate) flags: u32,
     imports: Vec<String>,
-    candidates: Vec<TextRange>,
+    candidates: Vec<LiteralCandidate>,
 }
 
 impl ParsedLiteral {
@@ -121,7 +130,7 @@ impl ParsedLiteral {
         imports.visit_body(body);
         Self {
             file,
-            original_text: matches!(text, Cow::Owned(_)).then(|| original.into()),
+            original_text: (text.as_ref() != original).then(|| original.into()),
             text: text.into_owned(),
             parsed,
             flags,
@@ -158,6 +167,7 @@ impl ParsedLiteral {
         Ok(PreparedLiteral {
             body,
             original_text: self.original_text,
+            file: None,
         })
     }
 }

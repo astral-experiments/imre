@@ -2770,6 +2770,22 @@ def main():
             retried = run(exe, "-B", future_caller)
             assert (retried.returncode, retried.stdout, retried.stderr) == (0, b"before\n2 1\n37\n", b""), retried
 
+        # The loader decodes bytes rather than compiling the string passed to write;
+        # identical writes from separate source sites must select the same file body.
+        identity_source = "# coding: latin-1\ntext = 'é'\ndef marker(): return 1\n"
+        identity_caller = root / "source_identity_caller.py"
+        identity_caller.write_text(
+            "try:\n    import source_identity\nexcept SyntaxError:\n    pass\n"
+            + ("with open('source_identity.py', 'w', encoding='utf-8', newline='') as stream:\n"
+               f"    stream.write({identity_source!r})\n") * 2
+            + "try:\n    import source_identity\nexcept SyntaxError:\n    print('stale source')\n"
+            "print(source_identity.text, source_identity.marker.__code__.co_filename == source_identity.__file__)\n"
+        )
+        for exe in (sys.executable, imre):
+            (root / "source_identity.py").write_text("pass\nfrom __future__ import annotations\n")
+            result = run(exe, "-B", identity_caller)
+            assert (result.returncode, result.stdout, result.stderr) == (0, "Ã© True\n".encode(), b""), result
+
         module_pkg = root / "module_pkg"
         module_pkg.mkdir()
         (module_pkg / "__init__.py").write_text("import sys\nassert sys.argv[0] == '-m'\n")

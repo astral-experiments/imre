@@ -1963,8 +1963,19 @@ impl RegisteredFrame<'_, '_> {
         exec: Option<super::sites::CompiledExec>,
     ) -> (&'static str, usize) {
         if let Some(child) = exec {
-            let source = &mut values[0];
             for child in child.alternatives {
+                if let Some(file) = child.file {
+                    self.output.declare(
+                        |d| &mut d.linked_file_source,
+                        "declare i64 @imre_dyn_link_file_source(ptr, ptr, ptr, ptr, i32)\n",
+                    );
+                    self.checked(&format!(
+                        "call i64 @imre_dyn_link_file_source(ptr %ctx, ptr {file}, ptr {}, ptr {}, i32 {})",
+                        child.source, child.entry, child.flags,
+                    ));
+                    continue;
+                }
+                let source = &mut values[0];
                 let name = if child.expression {
                     self.output.declare(
                         |d| &mut d.eval_operand,

@@ -152,6 +152,7 @@ pub(crate) struct CompiledExecAlternative {
     pub(crate) flags: u32,
     pub(crate) source: String,
     pub(crate) expression: bool,
+    pub(crate) file: Option<String>,
 }
 
 #[derive(Default)]

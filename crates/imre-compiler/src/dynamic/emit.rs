@@ -1346,6 +1346,7 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
                     flags: self.source.future_flags,
                     source: output.data(literal.text.as_bytes()),
                     expression: true,
+                    file: None,
                 }],
             };
             return Some(entry.insert(compiled).clone());
@@ -1358,9 +1359,12 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
                 return None;
             }
         };
-        let file = output.data(b"<string>");
         let mut alternatives = Vec::with_capacity(children.len());
         for child in children {
+            let file = match child.file.as_deref() {
+                Some(path) => output.data(path.as_os_str().as_encoded_bytes()),
+                None => output.data(b"<string>"),
+            };
             // A decoded module interns its own constants when its prologue runs.
             let parent_names = std::mem::take(&mut output.interned_identifiers);
             let compiled = child.body.emit(output, self.source.unit, &file);
@@ -1381,6 +1385,7 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
                 flags: child.body.source.future_flags,
                 source: output.data(text.as_bytes()),
                 expression: false,
+                file: child.file.is_some().then_some(file),
             });
         }
         let compiled = sites::CompiledExec { alternatives };

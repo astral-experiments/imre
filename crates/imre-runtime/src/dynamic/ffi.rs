@@ -1009,6 +1009,7 @@ fn context_with_heap<S: Into<crate::Str>>(
         scope_name_slots: Default::default(),
         native_type_dicts: Default::default(),
         sources: HashMap::new(),
+        linked_file_sources: smallvec::SmallVec::new(),
         deque_comparison_repeats: 0,
     };
     ctx.modules = ctx.dict(Vec::new());
@@ -1365,6 +1366,41 @@ pub(super) unsafe extern "C" fn imre_dyn_eval_operand(
         .linked_sources
         .insert(text, LinkedSource::Expression(entry));
     text
+}
+
+/// Make a checked file-write literal available to a later source loader. For example,
+/// a fixed `f.write('value = 1\n')` can supply the body after an import is retried.
+/// The loader still has to match both the filename and every source byte. Registration
+/// is optional and must not prevent the actual write if metadata storage is unavailable.
+///
+/// # Safety
+/// The caller supplies an active context and executable-lifetime path, source and code.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_link_file_source(
+    ctx: *mut Context,
+    file: *const c_char,
+    source: *const c_char,
+    entry: Code,
+    flags: u32,
+) -> Id {
+    // SAFETY: compiler-emitted operands have executable lifetime and are NUL terminated.
+    let (ctx, path, source) = unsafe { (&mut *ctx, native_path(file), cstr(source)) };
+    if ctx.linked_file_sources.iter().any(|candidate| {
+        candidate.path == path && candidate.source == source && candidate.flags == flags
+    }) {
+        return NONE;
+    }
+    if ctx.linked_file_sources.try_reserve(1).is_err() {
+        // Linking is optional metadata; refusing it must not suppress the actual write.
+        return NONE;
+    }
+    ctx.linked_file_sources.push(LinkedFileSource {
+        path,
+        source,
+        entry,
+        flags,
+    });
+    NONE
 }
 
 fn register_source(

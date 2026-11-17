@@ -619,6 +619,24 @@ impl Context {
                 Some(inherited),
             )));
         }
+        if loader {
+            let bytes = self.bytes_like(data)?;
+            let mut matching = self.linked_file_sources.iter().copied().filter(|source| {
+                source.path.as_os_str() == path.as_os_str()
+                    && source.source.as_bytes() == bytes
+                    && inherited & !source.flags == 0
+            });
+            if let Some(source) = matching.next() {
+                if matching.any(|other| other.flags != source.flags) {
+                    return Ok(None);
+                }
+                return Ok(Some(self.native_module_code(
+                    source.entry,
+                    filename,
+                    Some(source.flags),
+                )));
+            }
+        }
         let mut entries = self.sources.values().flatten().filter_map(|source| {
             if source.path.as_os_str() != path.as_os_str()
                 && !matches!(source.code, ModuleInitializer::File { declared_open_path: Some(alias), .. } if alias.as_os_str() == path.as_os_str())
