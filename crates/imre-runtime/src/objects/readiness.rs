@@ -191,8 +191,8 @@ fn syscall_result(count: i32) -> io::Result<i32> {
     }
 }
 
-// Keep the original deadline across EINTR. A zero timeout still observes readiness.
-fn wait<T: Default, E: From<Error>>(
+/// Keep the original deadline across EINTR. A zero timeout still observes readiness.
+pub(crate) fn wait<T: Default, E: From<Error>>(
     timeout: Option<Duration>,
     mut check_signals: impl FnMut() -> std::result::Result<(), E>,
     mut call: impl FnMut(Option<Duration>) -> io::Result<T>,

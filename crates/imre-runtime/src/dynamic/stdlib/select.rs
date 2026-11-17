@@ -1,5 +1,5 @@
 //! Boxed POSIX readiness shares the descriptor sets and poll registrations with typed calls.
-use super::super::{calls::RegisteredCall, copy_ids};
+use super::super::{calls::RegisteredCall, copy_ids, value::ParkedExecution};
 use super::{Context, Error, Id, NONE, Result, Value};
 use crate::objects::{
     errno_error,
@@ -122,10 +122,29 @@ pub(in crate::dynamic) unsafe fn run(context: *mut Context, args: &[Id]) -> Resu
     let mut inputs = [Vec::new(), Vec::new(), Vec::new()];
     // SAFETY: the caller owns the context. This borrow ends before the readiness wait.
     let (mut sets, timeout) = descriptor_sets(unsafe { &mut *context }, args, &mut inputs)?;
-    let any_ready = sets.wait(timeout, || {
-        // SAFETY: only the rooted operands and native fd sets survive through signal delivery.
-        unsafe { Context::dispatch_pending_signals(context) }
-    })?;
+    let ready = readiness::wait(
+        timeout,
+        || {
+            // SAFETY: the syscall has resumed the original execution before signal delivery.
+            unsafe { Context::dispatch_pending_signals(context) }
+        },
+        |remaining| {
+            let interests = sets;
+            // SAFETY: only copied native descriptor sets and the remaining duration enter the
+            // parked syscall. Its io::Error captures errno before the execution is restored.
+            match unsafe { ParkedExecution::wait(context, move || interests.wait_once(remaining)) }
+            {
+                Ok(result) => result.map(|ready| ready.map(Ok)),
+                // A parking allocation failure is terminal, rather than an errno or EINTR.
+                Err(error) => Ok(Some(Err(error))),
+            }
+        },
+    )?
+    .transpose()?;
+    let any_ready = ready.is_some();
+    if let Some(ready) = ready {
+        sets = ready;
+    }
     // SAFETY: the native wait and any registered signal callbacks have finished.
     let ctx = unsafe { &mut *context };
     let mut lists = Vec::new();
@@ -239,4 +258,60 @@ pub(super) fn call(
             .map_err(|_| Error::new("MemoryError", ""))?;
     }
     Ok(NONE)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dynamic::ffi;
+    use std::{
+        io::Write,
+        os::{fd::AsRawFd, unix::net::UnixStream},
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+        thread,
+        time::{Duration, Instant},
+    };
+
+    #[test]
+    fn boxed_select_parks_only_while_the_syscall_is_waiting() {
+        let mut ctx = ffi::new_context(
+            serde_json::json!({"paths": []}),
+            std::iter::empty::<String>(),
+        );
+        let parked = Arc::new(AtomicUsize::new(0));
+        ctx.heap.parked_count_probe = Some(Arc::clone(&parked));
+        let (reader, mut writer) = UnixStream::pair().unwrap();
+        let descriptor = ctx.int(i64::from(reader.as_raw_fd()));
+        let reads = ctx.alloc(Value::List(vec![descriptor]));
+        let writes = ctx.alloc(Value::List(Vec::new()));
+        let errors = ctx.alloc(Value::List(Vec::new()));
+        let timeout = ctx.int(2);
+        for id in [reads, writes, errors, timeout] {
+            ctx.heap.keep(id);
+        }
+        let probe = Arc::clone(&parked);
+        let peer = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(1);
+            while probe.load(Ordering::Acquire) == 0 && Instant::now() < deadline {
+                thread::yield_now();
+            }
+            let observed = probe.load(Ordering::Acquire);
+            writer.write_all(b"x").unwrap();
+            observed
+        });
+        // SAFETY: the context and argument roots belong to this execution throughout the call.
+        let result = unsafe { run(&raw mut ctx, &[reads, writes, errors, timeout]) }.unwrap();
+        assert_eq!(peer.join().unwrap(), 1);
+        assert_eq!(parked.load(Ordering::Acquire), 0);
+        let Value::Tuple(groups) = ctx.heap.get(result) else {
+            panic!("select tuple")
+        };
+        let Value::List(ready) = ctx.heap.get(groups[0]) else {
+            panic!("ready list")
+        };
+        assert_eq!(ready, &[descriptor]);
+    }
 }
