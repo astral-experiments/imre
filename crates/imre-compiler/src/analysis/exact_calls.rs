@@ -10,7 +10,10 @@ use ruff_python_ast::{
 };
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use std::path::Path;
-use ty_python_core::{SemanticIndex, definition::DefinitionKind};
+use ty_python_core::{
+    SemanticIndex,
+    definition::{Definition, DefinitionKind},
+};
 use ty_python_semantic::{
     Db, HasType, SemanticModel,
     types::{Type, TypeDefinition, ide_support::ImportAliasResolution},
@@ -62,7 +65,7 @@ struct Calls<'db, 'a> {
     path: &'a Path,
 }
 
-impl Calls<'_, '_> {
+impl<'db> Calls<'db, '_> {
     fn excluded(&self, expr: &Expr) -> bool {
         let range = expr.range();
         self.skipped
@@ -82,36 +85,103 @@ impl Calls<'_, '_> {
                 .ty_errors
                 .iter()
                 .any(|error| error.range.is_some_and(|r| expr.range().contains_range(r)))
+            || expr
+                .as_call_expr()
+                .is_some_and(|call| self.cannot_return(&self.model, call, 0))
+    }
+
+    /// Visit an unbound call in Python evaluation order. An exact nonreturn proof
+    /// is required to stop before a later operand; for example,
+    /// `print(fail(), take(True))` never reaches `take` when `fail` cannot return.
+    fn visit_unbound_call(&mut self, call: &ExprCall) {
+        let before = self.errors.len();
+        self.visit_expr(&call.func);
+        if self.failed(&call.func, before) {
+            return;
+        }
+        for argument in call.arguments.iter_source_order() {
+            let value = argument.value();
+            let before = self.errors.len();
+            self.visit_expr(value);
+            if self.failed(value, before) {
+                return;
+            }
+        }
+    }
+
+    /// Resolve only an unchanged, uniquely selected first-party source convention.
+    fn source_target(
+        &self,
+        model: &SemanticModel<'db>,
+        call: &ExprCall,
+    ) -> Option<Definition<'db>> {
+        let db = &self.session.db;
+        let name = call.func.as_name_expr()?;
+        let definition =
+            resolved_name_definition(model, name, ImportAliasResolution::ResolveAliases)?;
+        self.declarations
+            .call_shapes(db)
+            .binary_search(&definition)
+            .ok()?;
+        let callee @ Type::FunctionLiteral(_) = call.func.inferred_type(model)? else {
+            return None;
+        };
+        (matches!(callee.definition(db, &model.program_environment()), Some(TypeDefinition::Function(selected)) if selected == definition)
+            && !changed_module_binding(db, model, call, name, definition))
+        .then_some(definition)
+    }
+
+    /// Prove a bounded chain of undecorated source functions cannot return. A relay
+    /// must consist solely of `return <selected call>`; for example, `indirect() ->
+    /// int: return stop()` cannot supply an argument when `stop` always raises.
+    fn cannot_return(&self, model: &SemanticModel<'db>, call: &ExprCall, depth: usize) -> bool {
+        if depth == 16 {
+            return false;
+        }
+        let db = &self.session.db;
+        let Some(definition) = self.source_target(model, call) else {
+            return false;
+        };
+        if self
+            .declarations
+            .program_files(db)
+            .iter()
+            .any(|&file| function_layout_writes(db, file).contains(&definition))
+        {
+            return false;
+        }
+        let DefinitionKind::Function(function) = definition.kind(db) else {
+            return false;
+        };
+        let owner = definition.file(db);
+        let Some(module) = self.session.files.iter().position(|&file| file == owner) else {
+            return false;
+        };
+        let parsed = self.session.parsed(owner);
+        let function = function.node(&parsed);
+        if function.is_async || !function.decorator_list.is_empty() {
+            return false;
+        }
+        if self.session.nonreturning_function(module, function) {
+            return true;
+        }
+        let [Stmt::Return(ret)] = function.body.as_slice() else {
+            return false;
+        };
+        let Some(Expr::Call(next)) = ret.value.as_deref() else {
+            return false;
+        };
+        let owner_model = SemanticModel::new(db, db.program_file(owner));
+        self.cannot_return(&owner_model, next, depth + 1)
     }
 
     /// Return whether the call has a uniquely selected, fully bound source convention.
     /// Supplied operands are visited and checked in the shared binder's evaluation order.
     fn check_call(&mut self, call: &ExprCall) -> bool {
         let db = &self.session.db;
-        let Some(name) = call.func.as_name_expr() else {
+        let Some(definition) = self.source_target(&self.model, call) else {
             return false;
         };
-        let Some(definition) =
-            resolved_name_definition(&self.model, name, ImportAliasResolution::ResolveAliases)
-        else {
-            return false;
-        };
-        if self
-            .declarations
-            .call_shapes(db)
-            .binary_search(&definition)
-            .is_err()
-        {
-            return false;
-        }
-        let Some(callee @ Type::FunctionLiteral(_)) = call.func.inferred_type(&self.model) else {
-            return false;
-        };
-        if !matches!(callee.definition(db, &self.model.program_environment()), Some(TypeDefinition::Function(selected)) if selected == definition)
-            || changed_module_binding(db, &self.model, call, name, definition)
-        {
-            return false;
-        }
         let DefinitionKind::Function(function) = definition.kind(db) else {
             return false;
         };
@@ -179,9 +249,10 @@ impl<'ast> Visitor<'ast> for Calls<'_, '_> {
         if self.excluded(expr) {
             return;
         }
-        if let Expr::Call(call) = expr
-            && self.check_call(call)
-        {
+        if let Expr::Call(call) = expr {
+            if !self.check_call(call) {
+                self.visit_unbound_call(call);
+            }
             return;
         }
         visitor::walk_expr(self, expr);
