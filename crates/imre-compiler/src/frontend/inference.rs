@@ -1841,16 +1841,21 @@ impl Inference {
                     .iter()
                     .position(|report| !report.kind.is_representation())
                 {
-                    // An earlier module error can leave a generator's arguments unsolved.
-                    // Named startup still needs its suspended body, with the lexical Python binder.
-                    if graph.registered_startup {
+                    let unresolved = if graph.registered_startup {
                         let pending = self.pending.borrow();
-                        for (owner, signature) in signatures.iter() {
-                            if pending[signature.id].params.iter().any(Option::is_none) {
-                                self.source_checks.unresolved.push(*owner);
-                            }
-                        }
-                    }
+                        signatures
+                            .iter()
+                            .filter_map(|(owner, signature)| {
+                                pending[signature.id]
+                                    .params
+                                    .iter()
+                                    .any(Option::is_none)
+                                    .then_some(*owner)
+                            })
+                            .collect::<Vec<_>>()
+                    } else {
+                        Vec::new()
+                    };
                     if (!checked_bodies.is_empty() || !staged_returns.is_empty())
                         && !retries_failed_layout(graph)
                     {
@@ -1874,6 +1879,10 @@ impl Inference {
                                 .map(|slot| (slot, local_returns.remove(&slot)))
                                 .filter(resolved),
                         );
+                    }
+                    // Retain unresolved generators after capturing the settled bodies.
+                    for owner in unresolved {
+                        let _ = registered::retain_generator(graph, owner, &self.source_checks);
                     }
                     let primary = reports.remove(index);
                     return Err(primary.with_following(reports.into_iter()));
