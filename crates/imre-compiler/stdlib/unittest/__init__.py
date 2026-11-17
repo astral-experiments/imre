@@ -46,7 +46,7 @@ def _inequality_message(first: str, second: str) -> str:
     return left + " != " + right
 
 
-def _safe_repr(value):
+def _safe_repr(value: object) -> str:
     try:
         return repr(value)
     except Exception:
@@ -195,7 +195,7 @@ class TestCase(_SuiteMember):
     def id(self) -> str:
         return self.__class__.__module__ + "." + self.__class__.__qualname__ + "." + self._testMethodName
 
-    def _formatMessage(self, msg, standardMsg):
+    def _formatMessage(self, msg: object, standardMsg: object) -> object:
         short = not self.longMessage
         if msg is None:
             return standardMsg
@@ -206,7 +206,7 @@ class TestCase(_SuiteMember):
         except UnicodeDecodeError:
             return f"{_safe_repr(standardMsg)!s} : {_safe_repr(msg)!s}"
 
-    def fail(self, msg: str | None = None) -> None:
+    def fail(self, msg: object = None) -> None:
         if msg is None:
             raise self.failureException("None")
         raise self.failureException(msg)
@@ -453,9 +453,10 @@ class TestCase(_SuiteMember):
         if (member in container) != expected:
             self._failMembership(repr(member), repr(container), msg, expected)
 
-    def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
-        if first == second:
-            raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    def assertNotEqual(self, first: object, second: object, msg: object = None) -> None:
+        if not first != second:
+            standardMsg = f"{_safe_repr(first)!s} == {_safe_repr(second)!s}"
+            raise self.failureException(self._formatMessage(msg, standardMsg))
 
     def assertHasAttr(self, obj: ModuleType, name: str, msg: str | None = None) -> None:
         if not hasattr(obj, name):
@@ -484,8 +485,8 @@ class TestCase(_SuiteMember):
 def _baseAssertEqual(self: TestCase, first: str | bytes, second: str | bytes, msg: str | None = None) -> None:
     if not first == second:
         difference = _inequality_message(_safe_repr(first), _safe_repr(second))
-        msg = self._formatMessage(msg, difference)
-        raise self.failureException(msg)
+        formatted = self._formatMessage(msg, difference)
+        raise self.failureException(formatted)
 
 
 def _validateCaseMethod(case: TestCase, methodName: str) -> None:
