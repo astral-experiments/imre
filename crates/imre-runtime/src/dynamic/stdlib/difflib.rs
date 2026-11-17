@@ -29,9 +29,6 @@ pub(super) unsafe extern "C" fn imre_dyn_difflib_chain_b(
 
 /// Recognize an ordinary exact SequenceMatcher instance whose source globals and attributes need no hooks.
 fn receiver(ctx: &Context, scope: Id) -> Option<Id> {
-    if !unobserved_checkpoints(ctx) {
-        return None;
-    }
     let root = ctx.root_scope(scope);
     let globals = ctx.scope_data(root);
     if globals.module != "difflib" || globals.exec_globals.is_some() {
@@ -84,22 +81,18 @@ fn chain_b(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     let Some(receiver) = receiver(ctx, scope) else {
         return Ok(None);
     };
-    let root = ctx.root_scope(scope);
-    let Some(builtins) = ctx.source_builtins else {
+    let Some(isjunk) = ctx.plain_instance_field(receiver, "isjunk") else {
         return Ok(None);
     };
-    if ["enumerate", "set", "len"].iter().any(|name| {
-        ctx.scope_name(root, name).is_some()
-            || ctx.dict_named_item(builtins, name) != ctx.builtins.get(*name).copied()
-    }) {
+    if isjunk != NONE {
         return Ok(None);
     }
     let Some(b) = ctx.plain_instance_field(receiver, "b") else {
         return Ok(None);
     };
-    let Some(isjunk) = ctx.plain_instance_field(receiver, "isjunk") else {
+    if !matches!(ctx.heap.get(b), Value::Str(text) if text.is_ascii()) {
         return Ok(None);
-    };
+    }
     let Some(autojunk) = ctx.plain_instance_field(receiver, "autojunk") else {
         return Ok(None);
     };
@@ -107,9 +100,6 @@ fn chain_b(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
         Value::Bool(value) => *value,
         _ => return Ok(None),
     };
-    if isjunk != NONE {
-        return Ok(None);
-    }
     let Value::Instance { class, .. } = ctx.heap.get(receiver) else {
         unreachable!()
     };
@@ -117,6 +107,17 @@ fn chain_b(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
         ctx.raw_instance_field(receiver, name).is_some() || ctx.class_attr(*class, name).is_some()
     }) {
         // Replacing prior public values can run finalizers at each source assignment.
+        return Ok(None);
+    }
+    let root = ctx.root_scope(scope);
+    let Some(builtins) = ctx.source_builtins else {
+        return Ok(None);
+    };
+    if ["enumerate", "set", "len"].iter().any(|name| {
+        ctx.scope_name(root, name).is_some()
+            || ctx.dict_named_item(builtins, name) != ctx.builtins.get(*name).copied()
+    }) || !unobserved_checkpoints(ctx)
+    {
         return Ok(None);
     }
 
@@ -130,9 +131,7 @@ fn chain_b(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
             return Ok(None);
         };
         let bytes = b.as_bytes();
-        if !bytes.is_ascii() {
-            return Ok(None);
-        }
+        debug_assert!(bytes.is_ascii());
         for &byte in bytes {
             if counts[byte as usize] == 0 {
                 order[order_len] = byte;
