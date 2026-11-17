@@ -8135,6 +8135,13 @@ impl<'a> Checker<'a> {
                     }
                     if let ast::Expr::Attribute(attr) = target {
                         let receiver = self.expr(&attr.value)?;
+                        if receiver.ty == Type::PythonObject
+                            || matches!(self.resolve(&attr.value), Some(Binding::Module(_)))
+                        {
+                            return Err(
+                                self.scoped_builtin_error("deleting an object attribute", attr)
+                            );
+                        }
                         if let Some(name) = self.boxed_float_attribute(attr, receiver.ty) {
                             return Err(self.scoped_builtin_error(name, attr));
                         }

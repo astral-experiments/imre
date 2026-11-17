@@ -2211,6 +2211,33 @@ ACCEPTED = {
     },
 }
 
+# Executing code whose source has no proven linked body is a checked refusal.
+# Keep the complete original cases as rejections and compare their loader operations
+# separately without attempting that execution.
+for _name in ("source_loader_external_code", "loader_source_to_code"):
+    REJECTED[f"{_name}_unlinked_exec"] = (ACCEPTED[_name], "without a linked body for its source")
+
+_external = ACCEPTED["source_loader_external_code"]["main.py"]
+_external = _external.replace(
+    'namespace = {}\n    exec(loader.get_code(local_body.__name__), namespace)\n    assert namespace["value"] == expected',
+    'code = loader.get_code(local_body.__name__)\n    assert code.co_filename == origin',
+).replace(
+    'namespace = {}\n        exec(loader.get_code(local_body.__name__), namespace)\n        assert namespace["value"] == expected',
+    'code = loader.get_code(local_body.__name__)\n        assert code.co_filename == origin',
+).replace(
+    'namespace = {}\nexec(convert(loader, original, origin), namespace)',
+    'code = convert(loader, original, origin)',
+).replace('assert namespace["value"] == 41', 'assert code.co_filename == origin')
+_external = _external[:_external.index("try:\n    exec(changed, namespace)")] + "assert changed.co_name == '<module>'\n"
+ACCEPTED["source_loader_external_code"] = {
+    **ACCEPTED["source_loader_external_code"], "main.py": _external,
+}
+_loader = ACCEPTED["loader_source_to_code"]["main.py"].replace(
+    "    scope = {}\n    exec(code, scope)\n    print(code.co_filename, scope['value'])",
+    "    print(code.co_filename, code.co_name)",
+)
+ACCEPTED["loader_source_to_code"] = {"main.py": _loader}
+
 
 def run(command: list[str], cwd: Path, *, timeout: int = 60) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, cwd=cwd, text=True, capture_output=True, timeout=timeout,
