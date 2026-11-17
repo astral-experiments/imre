@@ -182,12 +182,12 @@ An observed intersection means the same original passed stock, O0 and O3; frozen
 <!-- current-compatibility-snapshot:start -->
 ### Current compatibility snapshot
 
-Revision `8571ca2dbecabf8d7863c369dc776611fd57d8ad` · **2,573 validated receipts**, **710 verified pairs**.
+Revision `8571ca2dbecabf8d7863c369dc776611fd57d8ad` · **2,614 validated receipts**, **745 verified pairs**.
 
 | Module | Raw originals | Verified pairs / status |
 | --- | ---: | --- |
 | `argparse` | 1,893 | 45 verified |
-| `base64` | 41 | pending (41 staged) |
+| `base64` | 41 | 35 verified |
 | `configparser` | 344 | 339 verified |
 | `csv` | 128 | 122 verified |
 | `fnmatch` | 24 | 24 verified |

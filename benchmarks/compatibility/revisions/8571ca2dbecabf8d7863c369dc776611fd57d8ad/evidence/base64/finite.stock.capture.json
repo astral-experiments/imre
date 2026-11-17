@@ -1,0 +1,34 @@
+{
+  "argv": [
+    "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "-B",
+    "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/launcher.py"
+  ],
+  "cwd": "/workspace/scratch/refresh-8571-empty",
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+  },
+  "timeout_seconds": 90,
+  "exit_code": 0,
+  "timed_out": false,
+  "seconds": 0.49050178800098365,
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "8e1f04ddff35c32ed6942f363ef7f15dba1950057a08642b9f24d4155ee157ca",
+  "launcher_sha256": "b78f27cb20e4cee95caf06194c057438ee0cc93f559580304d6ba27eec605b0a",
+  "python_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+  "version": "Python 3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+  "source_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "source_archive_sha256": "681d2ca1cd1e937fc5b27b43078ca39ac55068ed0fe3577c70e92fac4fb40ba3",
+  "collection": 36,
+  "inventory_complete": true,
+  "summary": {
+    "event": "summary",
+    "run": 36,
+    "successful": true
+  },
+  "cpython_tarball_sha256": "0d838be32b52da92a4293ecd99bc91f7be8b4acc573423665bd1a1428be46e47"
+}
