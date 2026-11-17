@@ -1,0 +1,73 @@
+{
+  "family": "base64",
+  "gate_passed": true,
+  "expected_diagnostic": true,
+  "image_produced": false,
+  "image_sha256": null,
+  "command": [
+    "/workspace/imre/target/release/imre",
+    "build",
+    "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/launcher.py",
+    "--module-root",
+    "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64",
+    "--extension-path",
+    "/workspace/scratch/refresh-8571-fixtures/Lib",
+    "--no-cache",
+    "--quiet",
+    "--opt-level",
+    "0",
+    "--runtime",
+    "/workspace/imre/target/release/libimre_runtime.a",
+    "--clang",
+    "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+    "--include-module",
+    "test.test_base64",
+    "-o",
+    "/workspace/scratch/refresh-8571-images/base64-gate.exe"
+  ],
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/refresh-8571-fixtures/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+  },
+  "exit_code": 1,
+  "timed_out": false,
+  "timeout_seconds": 90,
+  "seconds": 0.309,
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "53a1d551305042bc6606bad1df683343aa39f28f5f553bddd8a61e3e09acd4b7",
+  "launcher_sha256": "3270dc720e25b54ac7466a283f67e1a800e273b344cff02bbde2d66b36a93349",
+  "first_party_module": "/workspace/imre-refresh/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/gate_control_base64.py",
+  "first_party_module_sha256": "14841721c7b84f57d26a6a38a53827c683daf10930b9f297cfc15335bd1257b5",
+  "build": {
+    "head": "8571ca2dbecabf8d7863c369dc776611fd57d8ad",
+    "tree": "c6ff919e0ddeb2c23265857f299f785034e5b4bc",
+    "clean": true,
+    "cli_sha256": "b07018ea9eb8e9af234307899c33a6b14e498ba5fded97a26a582a9e2ad9be9e",
+    "runtime_sha256": "6c71c26ec0f9d9a34c56a0b82226574243c189c2854f689ef127b8d92e481fb5",
+    "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+    "command": [
+      "cargo",
+      "build",
+      "--offline",
+      "--release",
+      "--locked",
+      "-p",
+      "imre-compiler",
+      "-p",
+      "imre-runtime",
+      "--target-dir",
+      "/workspace/imre/target",
+      "-j",
+      "2"
+    ],
+    "environment": {
+      "CARGO_HOME": "/workspace/.toolchains/cargo",
+      "RUSTUP_HOME": "/workspace/.toolchains/rustup",
+      "PATH_prefix": "/workspace/.toolchains/cargo/bin"
+    },
+    "result": "    Finished `release` profile [optimized + debuginfo] target(s) in 5m 12s"
+  }
+}

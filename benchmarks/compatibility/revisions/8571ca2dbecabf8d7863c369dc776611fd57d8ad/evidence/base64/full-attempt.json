@@ -1,0 +1,19 @@
+{
+  "status": "stopped before an original result could be archived",
+  "reason": "full native suite reached TestMain and launched a child interpreter, contrary to the no-child-exec control",
+  "image": "/workspace/scratch/refresh-8571-images/base64-full-attempt-O0.exe",
+  "image_sha256": "a3de815445479e8d14c3f7901e4ebe490165f68e6007e7d571318c9165b5de2b",
+  "observed_child_argv": [
+    "/workspace/imre/target/release/imre",
+    "-X",
+    "faulthandler",
+    "-I",
+    "-m",
+    "base64",
+    "-d",
+    "@test_21103_tmp\u00e6"
+  ],
+  "per_id_results_used": false,
+  "stock_launcher_archive": "stock.launcher.py",
+  "stock_launcher_sha256": "535636d1237b92f6045e910b2ccfd847bb36059a0053f6b4f5e9ce420925dd0b"
+}
