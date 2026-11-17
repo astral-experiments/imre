@@ -939,8 +939,6 @@ pub(super) fn new_context<S: Into<crate::Str>>(
     let interpreter = Arc::new(InterpreterState {
         layout: stdlib::interpreter_layout(&config, &executable),
         executable,
-        helper_executable: launcher
-            .map_or_else(crate::objects::python_executable_text, str::to_owned),
         config: Arc::new(config),
         worker_count: AtomicUsize::new(0),
         socket_default_timeout: Mutex::new(None),

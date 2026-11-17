@@ -238,7 +238,6 @@ struct ExposedClassBody {
 struct InterpreterState {
     config: Arc<serde_json::Value>,
     executable: PathBuf,
-    helper_executable: String,
     layout: std::result::Result<imre_ast::layout::InterpreterLayout, stdlib::LayoutError>,
     worker_count: AtomicUsize,
     socket_default_timeout: Mutex<Option<Duration>>,

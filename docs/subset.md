@@ -1034,12 +1034,21 @@ including `check_returncode()`, sees each field's exact `str`, `bytes`, or
 `None` type. If a user call, explicit raise or different mode can supply the
 exception, the field type includes the representations used by the program.
 
-For programs that explicitly launch Python helpers, `sys.executable` is the
-absolute interpreter path selected by `IMRE_PYTHON`, or the first executable
-`python3` on `PATH`. It is an empty string if neither is available. The
-native program itself has no Python runtime dependency. `sysconfig.get_path("scripts")`
-locates the console scripts directory for that interpreter on standard POSIX
-installations and in virtual environments. `os.path.exists(path)` checks
+In a saved native program, `sys.executable` is the absolute path to the running
+native image, or an empty string if the path cannot be obtained or represented
+as UTF-8. It does not depend on imports, child calls, `PATH`, or `IMRE_PYTHON`.
+A saved image is not a Python command-line interpreter: invoking it with `-c`,
+`-m`, or a source filename does not execute Python code. In Imre command mode,
+`sys.executable` continues to identify the Imre launcher. A program that needs
+an external Python helper must select one explicitly, for example through its
+own configuration or `shutil.which("python3")`.
+
+The typed `sysconfig.get_path("scripts")` operation separately locates the
+console scripts directory for `IMRE_PYTHON`, or the first executable `python3`
+on `PATH`, on standard POSIX installations and in virtual environments. If
+neither is available, it falls back to the native executable directory. Boxed
+`sysconfig` uses the interpreter installation scheme. Neither changes
+`sys.executable` or delegates compiled source to Python. `os.path.exists(path)` checks
 whether the supplied path exists. `__file__` refers to
 the module’s source location at build time, so neighboring resources must
 remain available when the program accesses them.

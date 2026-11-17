@@ -11,7 +11,6 @@ mod annotations;
 mod argparse;
 mod args;
 mod source_calls;
-pub(crate) use args::python_executable_text;
 mod asyncio;
 pub(crate) mod base32;
 mod base85;
