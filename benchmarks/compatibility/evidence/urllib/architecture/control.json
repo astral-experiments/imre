@@ -1,0 +1,211 @@
+{
+  "withdrawal": {
+    "source_paths": [
+      "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_urlparse.py",
+      "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_urllib.py"
+    ],
+    "sources_absent_during_runs": true,
+    "matching_pyc_absent": true,
+    "remaining_fixture_files": 1637,
+    "source_files_restored_sha256": {
+      "test_urlparse.py": "57c42d764a141958fcc56977f91fe80c5e9faa4f93ef9024bf250b2bbc28e0ef",
+      "test_urllib.py": "66d64ab14806fd2c91f5aa4109f8e4992bc5a94e5189249dc5718266630c2c59"
+    },
+    "runs": {
+      "O0.urlparse": {
+        "argv": [
+          "/workspace/scratch/urllib-harness-O0.exe",
+          "test.test_urlparse"
+        ],
+        "environment": {
+          "IMREFLAGS": "--opt-level 0",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "TMPDIR": "/workspace/scratch/imre-tmp"
+        },
+        "unset_environment": [
+          "IMRE_ENCODED_FLAGS"
+        ],
+        "timeout_seconds": 180,
+        "exit_code": 0,
+        "executable_sha256": "480c230702948f0928afa110676d95b043f90b3ef4c8678fd2f21361eb0e2a2a",
+        "stderr_sha256": "157846d6e1906645c5c0d2a88a613b8cb262df12dcc2a5c6a0be7222ebfe26df",
+        "originals": 77,
+        "outcomes": {
+          "pass": 77
+        },
+        "exact_id_occurrence_outcome_sequence_matches_baseline": true
+      },
+      "O0.urllib": {
+        "argv": [
+          "/workspace/scratch/urllib-harness-O0.exe",
+          "test.test_urllib"
+        ],
+        "environment": {
+          "IMREFLAGS": "--opt-level 0",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "TMPDIR": "/workspace/scratch/imre-tmp"
+        },
+        "unset_environment": [
+          "IMRE_ENCODED_FLAGS"
+        ],
+        "timeout_seconds": 180,
+        "exit_code": 1,
+        "executable_sha256": "480c230702948f0928afa110676d95b043f90b3ef4c8678fd2f21361eb0e2a2a",
+        "stderr_sha256": "07bf08bf070b1ece29a727a46f3ab07381269fd5aca433189463e10a49fccaa0",
+        "originals": 101,
+        "outcomes": {
+          "pass": 97,
+          "skip": 2,
+          "error": 2
+        },
+        "exact_id_occurrence_outcome_sequence_matches_baseline": true
+      },
+      "O3.urlparse": {
+        "argv": [
+          "/workspace/scratch/urllib-harness-O3.exe",
+          "test.test_urlparse"
+        ],
+        "environment": {
+          "IMREFLAGS": "--opt-level 3",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "TMPDIR": "/workspace/scratch/imre-tmp"
+        },
+        "unset_environment": [
+          "IMRE_ENCODED_FLAGS"
+        ],
+        "timeout_seconds": 180,
+        "exit_code": 0,
+        "executable_sha256": "1c2619eeb407c731395d6ae3aa273b488ccb899f0c8833ec5e8f5329603902d5",
+        "stderr_sha256": "157846d6e1906645c5c0d2a88a613b8cb262df12dcc2a5c6a0be7222ebfe26df",
+        "originals": 77,
+        "outcomes": {
+          "pass": 77
+        },
+        "exact_id_occurrence_outcome_sequence_matches_baseline": true
+      },
+      "O3.urllib": {
+        "argv": [
+          "/workspace/scratch/urllib-harness-O3.exe",
+          "test.test_urllib"
+        ],
+        "environment": {
+          "IMREFLAGS": "--opt-level 3",
+          "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+          "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "TMPDIR": "/workspace/scratch/imre-tmp"
+        },
+        "unset_environment": [
+          "IMRE_ENCODED_FLAGS"
+        ],
+        "timeout_seconds": 180,
+        "exit_code": 1,
+        "executable_sha256": "1c2619eeb407c731395d6ae3aa273b488ccb899f0c8833ec5e8f5329603902d5",
+        "stderr_sha256": "07bf08bf070b1ece29a727a46f3ab07381269fd5aca433189463e10a49fccaa0",
+        "originals": 101,
+        "outcomes": {
+          "pass": 97,
+          "skip": 2,
+          "error": 2
+        },
+        "exact_id_occurrence_outcome_sequence_matches_baseline": true
+      }
+    }
+  },
+  "poison": {
+    "source": "status: int = True\n",
+    "source_sha256": "14841721c7b84f57d26a6a38a53827c683daf10930b9f297cfc15335bd1257b5",
+    "poisoned_harness_sha256": "abad369781bffc0401715fe76889c3f577520e067d3fedb44257d3f476c2b019",
+    "harness_change": "insert import urllib_poison after the module docstring; otherwise exact committed suite_runner.py",
+    "graph_build": {
+      "argv": [
+        "/workspace/imre/target/release/imre",
+        "build",
+        "/workspace/scratch/urllib-architecture/poison/suite_runner.py",
+        "--module-root",
+        "/workspace/scratch/urllib-architecture/poison",
+        "--extension-path",
+        "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "--no-cache",
+        "--opt-level",
+        "0",
+        "--runtime",
+        "/workspace/imre/target/release/libimre_runtime.a",
+        "--clang",
+        "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+        "-o",
+        "/workspace/scratch/urllib-architecture/poison/O0.exe"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "TMPDIR": "/workspace/scratch/imre-tmp"
+      },
+      "timeout_seconds": 180,
+      "exit_code": 0,
+      "executable_exists": true,
+      "executable_sha256": "8bd7b839e7ad348577b28f0846807805fce97d64f67a7d6755208c5f4e1c123c",
+      "objects_linked": 298
+    },
+    "standalone_build": {
+      "argv": [
+        "/workspace/imre/target/release/imre",
+        "build",
+        "/workspace/scratch/urllib-architecture/poison/urllib_poison.py",
+        "--module-root",
+        "/workspace/scratch/urllib-architecture/poison",
+        "--no-cache",
+        "--opt-level",
+        "0",
+        "--runtime",
+        "/workspace/imre/target/release/libimre_runtime.a",
+        "--clang",
+        "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+        "-o",
+        "/workspace/scratch/urllib-architecture/poison/bare.exe"
+      ],
+      "timeout_seconds": 60,
+      "exit_code": 1,
+      "executable_exists": false,
+      "diagnostic": "expected int, got bool; annotations are enforced contracts"
+    },
+    "small_import_graph_build": {
+      "entry_source": "import urllib_poison\n",
+      "argv": [
+        "/workspace/imre/target/release/imre",
+        "build",
+        "/workspace/scratch/urllib-architecture/poison/import_only.py",
+        "--module-root",
+        "/workspace/scratch/urllib-architecture/poison",
+        "--no-cache",
+        "--opt-level",
+        "0",
+        "--runtime",
+        "/workspace/imre/target/release/libimre_runtime.a",
+        "--clang",
+        "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+        "-o",
+        "/workspace/scratch/urllib-architecture/poison/import_only.exe"
+      ],
+      "timeout_seconds": 60,
+      "exit_code": 1,
+      "executable_exists": false,
+      "diagnostic": "expected int, got bool; annotations are enforced contracts"
+    },
+    "required_negative_control_passed": false
+  }
+}

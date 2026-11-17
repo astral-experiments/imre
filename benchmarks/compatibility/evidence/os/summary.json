@@ -1,0 +1,32 @@
+{
+  "family": "os",
+  "frozen_raw_originals": 579,
+  "stock_inventory": 579,
+  "repeated_occurrences": 0,
+  "tiers": {
+    "stock": {
+      "pass": 474,
+      "skip": 103,
+      "error": 2
+    },
+    "O0": {
+      "not_run": 554,
+      "pass": 25
+    },
+    "O3": {
+      "not_run": 554,
+      "pass": 25
+    }
+  },
+  "paired": 0,
+  "blockers": [
+    "Frozen family comprises test_os (375), test_posix (179), and test_genericpath (25).",
+    "Stock test_os.ChownFileTests.test_chown_without_permission errored with EINVAL in the namespace. test_posix.PosixTester.test_pipe2_c_limits errored because the stock installation lacks _testcapi.",
+    "Finite runner O0/O3 stopped at runpy.py:88 before collection for all three suites. Direct test_os builds rejected imports after executable statements; direct test_posix builds rejected assertion overloads.",
+    "Direct intact genericpath passed all 25 originals at both levels; its first concurrent O3 build attempt timed out at 120 seconds and its bounded sequential retry completed.",
+    "The genericpath FILE launcher graph linked despite an imported status: int = True control; all 25 candidate pairs are withheld, with raw native outcomes preserved."
+  ],
+  "provenance": "provenance.json",
+  "inventory": "inventory.jsonl",
+  "architecture_control": "architecture/poison_control.json"
+}

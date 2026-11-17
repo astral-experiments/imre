@@ -1,0 +1,13 @@
+{
+  "frozen_raw_originals": 141,
+  "stock_original_occurrences": 129,
+  "stock_unique_ids": 129,
+  "repeated_occurrences": 0,
+  "stock_outcomes": {
+    "pass": 128,
+    "skip": 1
+  },
+  "missing_from_frozen_denominator": 12,
+  "mismatch": true,
+  "note": "Pinned stock discovered 129 original occurrences; the frozen historical denominator is 141. No IDs are invented for the remaining 12."
+}

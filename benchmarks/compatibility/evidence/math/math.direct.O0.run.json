@@ -1,0 +1,55 @@
+{
+  "argv": [
+    "/workspace/scratch/stdlib-work/math.O0.exe",
+    "-v"
+  ],
+  "build_argv": [
+    "/workspace/imre/target/release/imre",
+    "build",
+    "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_math.py",
+    "--module-root",
+    "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+    "--no-cache",
+    "--opt-level",
+    "0",
+    "--runtime",
+    "/workspace/imre/target/release/libimre_runtime.a",
+    "--clang",
+    "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+    "-o",
+    "/workspace/scratch/stdlib-work/math.O0.exe"
+  ],
+  "cwd": "/workspace/scratch/stdlib-work/math",
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+    "IMREFLAGS": "--opt-level 0",
+    "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+  },
+  "build_timeout_seconds": 90,
+  "timeout_seconds": 45,
+  "build": {
+    "exit_code": 1,
+    "timed_out": false,
+    "elapsed_seconds": 2.426
+  },
+  "exit_code": null,
+  "timed_out": false,
+  "streams": {
+    "build.stdout": {
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "public_bytes": 0,
+      "compacted": false
+    },
+    "build.stderr": {
+      "raw_sha256": "c996a0c15eaae57480698bc75086ff50db1aa24c475b83516970ac0310b50410",
+      "raw_bytes": 3977,
+      "public_bytes": 3977,
+      "compacted": false
+    }
+  }
+}

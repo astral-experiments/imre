@@ -1,0 +1,36 @@
+{
+  "argv": [
+    "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "-B",
+    "-m",
+    "unittest",
+    "-v",
+    "test.test_genericpath"
+  ],
+  "cwd": "/workspace/scratch/stdlib-work/genericpath",
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "TMPDIR": "/workspace/scratch/stdlib-work/tmp"
+  },
+  "timeout_seconds": 120,
+  "timed_out": false,
+  "exit_code": 0,
+  "elapsed_seconds": 0.437,
+  "streams": {
+    "stdout": {
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "public_bytes": 0,
+      "compacted": false
+    },
+    "stderr": {
+      "raw_sha256": "fa1a04e71c2e2f323106619f9001d3411ecb0bf4d5ffd3b1758316a783853209",
+      "raw_bytes": 2130,
+      "public_bytes": 2130,
+      "compacted": false
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "argv": [
+    "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "-B",
+    "/workspace/imre-stdlib-data/benchmarks/compatibility/evidence/math/stock_reporter.py",
+    "test.test_math"
+  ],
+  "cwd": "/workspace/scratch/stdlib-work/math",
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "TMPDIR": "/workspace/scratch/stdlib-work/tmp"
+  },
+  "timeout_seconds": 180,
+  "timed_out": false,
+  "exit_code": 0,
+  "elapsed_seconds": 61.218,
+  "streams": {
+    "stdout": {
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "public_bytes": 0,
+      "compacted": false
+    },
+    "stderr": {
+      "raw_sha256": "544c2cfd5843494cf32096c195b14a1f6ea31e693743f6e8901e85566f0e61cb",
+      "raw_bytes": 5584,
+      "public_bytes": 5584,
+      "compacted": false
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "argv": [
+    "/workspace/scratch/stdlib-work/genericpath.O3.exe",
+    "-v"
+  ],
+  "build_argv": [
+    "/workspace/imre/target/release/imre",
+    "build",
+    "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_genericpath.py",
+    "--module-root",
+    "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+    "--no-cache",
+    "--opt-level",
+    "3",
+    "--runtime",
+    "/workspace/imre/target/release/libimre_runtime.a",
+    "--clang",
+    "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+    "-o",
+    "/workspace/scratch/stdlib-work/genericpath.O3.exe"
+  ],
+  "cwd": "/workspace/scratch/stdlib-work/genericpath",
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+    "IMREFLAGS": "--opt-level 3",
+    "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+  },
+  "build_timeout_seconds": 120,
+  "timeout_seconds": 30,
+  "build": {
+    "exit_code": -9,
+    "timed_out": true,
+    "elapsed_seconds": 120.121
+  },
+  "exit_code": null,
+  "timed_out": false,
+  "streams": {
+    "build.stdout": {
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_bytes": 0,
+      "public_bytes": 0,
+      "compacted": false
+    },
+    "build.stderr": {
+      "raw_sha256": "78b59562d9cdb86501875984a00772686aad4b7f056c011ecfbd62cf5d8eb9a5",
+      "raw_bytes": 92,
+      "public_bytes": 92,
+      "compacted": false
+    }
+  }
+}

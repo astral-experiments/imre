@@ -1,0 +1,1 @@
+4308  execve("/workspace/imre-compat-data/benchmarks/compatibility/evidence/datetime/O0.exe", ["/workspace/imre-compat-data/benc"...], 0x7fff948a6668 /* 79 vars */) = 0

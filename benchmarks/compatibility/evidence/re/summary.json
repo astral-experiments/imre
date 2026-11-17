@@ -1,0 +1,24 @@
+{
+  "family": "re",
+  "frozen_raw_originals": 165,
+  "stock_inventory": 165,
+  "repeated_occurrences": 0,
+  "tiers": {
+    "stock": {
+      "pass": 164,
+      "skip": 1
+    },
+    "O0": {
+      "not_run": 165
+    },
+    "O3": {
+      "not_run": 165
+    }
+  },
+  "paired": 0,
+  "blockers": [
+    "Finite runner O0/O3 stopped at runpy.py:88 before collection. Direct O0/O3 builds rejected a TestCase.assertLess argument type before execution."
+  ],
+  "provenance": "provenance.json",
+  "inventory": "inventory.jsonl"
+}

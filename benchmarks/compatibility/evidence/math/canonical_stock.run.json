@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "-B",
+    "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_math.py",
+    "-v"
+  ],
+  "cwd": "/workspace/scratch/stdlib-work",
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "TMPDIR": "/workspace/scratch/imre-tmp"
+  },
+  "exit_code": 0,
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "3489dbbb31eb1dbd49a1a72c11111fd87eae1bde3acb56b5c680cccdcd408a54",
+  "canonical_parser_diagnostic": "unparsed unittest output: reported ['89'], parsed 88"
+}

@@ -1,0 +1,39 @@
+{
+  "frozen_raw_originals": 383,
+  "stock_original_occurrences": 378,
+  "stock_unique_ids": 378,
+  "repeated_occurrences": 0,
+  "stock_outcomes": {
+    "pass": 376,
+    "skip": 2
+  },
+  "missing_from_frozen_denominator": 5,
+  "mismatch": true,
+  "loader_generated_results_excluded": [
+    {
+      "id": "unittest.loader.ModuleSkipped.test.test_zipfile._path.test_complexity",
+      "occurrence": 1,
+      "outcome": "skip",
+      "line": 1,
+      "reason": "loader-generated result; not an original test ID"
+    }
+  ],
+  "note": "The package loader emitted one synthetic ModuleSkipped result because big_o was unavailable; it is not an original and is excluded. Five frozen originals have no stock receipt.",
+  "optional_dependency_attempt": {
+    "argv": [
+      "uv",
+      "pip",
+      "install",
+      "--python",
+      "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+      "--target",
+      "/workspace/scratch/zipfile-optional-deps",
+      "--cache-dir",
+      "/workspace/scratch/uv-cache",
+      "big-o",
+      "pytest"
+    ],
+    "exit_code": 2,
+    "blocker": "Configured package registry request failed after three retries: tunnel error: unsuccessful. No alternate registry or policy workaround was attempted."
+  }
+}

@@ -1,0 +1,5 @@
+The positive launcher is the unchanged pinned `Lib/test/test_fnmatch.py` file, built directly at O0 and O3. The control stages a full copy of the original test fixture tree, inserts only `import fnmatch_poison` after the launcher's docstring, and adds the separate first-party `fnmatch_poison.py` containing `status: int = True`.
+
+The fresh O0 graph build, standalone poison build, and small import build all exit 1 with `expected int, got bool; annotations are enforced contracts`, and none creates an executable. The required negative control passes. Fresh saved positive O0 and O3 executables each reproduce all 24 original ID/occurrence/outcome triples with the exact staged test source and matching bytecode absent. The source is restored with the same hash. `strace` records only the initial executable launch at either tier, and `ldd` reports no libpython dependency. All 24 pairs remain credited.
+
+`control.json` contains exact commands, environments, hashes, exits, source-withdrawal results, and links to the adjacent raw streams.

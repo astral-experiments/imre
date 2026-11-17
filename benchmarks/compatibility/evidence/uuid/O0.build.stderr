@@ -1,0 +1,258 @@
+ Compiling /workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_uuid.py (-O0)
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_uuid.py:638:14
+    |
+636 |              mock.patch.object(self.uuid, '_last_timestamp', None), \
+637 |              mock.patch.object(self.uuid, 'getnode', return_value=93328246233727), \
+638 |              mock.patch('time.time_ns', return_value=1545052026752910643), \
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+639 |              mock.patch('random.getrandbits', return_value=5317): # guaranteed to be random
+640 |             u = self.uuid.uuid1()
+    |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_uuid.py:639:14
+    |
+637 |              mock.patch.object(self.uuid, 'getnode', return_value=93328246233727), \
+638 |              mock.patch('time.time_ns', return_value=1545052026752910643), \
+639 |              mock.patch('random.getrandbits', return_value=5317): # guaranteed to be random
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+640 |             u = self.uuid.uuid1()
+641 |             self.assertEqual(u, self.uuid.UUID('a7a55b92-01fc-11e9-94c5-54e1acf6da7f'))
+    |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_uuid.py:645:14
+    |
+643 |         with mock.patch.object(self.uuid, '_generate_time_safe', None), \
+644 |              mock.patch.object(self.uuid, '_last_timestamp', None), \
+645 |              mock.patch('time.time_ns', return_value=1545052026752910643):
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+646 |             u = self.uuid.uuid1(node=93328246233727, clock_seq=5317)
+647 |             self.assertEqual(u, self.uuid.UUID('a7a55b92-01fc-11e9-94c5-54e1acf6da7f'))
+    |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_uuid.py:741:13
+    |
+739 |             mock.patch.object(self.uuid, '_last_timestamp_v6', None),
+740 |             mock.patch.object(self.uuid, 'getnode', return_value=fake_node_value),
+741 |             mock.patch('time.time_ns', return_value=fake_nanoseconds),
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+742 |             mock.patch('random.getrandbits', return_value=fake_clock_seq)
+743 |         ):
+    |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_uuid.py:742:13
+    |
+740 |             mock.patch.object(self.uuid, 'getnode', return_value=fake_node_value),
+741 |             mock.patch('time.time_ns', return_value=fake_nanoseconds),
+742 |             mock.patch('random.getrandbits', return_value=fake_clock_seq)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+743 |         ):
+744 |             u = self.uuid.uuid6()
+    |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_uuid.py:777:14
+    |
+775 |         fake_nanoseconds = (timestamp - 0x1b21dd21_3814_000) * 100
+776 |
+777 |         with mock.patch('time.time_ns', return_value=fake_nanoseconds):
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+778 |             def gen():
+779 |                 with mock.patch.object(self.uuid, '_last_timestamp_v6', None):
+    |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_uuid.py:860:13
+    |
+858 |         with (
+859 |             mock.patch.object(self.uuid, '_last_timestamp_v6', None),
+860 |             mock.patch('time.time_ns', return_value=fake_nanoseconds)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+861 |         ):
+862 |             u = self.uuid.uuid6(node=node, clock_seq=clock_seq)
+    |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_uuid.py:905:17
+    |
+903 |                     _last_counter_v7=0,
+904 |                 ),
+905 |                 mock.patch('time.time_ns', return_value=timestamp_ns),
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+906 |                 mock.patch('os.urandom', return_value=random_data) as urand
+907 |             ):
+    |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_uuid.py:906:17
+    |
+904 |                 ),
+905 |                 mock.patch('time.time_ns', return_value=timestamp_ns),
+906 |                 mock.patch('os.urandom', return_value=random_data) as urand
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+907 |             ):
+908 |                 u = self.uuid.uuid7()
+    |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_uuid.py:964:17
+    |
+963 |             with (
+964 |                 mock.patch('time.time_ns', return_value=timestamp_ns),
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+965 |                 mock.patch('os.urandom', return_value=random_data) as urand
+966 |             ):
+    |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_uuid.py:965:17
+    |
+963 |             with (
+964 |                 mock.patch('time.time_ns', return_value=timestamp_ns),
+965 |                 mock.patch('os.urandom', return_value=random_data) as urand
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+966 |             ):
+967 |                 u1 = self.uuid.uuid7()
+    |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_uuid.py:985:17
+    |
+984 |             with (
+985 |                 mock.patch('time.time_ns', return_value=next_timestamp_ns),
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+986 |                 mock.patch('os.urandom', return_value=next_tail_bytes) as urand
+987 |             ):
+    |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_uuid.py:986:17
+    |
+984 |             with (
+985 |                 mock.patch('time.time_ns', return_value=next_timestamp_ns),
+986 |                 mock.patch('os.urandom', return_value=next_tail_bytes) as urand
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+987 |             ):
+988 |                 u2 = self.uuid.uuid7()
+    |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_uuid.py:1023:13
+     |
+1021 |                 _last_counter_v7=counter,
+1022 |             ),
+1023 |             mock.patch('time.time_ns', return_value=timestamp_ns),
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1024 |             mock.patch('os.urandom', return_value=tail_bytes) as urand
+1025 |         ):
+     |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_uuid.py:1024:13
+     |
+1022 |             ),
+1023 |             mock.patch('time.time_ns', return_value=timestamp_ns),
+1024 |             mock.patch('os.urandom', return_value=tail_bytes) as urand
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1025 |         ):
+1026 |             u = self.uuid.uuid7()
+     |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_uuid.py:1062:13
+     |
+1060 |                 _last_counter_v7=0x3ff_ffff_ffff,
+1061 |             ),
+1062 |             mock.patch('time.time_ns', return_value=timestamp_ns),
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1063 |             mock.patch('os.urandom', return_value=random_data) as urand
+1064 |         ):
+     |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_uuid.py:1063:13
+     |
+1061 |             ),
+1062 |             mock.patch('time.time_ns', return_value=timestamp_ns),
+1063 |             mock.patch('os.urandom', return_value=random_data) as urand
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1064 |         ):
+1065 |             u = self.uuid.uuid7()
+     |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_uuid.py:1161:6
+     |
+1160 |     @mock.patch.object(sys, "argv", ["", "-u", "uuid3", "-n", "@dns"])
+1161 |     @mock.patch('sys.stderr', new_callable=io.StringIO)
+     |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1162 |     def test_cli_namespace_required_for_uuid3(self, mock_err):
+1163 |         with self.assertRaises(SystemExit) as cm:
+     |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_uuid.py:1171:6
+     |
+1170 |     @mock.patch.object(sys, "argv", ["", "-u", "uuid3", "-N", "python.org"])
+1171 |     @mock.patch('sys.stderr', new_callable=io.StringIO)
+     |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1172 |     def test_cli_name_required_for_uuid3(self, mock_err):
+1173 |         with self.assertRaises(SystemExit) as cm:
+     |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_uuid.py:1211:6
+     |
+1209 |     @mock.patch.object(sys, "argv",
+1210 |                        ["", "-u", "uuid3", "-n", "any UUID", "-N", "python.org"])
+1211 |     @mock.patch('sys.stderr', new_callable=io.StringIO)
+     |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1212 |     def test_cli_uuid3_with_invalid_namespace(self, mock_err):
+1213 |         with self.assertRaises(SystemExit) as cm:
+     |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_uuid.py:1279:6
+     |
+1277 |     @mock.patch.object(sys, "argv",
+1278 |                        ["", "-u", "uuid5", "-n", "any UUID", "-N", "python.org"])
+1279 |     @mock.patch('sys.stderr', new_callable=io.StringIO)
+     |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1280 |     def test_cli_uuid5_with_invalid_namespace(self, mock_err):
+1281 |         with self.assertRaises(SystemExit) as cm:
+     |
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/import_helper.py:290:12
+    |
+288 |     # memory.
+289 |     from unittest import mock
+290 |     return mock.patch('os.register_at_fork', create=True)(func)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+

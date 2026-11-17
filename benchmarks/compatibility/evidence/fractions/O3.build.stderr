@@ -1,0 +1,45 @@
+ Compiling /workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_fractions.py (-O3)
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_fractions.py:535:29
+    |
+533 |         self.assertEqual((4, 2), _components(r))
+534 |         # Which breaks some important operations:
+535 |         self.assertNotEqual(F(4, 2), r)
+    |                             ^^^^^^^ Expected `int`, found `Fraction`
+536 |
+537 |     def testFromFloat(self):
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^       ---------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_fractions.py:535:38
+    |
+533 |         self.assertEqual((4, 2), _components(r))
+534 |         # Which breaks some important operations:
+535 |         self.assertNotEqual(F(4, 2), r)
+    |                                      ^ Expected `int`, found `Fraction`
+536 |
+537 |     def testFromFloat(self):
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+

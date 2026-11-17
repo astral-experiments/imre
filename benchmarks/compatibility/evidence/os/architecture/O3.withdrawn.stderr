@@ -1,0 +1,32 @@
+=== command 1 ===
+[guard: execve/execveat denied; no libpython mapped]
+test_path_commonprefix (__main__.PathLikeTests.test_path_commonprefix) ... ok
+test_path_exists (__main__.PathLikeTests.test_path_exists) ... ok
+test_path_getctime (__main__.PathLikeTests.test_path_getctime) ... ok
+test_path_getmtime (__main__.PathLikeTests.test_path_getmtime) ... ok
+test_path_getsize (__main__.PathLikeTests.test_path_getsize) ... ok
+test_path_isdir (__main__.PathLikeTests.test_path_isdir) ... ok
+test_path_isfile (__main__.PathLikeTests.test_path_isfile) ... ok
+test_path_samefile (__main__.PathLikeTests.test_path_samefile) ... ok
+test_commonprefix (__main__.TestGenericTest.test_commonprefix) ... ok
+test_exists (__main__.TestGenericTest.test_exists) ... ok
+test_exists_bool (__main__.TestGenericTest.test_exists_bool) ... ok
+test_exists_fd (__main__.TestGenericTest.test_exists_fd) ... ok
+test_filetime (__main__.TestGenericTest.test_filetime) ... ok
+test_getsize (__main__.TestGenericTest.test_getsize) ... ok
+test_invalid_paths (__main__.TestGenericTest.test_invalid_paths) ... ok
+test_isdir (__main__.TestGenericTest.test_isdir) ... ok
+test_isfile (__main__.TestGenericTest.test_isfile) ... ok
+test_no_argument (__main__.TestGenericTest.test_no_argument) ... ok
+test_samefile (__main__.TestGenericTest.test_samefile) ... ok
+test_samefile_on_link (__main__.TestGenericTest.test_samefile_on_link) ... ok
+test_samefile_on_symlink (__main__.TestGenericTest.test_samefile_on_symlink) ... ok
+test_sameopenfile (__main__.TestGenericTest.test_sameopenfile) ... ok
+test_samestat (__main__.TestGenericTest.test_samestat) ... ok
+test_samestat_on_link (__main__.TestGenericTest.test_samestat_on_link) ... ok
+test_samestat_on_symlink (__main__.TestGenericTest.test_samestat_on_symlink) ... ok
+
+----------------------------------------------------------------------
+Ran 25 tests in 0.146s
+
+OK

@@ -1,0 +1,972 @@
+ Compiling /workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_subprocess.py (-O0)
+error[no-matching-overload]: No overload of bound method `TestCase.assertIn` matches arguments
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_subprocess.py:196:9
+    |
+194 |         output = subprocess.check_output(
+195 |                 [sys.executable, "-c", "print('BDFL')"])
+196 |         self.assertIn(b'BDFL', output)
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+197 |
+198 |         with self.assertRaisesRegex(ValueError,
+    |
+info: First overload defined here
+   --> <imre stdlib>/unittest/__init__.py:465:9
+    |
+464 |       if TYPE_CHECKING:
+465 | /         @overload
+466 | |         def assertIn(self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None: ...
+    | |_________________________________________________________________________________________________________________________^ First overload defined here
+467 |           @overload
+468 |           def assertIn(self, member: int, container: list[int], msg: str | None = None) -> None: ...
+    |
+info: Possible overloads for bound method `assertIn`:
+info:   (self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None
+info:   (self, member: int, container: list[int], msg: str | None = None) -> None
+info:   (self, member: object, container: Mapping[int, str], msg: str | None = None) -> None
+info: Overload implementation defined here
+   --> <imre stdlib>/unittest/__init__.py:471:13
+    |
+469 |         @overload
+470 |         def assertIn(self, member: object, container: typing.Mapping[int, str], msg: str | None = None) -> None: ...
+471 |         def assertIn(self, member: object, container: object, msg: str | None = None) -> None: ...
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+472 |     else:
+473 |         def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None:
+    |
+
+
+error[no-matching-overload]: No overload of bound method `TestCase.assertIn` matches arguments
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_subprocess.py:218:9
+    |
+216 |                 [sys.executable, "-c", "import sys; sys.stderr.write('BDFL')"],
+217 |                 stderr=subprocess.STDOUT)
+218 |         self.assertIn(b'BDFL', output)
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+219 |
+220 |     def test_check_output_stdin_arg(self):
+    |
+info: First overload defined here
+   --> <imre stdlib>/unittest/__init__.py:465:9
+    |
+464 |       if TYPE_CHECKING:
+465 | /         @overload
+466 | |         def assertIn(self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None: ...
+    | |_________________________________________________________________________________________________________________________^ First overload defined here
+467 |           @overload
+468 |           def assertIn(self, member: int, container: list[int], msg: str | None = None) -> None: ...
+    |
+info: Possible overloads for bound method `assertIn`:
+info:   (self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None
+info:   (self, member: int, container: list[int], msg: str | None = None) -> None
+info:   (self, member: object, container: Mapping[int, str], msg: str | None = None) -> None
+info: Overload implementation defined here
+   --> <imre stdlib>/unittest/__init__.py:471:13
+    |
+469 |         @overload
+470 |         def assertIn(self, member: object, container: typing.Mapping[int, str], msg: str | None = None) -> None: ...
+471 |         def assertIn(self, member: object, container: object, msg: str | None = None) -> None: ...
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+472 |     else:
+473 |         def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None:
+    |
+
+
+error[no-matching-overload]: No overload of bound method `TestCase.assertIn` matches arguments
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_subprocess.py:230:9
+    |
+228 |                  "import sys; sys.stdout.write(sys.stdin.read().upper())"],
+229 |                 stdin=tf)
+230 |         self.assertIn(b'PEAR', output)
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+231 |
+232 |     def test_check_output_input_arg(self):
+    |
+info: First overload defined here
+   --> <imre stdlib>/unittest/__init__.py:465:9
+    |
+464 |       if TYPE_CHECKING:
+465 | /         @overload
+466 | |         def assertIn(self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None: ...
+    | |_________________________________________________________________________________________________________________________^ First overload defined here
+467 |           @overload
+468 |           def assertIn(self, member: int, container: list[int], msg: str | None = None) -> None: ...
+    |
+info: Possible overloads for bound method `assertIn`:
+info:   (self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None
+info:   (self, member: int, container: list[int], msg: str | None = None) -> None
+info:   (self, member: object, container: Mapping[int, str], msg: str | None = None) -> None
+info: Overload implementation defined here
+   --> <imre stdlib>/unittest/__init__.py:471:13
+    |
+469 |         @overload
+470 |         def assertIn(self, member: object, container: typing.Mapping[int, str], msg: str | None = None) -> None: ...
+471 |         def assertIn(self, member: object, container: object, msg: str | None = None) -> None: ...
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+472 |     else:
+473 |         def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None:
+    |
+
+
+error[no-matching-overload]: No overload of bound method `TestCase.assertIn` matches arguments
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_subprocess.py:238:9
+    |
+236 |                  "import sys; sys.stdout.write(sys.stdin.read().upper())"],
+237 |                 input=b'pear')
+238 |         self.assertIn(b'PEAR', output)
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+239 |
+240 |     def test_check_output_input_none(self):
+    |
+info: First overload defined here
+   --> <imre stdlib>/unittest/__init__.py:465:9
+    |
+464 |       if TYPE_CHECKING:
+465 | /         @overload
+466 | |         def assertIn(self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None: ...
+    | |_________________________________________________________________________________________________________________________^ First overload defined here
+467 |           @overload
+468 |           def assertIn(self, member: int, container: list[int], msg: str | None = None) -> None: ...
+    |
+info: Possible overloads for bound method `assertIn`:
+info:   (self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None
+info:   (self, member: int, container: list[int], msg: str | None = None) -> None
+info:   (self, member: object, container: Mapping[int, str], msg: str | None = None) -> None
+info: Overload implementation defined here
+   --> <imre stdlib>/unittest/__init__.py:471:13
+    |
+469 |         @overload
+470 |         def assertIn(self, member: object, container: typing.Mapping[int, str], msg: str | None = None) -> None: ...
+471 |         def assertIn(self, member: object, container: object, msg: str | None = None) -> None: ...
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+472 |     else:
+473 |         def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None:
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `Popen.communicate` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_subprocess.py:971:42
+    |
+969 |         self.addCleanup(p.stdout.close)
+970 |         self.addCleanup(p.stdin.close)
+971 |         (stdout, stderr) = p.communicate(mv)
+    |                                          ^^ Expected `bytes | None`, found `memoryview[int]`
+972 |         self.assertEqual(stdout, test_data)
+973 |         self.assertIsNone(stderr)
+    |
+info: Method defined here
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/subprocess.pyi:1742:9
+     |
+1740 |     # TODO: this should allow ReadableBuffer for Popen[bytes], but adding
+1741 |     # overloads for that runs into a mypy bug (python/mypy#14070).
+1742 |     def communicate(self, input: AnyStr | None = None, timeout: float | None = None) -> tuple[AnyStr, AnyStr]:
+     |         ^^^^^^^^^^^       --------------------------- Parameter declared here
+1743 |         """Interact with process: Send data to stdin and close it.
+1744 |         Read data from stdout and stderr, until end-of-file is
+     |
+
+
+error[invalid-argument-type]: Argument to bound method `Popen.communicate` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_subprocess.py:998:42
+     |
+ 996 |         self.addCleanup(p.stdout.close)
+ 997 |         self.addCleanup(p.stdin.close)
+ 998 |         (stdout, stderr) = p.communicate(mv)
+     |                                          ^^ Expected `bytes | None`, found `memoryview[int]`
+ 999 |         self.assertEqual(stdout, expected_bytes,
+1000 |                          msg=f"{len(stdout)=} =? {len(expected_bytes)=}")
+     |
+info: Method defined here
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/subprocess.pyi:1742:9
+     |
+1740 |     # TODO: this should allow ReadableBuffer for Popen[bytes], but adding
+1741 |     # overloads for that runs into a mypy bug (python/mypy#14070).
+1742 |     def communicate(self, input: AnyStr | None = None, timeout: float | None = None) -> tuple[AnyStr, AnyStr]:
+     |         ^^^^^^^^^^^       --------------------------- Parameter declared here
+1743 |         """Interact with process: Send data to stdin and close it.
+1744 |         Read data from stdout and stderr, until end-of-file is
+     |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertLess` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_subprocess.py:1108:29
+     |
+1106 |             # Allow generous margin for slow CI, but must be well under
+1107 |             # the slow-reader's stall cap.
+1108 |             self.assertLess(elapsed, 5.0,
+     |                             ^^^^^^^ Expected `int`, found `float`
+1109 |                 f"TimeoutExpired raised after {elapsed:.2f}s; expected ~{timeout}s. "
+1110 |                 "Stdin writing blocked without checking timeout.")
+     |
+info: element `float*` of union `int | float*` is not assignable to `int`
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:266:9
+    |
+264 |             raise self.failureException(self._formatMessage(msg, repr(expr) + " is not false"))
+265 |
+266 |     def assertLess(self, a: int, b: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^       ------ Parameter declared here
+267 |         if not a < b:
+268 |             self.fail(self._formatMessage(msg, f"{a!r} not less than {b!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertLess` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_subprocess.py:1108:38
+     |
+1106 |             # Allow generous margin for slow CI, but must be well under
+1107 |             # the slow-reader's stall cap.
+1108 |             self.assertLess(elapsed, 5.0,
+     |                                      ^^^ Expected `int`, found `float*`
+1109 |                 f"TimeoutExpired raised after {elapsed:.2f}s; expected ~{timeout}s. "
+1110 |                 "Stdin writing blocked without checking timeout.")
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:266:9
+    |
+264 |             raise self.failureException(self._formatMessage(msg, repr(expr) + " is not false"))
+265 |
+266 |     def assertLess(self, a: int, b: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^               ------ Parameter declared here
+267 |         if not a < b:
+268 |             self.fail(self._formatMessage(msg, f"{a!r} not less than {b!r}"))
+    |
+
+
+error[no-matching-overload]: No overload of `Popen.__init__` matches arguments
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_subprocess.py:1147:25
+     |
+1145 |                     if not options:
+1146 |                         continue
+1147 |                     p = subprocess.Popen(ZERO_RETURN_CMD, **options)
+     |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1148 |                     p.communicate()
+1149 |                     if p.stdin is not None:
+     |
+info: First overload defined here
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/subprocess.pyi:1358:9
+     |
+1356 |       if sys.version_info >= (3, 11):
+1357 |           # process_group is added in 3.11
+1358 | /         @overload  # encoding is str
+1359 | |         def __init__(
+1360 | |             self: Popen[str],
+1361 | |             args: _CMD,
+1362 | |             bufsize: int = -1,
+1363 | |             executable: StrOrBytesPath | None = None,
+1364 | |             stdin: _FILE | None = None,
+1365 | |             stdout: _FILE | None = None,
+1366 | |             stderr: _FILE | None = None,
+1367 | |             preexec_fn: Callable[[], object] | None = None,
+1368 | |             close_fds: bool = True,
+1369 | |             shell: bool | int = False,
+1370 | |             cwd: StrOrBytesPath | None = None,
+1371 | |             env: _ENV | None = None,
+1372 | |             universal_newlines: bool | None = None,
+1373 | |             startupinfo: Any | None = None,
+1374 | |             creationflags: int = 0,
+1375 | |             restore_signals: bool = True,
+1376 | |             start_new_session: bool = False,
+1377 | |             pass_fds: Collection[int] = (),
+1378 | |             *,
+1379 | |             text: bool | None = None,
+1380 | |             encoding: str,
+1381 | |             errors: str | None = None,
+1382 | |             user: str | int | None = None,
+1383 | |             group: str | int | None = None,
+1384 | |             extra_groups: Iterable[str | int] | None = None,
+1385 | |             umask: int = -1,
+1386 | |             pipesize: int = -1,
+1387 | |             process_group: int | None = None,
+1388 | |         ) -> None:
+1389 | |             """Create new Popen instance."""
+     | |____________________________________________^ First overload defined here
+1390 |           @overload  # errors is str
+1391 |           def __init__(
+     |
+info: Possible overloads for bound method `__init__`:
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: bool | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: bool | None = None, encoding: str, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: bool | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: bool | None = None, encoding: str | None = None, errors: str, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, *, universal_newlines: Literal[True], startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., text: bool | None = None, encoding: str | None = None, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: Literal[True] | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: Literal[True], encoding: str | None = None, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[bytes], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: Literal[False] | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: Literal[False] | None = None, encoding: None = None, errors: None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[Any], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: bool | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: bool | None = None, encoding: str | None = None, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+
+
+error[no-matching-overload]: No overload of `Popen.__init__` matches arguments
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_subprocess.py:1238:17
+     |
+1237 |           for extra_kwarg in ('universal_newlines', 'text'):
+1238 |               p = subprocess.Popen(args, **{'stdin': subprocess.PIPE,
+     |  _________________^
+1239 | |                                           'stdout': subprocess.PIPE,
+1240 | |                                           extra_kwarg: True})
+     | |_____________________________________________________________^
+1241 |               with p:
+1242 |                   p.stdin.write("line1\n")
+     |
+info: First overload defined here
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/subprocess.pyi:1358:9
+     |
+1356 |       if sys.version_info >= (3, 11):
+1357 |           # process_group is added in 3.11
+1358 | /         @overload  # encoding is str
+1359 | |         def __init__(
+1360 | |             self: Popen[str],
+1361 | |             args: _CMD,
+1362 | |             bufsize: int = -1,
+1363 | |             executable: StrOrBytesPath | None = None,
+1364 | |             stdin: _FILE | None = None,
+1365 | |             stdout: _FILE | None = None,
+1366 | |             stderr: _FILE | None = None,
+1367 | |             preexec_fn: Callable[[], object] | None = None,
+1368 | |             close_fds: bool = True,
+1369 | |             shell: bool | int = False,
+1370 | |             cwd: StrOrBytesPath | None = None,
+1371 | |             env: _ENV | None = None,
+1372 | |             universal_newlines: bool | None = None,
+1373 | |             startupinfo: Any | None = None,
+1374 | |             creationflags: int = 0,
+1375 | |             restore_signals: bool = True,
+1376 | |             start_new_session: bool = False,
+1377 | |             pass_fds: Collection[int] = (),
+1378 | |             *,
+1379 | |             text: bool | None = None,
+1380 | |             encoding: str,
+1381 | |             errors: str | None = None,
+1382 | |             user: str | int | None = None,
+1383 | |             group: str | int | None = None,
+1384 | |             extra_groups: Iterable[str | int] | None = None,
+1385 | |             umask: int = -1,
+1386 | |             pipesize: int = -1,
+1387 | |             process_group: int | None = None,
+1388 | |         ) -> None:
+1389 | |             """Create new Popen instance."""
+     | |____________________________________________^ First overload defined here
+1390 |           @overload  # errors is str
+1391 |           def __init__(
+     |
+info: Possible overloads for bound method `__init__`:
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: bool | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: bool | None = None, encoding: str, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: bool | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: bool | None = None, encoding: str | None = None, errors: str, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, *, universal_newlines: Literal[True], startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., text: bool | None = None, encoding: str | None = None, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: Literal[True] | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: Literal[True], encoding: str | None = None, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[bytes], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: Literal[False] | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: Literal[False] | None = None, encoding: None = None, errors: None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[Any], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: bool | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: bool | None = None, encoding: str | None = None, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+
+
+error[no-matching-overload]: No overload of `Popen.__init__` matches arguments
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_subprocess.py:1257:13
+     |
+1255 |       def test_universal_newlines_communicate(self):
+1256 |           # universal newlines through communicate()
+1257 |           p = subprocess.Popen([sys.executable, "-c",
+     |  _____________^
+1258 | |                               'import sys,os;' + SETBINARY +
+1259 | |                               'buf = sys.stdout.buffer;'
+1260 | |                               'buf.write(b"line2\\n");'
+1261 | |                               'buf.flush();'
+1262 | |                               'buf.write(b"line4\\n");'
+1263 | |                               'buf.flush();'
+1264 | |                               'buf.write(b"line5\\r\\n");'
+1265 | |                               'buf.flush();'
+1266 | |                               'buf.write(b"line6\\r");'
+1267 | |                               'buf.flush();'
+1268 | |                               'buf.write(b"\\nline7");'
+1269 | |                               'buf.flush();'
+1270 | |                               'buf.write(b"\\nline8");'],
+1271 | |                              stderr=subprocess.PIPE,
+1272 | |                              stdout=subprocess.PIPE,
+1273 | |                              universal_newlines=1)
+     | |__________________________________________________^
+1274 |           self.addCleanup(p.stdout.close)
+1275 |           self.addCleanup(p.stderr.close)
+     |
+info: First overload defined here
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/subprocess.pyi:1358:9
+     |
+1356 |       if sys.version_info >= (3, 11):
+1357 |           # process_group is added in 3.11
+1358 | /         @overload  # encoding is str
+1359 | |         def __init__(
+1360 | |             self: Popen[str],
+1361 | |             args: _CMD,
+1362 | |             bufsize: int = -1,
+1363 | |             executable: StrOrBytesPath | None = None,
+1364 | |             stdin: _FILE | None = None,
+1365 | |             stdout: _FILE | None = None,
+1366 | |             stderr: _FILE | None = None,
+1367 | |             preexec_fn: Callable[[], object] | None = None,
+1368 | |             close_fds: bool = True,
+1369 | |             shell: bool | int = False,
+1370 | |             cwd: StrOrBytesPath | None = None,
+1371 | |             env: _ENV | None = None,
+1372 | |             universal_newlines: bool | None = None,
+1373 | |             startupinfo: Any | None = None,
+1374 | |             creationflags: int = 0,
+1375 | |             restore_signals: bool = True,
+1376 | |             start_new_session: bool = False,
+1377 | |             pass_fds: Collection[int] = (),
+1378 | |             *,
+1379 | |             text: bool | None = None,
+1380 | |             encoding: str,
+1381 | |             errors: str | None = None,
+1382 | |             user: str | int | None = None,
+1383 | |             group: str | int | None = None,
+1384 | |             extra_groups: Iterable[str | int] | None = None,
+1385 | |             umask: int = -1,
+1386 | |             pipesize: int = -1,
+1387 | |             process_group: int | None = None,
+1388 | |         ) -> None:
+1389 | |             """Create new Popen instance."""
+     | |____________________________________________^ First overload defined here
+1390 |           @overload  # errors is str
+1391 |           def __init__(
+     |
+info: Possible overloads for bound method `__init__`:
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: bool | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: bool | None = None, encoding: str, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: bool | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: bool | None = None, encoding: str | None = None, errors: str, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, *, universal_newlines: Literal[True], startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., text: bool | None = None, encoding: str | None = None, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: Literal[True] | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: Literal[True], encoding: str | None = None, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[bytes], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: Literal[False] | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: Literal[False] | None = None, encoding: None = None, errors: None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[Any], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: bool | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: bool | None = None, encoding: str | None = None, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+
+
+error[no-matching-overload]: No overload of `Popen.__init__` matches arguments
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_subprocess.py:1282:13
+     |
+1280 |       def test_universal_newlines_communicate_stdin(self):
+1281 |           # universal newlines through communicate(), with only stdin
+1282 |           p = subprocess.Popen([sys.executable, "-c",
+     |  _____________^
+1283 | |                               'import sys,os;' + SETBINARY + textwrap.dedent('''
+1284 | |                                s = sys.stdin.readline()
+1285 | |                                assert s == "line1\\n", repr(s)
+1286 | |                                s = sys.stdin.read()
+1287 | |                                assert s == "line3\\n", repr(s)
+1288 | |                               ''')],
+1289 | |                              stdin=subprocess.PIPE,
+1290 | |                              universal_newlines=1)
+     | |__________________________________________________^
+1291 |           (stdout, stderr) = p.communicate("line1\nline3\n")
+1292 |           self.assertEqual(p.returncode, 0)
+     |
+info: First overload defined here
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/subprocess.pyi:1358:9
+     |
+1356 |       if sys.version_info >= (3, 11):
+1357 |           # process_group is added in 3.11
+1358 | /         @overload  # encoding is str
+1359 | |         def __init__(
+1360 | |             self: Popen[str],
+1361 | |             args: _CMD,
+1362 | |             bufsize: int = -1,
+1363 | |             executable: StrOrBytesPath | None = None,
+1364 | |             stdin: _FILE | None = None,
+1365 | |             stdout: _FILE | None = None,
+1366 | |             stderr: _FILE | None = None,
+1367 | |             preexec_fn: Callable[[], object] | None = None,
+1368 | |             close_fds: bool = True,
+1369 | |             shell: bool | int = False,
+1370 | |             cwd: StrOrBytesPath | None = None,
+1371 | |             env: _ENV | None = None,
+1372 | |             universal_newlines: bool | None = None,
+1373 | |             startupinfo: Any | None = None,
+1374 | |             creationflags: int = 0,
+1375 | |             restore_signals: bool = True,
+1376 | |             start_new_session: bool = False,
+1377 | |             pass_fds: Collection[int] = (),
+1378 | |             *,
+1379 | |             text: bool | None = None,
+1380 | |             encoding: str,
+1381 | |             errors: str | None = None,
+1382 | |             user: str | int | None = None,
+1383 | |             group: str | int | None = None,
+1384 | |             extra_groups: Iterable[str | int] | None = None,
+1385 | |             umask: int = -1,
+1386 | |             pipesize: int = -1,
+1387 | |             process_group: int | None = None,
+1388 | |         ) -> None:
+1389 | |             """Create new Popen instance."""
+     | |____________________________________________^ First overload defined here
+1390 |           @overload  # errors is str
+1391 |           def __init__(
+     |
+info: Possible overloads for bound method `__init__`:
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: bool | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: bool | None = None, encoding: str, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: bool | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: bool | None = None, encoding: str | None = None, errors: str, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, *, universal_newlines: Literal[True], startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., text: bool | None = None, encoding: str | None = None, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: Literal[True] | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: Literal[True], encoding: str | None = None, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[bytes], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: Literal[False] | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: Literal[False] | None = None, encoding: None = None, errors: None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[Any], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: bool | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: bool | None = None, encoding: str | None = None, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+
+
+error[invalid-argument-type]: Argument to bound method `Popen.communicate` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_subprocess.py:1291:42
+     |
+1289 |                              stdin=subprocess.PIPE,
+1290 |                              universal_newlines=1)
+1291 |         (stdout, stderr) = p.communicate("line1\nline3\n")
+     |                                          ^^^^^^^^^^^^^^^^ Expected `AnyStr@Popen | None`, found `Literal["line1\nline3\n"]`
+1292 |         self.assertEqual(p.returncode, 0)
+     |
+info: Method defined here
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/subprocess.pyi:1742:9
+     |
+1740 |     # TODO: this should allow ReadableBuffer for Popen[bytes], but adding
+1741 |     # overloads for that runs into a mypy bug (python/mypy#14070).
+1742 |     def communicate(self, input: AnyStr | None = None, timeout: float | None = None) -> tuple[AnyStr, AnyStr]:
+     |         ^^^^^^^^^^^       --------------------------- Parameter declared here
+1743 |         """Interact with process: Send data to stdin and close it.
+1744 |         Read data from stdout and stderr, until end-of-file is
+     |
+
+
+error[no-matching-overload]: No overload of `Popen.__init__` matches arguments
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_subprocess.py:1475:13
+     |
+1473 |         # TypeError.
+1474 |         with self.assertRaises(TypeError):
+1475 |             subprocess.Popen(ZERO_RETURN_CMD, "orange")
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1476 |
+1477 |     def test_bufsize_is_none(self):
+     |
+info: First overload defined here
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/subprocess.pyi:1358:9
+     |
+1356 |       if sys.version_info >= (3, 11):
+1357 |           # process_group is added in 3.11
+1358 | /         @overload  # encoding is str
+1359 | |         def __init__(
+1360 | |             self: Popen[str],
+1361 | |             args: _CMD,
+1362 | |             bufsize: int = -1,
+1363 | |             executable: StrOrBytesPath | None = None,
+1364 | |             stdin: _FILE | None = None,
+1365 | |             stdout: _FILE | None = None,
+1366 | |             stderr: _FILE | None = None,
+1367 | |             preexec_fn: Callable[[], object] | None = None,
+1368 | |             close_fds: bool = True,
+1369 | |             shell: bool | int = False,
+1370 | |             cwd: StrOrBytesPath | None = None,
+1371 | |             env: _ENV | None = None,
+1372 | |             universal_newlines: bool | None = None,
+1373 | |             startupinfo: Any | None = None,
+1374 | |             creationflags: int = 0,
+1375 | |             restore_signals: bool = True,
+1376 | |             start_new_session: bool = False,
+1377 | |             pass_fds: Collection[int] = (),
+1378 | |             *,
+1379 | |             text: bool | None = None,
+1380 | |             encoding: str,
+1381 | |             errors: str | None = None,
+1382 | |             user: str | int | None = None,
+1383 | |             group: str | int | None = None,
+1384 | |             extra_groups: Iterable[str | int] | None = None,
+1385 | |             umask: int = -1,
+1386 | |             pipesize: int = -1,
+1387 | |             process_group: int | None = None,
+1388 | |         ) -> None:
+1389 | |             """Create new Popen instance."""
+     | |____________________________________________^ First overload defined here
+1390 |           @overload  # errors is str
+1391 |           def __init__(
+     |
+info: Possible overloads for bound method `__init__`:
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: bool | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: bool | None = None, encoding: str, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: bool | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: bool | None = None, encoding: str | None = None, errors: str, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, *, universal_newlines: Literal[True], startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., text: bool | None = None, encoding: str | None = None, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: Literal[True] | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: Literal[True], encoding: str | None = None, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[bytes], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: Literal[False] | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: Literal[False] | None = None, encoding: None = None, errors: None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[Any], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: bool | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: bool | None = None, encoding: str | None = None, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+
+
+error[no-matching-overload]: No overload of `Popen.__init__` matches arguments
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_subprocess.py:1479:13
+     |
+1477 |     def test_bufsize_is_none(self):
+1478 |         # bufsize=None should be the same as bufsize=0.
+1479 |         p = subprocess.Popen(ZERO_RETURN_CMD, None)
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1480 |         self.assertEqual(p.wait(), 0)
+1481 |         # Again with keyword arg
+     |
+info: First overload defined here
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/subprocess.pyi:1358:9
+     |
+1356 |       if sys.version_info >= (3, 11):
+1357 |           # process_group is added in 3.11
+1358 | /         @overload  # encoding is str
+1359 | |         def __init__(
+1360 | |             self: Popen[str],
+1361 | |             args: _CMD,
+1362 | |             bufsize: int = -1,
+1363 | |             executable: StrOrBytesPath | None = None,
+1364 | |             stdin: _FILE | None = None,
+1365 | |             stdout: _FILE | None = None,
+1366 | |             stderr: _FILE | None = None,
+1367 | |             preexec_fn: Callable[[], object] | None = None,
+1368 | |             close_fds: bool = True,
+1369 | |             shell: bool | int = False,
+1370 | |             cwd: StrOrBytesPath | None = None,
+1371 | |             env: _ENV | None = None,
+1372 | |             universal_newlines: bool | None = None,
+1373 | |             startupinfo: Any | None = None,
+1374 | |             creationflags: int = 0,
+1375 | |             restore_signals: bool = True,
+1376 | |             start_new_session: bool = False,
+1377 | |             pass_fds: Collection[int] = (),
+1378 | |             *,
+1379 | |             text: bool | None = None,
+1380 | |             encoding: str,
+1381 | |             errors: str | None = None,
+1382 | |             user: str | int | None = None,
+1383 | |             group: str | int | None = None,
+1384 | |             extra_groups: Iterable[str | int] | None = None,
+1385 | |             umask: int = -1,
+1386 | |             pipesize: int = -1,
+1387 | |             process_group: int | None = None,
+1388 | |         ) -> None:
+1389 | |             """Create new Popen instance."""
+     | |____________________________________________^ First overload defined here
+1390 |           @overload  # errors is str
+1391 |           def __init__(
+     |
+info: Possible overloads for bound method `__init__`:
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: bool | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: bool | None = None, encoding: str, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: bool | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: bool | None = None, encoding: str | None = None, errors: str, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, *, universal_newlines: Literal[True], startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., text: bool | None = None, encoding: str | None = None, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: Literal[True] | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: Literal[True], encoding: str | None = None, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[bytes], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: Literal[False] | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: Literal[False] | None = None, encoding: None = None, errors: None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[Any], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: bool | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: bool | None = None, encoding: str | None = None, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+
+
+error[no-matching-overload]: No overload of `Popen.__init__` matches arguments
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_subprocess.py:1482:13
+     |
+1480 |         self.assertEqual(p.wait(), 0)
+1481 |         # Again with keyword arg
+1482 |         p = subprocess.Popen(ZERO_RETURN_CMD, bufsize=None)
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1483 |         self.assertEqual(p.wait(), 0)
+     |
+info: First overload defined here
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/subprocess.pyi:1358:9
+     |
+1356 |       if sys.version_info >= (3, 11):
+1357 |           # process_group is added in 3.11
+1358 | /         @overload  # encoding is str
+1359 | |         def __init__(
+1360 | |             self: Popen[str],
+1361 | |             args: _CMD,
+1362 | |             bufsize: int = -1,
+1363 | |             executable: StrOrBytesPath | None = None,
+1364 | |             stdin: _FILE | None = None,
+1365 | |             stdout: _FILE | None = None,
+1366 | |             stderr: _FILE | None = None,
+1367 | |             preexec_fn: Callable[[], object] | None = None,
+1368 | |             close_fds: bool = True,
+1369 | |             shell: bool | int = False,
+1370 | |             cwd: StrOrBytesPath | None = None,
+1371 | |             env: _ENV | None = None,
+1372 | |             universal_newlines: bool | None = None,
+1373 | |             startupinfo: Any | None = None,
+1374 | |             creationflags: int = 0,
+1375 | |             restore_signals: bool = True,
+1376 | |             start_new_session: bool = False,
+1377 | |             pass_fds: Collection[int] = (),
+1378 | |             *,
+1379 | |             text: bool | None = None,
+1380 | |             encoding: str,
+1381 | |             errors: str | None = None,
+1382 | |             user: str | int | None = None,
+1383 | |             group: str | int | None = None,
+1384 | |             extra_groups: Iterable[str | int] | None = None,
+1385 | |             umask: int = -1,
+1386 | |             pipesize: int = -1,
+1387 | |             process_group: int | None = None,
+1388 | |         ) -> None:
+1389 | |             """Create new Popen instance."""
+     | |____________________________________________^ First overload defined here
+1390 |           @overload  # errors is str
+1391 |           def __init__(
+     |
+info: Possible overloads for bound method `__init__`:
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: bool | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: bool | None = None, encoding: str, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: bool | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: bool | None = None, encoding: str | None = None, errors: str, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, *, universal_newlines: Literal[True], startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., text: bool | None = None, encoding: str | None = None, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: Literal[True] | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: Literal[True], encoding: str | None = None, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[bytes], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: Literal[False] | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: Literal[False] | None = None, encoding: None = None, errors: None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[Any], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: bool | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: bool | None = None, encoding: str | None = None, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+
+
+error[no-matching-overload]: No overload of `Popen.__init__` matches arguments
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_subprocess.py:1740:18
+     |
+1738 |         for stream in ('stdout', 'stderr'):
+1739 |             kw = {stream: subprocess.PIPE}
+1740 |             with subprocess.Popen(args, **kw) as process:
+     |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1741 |                 # communicate() will be interrupted by SIGUSR1
+1742 |                 process.communicate()
+     |
+info: First overload defined here
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/subprocess.pyi:1358:9
+     |
+1356 |       if sys.version_info >= (3, 11):
+1357 |           # process_group is added in 3.11
+1358 | /         @overload  # encoding is str
+1359 | |         def __init__(
+1360 | |             self: Popen[str],
+1361 | |             args: _CMD,
+1362 | |             bufsize: int = -1,
+1363 | |             executable: StrOrBytesPath | None = None,
+1364 | |             stdin: _FILE | None = None,
+1365 | |             stdout: _FILE | None = None,
+1366 | |             stderr: _FILE | None = None,
+1367 | |             preexec_fn: Callable[[], object] | None = None,
+1368 | |             close_fds: bool = True,
+1369 | |             shell: bool | int = False,
+1370 | |             cwd: StrOrBytesPath | None = None,
+1371 | |             env: _ENV | None = None,
+1372 | |             universal_newlines: bool | None = None,
+1373 | |             startupinfo: Any | None = None,
+1374 | |             creationflags: int = 0,
+1375 | |             restore_signals: bool = True,
+1376 | |             start_new_session: bool = False,
+1377 | |             pass_fds: Collection[int] = (),
+1378 | |             *,
+1379 | |             text: bool | None = None,
+1380 | |             encoding: str,
+1381 | |             errors: str | None = None,
+1382 | |             user: str | int | None = None,
+1383 | |             group: str | int | None = None,
+1384 | |             extra_groups: Iterable[str | int] | None = None,
+1385 | |             umask: int = -1,
+1386 | |             pipesize: int = -1,
+1387 | |             process_group: int | None = None,
+1388 | |         ) -> None:
+1389 | |             """Create new Popen instance."""
+     | |____________________________________________^ First overload defined here
+1390 |           @overload  # errors is str
+1391 |           def __init__(
+     |
+info: Possible overloads for bound method `__init__`:
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: bool | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: bool | None = None, encoding: str, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: bool | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: bool | None = None, encoding: str | None = None, errors: str, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, *, universal_newlines: Literal[True], startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., text: bool | None = None, encoding: str | None = None, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[str], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: Literal[True] | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: Literal[True], encoding: str | None = None, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[bytes], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: Literal[False] | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: Literal[False] | None = None, encoding: None = None, errors: None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+info:   (self: Popen[Any], args: Unknown, bufsize: int = -1, executable: Unknown | None = None, stdin: None | int | IO[Any] = None, stdout: None | int | IO[Any] = None, stderr: None | int | IO[Any] = None, preexec_fn: Unknown | None = None, close_fds: bool = True, shell: int = False, cwd: Unknown | None = None, env: Unknown | None = None, universal_newlines: bool | None = None, startupinfo: Any | None = None, creationflags: int = 0, restore_signals: bool = True, start_new_session: bool = False, pass_fds: Unknown = ..., *, text: bool | None = None, encoding: str | None = None, errors: str | None = None, user: str | int | None = None, group: str | int | None = None, extra_groups: Unknown | None = None, umask: int = -1, pipesize: int = -1, process_group: int | None = None) -> None
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertLess` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_subprocess.py:2009:25
+     |
+2007 |         else:
+2008 |             self.fail("TimeoutExpired not raised.")
+2009 |         self.assertLess(after_secs - before_secs, 1.5,
+     |                         ^^^^^^^^^^^^^^^^^^^^^^^^ Expected `int`, found `float`
+2010 |                         msg="TimeoutExpired was delayed! Bad traceback:\n```\n"
+2011 |                         f"{stacks}```")
+     |
+info: element `float*` of union `int | float*` is not assignable to `int`
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:266:9
+    |
+264 |             raise self.failureException(self._formatMessage(msg, repr(expr) + " is not false"))
+265 |
+266 |     def assertLess(self, a: int, b: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^       ------ Parameter declared here
+267 |         if not a < b:
+268 |             self.fail(self._formatMessage(msg, f"{a!r} not less than {b!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertLess` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_subprocess.py:2009:51
+     |
+2007 |         else:
+2008 |             self.fail("TimeoutExpired not raised.")
+2009 |         self.assertLess(after_secs - before_secs, 1.5,
+     |                                                   ^^^ Expected `int`, found `float*`
+2010 |                         msg="TimeoutExpired was delayed! Bad traceback:\n```\n"
+2011 |                         f"{stacks}```")
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:266:9
+    |
+264 |             raise self.failureException(self._formatMessage(msg, repr(expr) + " is not false"))
+265 |
+266 |     def assertLess(self, a: int, b: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^               ------ Parameter declared here
+267 |         if not a < b:
+268 |             self.fail(self._formatMessage(msg, f"{a!r} not less than {b!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.skipTest` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_subprocess.py:2512:27
+     |
+2510 |             from resource import getrlimit, setrlimit, RLIMIT_NPROC
+2511 |         except ImportError as err:
+2512 |             self.skipTest(err)  # RLIMIT_NPROC is specific to Linux and BSD
+     |                           ^^^ Expected `str`, found `ImportError`
+2513 |         limits = getrlimit(RLIMIT_NPROC)
+2514 |         [_, hard] = limits
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:214:9
+    |
+212 |         raise self.failureException(msg)
+213 |
+214 |     def skipTest(self, reason: str) -> None:
+    |         ^^^^^^^^       ----------- Parameter declared here
+215 |         raise SkipTest(reason)
+    |
+
+
+error[no-matching-overload]: No overload of bound method `TestCase.assertIn` matches arguments
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_subprocess.py:3788:9
+     |
+3786 |         stdout, stderr = p.communicate()
+3787 |         self.assertEqual(p.returncode, 1)
+3788 |         self.assertIn(b"OSError", stderr)
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+3789 |
+3790 |         # The same as the previous call, but with an empty handle_list
+     |
+info: First overload defined here
+   --> <imre stdlib>/unittest/__init__.py:465:9
+    |
+464 |       if TYPE_CHECKING:
+465 | /         @overload
+466 | |         def assertIn(self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None: ...
+    | |_________________________________________________________________________________________________________________________^ First overload defined here
+467 |           @overload
+468 |           def assertIn(self, member: int, container: list[int], msg: str | None = None) -> None: ...
+    |
+info: Possible overloads for bound method `assertIn`:
+info:   (self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None
+info:   (self, member: int, container: list[int], msg: str | None = None) -> None
+info:   (self, member: object, container: Mapping[int, str], msg: str | None = None) -> None
+info: Overload implementation defined here
+   --> <imre stdlib>/unittest/__init__.py:471:13
+    |
+469 |         @overload
+470 |         def assertIn(self, member: object, container: typing.Mapping[int, str], msg: str | None = None) -> None: ...
+471 |         def assertIn(self, member: object, container: object, msg: str | None = None) -> None: ...
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+472 |     else:
+473 |         def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None:
+    |
+
+
+error[no-matching-overload]: No overload of bound method `TestCase.assertIn` matches arguments
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_subprocess.py:3800:9
+     |
+3798 |         stdout, stderr = p.communicate()
+3799 |         self.assertEqual(p.returncode, 1)
+3800 |         self.assertIn(b"OSError", stderr)
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+3801 |
+3802 |         # Check for a warning due to using handle_list and close_fds=False
+     |
+info: First overload defined here
+   --> <imre stdlib>/unittest/__init__.py:465:9
+    |
+464 |       if TYPE_CHECKING:
+465 | /         @overload
+466 | |         def assertIn(self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None: ...
+    | |_________________________________________________________________________________________________________________________^ First overload defined here
+467 |           @overload
+468 |           def assertIn(self, member: int, container: list[int], msg: str | None = None) -> None: ...
+    |
+info: Possible overloads for bound method `assertIn`:
+info:   (self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None
+info:   (self, member: int, container: list[int], msg: str | None = None) -> None
+info:   (self, member: object, container: Mapping[int, str], msg: str | None = None) -> None
+info: Overload implementation defined here
+   --> <imre stdlib>/unittest/__init__.py:471:13
+    |
+469 |         @overload
+470 |         def assertIn(self, member: object, container: typing.Mapping[int, str], msg: str | None = None) -> None: ...
+471 |         def assertIn(self, member: object, container: object, msg: str | None = None) -> None: ...
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+472 |     else:
+473 |         def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None:
+    |
+
+
+error[no-matching-overload]: No overload of bound method `TestCase.assertIn` matches arguments
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_subprocess.py:3834:13
+     |
+3832 |                              env=newenv)
+3833 |         with p:
+3834 |             self.assertIn(b"physalis", p.stdout.read())
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+3835 |
+3836 |     def test_shell_string(self):
+     |
+info: First overload defined here
+   --> <imre stdlib>/unittest/__init__.py:465:9
+    |
+464 |       if TYPE_CHECKING:
+465 | /         @overload
+466 | |         def assertIn(self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None: ...
+    | |_________________________________________________________________________________________________________________________^ First overload defined here
+467 |           @overload
+468 |           def assertIn(self, member: int, container: list[int], msg: str | None = None) -> None: ...
+    |
+info: Possible overloads for bound method `assertIn`:
+info:   (self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None
+info:   (self, member: int, container: list[int], msg: str | None = None) -> None
+info:   (self, member: object, container: Mapping[int, str], msg: str | None = None) -> None
+info: Overload implementation defined here
+   --> <imre stdlib>/unittest/__init__.py:471:13
+    |
+469 |         @overload
+470 |         def assertIn(self, member: object, container: typing.Mapping[int, str], msg: str | None = None) -> None: ...
+471 |         def assertIn(self, member: object, container: object, msg: str | None = None) -> None: ...
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+472 |     else:
+473 |         def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None:
+    |
+
+
+error[no-matching-overload]: No overload of bound method `TestCase.assertIn` matches arguments
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_subprocess.py:3844:13
+     |
+3842 |                              env=newenv)
+3843 |         with p:
+3844 |             self.assertIn(b"physalis", p.stdout.read())
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+3845 |
+3846 |     def test_shell_encodings(self):
+     |
+info: First overload defined here
+   --> <imre stdlib>/unittest/__init__.py:465:9
+    |
+464 |       if TYPE_CHECKING:
+465 | /         @overload
+466 | |         def assertIn(self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None: ...
+    | |_________________________________________________________________________________________________________________________^ First overload defined here
+467 |           @overload
+468 |           def assertIn(self, member: int, container: list[int], msg: str | None = None) -> None: ...
+    |
+info: Possible overloads for bound method `assertIn`:
+info:   (self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None
+info:   (self, member: int, container: list[int], msg: str | None = None) -> None
+info:   (self, member: object, container: Mapping[int, str], msg: str | None = None) -> None
+info: Overload implementation defined here
+   --> <imre stdlib>/unittest/__init__.py:471:13
+    |
+469 |         @overload
+470 |         def assertIn(self, member: object, container: typing.Mapping[int, str], msg: str | None = None) -> None: ...
+471 |         def assertIn(self, member: object, container: object, msg: str | None = None) -> None: ...
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+472 |     else:
+473 |         def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None:
+    |
+
+

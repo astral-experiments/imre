@@ -1,0 +1,85 @@
+{
+  "argv": [
+    "/workspace/scratch/tokenize-file-O0.exe",
+    "-v",
+    "TestRoundtrip.test_roundtrip",
+    "TestRoundtrip.test_string_concatenation",
+    "TestTokenize",
+    "TestTokenizerAdheresToPep0263",
+    "Test_Tokenize",
+    "TokenizeTest",
+    "UntokenizeTest"
+  ],
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "TMPDIR": "/workspace/scratch/imre-tmp",
+    "IMRE_PYTHON": "/workspace/scratch/stdlib-sdk/imre",
+    "IMREFLAGS": "--opt-level 0"
+  },
+  "timeout_seconds": 120,
+  "exit_code": 0,
+  "timed_out": false,
+  "reported_totals": [
+    "42"
+  ],
+  "parsed_results": 42,
+  "target_originals": 42,
+  "updated_originals": 42,
+  "excluded_ids": [
+    "test.test_tokenize.TestRoundtrip.test_random_files"
+  ],
+  "binary_sha256": "2d4fe2061845ade633891479e2090b917c310639ecb3d30c9f666ae84154d4ea",
+  "build": {
+    "argv": [
+      "/workspace/scratch/stdlib-sdk/imre",
+      "build",
+      "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_tokenize.py",
+      "--module-root",
+      "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "--quiet",
+      "--no-cache",
+      "--opt-level",
+      "0",
+      "--runtime",
+      "/workspace/scratch/stdlib-sdk/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "-o",
+      "/workspace/scratch/tokenize-file-O0.exe"
+    ],
+    "timeout_seconds": 180,
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_PYTHON": "/workspace/scratch/stdlib-sdk/imre"
+    },
+    "entry": "unchanged pinned original test file"
+  },
+  "raw": {
+    "stdout": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "excerpted": false
+    },
+    "stderr": {
+      "sha256": "f93ed3482b4e9377afedda10e4e37fcda79fedce47c4422f4814b813e8b9fbbb",
+      "bytes": 3648,
+      "excerpted": false
+    },
+    "build_stdout": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "excerpted": false
+    },
+    "build_stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "excerpted": false
+    }
+  },
+  "normalization": "Same deterministic description/doctest joining as the base suite run.json."
+}

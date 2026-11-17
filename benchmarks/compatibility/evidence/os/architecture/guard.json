@@ -1,0 +1,48 @@
+{
+  "guard_build_argv": [
+    "/usr/bin/cc",
+    "-shared",
+    "-fPIC",
+    "-O2",
+    "/workspace/scratch/stdlib-architecture/guard/exec_guard.c",
+    "-ldl",
+    "-o",
+    "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+  ],
+  "guard_build_environment": {
+    "TMPDIR": "/workspace/scratch/stdlib-work/tmp"
+  },
+  "guard_source_sha256": "8c9a25f9b597347dd228a9b29339cfb79cda67d9da64884afd84608f1779339d",
+  "guard_executable_sha256": "32376a734ccdf81d73c0c50e9981dd392c92a5b1adb6fd0f46719b3fd90c8dc1",
+  "exec_probe": {
+    "argv": [
+      "/bin/sh",
+      "-c",
+      "exec /bin/true"
+    ],
+    "environment": {
+      "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+    },
+    "exit_code": 126,
+    "stderr_sha256": "aec3b48f921d3a10c6114c4fe33e5eb51ba22919da5b7db75933c91c57569b21"
+  },
+  "dlopen_probe": {
+    "build_argv": [
+      "/usr/bin/cc",
+      "/workspace/scratch/stdlib-architecture/guard/dlopen_probe.c",
+      "-ldl",
+      "-o",
+      "/workspace/scratch/stdlib-architecture/guard/dlopen_probe"
+    ],
+    "argv": [
+      "/workspace/scratch/stdlib-architecture/guard/dlopen_probe"
+    ],
+    "environment": {
+      "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+    },
+    "exit_code": 0,
+    "stderr_sha256": "91cc552971ba1ed7c9c04c007b2130636749aec358b0d681eacec9a4c8f54897"
+  },
+  "restriction": "Constructor verifies no libpython mapping and installs an inherited seccomp filter denying execve/execveat and the x32 ABI; dlopen calls naming libpython are denied. A marker is required for each guarded run.",
+  "strace": "Cloud sandbox denied PTRACE_TRACEME; no attempt was made to bypass it."
+}

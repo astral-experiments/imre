@@ -1,0 +1,2 @@
+3883  execve("/workspace/imre-compat-data/benchmarks/compatibility/evidence/fnmatch/O3.exe", ["/workspace/imre-compat-data/benc"..., "-v"], 0x7ffcbe974e10 /* 76 vars */) = 0
+3883  +++ exited with 0 +++

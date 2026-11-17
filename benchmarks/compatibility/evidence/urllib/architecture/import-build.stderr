@@ -1,0 +1,2 @@
+ Compiling /workspace/scratch/urllib-architecture/poison/import_only.py (-O0)
+/workspace/scratch/urllib-architecture/poison/urllib_poison.py:1:15: Imre: expected int, got bool; annotations are enforced contracts

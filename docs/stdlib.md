@@ -5,7 +5,7 @@
 
 Revision `49f0dc2ef78b82692e333252faf71b4fc7730949` · CPython **3.14.5** · Linux x86-64. These are original-test receipts at this revision, not cumulative credits.
 
-Frozen 45-family cohort: **4,179 pinned receipts** of **16,225 raw upstream originals**, **0 verified paired passes**; **12,046 originals have no receipt**.
+Frozen 45-family cohort: **9,400 pinned receipts** of **16,225 raw upstream originals**, **24 verified paired passes**; **6,825 originals have no receipt**.
 
 Supplemental pilots, outside the frozen cohort: **3 receipts** of **3 originals**, **3 verified paired passes**.
 
@@ -18,48 +18,48 @@ Scripts: **0 of 84 original commands have receipts**, **0 verified paired passes
 | `argparse` | 1,893 | 1,893 pass | not run | not run | 0 verified | 1,887 |
 | `base64` | 41 | not run | not run | not run | unknown (not run) | 40 |
 | `collections` | 659 | not run | not run | not run | unknown (not run) | 639 |
-| `configparser` | 344 | not run | not run | not run | unknown (not run) | 339 |
+| `configparser` | 344 | 339 pass, 5 skip | 339 pass, 5 skip | 339 pass, 5 skip | 0 verified | 339 |
 | `contextlib` | 149 | not run | not run | not run | unknown (not run) | 149 |
-| `copy` | 81 | not run | not run | not run | unknown (not run) | 81 |
+| `copy` | 81 | 81 pass | not run | not run | 0 verified | 81 |
 | `csv` | 128 | not run | not run | not run | unknown (not run) | 122 |
-| `dataclasses` | 276 | not run | not run | not run | unknown (not run) | 273 |
-| `datetime` | 1,098 | not run | not run | not run | unknown (not run) | 1,029 |
-| `fnmatch` | 24 | not run | not run | not run | unknown (not run) | 24 |
-| `fractions` | 50 | not run | not run | not run | unknown (not run) | 50 |
+| `dataclasses` | 276 | 275 pass, 1 skip | not run | not run | 0 verified | 273 |
+| `datetime` | 1,098 | 1,045 pass, 53 skip | 19 pass, 24 skip, 1,055 not run | 21 pass, 24 skip, 1,053 not run | 0 verified | 1,029 |
+| `fnmatch` | 24 | 24 pass | 24 pass | 24 pass | 24 verified | 24 |
+| `fractions` | 50 | 50 pass | not run | not run | 0 verified | 50 |
 | `functools` | 329 | not run | not run | not run | unknown (not run) | 316 |
-| `glob` | 24 | not run | not run | not run | unknown (not run) | 22 |
+| `glob` | 24 | 22 pass, 2 skip | 21 pass, 2 skip, 1 not run | 21 pass, 2 skip, 1 not run | 0 verified | 22 |
 | `gzip` | 75 | not run | not run | not run | unknown (not run) | 74 |
 | `hashlib` | 82 | not run | not run | not run | unknown (not run) | 78 |
 | `importlib` | 1,345 | 1,328 pass, 17 skip | not run | not run | 0 verified | 432 |
-| `inspect` | 362 | not run | not run | not run | unknown (not run) | 264 |
+| `inspect` | 362 | 355 pass, 7 skip | not run | not run | 0 verified | 264 |
 | `io` | 1,038 | not run | not run | not run | unknown (not run) | 959 |
 | `itertools` | 138 | not run | not run | not run | unknown (not run) | 111 |
 | `json` | 216 | not run | not run | not run | unknown (not run) | 207 |
-| `logging` | 272 | not run | not run | not run | unknown (not run) | 220 |
-| `math` | 89 | not run | not run | not run | unknown (not run) | 85 |
+| `logging` | 272 | 269 pass, 3 skip | not run | not run | 0 verified | 220 |
+| `math` | 89 | 89 pass | not run | not run | 0 verified | 85 |
 | `netrc` | 23 | not run | not run | not run | unknown (not run) | 22 |
-| `os` | 579 | not run | not run | not run | unknown (not run) | 471 |
+| `os` | 579 | 474 pass, 2 error, 103 skip | 25 pass, 554 not run | 25 pass, 554 not run | 0 verified | 471 |
 | `pathlib` | 1,369 | not run | not run | not run | unknown (not run) | 968 |
-| `re` | 165 | not run | not run | not run | unknown (not run) | 146 |
-| `shutil` | 223 | not run | not run | not run | unknown (not run) | 172 |
+| `re` | 165 | 164 pass, 1 skip | not run | not run | 0 verified | 146 |
+| `shutil` | 223 | 160 pass, 63 skip | not run | not run | 0 verified | 172 |
 | `socket` | 746 | 614 pass, 132 skip | not run | not run | 0 verified | 110 |
 | `ssl` | 195 | 180 pass, 15 skip | not run | not run | 0 verified | 66 |
 | `struct` | 43 | not run | not run | not run | unknown (not run) | 34 |
-| `subprocess` | 353 | not run | not run | not run | unknown (not run) | 303 |
+| `subprocess` | 353 | 308 pass, 2 error, 43 skip | not run | not run | 0 verified | 303 |
 | `tempfile` | 118 | not run | not run | not run | unknown (not run) | 110 |
-| `textwrap` | 68 | not run | not run | not run | unknown (not run) | 68 |
+| `textwrap` | 68 | 68 pass | 68 pass | 68 pass | 0 verified | 68 |
 | `threading` | 228 | not run | not run | not run | unknown (not run) | 97 |
-| `tokenize` | 130 | not run | not run | not run | unknown (not run) | 127 |
-| `tomllib` | 17 | not run | not run | not run | unknown (not run) | 17 |
-| `types` | 141 | not run | not run | not run | unknown (not run) | 134 |
+| `tokenize` | 130 | 130 pass | 127 pass, 2 error, 1 not run | 127 pass, 2 error, 1 not run | 0 verified | 127 |
+| `tomllib` | 17 | 17 pass | 17 pass | 17 pass | 0 verified | 17 |
+| `types` | 141 | 128 pass, 1 skip, 12 not run | not run | not run | 0 verified; 12 unknown | 134 |
 | `typing` | 712 | not run | not run | not run | unknown (not run) | 710 |
 | `unittest` | 1,090 | not run | not run | not run | unknown (not run) | 1,054 |
-| `urllib` | 178 | not run | not run | not run | unknown (not run) | 173 |
-| `uuid` | 120 | not run | not run | not run | unknown (not run) | 48 |
+| `urllib` | 178 | 174 pass, 2 error, 2 skip | 174 pass, 2 error, 2 skip | 174 pass, 2 error, 2 skip | 0 verified | 173 |
+| `uuid` | 120 | 103 pass, 17 skip | not run | not run | 0 verified | 48 |
 | `warnings` | 187 | not run | not run | not run | unknown (not run) | 181 |
 | `weakref` | 183 | not run | not run | not run | unknown (not run) | 168 |
-| `zipfile` | 383 | not run | not run | not run | unknown (not run) | 370 |
-| `zoneinfo` | 261 | not run | not run | not run | unknown (not run) | 229 |
+| `zipfile` | 383 | 376 pass, 2 skip, 5 not run | not run | not run | 0 verified; 5 unknown | 370 |
+| `zoneinfo` | 261 | 233 pass, 28 skip | not run | not run | 0 verified | 229 |
 
 #### Supplemental pilots
 

@@ -1,0 +1,278 @@
+{
+  "imre_revision": "49f0dc2ef78b82692e333252faf71b4fc7730949",
+  "platform": {
+    "os": "linux",
+    "arch": "x86_64",
+    "release": "6.18.57"
+  },
+  "runs": {
+    "stock": {
+      "argv": [
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "-c",
+        "import sys, unittest; unittest.main(module=None, argv=['unittest', '-v', sys.argv[1]], testRunner=unittest.TextTestRunner(verbosity=2, descriptions=False))",
+        "test.test_inspect"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "TMPDIR": "/workspace/scratch/imre-tmp",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1"
+      },
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.917,
+      "raw": {
+        "stdout": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "stderr": {
+          "sha256": "ecf2c2b15d60608adc1618d9ca8b414e50b5bbe719b0fc2d613862e94351d644",
+          "bytes": 42074
+        }
+      },
+      "collection_exclusions": [],
+      "original_occurrences": 362,
+      "timeout_seconds": 180
+    },
+    "O0": {
+      "argv": [
+        "/workspace/scratch/inspect-O0.exe",
+        "unittest",
+        "-v",
+        "test.test_inspect"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "TMPDIR": "/workspace/scratch/imre-tmp",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "IMREFLAGS": "--opt-level 0",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+      },
+      "build_argv": [
+        "/workspace/imre/target/release/imre",
+        "build",
+        "/workspace/imre-pinned/crates/imre-compiler/stdlib/runpy.py",
+        "--module-root",
+        "/workspace/imre-pinned",
+        "--extension-path",
+        "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "--quiet",
+        "--no-cache",
+        "--opt-level",
+        "0",
+        "--runtime",
+        "/workspace/imre/target/release/libimre_runtime.a",
+        "--clang",
+        "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+        "-o",
+        "/workspace/scratch/inspect-O0.exe",
+        "--include-module",
+        "unittest.__main__",
+        "--include-module",
+        "test.test_inspect",
+        "--include-module",
+        "test.test_inspect.test_inspect",
+        "--include-module",
+        "test.test_inspect.inspect_fodder",
+        "--include-module",
+        "test.test_inspect.inspect_fodder2",
+        "--include-module",
+        "test.test_inspect.inspect_deferred_annotations",
+        "--include-module",
+        "test.test_inspect.inspect_stock_annotations",
+        "--include-module",
+        "test.test_inspect.inspect_stringized_annotations",
+        "--include-module",
+        "test.test_inspect.inspect_stringized_annotations_2",
+        "--include-module",
+        "test.test_inspect.inspect_stringized_annotations_pep695"
+      ],
+      "build_exit_code": 1,
+      "build_timed_out": false,
+      "build_raw": {
+        "stdout": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "stderr": {
+          "sha256": "c45dcb04ddc07842eb24279ff8ba43239e661d10dbe1639284b6a9455a33cd6b",
+          "bytes": 263
+        }
+      },
+      "build_elapsed_seconds": 0.97,
+      "reason": "build failed before test execution (see build stderr)",
+      "timeout_seconds": 120
+    },
+    "O3": {
+      "argv": [
+        "/workspace/scratch/inspect-O3.exe",
+        "unittest",
+        "-v",
+        "test.test_inspect"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "TMPDIR": "/workspace/scratch/imre-tmp",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "IMREFLAGS": "--opt-level 3",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+      },
+      "build_argv": [
+        "/workspace/imre/target/release/imre",
+        "build",
+        "/workspace/imre-pinned/crates/imre-compiler/stdlib/runpy.py",
+        "--module-root",
+        "/workspace/imre-pinned",
+        "--extension-path",
+        "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "--quiet",
+        "--no-cache",
+        "--opt-level",
+        "3",
+        "--runtime",
+        "/workspace/imre/target/release/libimre_runtime.a",
+        "--clang",
+        "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+        "-o",
+        "/workspace/scratch/inspect-O3.exe",
+        "--include-module",
+        "unittest.__main__",
+        "--include-module",
+        "test.test_inspect",
+        "--include-module",
+        "test.test_inspect.test_inspect",
+        "--include-module",
+        "test.test_inspect.inspect_fodder",
+        "--include-module",
+        "test.test_inspect.inspect_fodder2",
+        "--include-module",
+        "test.test_inspect.inspect_deferred_annotations",
+        "--include-module",
+        "test.test_inspect.inspect_stock_annotations",
+        "--include-module",
+        "test.test_inspect.inspect_stringized_annotations",
+        "--include-module",
+        "test.test_inspect.inspect_stringized_annotations_2",
+        "--include-module",
+        "test.test_inspect.inspect_stringized_annotations_pep695"
+      ],
+      "build_exit_code": 1,
+      "build_timed_out": false,
+      "build_raw": {
+        "stdout": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "stderr": {
+          "sha256": "c45dcb04ddc07842eb24279ff8ba43239e661d10dbe1639284b6a9455a33cd6b",
+          "bytes": 263
+        }
+      },
+      "build_elapsed_seconds": 0.917,
+      "reason": "build failed before test execution (see build stderr)",
+      "timeout_seconds": 120
+    }
+  },
+  "source_archive_sha256": "0d838be32b52da92a4293ecd99bc91f7be8b4acc573423665bd1a1428be46e47",
+  "source_files": [
+    {
+      "repo": "https://github.com/python/cpython",
+      "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+      "path": "Lib/test/test_inspect/test_inspect.py",
+      "git_blob": "28acb2a45a31b75c43e82f9f0d64fcb9944915ec",
+      "sha256": "49059571ec9fb40dd61745fb0ea0e2a619f3d5eee089eebe9271f64ac034120e"
+    }
+  ],
+  "direct_build_probes": [
+    {
+      "tier": "O0",
+      "source": "test/test_inspect/test_inspect.py",
+      "argv": [
+        "/workspace/imre/target/release/imre",
+        "build",
+        "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_inspect/test_inspect.py",
+        "--module-root",
+        "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "--quiet",
+        "--no-cache",
+        "--opt-level",
+        "0",
+        "--runtime",
+        "/workspace/imre/target/release/libimre_runtime.a",
+        "--clang",
+        "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+        "-o",
+        "/workspace/scratch/inspect-test_inspect-O0-direct.exe"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1"
+      },
+      "exit_code": 1,
+      "timed_out": false,
+      "timeout_seconds": 60,
+      "raw": {
+        "stdout": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "stderr": {
+          "sha256": "5de45876818846996fd130d22f1e0b37aa783e5f787f48b929ea69b3708c0bfc",
+          "bytes": 246
+        }
+      },
+      "evidence": "O0.direct.test_inspect.build.stderr"
+    },
+    {
+      "tier": "O3",
+      "source": "test/test_inspect/test_inspect.py",
+      "argv": [
+        "/workspace/imre/target/release/imre",
+        "build",
+        "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_inspect/test_inspect.py",
+        "--module-root",
+        "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "--quiet",
+        "--no-cache",
+        "--opt-level",
+        "3",
+        "--runtime",
+        "/workspace/imre/target/release/libimre_runtime.a",
+        "--clang",
+        "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+        "-o",
+        "/workspace/scratch/inspect-test_inspect-O3-direct.exe"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1"
+      },
+      "exit_code": 1,
+      "timed_out": false,
+      "timeout_seconds": 60,
+      "raw": {
+        "stdout": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "stderr": {
+          "sha256": "5de45876818846996fd130d22f1e0b37aa783e5f787f48b929ea69b3708c0bfc",
+          "bytes": 246
+        }
+      },
+      "evidence": "O3.direct.test_inspect.build.stderr"
+    }
+  ]
+}

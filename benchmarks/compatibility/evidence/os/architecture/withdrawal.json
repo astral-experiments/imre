@@ -1,0 +1,100 @@
+{
+  "source_paths": [
+    "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_genericpath.py",
+    "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_glob.py"
+  ],
+  "sources_absent_during_runs": true,
+  "matching_pyc_absent": true,
+  "remaining_fixture_files": 1637,
+  "positive_originals": 25,
+  "runs": {
+    "O0": {
+      "executable_sha256": "a77c7d92f60f10271f5141e107f4cf798570b128177d8eca7f41674577473421",
+      "cwd": "/workspace/scratch/stdlib-work/genericpath",
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+        "IMREFLAGS": "--opt-level 0",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+        "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+      },
+      "timeout_seconds_per_command": 30,
+      "dynamic_needed": [
+        "0x0000000000000001 (NEEDED)             Shared library: [libm.so.6]",
+        "0x0000000000000001 (NEEDED)             Shared library: [libgcc_s.so.1]",
+        "0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]",
+        "0x0000000000000001 (NEEDED)             Shared library: [ld-linux-x86-64.so.2]"
+      ],
+      "commands": [
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/genericpath.O0.baseline.exe",
+            "-v"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "9ac8751b6183f16367d4ca0ad270f1297ea2cf24f8913e904efa469f5ddd4784",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 25
+        }
+      ],
+      "observed": {
+        "pass": 25
+      },
+      "exact_positive_id_outcome_sequence_matches_baseline": true,
+      "all_commands_exit_zero": true,
+      "guard_installed_every_command": true,
+      "any_libpython_dlopen_attempt": false
+    },
+    "O3": {
+      "executable_sha256": "f44433115cad96d4f54b55bc737a92735a6e2c0edc30d9ba448836262334fbbc",
+      "cwd": "/workspace/scratch/stdlib-work/genericpath",
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+        "IMREFLAGS": "--opt-level 3",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+        "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+      },
+      "timeout_seconds_per_command": 30,
+      "dynamic_needed": [
+        "0x0000000000000001 (NEEDED)             Shared library: [libm.so.6]",
+        "0x0000000000000001 (NEEDED)             Shared library: [libgcc_s.so.1]",
+        "0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]",
+        "0x0000000000000001 (NEEDED)             Shared library: [ld-linux-x86-64.so.2]"
+      ],
+      "commands": [
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/genericpath.O3.baseline.exe",
+            "-v"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "fab05e2dfc4bece64826bbf2d0f03d6e8cc0a08d529fbbf2c2c161a616248436",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 25
+        }
+      ],
+      "observed": {
+        "pass": 25
+      },
+      "exact_positive_id_outcome_sequence_matches_baseline": true,
+      "all_commands_exit_zero": true,
+      "guard_installed_every_command": true,
+      "any_libpython_dlopen_attempt": false
+    }
+  },
+  "restored_source_sha256": {
+    "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_genericpath.py": "7bd29efff32abbfaae89f57f4d6855e0c5e2940c1aae0a492707d147c8c95301",
+    "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_glob.py": "b4adbfa93158f2949957bc6b9c7f16aca58e3fa9b35c863a6caf36f4114a279a"
+  }
+}

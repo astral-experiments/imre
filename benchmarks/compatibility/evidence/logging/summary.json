@@ -1,0 +1,24 @@
+{
+  "family": "logging",
+  "frozen_raw_originals": 272,
+  "stock_inventory": 272,
+  "repeated_occurrences": 0,
+  "tiers": {
+    "stock": {
+      "pass": 269,
+      "skip": 3
+    },
+    "O0": {
+      "not_run": 272
+    },
+    "O3": {
+      "not_run": 272
+    }
+  },
+  "paired": 0,
+  "blockers": [
+    "Finite runner O0/O3 stopped at runpy.py:88 before collection. Direct O0/O3 builds rejected TestCase.skipTest argument types before execution."
+  ],
+  "provenance": "provenance.json",
+  "inventory": "inventory.jsonl"
+}

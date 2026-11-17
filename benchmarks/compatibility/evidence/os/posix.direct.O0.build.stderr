@@ -1,0 +1,731 @@
+ Compiling /workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py (-O0)
+error[no-matching-overload]: No overload of bound method `TestCase.assertIn` matches arguments
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:726:13
+    |
+724 |             # Some old systems don't allow unprivileged users to use
+725 |             # mknod(), or only support creating device nodes.
+726 |             self.assertIn(e.errno, (errno.EPERM, errno.EINVAL, errno.EACCES))
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+727 |         else:
+728 |             self.assertTrue(stat.S_ISFIFO(posix.stat(os_helper.TESTFN).st_mode))
+    |
+info: First overload defined here
+   --> <imre stdlib>/unittest/__init__.py:465:9
+    |
+464 |       if TYPE_CHECKING:
+465 | /         @overload
+466 | |         def assertIn(self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None: ...
+    | |_________________________________________________________________________________________________________________________^ First overload defined here
+467 |           @overload
+468 |           def assertIn(self, member: int, container: list[int], msg: str | None = None) -> None: ...
+    |
+info: Possible overloads for bound method `assertIn`:
+info:   (self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None
+info:   (self, member: int, container: list[int], msg: str | None = None) -> None
+info:   (self, member: object, container: Mapping[int, str], msg: str | None = None) -> None
+info: Overload implementation defined here
+   --> <imre stdlib>/unittest/__init__.py:471:13
+    |
+469 |         @overload
+470 |         def assertIn(self, member: object, container: typing.Mapping[int, str], msg: str | None = None) -> None: ...
+471 |         def assertIn(self, member: object, container: object, msg: str | None = None) -> None: ...
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+472 |     else:
+473 |         def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None:
+    |
+
+
+error[no-matching-overload]: No overload of bound method `TestCase.assertIn` matches arguments
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:736:13
+    |
+734 |                 dir_fd=None)
+735 |         except OSError as e:
+736 |             self.assertIn(e.errno, (errno.EPERM, errno.EINVAL, errno.EACCES))
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+737 |
+738 |     @unittest.skipUnless(hasattr(posix, 'makedev'), 'test needs posix.makedev()')
+    |
+info: First overload defined here
+   --> <imre stdlib>/unittest/__init__.py:465:9
+    |
+464 |       if TYPE_CHECKING:
+465 | /         @overload
+466 | |         def assertIn(self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None: ...
+    | |_________________________________________________________________________________________________________________________^ First overload defined here
+467 |           @overload
+468 |           def assertIn(self, member: int, container: list[int], msg: str | None = None) -> None: ...
+    |
+info: Possible overloads for bound method `assertIn`:
+info:   (self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None
+info:   (self, member: int, container: list[int], msg: str | None = None) -> None
+info:   (self, member: object, container: Mapping[int, str], msg: str | None = None) -> None
+info: Overload implementation defined here
+   --> <imre stdlib>/unittest/__init__.py:471:13
+    |
+469 |         @overload
+470 |         def assertIn(self, member: object, container: typing.Mapping[int, str], msg: str | None = None) -> None: ...
+471 |         def assertIn(self, member: object, container: object, msg: str | None = None) -> None: ...
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+472 |     else:
+473 |         def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None:
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertGreaterEqual` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:1401:43
+     |
+1399 |         self.assertIsInstance(interval, float)
+1400 |         # Reasonable constraints, I think.
+1401 |         self.assertGreaterEqual(interval, 0.)
+     |                                           ^^ Expected `int`, found `float*`
+1402 |         self.assertLess(interval, 1.)
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:278:9
+    |
+276 |             self.fail(self._formatMessage(msg, f"{a!r} not greater than {b!r}"))
+277 |
+278 |     def assertGreaterEqual(self, a: int, b: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^^^^^               ------ Parameter declared here
+279 |         if not a >= b:
+280 |             self.fail(self._formatMessage(msg, f"{a!r} not greater than or equal to {b!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertLess` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:1402:35
+     |
+1400 |         # Reasonable constraints, I think.
+1401 |         self.assertGreaterEqual(interval, 0.)
+1402 |         self.assertLess(interval, 1.)
+     |                                   ^^ Expected `int`, found `float*`
+1403 |
+1404 |     @requires_sched_affinity
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:266:9
+    |
+264 |             raise self.failureException(self._formatMessage(msg, repr(expr) + " is not false"))
+265 |
+266 |     def assertLess(self, a: int, b: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^               ------ Parameter declared here
+267 |         if not a < b:
+268 |             self.fail(self._formatMessage(msg, f"{a!r} not less than {b!r}"))
+    |
+
+
+error[no-matching-overload]: No overload of bound method `TestCase.assertIn` matches arguments
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:1733:17
+     |
+1731 |                 # Some old systems don't allow unprivileged users to use
+1732 |                 # mknod(), or only support creating device nodes.
+1733 |                 self.assertIn(e.errno, (errno.EPERM, errno.EINVAL, errno.EACCES))
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1734 |             else:
+1735 |                 self.addCleanup(posix.unlink, fullname)
+     |
+info: First overload defined here
+   --> <imre stdlib>/unittest/__init__.py:465:9
+    |
+464 |       if TYPE_CHECKING:
+465 | /         @overload
+466 | |         def assertIn(self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None: ...
+    | |_________________________________________________________________________________________________________________________^ First overload defined here
+467 |           @overload
+468 |           def assertIn(self, member: int, container: list[int], msg: str | None = None) -> None: ...
+    |
+info: Possible overloads for bound method `assertIn`:
+info:   (self, member: str, container: str | list[str] | dict[str, str], msg: str | None = None) -> None
+info:   (self, member: int, container: list[int], msg: str | None = None) -> None
+info:   (self, member: object, container: Mapping[int, str], msg: str | None = None) -> None
+info: Overload implementation defined here
+   --> <imre stdlib>/unittest/__init__.py:471:13
+    |
+469 |         @overload
+470 |         def assertIn(self, member: object, container: typing.Mapping[int, str], msg: str | None = None) -> None: ...
+471 |         def assertIn(self, member: object, container: object, msg: str | None = None) -> None: ...
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+472 |     else:
+473 |         def assertIn(self, member: object, container: dict[int, str], msg: str | None = None) -> None:
+    |
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:1856:15
+     |
+1854 |             """
+1855 |         args = self.python_args('-c', script)
+1856 |         pid = self.spawn_func(args[0], args, os.environ)
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1857 |         support.wait_process(pid, exitcode=0)
+1858 |         with open(pidfile, encoding="utf-8") as f:
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:1864:19
+     |
+1862 |           no_such_executable = 'no_such_executable'
+1863 |           try:
+1864 |               pid = self.spawn_func(no_such_executable,
+     |  ___________________^
+1865 | |                                   [no_such_executable],
+1866 | |                                   os.environ)
+     | |_____________________________________________^
+1867 |           # bpo-35794: PermissionError can be raised if there are
+1868 |           # directories in the $PATH that are not accessible.
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:1885:15
+     |
+1883 |           """
+1884 |           args = self.python_args('-c', script)
+1885 |           pid = self.spawn_func(args[0], args,
+     |  _______________^
+1886 | |                               {**os.environ, 'foo': 'bar'})
+     | |___________________________________________________________^
+1887 |           support.wait_process(pid, exitcode=0)
+1888 |           with open(envfile, encoding="utf-8") as f:
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:1892:15
+     |
+1891 |       def test_none_file_actions(self):
+1892 |           pid = self.spawn_func(
+     |  _______________^
+1893 | |             self.NOOP_PROGRAM[0],
+1894 | |             self.NOOP_PROGRAM,
+1895 | |             os.environ,
+1896 | |             file_actions=None
+1897 | |         )
+     | |_________^
+1898 |           support.wait_process(pid, exitcode=0)
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:1901:15
+     |
+1900 |       def test_empty_file_actions(self):
+1901 |           pid = self.spawn_func(
+     |  _______________^
+1902 | |             self.NOOP_PROGRAM[0],
+1903 | |             self.NOOP_PROGRAM,
+1904 | |             os.environ,
+1905 | |             file_actions=[]
+1906 | |         )
+     | |_________^
+1907 |           support.wait_process(pid, exitcode=0)
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:1910:15
+     |
+1909 |       def test_resetids_explicit_default(self):
+1910 |           pid = self.spawn_func(
+     |  _______________^
+1911 | |             sys.executable,
+1912 | |             [sys.executable, '-c', 'pass'],
+1913 | |             os.environ,
+1914 | |             resetids=False
+1915 | |         )
+     | |_________^
+1916 |           support.wait_process(pid, exitcode=0)
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:1919:15
+     |
+1918 |       def test_resetids(self):
+1919 |           pid = self.spawn_func(
+     |  _______________^
+1920 | |             sys.executable,
+1921 | |             [sys.executable, '-c', 'pass'],
+1922 | |             os.environ,
+1923 | |             resetids=True
+1924 | |         )
+     | |_________^
+1925 |           support.wait_process(pid, exitcode=0)
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:1928:15
+     |
+1927 |       def test_setpgroup(self):
+1928 |           pid = self.spawn_func(
+     |  _______________^
+1929 | |             sys.executable,
+1930 | |             [sys.executable, '-c', 'pass'],
+1931 | |             os.environ,
+1932 | |             setpgroup=os.getpgrp()
+1933 | |         )
+     | |_________^
+1934 |           support.wait_process(pid, exitcode=0)
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:1938:15
+     |
+1936 |     def test_setpgroup_allow_none(self):
+1937 |         path, args = self.NOOP_PROGRAM[0], self.NOOP_PROGRAM
+1938 |         pid = self.spawn_func(path, args, os.environ, setpgroup=None)
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1939 |         support.wait_process(pid, exitcode=0)
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:1943:13
+     |
+1941 |       def test_setpgroup_wrong_type(self):
+1942 |           with self.assertRaises(TypeError):
+1943 | /             self.spawn_func(sys.executable,
+1944 | |                             [sys.executable, "-c", "pass"],
+1945 | |                             os.environ, setpgroup="023")
+     | |________________________________________________________^
+1946 |
+1947 |       @unittest.skipUnless(hasattr(signal, 'pthread_sigmask'),
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:1954:15
+     |
+1952 |               signal.raise_signal(signal.SIGUSR1)""")
+1953 |
+1954 |           pid = self.spawn_func(
+     |  _______________^
+1955 | |             sys.executable,
+1956 | |             [sys.executable, '-c', code],
+1957 | |             os.environ,
+1958 | |             setsigmask=[signal.SIGUSR1]
+1959 | |         )
+     | |_________^
+1960 |           support.wait_process(pid, exitcode=0)
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:1964:13
+     |
+1962 |       def test_setsigmask_wrong_type(self):
+1963 |           with self.assertRaises(TypeError):
+1964 | /             self.spawn_func(sys.executable,
+1965 | |                             [sys.executable, "-c", "pass"],
+1966 | |                             os.environ, setsigmask=34)
+     | |______________________________________________________^
+1967 |           with self.assertRaises(TypeError):
+1968 |               self.spawn_func(sys.executable,
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:1968:13
+     |
+1966 |                               os.environ, setsigmask=34)
+1967 |           with self.assertRaises(TypeError):
+1968 | /             self.spawn_func(sys.executable,
+1969 | |                             [sys.executable, "-c", "pass"],
+1970 | |                             os.environ, setsigmask=["j"])
+     | |_________________________________________________________^
+1971 |           with self.assertRaises(ValueError):
+1972 |               self.spawn_func(sys.executable,
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:1972:13
+     |
+1970 |                               os.environ, setsigmask=["j"])
+1971 |           with self.assertRaises(ValueError):
+1972 | /             self.spawn_func(sys.executable,
+1973 | |                             [sys.executable, "-c", "pass"],
+1974 | |                             os.environ, setsigmask=[signal.NSIG,
+1975 | |                                                     signal.NSIG+1])
+     | |___________________________________________________________________^
+1976 |
+1977 |       def test_setsid(self):
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:1991:23
+     |
+1990 |               try:
+1991 |                   pid = self.spawn_func(sys.executable,
+     |  _______________________^
+1992 | |                                       [sys.executable, "-c", code],
+1993 | |                                       os.environ, setsid=True)
+     | |______________________________________________________________^
+1994 |               except NotImplementedError as exc:
+1995 |                   self.skipTest(f"setsid is not supported: {exc!r}")
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:2016:19
+     |
+2014 |               signal.raise_signal(signal.SIGUSR1)""")
+2015 |           try:
+2016 |               pid = self.spawn_func(
+     |  ___________________^
+2017 | |                 sys.executable,
+2018 | |                 [sys.executable, '-c', code],
+2019 | |                 os.environ,
+2020 | |                 setsigdef=[signal.SIGUSR1]
+2021 | |             )
+     | |_____________^
+2022 |           finally:
+2023 |               signal.signal(signal.SIGUSR1, original_handler)
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:2029:13
+     |
+2027 |       def test_setsigdef_wrong_type(self):
+2028 |           with self.assertRaises(TypeError):
+2029 | /             self.spawn_func(sys.executable,
+2030 | |                             [sys.executable, "-c", "pass"],
+2031 | |                             os.environ, setsigdef=34)
+     | |_____________________________________________________^
+2032 |           with self.assertRaises(TypeError):
+2033 |               self.spawn_func(sys.executable,
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:2033:13
+     |
+2031 |                               os.environ, setsigdef=34)
+2032 |           with self.assertRaises(TypeError):
+2033 | /             self.spawn_func(sys.executable,
+2034 | |                             [sys.executable, "-c", "pass"],
+2035 | |                             os.environ, setsigdef=["j"])
+     | |________________________________________________________^
+2036 |           with self.assertRaises(ValueError):
+2037 |               self.spawn_func(sys.executable,
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:2037:13
+     |
+2035 |                               os.environ, setsigdef=["j"])
+2036 |           with self.assertRaises(ValueError):
+2037 | /             self.spawn_func(sys.executable,
+2038 | |                             [sys.executable, "-c", "pass"],
+2039 | |                             os.environ, setsigdef=[signal.NSIG, signal.NSIG+1])
+     | |_______________________________________________________________________________^
+2040 |
+2041 |       def test_scheduler_allow_none(self):
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:2043:15
+     |
+2041 |     def test_scheduler_allow_none(self):
+2042 |         path, args = self.NOOP_PROGRAM[0], self.NOOP_PROGRAM
+2043 |         pid = self.spawn_func(path, args, os.environ, scheduler=None)
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2044 |         support.wait_process(pid, exitcode=0)
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:2053:13
+     |
+2051 |             "scheduler must be a tuple or None",
+2052 |         ):
+2053 |             self.spawn_func(path, args, os.environ, scheduler=scheduler)
+     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2054 |
+2055 |     @requires_sched
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:2067:15
+     |
+2065 |               if os.sched_getparam(0).sched_priority != {priority}:
+2066 |                   sys.exit(102)""")
+2067 |           pid = self.spawn_func(
+     |  _______________^
+2068 | |             sys.executable,
+2069 | |             [sys.executable, '-c', code],
+2070 | |             os.environ,
+2071 | |             scheduler=(None, os.sched_param(priority))
+2072 | |         )
+     | |_________^
+2073 |           support.wait_process(pid, exitcode=0)
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:2093:15
+     |
+2091 |               if os.sched_getparam(0).sched_priority != {priority}:
+2092 |                   sys.exit(102)""")
+2093 |           pid = self.spawn_func(
+     |  _______________^
+2094 | |             sys.executable,
+2095 | |             [sys.executable, '-c', code],
+2096 | |             os.environ,
+2097 | |             scheduler=(policy, os.sched_param(priority))
+2098 | |         )
+     | |_________^
+2099 |           support.wait_process(pid, exitcode=0)
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:2107:15
+     |
+2105 |               (os.POSIX_SPAWN_DUP2, 1, 4),
+2106 |           ]
+2107 |           pid = self.spawn_func(self.NOOP_PROGRAM[0],
+     |  _______________^
+2108 | |                               self.NOOP_PROGRAM,
+2109 | |                               os.environ,
+2110 | |                               file_actions=file_actions)
+     | |________________________________________________________^
+2111 |           support.wait_process(pid, exitcode=0)
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:2116:13
+     |
+2114 |           args = self.NOOP_PROGRAM
+2115 |           with self.assertRaises(TypeError):
+2116 | /             self.spawn_func(args[0], args, os.environ,
+2117 | |                             file_actions=[None])
+     | |________________________________________________^
+2118 |           with self.assertRaises(TypeError):
+2119 |               self.spawn_func(args[0], args, os.environ,
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:2119:13
+     |
+2117 |                               file_actions=[None])
+2118 |           with self.assertRaises(TypeError):
+2119 | /             self.spawn_func(args[0], args, os.environ,
+2120 | |                             file_actions=[()])
+     | |______________________________________________^
+2121 |           with self.assertRaises(TypeError):
+2122 |               self.spawn_func(args[0], args, os.environ,
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:2122:13
+     |
+2120 |                               file_actions=[()])
+2121 |           with self.assertRaises(TypeError):
+2122 | /             self.spawn_func(args[0], args, os.environ,
+2123 | |                             file_actions=[(None,)])
+     | |___________________________________________________^
+2124 |           with self.assertRaises(TypeError):
+2125 |               self.spawn_func(args[0], args, os.environ,
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:2125:13
+     |
+2123 |                               file_actions=[(None,)])
+2124 |           with self.assertRaises(TypeError):
+2125 | /             self.spawn_func(args[0], args, os.environ,
+2126 | |                             file_actions=[(12345,)])
+     | |____________________________________________________^
+2127 |           with self.assertRaises(TypeError):
+2128 |               self.spawn_func(args[0], args, os.environ,
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:2128:13
+     |
+2126 |                               file_actions=[(12345,)])
+2127 |           with self.assertRaises(TypeError):
+2128 | /             self.spawn_func(args[0], args, os.environ,
+2129 | |                             file_actions=[(os.POSIX_SPAWN_CLOSE,)])
+     | |___________________________________________________________________^
+2130 |           with self.assertRaises(TypeError):
+2131 |               self.spawn_func(args[0], args, os.environ,
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:2131:13
+     |
+2129 |                               file_actions=[(os.POSIX_SPAWN_CLOSE,)])
+2130 |           with self.assertRaises(TypeError):
+2131 | /             self.spawn_func(args[0], args, os.environ,
+2132 | |                             file_actions=[(os.POSIX_SPAWN_CLOSE, 1, 2)])
+     | |________________________________________________________________________^
+2133 |           with self.assertRaises(TypeError):
+2134 |               self.spawn_func(args[0], args, os.environ,
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:2134:13
+     |
+2132 |                               file_actions=[(os.POSIX_SPAWN_CLOSE, 1, 2)])
+2133 |           with self.assertRaises(TypeError):
+2134 | /             self.spawn_func(args[0], args, os.environ,
+2135 | |                             file_actions=[(os.POSIX_SPAWN_CLOSE, None)])
+     | |________________________________________________________________________^
+2136 |           with self.assertRaises(ValueError):
+2137 |               self.spawn_func(args[0], args, os.environ,
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:2137:13
+     |
+2135 |                               file_actions=[(os.POSIX_SPAWN_CLOSE, None)])
+2136 |           with self.assertRaises(ValueError):
+2137 | /             self.spawn_func(args[0], args, os.environ,
+2138 | |                             file_actions=[(os.POSIX_SPAWN_OPEN,
+2139 | |                                            3, __file__ + '\0',
+2140 | |                                            os.O_RDONLY, 0)])
+     | |____________________________________________________________^
+2141 |
+2142 |       def test_open_file(self):
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:2155:15
+     |
+2153 |           ]
+2154 |           args = self.python_args('-c', script)
+2155 |           pid = self.spawn_func(args[0], args, os.environ,
+     |  _______________^
+2156 | |                               file_actions=file_actions)
+     | |________________________________________________________^
+2157 |
+2158 |           support.wait_process(pid, exitcode=0)
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:2174:15
+     |
+2172 |               """
+2173 |           args = self.python_args('-c', script)
+2174 |           pid = self.spawn_func(args[0], args, os.environ,
+     |  _______________^
+2175 | |                               file_actions=[(os.POSIX_SPAWN_CLOSE, 0)])
+     | |_______________________________________________________________________^
+2176 |
+2177 |           support.wait_process(pid, exitcode=0)
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `None` is not callable
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_posix.py:2193:19
+     |
+2191 |               ]
+2192 |               args = self.python_args('-c', script)
+2193 |               pid = self.spawn_func(args[0], args, os.environ,
+     |  ___________________^
+2194 | |                                   file_actions=file_actions)
+     | |____________________________________________________________^
+2195 |               support.wait_process(pid, exitcode=0)
+2196 |           with open(dupfile, encoding="utf-8") as f:
+     |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `None | Unknown`
+
+
+error[call-non-callable]: Object of type `_PatchFactory` is not callable
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/import_helper.py:290:12
+    |
+288 |     # memory.
+289 |     from unittest import mock
+290 |     return mock.patch('os.register_at_fork', create=True)(func)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+

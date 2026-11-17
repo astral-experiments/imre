@@ -1,0 +1,30 @@
+test_path_commonprefix (test.test_genericpath.PathLikeTests.test_path_commonprefix) ... ok
+test_path_exists (test.test_genericpath.PathLikeTests.test_path_exists) ... ok
+test_path_getctime (test.test_genericpath.PathLikeTests.test_path_getctime) ... ok
+test_path_getmtime (test.test_genericpath.PathLikeTests.test_path_getmtime) ... ok
+test_path_getsize (test.test_genericpath.PathLikeTests.test_path_getsize) ... ok
+test_path_isdir (test.test_genericpath.PathLikeTests.test_path_isdir) ... ok
+test_path_isfile (test.test_genericpath.PathLikeTests.test_path_isfile) ... ok
+test_path_samefile (test.test_genericpath.PathLikeTests.test_path_samefile) ... ok
+test_commonprefix (test.test_genericpath.TestGenericTest.test_commonprefix) ... ok
+test_exists (test.test_genericpath.TestGenericTest.test_exists) ... ok
+test_exists_bool (test.test_genericpath.TestGenericTest.test_exists_bool) ... ok
+test_exists_fd (test.test_genericpath.TestGenericTest.test_exists_fd) ... ok
+test_filetime (test.test_genericpath.TestGenericTest.test_filetime) ... ok
+test_getsize (test.test_genericpath.TestGenericTest.test_getsize) ... ok
+test_invalid_paths (test.test_genericpath.TestGenericTest.test_invalid_paths) ... ok
+test_isdir (test.test_genericpath.TestGenericTest.test_isdir) ... ok
+test_isfile (test.test_genericpath.TestGenericTest.test_isfile) ... ok
+test_no_argument (test.test_genericpath.TestGenericTest.test_no_argument) ... ok
+test_samefile (test.test_genericpath.TestGenericTest.test_samefile) ... ok
+test_samefile_on_link (test.test_genericpath.TestGenericTest.test_samefile_on_link) ... ok
+test_samefile_on_symlink (test.test_genericpath.TestGenericTest.test_samefile_on_symlink) ... ok
+test_sameopenfile (test.test_genericpath.TestGenericTest.test_sameopenfile) ... ok
+test_samestat (test.test_genericpath.TestGenericTest.test_samestat) ... ok
+test_samestat_on_link (test.test_genericpath.TestGenericTest.test_samestat_on_link) ... ok
+test_samestat_on_symlink (test.test_genericpath.TestGenericTest.test_samestat_on_symlink) ... ok
+
+----------------------------------------------------------------------
+Ran 25 tests in 0.005s
+
+OK

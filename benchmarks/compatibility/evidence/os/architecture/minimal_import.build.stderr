@@ -1,0 +1,2 @@
+ Compiling /workspace/scratch/stdlib-architecture/genericpath/Lib/minimal_import.py (-O0)
+/workspace/scratch/stdlib-architecture/genericpath/Lib/genericpath_poison.py:1:15: Imre: expected int, got bool; annotations are enforced contracts

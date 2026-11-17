@@ -1,0 +1,96 @@
+{
+  "argv": [
+    "/workspace/scratch/tokenize-file-O3.exe",
+    "-v",
+    "CTokenizeTest",
+    "CTokenizerBufferTests",
+    "CommandLineTest",
+    "GenerateTokensTest",
+    "InvalidPythonTests",
+    "StringPrefixTest",
+    "TestDetectEncoding",
+    "TestMisc",
+    "TestRoundtrip.test_backslash_continuation",
+    "TestRoundtrip.test_continuation",
+    "TestRoundtrip.test_indentation_semantics_retained",
+    "TestRoundtrip.test_roundtrip",
+    "TestRoundtrip.test_string_concatenation",
+    "TestTokenize",
+    "TestTokenizerAdheresToPep0263",
+    "Test_Tokenize",
+    "TokenizeTest",
+    "UntokenizeTest"
+  ],
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "TMPDIR": "/workspace/scratch/imre-tmp",
+    "IMRE_PYTHON": "/workspace/scratch/stdlib-sdk/imre",
+    "IMREFLAGS": "--opt-level 3"
+  },
+  "timeout_seconds": 120,
+  "exit_code": 1,
+  "timed_out": false,
+  "reported_totals": [
+    "129"
+  ],
+  "parsed_results": 129,
+  "target_originals": 129,
+  "updated_originals": 129,
+  "excluded_ids": [
+    "test.test_tokenize.TestRoundtrip.test_random_files"
+  ],
+  "binary_sha256": "ca19b4c20c81d9742f1fd59cd6f03adbad0cc2db16cde4bf114ee6295874dcc6",
+  "build": {
+    "argv": [
+      "/workspace/scratch/stdlib-sdk/imre",
+      "build",
+      "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_tokenize.py",
+      "--module-root",
+      "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "--quiet",
+      "--no-cache",
+      "--opt-level",
+      "3",
+      "--runtime",
+      "/workspace/scratch/stdlib-sdk/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "-o",
+      "/workspace/scratch/tokenize-file-O3.exe"
+    ],
+    "timeout_seconds": 360,
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "IMREFLAGS": "--opt-level 3",
+      "IMRE_PYTHON": "/workspace/scratch/stdlib-sdk/imre"
+    },
+    "entry": "unchanged pinned original test file"
+  },
+  "raw": {
+    "stdout": {
+      "sha256": "448747dd8a1fe40b4adcc92f54d1a29b88486f6e7f273cc83a50e2b0bc6f3654",
+      "bytes": 78,
+      "excerpted": false
+    },
+    "stderr": {
+      "sha256": "c76dac728c657e1e17cc5432885bce3545899b101e9114a533395f30346f0551",
+      "bytes": 12203,
+      "excerpted": false
+    },
+    "build_stdout": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "excerpted": false
+    },
+    "build_stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "excerpted": false
+    }
+  },
+  "normalization": "Same deterministic description/doctest joining as the base suite run.json."
+}

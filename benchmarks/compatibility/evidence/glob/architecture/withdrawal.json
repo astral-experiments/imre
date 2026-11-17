@@ -1,0 +1,622 @@
+{
+  "source_paths": [
+    "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_genericpath.py",
+    "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_glob.py"
+  ],
+  "sources_absent_during_runs": true,
+  "matching_pyc_absent": true,
+  "remaining_fixture_files": 1637,
+  "positive_originals": 21,
+  "runs": {
+    "O0": {
+      "executable_sha256": "b08af1c25db2aac8ee1f7ecd84e9c9e77d7ad79f86113b50d1be3d899f371b4a",
+      "cwd": "/workspace/scratch/stdlib-work/glob",
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+        "IMREFLAGS": "--opt-level 0",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+        "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+      },
+      "timeout_seconds_per_command": 30,
+      "dynamic_needed": [
+        "0x0000000000000001 (NEEDED)             Shared library: [libm.so.6]",
+        "0x0000000000000001 (NEEDED)             Shared library: [libgcc_s.so.1]",
+        "0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]",
+        "0x0000000000000001 (NEEDED)             Shared library: [ld-linux-x86-64.so.2]"
+      ],
+      "commands": [
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O0.baseline.exe",
+            "-v",
+            "GlobTests.test_escape"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "6cf2d8eee13087e3b345e960574ab3c60c997e84ad6c10eb5df24fabcab70aff",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O0.baseline.exe",
+            "-v",
+            "GlobTests.test_glob0"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "1bac5033a6ee2adfe3e51443f24f3ff0baafd09e6102e85c1e80f126557569e8",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O0.baseline.exe",
+            "-v",
+            "GlobTests.test_glob1"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "1f1ab497ec7a537a9c5d3a5217b0f4d41ac82bc778af4159dd21bc8e98edaf79",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O0.baseline.exe",
+            "-v",
+            "GlobTests.test_glob_broken_symlinks"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "66bf8fef74cbabd3928cbafc796d464fb7168ce0eaaf1a48a918e73c08e5c9a3",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O0.baseline.exe",
+            "-v",
+            "GlobTests.test_glob_bytes_directory_with_trailing_slash"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "7a777c23c2747afdad8887e8b18f78d23396cf134634e50a66f1d8a5a2336c20",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O0.baseline.exe",
+            "-v",
+            "GlobTests.test_glob_directory_names"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "62cac1065f33974183b397c63d2a91841b7dbd90fbe5d82647990fdd9689b9da",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O0.baseline.exe",
+            "-v",
+            "GlobTests.test_glob_directory_with_trailing_slash"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "7fb3bddb67c156a6809f83bbf414da988606d68ea68d7ab6ea9007ef22ee13b9",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O0.baseline.exe",
+            "-v",
+            "GlobTests.test_glob_empty_pattern"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "4aa6d6d387f50e0e2619c3e45bf1232793d28c89d2b2befe376bb131b8c954c1",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O0.baseline.exe",
+            "-v",
+            "GlobTests.test_glob_literal"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "8bc5748be0ebe2d5f647f118fb9113845f88a60fd8c40ef90b53d41f68d48cb6",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O0.baseline.exe",
+            "-v",
+            "GlobTests.test_glob_named_pipe"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "761d9654adbcf48eee15cf270ce49414d333bd8aa7ef8b09cc405e83aad32e1c",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O0.baseline.exe",
+            "-v",
+            "GlobTests.test_glob_nested_directory"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "50a4ed0b6c1bcea9d4b8fa66b4222f58e8a9a95c37224df92970f726f7805d79",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O0.baseline.exe",
+            "-v",
+            "GlobTests.test_glob_non_directory"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "fa7b5c72536635c5c65ee096dff6fb293e5e08ca6f72f48669d7ce115f604993",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O0.baseline.exe",
+            "-v",
+            "GlobTests.test_glob_one_directory"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "3f10ecd33edd172923cb990e78f2a6c9ed9df278151e0e07f26bfdc63a8015f8",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O0.baseline.exe",
+            "-v",
+            "GlobTests.test_glob_symlinks"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "9d07a8bcfb1e9a1cee2e8467ee37beb936ed9ec541b4b6cc5a851dc046ac6098",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O0.baseline.exe",
+            "-v",
+            "GlobTests.test_hidden_glob"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "d84e9d40ca971d66306e4364f23e076bef8d1ce478bd1a3dd4c1c00f244a91d4",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O0.baseline.exe",
+            "-v",
+            "GlobTests.test_recursive_glob"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e603c67cc02d04869903712e297c733cd07438358e600569e2ebd99397ce74b3",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O0.baseline.exe",
+            "-v",
+            "GlobTests.test_translate"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "19307208a80fdf34c1651e4cbbe77fd144332e046049d6074b73db0c0dffea62",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O0.baseline.exe",
+            "-v",
+            "GlobTests.test_translate_include_hidden"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "9f1f2b3e140554d486e0701fb31d171b6237ec62f6785b75b9fa217984223f77",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O0.baseline.exe",
+            "-v",
+            "GlobTests.test_translate_matching"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "a4681a2aa2b19b8df747a38dbe90c9fb86abb864a7cdcda38ce268ebb55bdc52",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O0.baseline.exe",
+            "-v",
+            "GlobTests.test_translate_recursive"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "ffd94ea7b28ced19f69951ac44b7abccd77ffc02bfb87cf098777b75523edc4f",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O0.baseline.exe",
+            "-v",
+            "GlobTests.test_translate_seps"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "cc259f1a958b87e88449503de28d2c1864fdf3d02b8d73bc2ebb451b24d1e4d7",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        }
+      ],
+      "observed": {
+        "pass": 21
+      },
+      "exact_positive_id_outcome_sequence_matches_baseline": true,
+      "all_commands_exit_zero": true,
+      "guard_installed_every_command": true,
+      "any_libpython_dlopen_attempt": false
+    },
+    "O3": {
+      "executable_sha256": "ce2ecdc1576aa6b2255089152297c852f38ae273ee66ec2c1a75890be79ce00e",
+      "cwd": "/workspace/scratch/stdlib-work/glob",
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+        "IMREFLAGS": "--opt-level 3",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+        "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+      },
+      "timeout_seconds_per_command": 30,
+      "dynamic_needed": [
+        "0x0000000000000001 (NEEDED)             Shared library: [libm.so.6]",
+        "0x0000000000000001 (NEEDED)             Shared library: [libgcc_s.so.1]",
+        "0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]",
+        "0x0000000000000001 (NEEDED)             Shared library: [ld-linux-x86-64.so.2]"
+      ],
+      "commands": [
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O3.baseline.exe",
+            "-v",
+            "GlobTests.test_escape"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "491bc480a0e0db57aa7cde93c12cc1411a9b48eb6213055889f721f018139018",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O3.baseline.exe",
+            "-v",
+            "GlobTests.test_glob0"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "c6b0bc9b609765315f50b9f388b9e79b0f31c85bb5bba2abba7b575576fac263",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O3.baseline.exe",
+            "-v",
+            "GlobTests.test_glob1"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "1f1ab497ec7a537a9c5d3a5217b0f4d41ac82bc778af4159dd21bc8e98edaf79",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O3.baseline.exe",
+            "-v",
+            "GlobTests.test_glob_broken_symlinks"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "c23febaef4933a42c4d802e2ddb1e1668f1c23fd62c5135c2a7d8028e5b14a03",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O3.baseline.exe",
+            "-v",
+            "GlobTests.test_glob_bytes_directory_with_trailing_slash"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "7a777c23c2747afdad8887e8b18f78d23396cf134634e50a66f1d8a5a2336c20",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O3.baseline.exe",
+            "-v",
+            "GlobTests.test_glob_directory_names"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "8b417aa07c0caa34c2d645d3460c16a14e31658d66bf689d2e2fb7952ae1a162",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O3.baseline.exe",
+            "-v",
+            "GlobTests.test_glob_directory_with_trailing_slash"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "7fb3bddb67c156a6809f83bbf414da988606d68ea68d7ab6ea9007ef22ee13b9",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O3.baseline.exe",
+            "-v",
+            "GlobTests.test_glob_empty_pattern"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "4aa6d6d387f50e0e2619c3e45bf1232793d28c89d2b2befe376bb131b8c954c1",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O3.baseline.exe",
+            "-v",
+            "GlobTests.test_glob_literal"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "8bc5748be0ebe2d5f647f118fb9113845f88a60fd8c40ef90b53d41f68d48cb6",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O3.baseline.exe",
+            "-v",
+            "GlobTests.test_glob_named_pipe"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "a782fe268c477b9f5e49ef3d89f7c238cadf4dde7fb19279b758b1fdd6157a1a",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O3.baseline.exe",
+            "-v",
+            "GlobTests.test_glob_nested_directory"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "360c9ddef3e192fedd43bb523dd17d9aa1f144ac668ee5e141a2cf0e8207f03b",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O3.baseline.exe",
+            "-v",
+            "GlobTests.test_glob_non_directory"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "5533b78caf08dd0e31f18e7531f5c40ad4123633bfd9763e5967c099a465c5ac",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O3.baseline.exe",
+            "-v",
+            "GlobTests.test_glob_one_directory"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "4668f5de6b0c269db949aa1241fd25f4dfba1da5ac26b974a8dd12b4693bbc61",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O3.baseline.exe",
+            "-v",
+            "GlobTests.test_glob_symlinks"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "9d07a8bcfb1e9a1cee2e8467ee37beb936ed9ec541b4b6cc5a851dc046ac6098",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O3.baseline.exe",
+            "-v",
+            "GlobTests.test_hidden_glob"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "842833b3feb99d5461e7e3a89324bd4173f3bc20d26c08a43395328a4a756d09",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O3.baseline.exe",
+            "-v",
+            "GlobTests.test_recursive_glob"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "391e09a988b1d7953bc66c6d7f50e4b8efd3a4125b3b69d22e99eae9c983b667",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O3.baseline.exe",
+            "-v",
+            "GlobTests.test_translate"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "19307208a80fdf34c1651e4cbbe77fd144332e046049d6074b73db0c0dffea62",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O3.baseline.exe",
+            "-v",
+            "GlobTests.test_translate_include_hidden"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "9f1f2b3e140554d486e0701fb31d171b6237ec62f6785b75b9fa217984223f77",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O3.baseline.exe",
+            "-v",
+            "GlobTests.test_translate_matching"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "a4681a2aa2b19b8df747a38dbe90c9fb86abb864a7cdcda38ce268ebb55bdc52",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O3.baseline.exe",
+            "-v",
+            "GlobTests.test_translate_recursive"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "ffd94ea7b28ced19f69951ac44b7abccd77ffc02bfb87cf098777b75523edc4f",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        },
+        {
+          "argv": [
+            "/workspace/scratch/stdlib-architecture/glob.O3.baseline.exe",
+            "-v",
+            "GlobTests.test_translate_seps"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "cc259f1a958b87e88449503de28d2c1864fdf3d02b8d73bc2ebb451b24d1e4d7",
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "reported_results": 1
+        }
+      ],
+      "observed": {
+        "pass": 21
+      },
+      "exact_positive_id_outcome_sequence_matches_baseline": true,
+      "all_commands_exit_zero": true,
+      "guard_installed_every_command": true,
+      "any_libpython_dlopen_attempt": false
+    }
+  },
+  "restored_source_sha256": {
+    "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_genericpath.py": "7bd29efff32abbfaae89f57f4d6855e0c5e2940c1aae0a492707d147c8c95301",
+    "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_glob.py": "b4adbfa93158f2949957bc6b9c7f16aca58e3fa9b35c863a6caf36f4114a279a"
+  }
+}
