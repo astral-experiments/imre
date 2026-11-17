@@ -998,37 +998,25 @@ fn worker_target(
         callable, receiver, ..
     } = *target_value
         && keywords.is_empty()
+        && let [input] = pos.as_slice()
     {
-        let (symbol, storage) = match ctx.heap.get(callable) {
-            Value::Native(symbol) => (symbol.as_str(), receiver),
-            Value::HeapTypeMethod {
-                owner,
-                name: "update",
-                ..
-            } if ctx.heap.get(receiver).instance_class() == Some(*owner) => {
-                ("hash.update", ctx.scalar_value(receiver))
-            }
-            _ => ("", receiver),
-        };
-        let operation = match (ctx.heap.get(storage), pos.as_slice()) {
-            (value @ Value::Hash(hash), [id])
-                if super::builtins::method_name(value, "update").as_deref() == Some(symbol) =>
-            {
-                if let Value::Bytes(data) = ctx.heap.get(*id) {
-                    Some(Operation::UpdateHash {
-                        hash: hash.clone(),
-                        data: super::copy_ids(data)?,
-                    })
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        };
-        if let Some(operation) = operation {
-            // The bound call owns its expanded arguments even if the caller clears the list.
-            return Ok((operation, super::concat_ids(roots, pos)?));
-        }
+        let input = *input;
+        let operation =
+            super::thread_callback::prepare_hash_update(ctx, callable, receiver, receiver, input)
+                .map_err(|error| {
+                    if error.kind == "MemoryError" {
+                        error
+                    } else {
+                        super::thread_callback::unsupported_target()
+                    }
+                })?
+                .ok_or_else(super::thread_callback::unsupported_target)?;
+        // Retain the selected callable, original receiver, and expanded argument even if the
+        // creator replaces the target field or clears the original argument container.
+        return Ok((
+            operation,
+            super::concat_ids(roots, &[callable, receiver, input])?,
+        ));
     }
     Err(super::thread_callback::unsupported_target())
 }
