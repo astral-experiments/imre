@@ -241,7 +241,9 @@ impl<'ast, 'db> Escape<'ast, 'db> {
         else {
             return None;
         };
-        if !interface.file(db).path(db).is_vendored_path() || self.member_was_assigned(value) {
+        if !interface.file(db).path(db).is_vendored_path()
+            || (value.is_attribute_expr() && self.member_was_assigned(value))
+        {
             return None;
         }
         let selected = self
@@ -251,7 +253,9 @@ impl<'ast, 'db> Escape<'ast, 'db> {
             return None;
         };
         let replacement = match interface.scope(db).node(db) {
-            ty_python_core::scope::NodeWithScopeKind::Class(class) => {
+            ty_python_core::scope::NodeWithScopeKind::Class(class)
+                if !self.selected_writes.is_empty() =>
+            {
                 let parsed = self.session.parsed(interface.file(db));
                 let owner = ty_python_core::semantic_index(db, interface.program_file(db))
                     .try_definition(class.node(&parsed))?;
@@ -847,17 +851,15 @@ impl<'a> Escape<'a, '_> {
             return;
         }
         let Expr::Call(call) = expression else {
+            let db = self.model.db();
             if let Expr::Attribute(attr) = expression
                 && attr.ctx == ruff_python_ast::ExprContext::Store
                 && self.reachable(attr.range())
-                && let Some(TypeDefinition::StaticClass(owner)) =
-                    attr.value.inferred_type(self.model).and_then(|ty| {
-                        ty.definition(self.model.db(), &self.model.program_environment())
-                    })
-                && owner
-                    .file(self.model.db())
-                    .path(self.model.db())
-                    .is_vendored_path()
+                && let Some(TypeDefinition::StaticClass(owner)) = attr
+                    .value
+                    .inferred_type(self.model)
+                    .and_then(|ty| ty.definition(db, &self.model.program_environment()))
+                && owner.file(db).path(db).is_vendored_path()
             {
                 self.selected_writes
                     .insert((owner, attr.attr.as_str()), attr.range());

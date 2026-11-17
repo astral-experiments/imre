@@ -3637,6 +3637,7 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_eval_name.py")
         for provider, source, intrinsic in (
             ("bdb", "bdb.Bdb().runeval(input())", b"builtins.eval"),
+            ("bdb", "operation = bdb.Bdb().runeval\noperation(input())", b"builtins.eval"),
             ("timeit", "timer = timeit.Timer()\ntimer.__init__(input())", b"builtins.exec"),
         ):
             entry = root / f"unlinked_{provider}.py"
