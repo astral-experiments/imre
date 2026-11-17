@@ -277,10 +277,22 @@ def unsupported():
     def manual(value):
         pass
 
-    manual.__annotations__ = {"value": "int # runtime-only"}
-    try:
-        annotationlib.get_annotations(manual, eval_str=True)
-    except NotImplementedError as error:
-        assert "declare the annotation in source or avoid eval_str" in str(error)
-    else:
-        raise AssertionError("unlinked manual annotation expression executed")
+    for source in ("int ", "\nint", "(int)", "(((int)))", "int # runtime-only"):
+        # Build a fresh, unlinked string, even when that spelling also appears in a declaration.
+        text = "".join((source[:-1], source[-1:]))
+        manual.__annotations__ = {"value": text}
+        try:
+            annotationlib.get_annotations(manual, eval_str=True)
+        except NotImplementedError as error:
+            assert "declare the annotation in source or avoid eval_str" in str(error)
+        else:
+            raise AssertionError("unlinked manual annotation expression executed")
+    for text in ("\n    int", "\n\tint", "int\n \t", "\r int"):
+        manual.__annotations__ = {"value": text}
+        namespace = {}
+        try:
+            annotationlib.get_annotations(manual, globals=namespace, eval_str=True)
+        except IndentationError:
+            assert "__builtins__" in namespace
+        else:
+            raise AssertionError("invalid indentation accepted")
