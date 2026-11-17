@@ -186,12 +186,31 @@ pub(crate) fn bind_source_arguments<'a>(
     call: &'a ast::ExprCall,
     parameters: &'a ast::Parameters,
 ) -> Option<FixedArguments<SourceArgument<'a>, &'a ast::ParameterWithDefault>> {
+    bind_source_arguments_after(call, parameters, 0)
+}
+
+/// Bind the written arguments of an already-bound method after its receiver formal.
+pub(crate) fn fixed_bound_call_arguments<'a>(
+    call: &'a ast::ExprCall,
+    parameters: &'a ast::Parameters,
+) -> Option<Vec<SourceArgument<'a>>> {
+    parameters.iter_non_variadic_params().next()?;
+    bind_source_arguments_after(call, parameters, 1)?.complete()
+}
+
+/// Bind fixed source operands after any formal supplied by the callable itself.
+fn bind_source_arguments_after<'a>(
+    call: &'a ast::ExprCall,
+    parameters: &'a ast::Parameters,
+    skip: usize,
+) -> Option<FixedArguments<SourceArgument<'a>, &'a ast::ParameterWithDefault>> {
     if has_unpacking(call) {
         return None;
     }
     let fixed: Vec<_> = parameters
         .iter_non_variadic_params()
         .enumerate()
+        .skip(skip)
         .map(|(i, p)| (p, ParameterKind::fixed(parameters, i)))
         .collect();
     supplied_fixed_parameters(

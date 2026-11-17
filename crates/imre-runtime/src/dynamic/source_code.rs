@@ -22,32 +22,6 @@ pub(super) const CONDITIONAL: &str = "__conditional_annotations__";
 struct ParsedModule {
     constants: Id,
     flags: u32,
-    bare_name: Option<(ast::name::Name, [u32; 4])>,
-}
-
-/// Execute a parsed eval expression consisting of one name in its normal Python frame.
-///
-/// # Safety
-/// The context has entered a code object registered with its parsed identifier.
-unsafe extern "C" fn eval_name_entry(context: *mut Context, scope: Id) -> Id {
-    // SAFETY: the interpreter owns this active code frame for the duration of the call.
-    let context = unsafe { &mut *context };
-    let code = context.heap.current_code();
-    let Some(LinkedSource::EvalName(_, position)) = context.heap.linked_sources.get(&code) else {
-        unreachable!("registered eval name")
-    };
-    let position = *position;
-    // SAFETY: a null filename selects the active code object's filename, as for generated code.
-    let result = unsafe { context.native_statement(&[], std::ptr::null(), position[0], NONE) }
-        .and_then(|()| {
-            let Some(LinkedSource::EvalName(name, _)) = context.heap.linked_sources.get(&code)
-            else {
-                unreachable!("registered eval name")
-            };
-            let name = copy_label(name.as_str())?;
-            context.lookup(scope, &name)
-        });
-    ffi::finish_at(context, result, Some(&position))
 }
 
 /// An explicit Python closure tuple keeps its identity. A compiled binding can
@@ -2470,7 +2444,6 @@ impl Context {
         code.strip_docstrings = self.config["optimize"].as_i64().unwrap_or(0) >= 2;
         code.interactive = interactive;
         let mut shared = SharedConstants::default();
-        let mut bare_name = None;
         let constants = match parsed.into_syntax() {
             ast::Mod::Expression(expression) => {
                 use ast::visitor::Visitor;
@@ -2483,23 +2456,6 @@ impl Context {
                     CompiledStrings::new(&mut self.heap, &mut shared, &spellings, &code.directives);
                 strings.visit_expr(&expression.body);
                 let constants = strings.finish_scope(code.has_named_bindings, true)?;
-                if let ast::Expr::Name(name) = *expression.body
-                    && name.id.as_str() != "__debug__"
-                {
-                    let start = usize::from(name.start());
-                    let end = usize::from(name.end());
-                    let line = lines.partition_point(|&offset| offset <= start);
-                    let offset = lines[line - 1];
-                    bare_name = Some((
-                        name.id,
-                        [
-                            line as u32,
-                            (start - offset) as u32,
-                            (start - offset) as u32,
-                            (end - offset) as u32,
-                        ],
-                    ));
-                }
                 constants
             }
             ast::Mod::Module(module) => {
@@ -2542,11 +2498,7 @@ impl Context {
         if let Some(issue) = pending_syntax(self, &code)? {
             return Err(issue);
         }
-        Ok(ParsedModule {
-            constants,
-            flags,
-            bare_name,
-        })
+        Ok(ParsedModule { constants, flags })
     }
 
     /// Attach the filename after tokenization, just as compile does for string input.
@@ -3261,41 +3213,12 @@ impl Context {
                     && inherited == 0
                     && !imre_ast::forward_refs::is_starred(self.str_value(source)?);
                 let filename = self.text("<string>");
-                let parsed = if !exact {
-                    Some(self.prepare_source_program(
-                        source,
-                        filename,
-                        mode,
-                        mode == "eval",
-                        inherited,
-                    )?)
-                } else {
-                    None
-                };
-                if entry.is_none()
-                    && mode == "eval"
-                    && let Some(parsed) = parsed
-                    && let Some((name, position)) = parsed.bare_name
-                {
-                    let code =
-                        self.native_module_code(eval_name_entry, filename, Some(parsed.flags));
-                    let Value::Code(object) = self.heap.get_mut(code) else {
-                        unreachable!("native eval code")
-                    };
-                    object.body = Body::Native(eval_name_entry, parsed.constants);
-                    self.heap
-                        .linked_sources
-                        .try_reserve(1)
-                        .map_err(|_| Error::new("MemoryError", ""))?;
-                    self.heap
-                        .linked_sources
-                        .insert(code, LinkedSource::EvalName(name, position));
-                    code
-                } else {
-                    let entry =
-                        entry.ok_or_else(|| Self::missing_body_error("<module>", "<string>", 1))?;
-                    self.native_module_code(entry, filename, exact.then_some(inherited))
+                if !exact {
+                    self.prepare_source_program(source, filename, mode, mode == "eval", inherited)?;
                 }
+                let entry =
+                    entry.ok_or_else(|| Self::missing_body_error("<module>", "<string>", 1))?;
+                self.native_module_code(entry, filename, exact.then_some(inherited))
             }
             _ => {
                 return Err(Error::new(

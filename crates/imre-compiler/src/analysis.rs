@@ -1572,6 +1572,14 @@ impl Session {
         if let Some(report) = report {
             return Err(report.to_string());
         }
+        let selected_provider = |owner: &str| {
+            sources.clone().find_map(|(id, source)| {
+                (source.name == owner
+                    && source.has_open_execution
+                    && source.is_original_sdk_source())
+                .then_some(self.files[id])
+            })
+        };
         let ordinary = self.check_execution_with_imports(
             sources
                 .clone()
@@ -1580,12 +1588,13 @@ impl Session {
                     (
                         id,
                         source.path,
-                        source.has_open_exec,
+                        source.has_open_execution,
                         source.linked_exec,
                         source.literal_unit,
                     )
                 }),
             captures,
+            &selected_provider,
         );
         let files = self.check_run_path_callers(sources, has_file_body);
         match (ordinary, files) {
