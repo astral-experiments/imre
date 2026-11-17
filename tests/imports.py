@@ -2496,6 +2496,8 @@ def main() -> None:
             type_aliases = "boxed_type_alias_values"
             for fixture in (interactive, type_aliases):
                 shutil.copyfile(FIXTURES.parent / f"{fixture}.py", project / f"{fixture}.py")
+            require_success(run([args.python, "-E", "-c",
+                                 "import boxed_interactive_interpreter as fixture; fixture.current()"], project))
             entry = project / "main.py"
             # Select a known provider at execution time. All Python sources exist before the build.
             providers = ("opcode", "_opcode_metadata", "code", "codeop", "codeop_module",
@@ -2513,6 +2515,8 @@ def main() -> None:
                 "        print(module.opmap['POP_TOP'])\n"
                 "    elif sys.argv[2] == 'current':\n"
                 "        module.current()\n"
+                "    elif sys.argv[2] == 'available':\n"
+                "        module.available()\n"
                 "    elif sys.argv[2] == 'write':\n"
                 "        import zlib\n"
                 "        member = module.compress(memoryview(b'payload'), compresslevel=1, mtime=42)\n"
@@ -2583,7 +2587,7 @@ def main() -> None:
                 ("code", "flags", "16896\n"), ("codeop", "flags", "16896\n"),
                 ("codeop_module", "import", ""),
                 ("codeop_named_helper", "import", "16896\n"),
-                (interactive, "current", ""),
+                (interactive, "available", ""),
                 (type_aliases, "current", "checked lazy aliases\n"),
                 ("gzip", "write", "7\n"),
                 ("gzip", "read", "b'first' b's' 6 b'econd'\nTrue\nb'' b'fir' b'stsecond' b''\n"),
@@ -2592,6 +2596,12 @@ def main() -> None:
                 require_success(result)
                 assert result.stdout == expected, (module, level, result.stdout)
                 checks += 1
+
+            refused = run([str(executable), interactive, "current"], temporary)
+            assert refused.returncode == 1 and not refused.stdout, refused
+            assert "NotImplementedError: no compiled Python body for <module> (<console>:1)" in refused.stderr, refused
+            assert refused.stderr.splitlines()[-1] == "KeyError: 'answer'", refused
+            checks += 1
 
             assert gzip.decompress((temporary / "written.gz").read_bytes()) == b"payload"
 
@@ -2768,7 +2778,7 @@ def main() -> None:
             ("annotated", "def choose(flag: bool) -> int:\n    return flag\n", "expected int, got bool"),
             ("inferred", "def choose(flag):\n    if flag:\n        return 1\n    return 'one'\n", "inferred returns require"),
             ("unused_object", "def choose(flag):\n    parsed = ast.parse('1')\n    if flag:\n        return 1\n    return 'one'\n", "inferred returns require"),
-            ("live_object", "def choose(flag) -> int:\n    parsed = ast.parse('1')\n    print(parsed)\n    return 'one'\n", "invalid-return-type"),
+            ("live_object", "def choose(flag) -> int:\n    parsed = ast.parse('1')\n    print(parsed)\n    return 'one'\n", "helper.py:6:12: Imre: expected int, got str"),
         ]:
             case = temporary / ("object_return_" + name)
             write_files(case, {
@@ -2803,9 +2813,12 @@ def main() -> None:
         caught = temporary / "object_return_operand"
         write_files(caught, {
             "main.py": "from helper import wrapper\ntry:\n    wrapper()\nexcept TypeError:\n    print('caught')\n",
-            "helper.py": "import ast\nast.parse('1')\ndef take(value: int) -> int:\n    return value\n"
-                         "def wrapper() -> int:\n    return take('argument')\n",
+            "helper.py": "import ast\nast.parse('1')\ndef take(value: object) -> int:\n    return hash(value)\n"
+                         "def wrapper() -> int:\n    return take([])\n",
         })
+        baseline = run([args.python, "-E", "-m", "main"], caught)
+        require_success(baseline)
+        assert baseline.stdout == "caught\n", baseline
         for level in args.opt_levels:
             executable = temporary / f"operand-{level}"
             for flags in ([], ["--reachable-only"]):
@@ -2867,7 +2880,7 @@ def main() -> None:
         result = run([compiler, "check", str(escape / "main.py")], temporary)
         assert result.returncode != 0 and "outside" in result.stderr, result.stderr
         checks += 1
-    print(f"{checks} import checks passed ({len(NATIVE_REFUSALS)} native refusal cases)")
+    print(f"{checks} import checks passed ({len(NATIVE_REFUSALS) + 1} native refusal cases)")
 
 
 if __name__ == "__main__":
