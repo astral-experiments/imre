@@ -1,0 +1,28 @@
+{
+  "schema": "imre.compatibility.cohort.v1",
+  "imre_revision": "49f0dc2ef78b82692e333252faf71b4fc7730949",
+  "cpython_version": "3.14.5",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "historical_families": "benchmarks/cpython_stdlib/full/frozen-stock-intersection-8818.tsv",
+  "supplemental_families": [
+    {
+      "family": "errno",
+      "originals": 3,
+      "source": "benchmarks/cpython_stdlib/full/errno/UPSTREAM.json"
+    }
+  ],
+  "scripts": {
+    "expected_commands": 84,
+    "shards": [
+      "uv-a",
+      "uv-b",
+      "ruff-a",
+      "ruff-b",
+      "ty"
+    ]
+  },
+  "platform": {
+    "os": "linux",
+    "arch": "x86_64"
+  }
+}

@@ -1,0 +1,8 @@
+test_for_improper_attributes (__main__.ErrnoAttributeTests.test_for_improper_attributes) ... ok
+test_using_errorcode (__main__.ErrnoAttributeTests.test_using_errorcode) ... ok
+test_attributes_in_errorcode (__main__.ErrorcodeTests.test_attributes_in_errorcode) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.000s
+
+OK

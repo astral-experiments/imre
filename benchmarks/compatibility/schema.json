@@ -1,0 +1,391 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "imre.compatibility.v1",
+  "title": "One original Imre compatibility test or command receipt",
+  "allOf": [
+    {
+      "$ref": "#/$defs/common"
+    }
+  ],
+  "oneOf": [
+    {
+      "properties": {
+        "kind": {
+          "const": "stdlib"
+        },
+        "family": {
+          "type": "string"
+        },
+        "occurrence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "source": {
+          "required": [
+            "git_blob"
+          ]
+        }
+      },
+      "required": [
+        "family",
+        "occurrence"
+      ]
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "script"
+        },
+        "normalized_invocation": {
+          "$ref": "#/$defs/invocation"
+        },
+        "comparisons": {
+          "type": "object",
+          "required": [
+            "O0",
+            "O3"
+          ],
+          "properties": {
+            "O0": {
+              "$ref": "#/$defs/comparison"
+            },
+            "O3": {
+              "$ref": "#/$defs/comparison"
+            }
+          },
+          "additionalProperties": false
+        },
+        "runs": {
+          "properties": {
+            "stock": {
+              "$ref": "#/$defs/scriptRun"
+            },
+            "O0": {
+              "$ref": "#/$defs/scriptRun"
+            },
+            "O3": {
+              "$ref": "#/$defs/scriptRun"
+            }
+          }
+        }
+      },
+      "required": [
+        "normalized_invocation",
+        "comparisons"
+      ]
+    }
+  ],
+  "$defs": {
+    "invocation": {
+      "type": "object",
+      "required": [
+        "cwd",
+        "argv",
+        "env"
+      ],
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "argv": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "required": [
+        "outcome",
+        "argv"
+      ],
+      "properties": {
+        "outcome": {
+          "enum": [
+            "pass",
+            "fail",
+            "error",
+            "skip",
+            "timeout",
+            "not_run",
+            "omitted"
+          ]
+        },
+        "argv": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "environment": {
+          "type": "object"
+        },
+        "version": {
+          "type": "string"
+        },
+        "full_version": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "exit_code": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "stdout_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "stderr_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "effects_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "effects_manifest": {
+          "type": "string"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "not_run",
+                  "omitted"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "reason"
+            ]
+          },
+          "else": {
+            "required": [
+              "evidence"
+            ]
+          }
+        }
+      ]
+    },
+    "scriptRun": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/run"
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "pass"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "exit_code",
+              "stdout_sha256",
+              "stderr_sha256",
+              "effects_sha256",
+              "effects_manifest"
+            ]
+          }
+        }
+      ]
+    },
+    "comparison": {
+      "type": "object",
+      "required": [
+        "exit_code",
+        "stdout",
+        "stderr",
+        "effects"
+      ],
+      "properties": {
+        "exit_code": {
+          "enum": [
+            "exact",
+            "different",
+            "not_checked"
+          ]
+        },
+        "stdout": {
+          "enum": [
+            "exact",
+            "different",
+            "not_checked"
+          ]
+        },
+        "stderr": {
+          "enum": [
+            "exact",
+            "different",
+            "not_checked"
+          ]
+        },
+        "effects": {
+          "enum": [
+            "exact",
+            "different",
+            "not_checked"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "common": {
+      "type": "object",
+      "required": [
+        "schema",
+        "kind",
+        "id",
+        "source",
+        "imre_revision",
+        "platform",
+        "runs",
+        "omission_reason",
+        "paired"
+      ],
+      "properties": {
+        "schema": {
+          "const": "imre.compatibility.v1"
+        },
+        "kind": {
+          "enum": [
+            "stdlib",
+            "script"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "type": "object",
+          "required": [
+            "repo",
+            "commit",
+            "path",
+            "sha256"
+          ],
+          "properties": {
+            "repo": {
+              "type": "string"
+            },
+            "commit": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "path": {
+              "type": "string"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_blob": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            }
+          }
+        },
+        "imre_revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "platform": {
+          "type": "object",
+          "required": [
+            "os",
+            "arch"
+          ],
+          "properties": {
+            "os": {
+              "type": "string"
+            },
+            "arch": {
+              "type": "string"
+            },
+            "release": {
+              "type": "string"
+            }
+          }
+        },
+        "runs": {
+          "type": "object",
+          "required": [
+            "stock",
+            "O0",
+            "O3"
+          ],
+          "properties": {
+            "stock": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/run"
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "outcome": {
+                        "not": {
+                          "const": "not_run"
+                        }
+                      }
+                    }
+                  },
+                  "then": {
+                    "required": [
+                      "version"
+                    ],
+                    "properties": {
+                      "version": {
+                        "const": "3.14.5"
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            "O0": {
+              "$ref": "#/$defs/run"
+            },
+            "O3": {
+              "$ref": "#/$defs/run"
+            }
+          },
+          "additionalProperties": false
+        },
+        "omission_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "paired": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

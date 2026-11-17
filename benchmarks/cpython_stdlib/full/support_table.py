@@ -12,6 +12,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from inventory import inventory
 from native_report import rollup
+sys.path.insert(0, str(HERE.parents[1] / "compatibility"))
+from scorecard import render as render_scorecard
 
 ROOT = HERE.parents[2]
 PAGE = ROOT / "docs" / "stdlib.md"
@@ -82,19 +84,25 @@ def render(compiler):
     lines = [
         "# Standard library support",
         "",
-        f"Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/{pin}/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover {len(names)} names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other {len(underscored)}. Dotted APIs such as `os.path` appear under their parent.",
+        render_scorecard("stdlib"),
         "",
-        f"**At a glance:** {sum(result in ('Yes', 'Whole only') for result in imports.values())} of {len(registered)} modules accept an ordinary import; {sum(result == 'Reachable only' for result in imports.values())} more accept it only with `--reachable-only`. Across {len(measured)} modules with recorded suites, {native:,} complete test executions pass natively at both optimization levels; {covered:,} of {denominator:,} upstream executions have a classification.",
+        "## Historical API and ledger inventory",
+        "",
+        "The following import probes and native/host classifications are an archived ledger view from earlier revisions. They are not paired stock/O0/O3 results at the scorecard pin. In particular, the historical `argparse` zero is a different classification from the historical cumulative 1,887 credits; neither is a current result.",
+        "",
+        f"This inventory checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/{pin}/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover {len(names)} names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other {len(underscored)}. Dotted APIs such as `os.path` appear under their parent.",
+        "",
+        f"**Historical inventory:** {sum(result in ('Yes', 'Whole only') for result in imports.values())} of {len(registered)} modules accept an ordinary import; {sum(result == 'Reachable only' for result in imports.values())} more accept it only with `--reachable-only`. Across {len(measured)} modules with recorded suites, {native:,} complete test executions pass natively at both optimization levels; {covered:,} of {denominator:,} upstream executions have a classification.",
         "",
         "**Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.",
         "",
-        "**Native / upstream** counts unchanged test executions in the checked-in Linux suites: the body, assertions, operation and fixtures must all run on Imre at **both O0 and O3**. The denominator includes upstream skips, companion suites and repeated test IDs. A dash means there is no measurement; zero is a measured result. These are test counts, not percentages of an API.",
+        "**Historical native / upstream** counts unchanged test executions in the checked-in Linux suites: the body, assertions, operation and fixtures must all run on Imre at **both O0 and O3**. The denominator includes upstream skips, companion suites and repeated test IDs. A dash means there is no measurement; zero is a result in that historical classification. These are test counts, not percentages of an API.",
         "",
         f"The last two columns show where CPython still helps at O3. **CPython fixture**: {host_fixtures:,} test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: {host_tests:,} executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.",
         "",
         "## Modules with examples, accepted imports or suite results",
         "",
-        "| Module | Import | Native API example or boundary | Native / upstream | CPython fixture | CPython test |",
+        "| Module | Import | Native API example or boundary | Historical native / upstream | CPython fixture | CPython test |",
         "| --- | --- | --- | ---: | ---: | ---: |",
     ]
     def module_row(name):
@@ -120,7 +128,7 @@ def render(compiler):
     lines.extend(["", "## Names beginning with an underscore", "",
                   "These include documented interfaces such as `__future__` and `_thread`, as well as implementation details. The same import and suite checks apply.", "",
                   "<details>", f"<summary>Show {len(underscored)} module names</summary>", "",
-                  "| Module | Import | Native API example or boundary | Native / upstream | CPython fixture | CPython test |",
+                  "| Module | Import | Native API example or boundary | Historical native / upstream | CPython fixture | CPython test |",
                   "| --- | --- | --- | ---: | ---: | ---: |"])
     lines.extend(module_row(name) for name in underscored if has_detail(name))
     if rejected := [name for name in underscored if not has_detail(name)]:
@@ -132,11 +140,12 @@ def render(compiler):
     if extra := sorted(rows.keys() - registered):
         lines.extend(["", "## Additional test subjects", "",
                       "These ledgers describe Python types or other subjects outside the top-level module inventory.", "",
-                      "| Subject | Native / upstream | CPython fixture | CPython test |", "| --- | ---: | ---: | ---: |"])
+                      "| Subject | Historical native / upstream | CPython fixture | CPython test |", "| --- | ---: | ---: | ---: |"])
         for name in extra:
             native, fixture, test = measurements(name, rows)
             lines.append(f"| `{name}` | {native} | {fixture} | {test} |")
     lines.extend(["", "## Updating this page", "",
+                  "Regenerate and validate the pinned scorecard with `python3 benchmarks/compatibility/scorecard.py` and `--check`. The following command refreshes the separate historical inventory.", "",
                   "Add an [API example](../benchmarks/cpython_stdlib/full/api_examples.toml) when a module gains a usable operation. Update the [per-test evidence](../benchmarks/cpython_stdlib/full/README.md) when native execution changes. From the repository root, use a current Linux Imre build and CPython 3.14.5:", "",
                   "```sh", "python3.14 -B benchmarks/cpython_stdlib/full/support_table.py --imre target/release/imre", "```", "",
                   "Pass `--check` to verify the checked-in page."])
