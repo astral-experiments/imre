@@ -298,6 +298,20 @@ class ForwardRef:
 
         from _typing import _eval_type_expression, _validate_forward_ref
         arg = self.__forward_arg__
+        import keyword
+        if arg.isidentifier() and not keyword.iskeyword(arg):
+            import builtins
+            if arg in locals:
+                return locals[arg]
+            if arg in globals:
+                return globals[arg]
+            if hasattr(builtins, arg):
+                return getattr(builtins, arg)
+            if format == Format.FORWARDREF:
+                return self
+            error = NameError(f"name {arg!r} is not defined")
+            error.name = arg
+            raise error
         source = _rewrite_star_unpack(arg)
         try:
             return _eval_type_expression(source, globals, locals)
@@ -951,14 +965,6 @@ def get_annotations(
         if locals is None:
             locals = {}
         locals = {param.__name__: param for param in type_params} | locals
-
-    if globals is None:
-        import builtins
-        if locals is None:
-            locals = builtins.locals()
-        globals = builtins.globals()
-    elif locals is None:
-        locals = globals
 
     from _typing import _eval_type_expression
     return_value = {

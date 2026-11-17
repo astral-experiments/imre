@@ -2846,30 +2846,63 @@ impl Context {
         }
     }
 
-    /// Evaluate one forward-reference expression in its defining Python namespaces.
+    /// Evaluate a linked annotation expression, or resolve its normalized bare name.
     pub(super) fn eval_type_expression(&mut self, text: Id, globals: Id, locals: Id) -> Result<Id> {
+        let (globals, locals) = self.source_namespaces(
+            self.heap.current_scope(),
+            (globals != NONE).then_some(globals),
+            (locals != NONE).then_some(locals),
+        )?;
         if let Some(entry) = self.linked_expression(text) {
             let filename = self.text("<string>");
             let code = self.native_module_code(entry, filename, None);
-            return self.eval_namespace_code(code, globals, locals);
+            return self.eval_namespace_code(code, globals, locals.unwrap_or(globals));
         }
         let source = self.str_value(text)?;
         if crate::objects::python_isidentifier(source)
             && !ruff_python_stdlib::keyword::is_keyword(source)
         {
-            // ForwardRef.evaluate looks up the original string for a bare identifier.
-            // The parser applies NFKC to ident.id, as required for compound expressions.
-            for mapping in [locals, globals, self.default_source_builtins()?] {
-                if self.contains(text, mapping)? {
-                    return self.get_item(mapping, text);
+            let normalized = crate::objects::normalize_unicode("NFKC", source)?;
+            let name = copy_label(normalized.as_deref().unwrap_or(source))?;
+            let (locals, builtins) =
+                self.checked_source_namespaces(globals, locals, None, "eval")?;
+            if let Some(locals) = locals {
+                match self.load_exec_name(locals, &name) {
+                    Err(error) if self.is_builtin_error(&error, "KeyError") => {}
+                    value => return value,
                 }
             }
-            return Err(Self::undefined_source_name(self.str_value(text)?, text));
+            return self.source_global(
+                ExecGlobals {
+                    dict: globals,
+                    builtins,
+                },
+                &name,
+            );
         }
         let filename = self.text("<string>");
         let code =
             self.compile_source_with_flags(text, filename, "eval", self.inherited_compile_flags())?;
-        self.eval_namespace_code(code, globals, locals)
+        self.eval_namespace_code(code, globals, locals.unwrap_or(globals))
+    }
+
+    /// Resolve explicit namespaces or the active Python frame as eval and exec do.
+    fn source_namespaces(
+        &mut self,
+        scope: Id,
+        globals: Option<Id>,
+        locals: Option<Id>,
+    ) -> Result<(Id, Option<Id>)> {
+        let locals = match locals {
+            Some(locals) => Some(locals),
+            None if globals.is_none() => Some(self.frame_locals(scope)?),
+            None => None,
+        };
+        let globals = match globals {
+            Some(globals) => globals,
+            None => self.module_globals(scope)?,
+        };
+        Ok((globals, locals))
     }
 
     /// Prepare eval or exec with explicit namespaces or the active Python frame.
@@ -2900,16 +2933,11 @@ impl Context {
                 builtins::bind_method_arguments(name, args, kwargs, ["", "globals", "locals"], 3)?;
             (globals, locals, None)
         };
-        let globals = globals.filter(|&g| g != NONE);
-        let locals = match locals.filter(|&l| l != NONE) {
-            Some(locals) => Some(locals),
-            None if globals.is_none() => Some(self.frame_locals(scope)?),
-            None => None,
-        };
-        let globals = match globals {
-            Some(globals) => globals,
-            None => self.module_globals(scope)?,
-        };
+        let (globals, locals) = self.source_namespaces(
+            scope,
+            globals.filter(|&g| g != NONE),
+            locals.filter(|&l| l != NONE),
+        )?;
         self.prepare_namespace_code(source, globals, locals, None, name, closure)
     }
 
@@ -3064,15 +3092,14 @@ impl Context {
         Ok(builtins)
     }
 
-    pub(super) fn prepare_namespace_code(
+    /// Validate and prepare the common globals, locals, and builtins namespace.
+    fn checked_source_namespaces(
         &mut self,
-        source: Id,
         globals: Id,
         locals: Option<Id>,
         function: Option<Id>,
         mode: &str,
-        closure: Option<Id>,
-    ) -> Result<calls::RegisteredCall> {
+    ) -> Result<(Option<Id>, Id)> {
         if self.dict_storage(globals).is_none() {
             let ty = self.type_name(globals);
             return Err(Error::new(
@@ -3108,6 +3135,19 @@ impl Context {
             ));
         }
         let builtins = self.namespace_builtins(globals, function)?;
+        Ok((locals, builtins))
+    }
+
+    pub(super) fn prepare_namespace_code(
+        &mut self,
+        source: Id,
+        globals: Id,
+        locals: Option<Id>,
+        function: Option<Id>,
+        mode: &str,
+        closure: Option<Id>,
+    ) -> Result<calls::RegisteredCall> {
+        let (locals, builtins) = self.checked_source_namespaces(globals, locals, function, mode)?;
         let code_id = match self.heap.get(self.scalar_value(source)) {
             Value::Code(code) if mode == "eval" && !code.definition.freevars().is_empty() => {
                 return Err(Error::new(

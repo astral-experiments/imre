@@ -212,6 +212,23 @@ def current():
     }
     assert seen == [14]
 
+    def manual(value):
+        pass
+
+    manual.__annotations__ = {"value": "Token"}
+    assert module.get_annotations(manual, globals={"__builtins__": {"Token": bytes}},
+                                  eval_str=True) == {"value": bytes}
+    try:
+        module.ForwardRef("Token").evaluate(globals={"__builtins__": {"Token": bytes}})
+    except NameError as error:
+        assert error.name == "Token"
+    else:
+        raise AssertionError("ForwardRef must not use custom builtins for a bare name")
+    manual.__annotations__ = {"value": "Ｋey"}
+    namespace = {"Key": 23}
+    assert module.get_annotations(manual, globals=namespace, eval_str=True) == {"value": 23}
+    assert "__builtins__" in namespace
+
     def compound(value: "list[Choice]"):
         pass
 
