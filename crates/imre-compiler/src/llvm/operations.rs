@@ -1211,7 +1211,25 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 CheckedValue::owned(self.fixed().construct_record(expr.ty, *initializer, args))
             }
             ExprKind::Exception { kind, message } => {
-                CheckedValue::owned(self.fixed().exception_value(*kind, message.as_deref()))
+                if matches!(self.0, Entry::Native(_)) {
+                    CheckedValue::owned(self.fixed().exception_value(*kind, message.as_deref()))
+                } else {
+                    let message = message.as_deref().map(|message| self.operand(message));
+                    let frame = self.python();
+                    let name = frame.text(
+                        imre_ast::exceptions::Kind::try_from_raw(*kind)
+                            .unwrap()
+                            .name(),
+                    );
+                    let class = frame.op("builtin", &[&name]);
+                    let value = if let Some(message) = message {
+                        let message = frame.materialize(&message);
+                        frame.invoke(&class, &[&message])
+                    } else {
+                        frame.invoke(&class, &[])
+                    };
+                    CheckedValue::handle(value)
+                }
             }
             ExprKind::Field(receiver, index) => {
                 let emitter = self.fixed();

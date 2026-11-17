@@ -2250,6 +2250,7 @@ pub(crate) struct SuitePreparation<'a> {
     source: values::RegisteredSource<'a>,
     pub(crate) declaration_refusals: HashMap<TextSize, PreparedRefusal>,
     pub(crate) literal_refusals: Option<&'a crate::dynamic::literal::LiteralSites>,
+    pub(crate) profile_exclusions: Option<&'a HashMap<TextSize, String>>,
     refusal: Option<PreparedRefusal>,
     pub(crate) sites: StatementSites,
 }
@@ -2271,6 +2272,7 @@ impl<'a> SuitePreparation<'a> {
             },
             declaration_refusals: HashMap::new(),
             literal_refusals: None,
+            profile_exclusions: None,
             refusal: None,
         }
     }
@@ -2716,6 +2718,25 @@ impl<'a> SuitePreparation<'a> {
         mut placed: Option<Box<RegisteredFunction>>,
     ) -> RegisteredSuite {
         let mut scope = self.source_scope(kind);
+        if let Some(reason) = stmts
+            .first()
+            .and_then(|first| self.profile_exclusions?.get(&first.start()))
+        {
+            let exception = Expr {
+                ty: Type::Exception,
+                kind: ExprKind::Exception {
+                    kind: exception_kind("ValueError").unwrap(),
+                    message: Some(Box::new(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Str(reason.clone()),
+                    })),
+                },
+            };
+            let mut suite =
+                RegisteredSuite::new(scope.finish(vec![Statement::raise(exception)]), Vec::new());
+            suite.falls_through = false;
+            return suite;
+        }
         let mut statements = Vec::new();
         if let Some(entry) = &mut placed {
             // The caller reserved space for these declarations after its checked statements.
@@ -2739,14 +2760,21 @@ impl<'a> SuitePreparation<'a> {
             }
             let slots_before = scope.locals.len();
             scope.refusal = None;
-            let physical = matches!(select, SuiteSelection::Physical)
+            let profiled = !matches!(stmt, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_))
+                && self.profile_exclusions.is_some_and(|exclusions| {
+                    exclusions.keys().any(|start| stmt.range().contains(*start))
+                });
+            let physical = profiled
+                || matches!(select, SuiteSelection::Physical)
                 || (suspended
                     && matches!(
                         stmt,
                         ast::Stmt::If(_) | ast::Stmt::While(_) | ast::Stmt::Try(_)
                     ));
-            let inline = !physical || scope.checked_physical_statement(stmt);
-            let lowered = if !inline && !stmt.is_assign_stmt() {
+            let inline = !profiled && (!physical || scope.checked_physical_statement(stmt));
+            let lowered = if profiled {
+                Err(())
+            } else if !inline && !stmt.is_assign_stmt() {
                 scope.physical_statement(stmt, &mut body, self)
             } else {
                 let first = operands.len();

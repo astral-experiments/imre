@@ -365,6 +365,8 @@ pub(crate) fn frame_inputs(
             ExprKind::Builtin(Builtin::RegisteredAssertionFailure { .. }, args) => {
                 expr.ty == Type::None && args.len() <= 1
             }
+            ExprKind::Exception { kind, .. } => imre_ast::exceptions::Kind::try_from_raw(*kind)
+                .is_some_and(|kind| imre_ast::exceptions::boxed_builtin_kind(kind.name()) == Some(kind)),
             ExprKind::Builtin(Builtin::RegisteredDefinition(_), _) => {
                 uses_python_protocol = true;
                 true

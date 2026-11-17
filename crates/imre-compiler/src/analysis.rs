@@ -3,6 +3,7 @@
 mod class_cell;
 #[cfg(test)]
 mod closed_program_tests;
+mod correlated_calls;
 mod execution;
 #[cfg(test)]
 mod incremental_tests;
@@ -48,6 +49,7 @@ static REGISTERED_BODY_RULES: LazyLock<Arc<RuleSelection>> =
 #[salsa::input(singleton)]
 struct DiagnosticRules {
     rules: Arc<RuleSelection>,
+    profile_exclusions: Arc<HashMap<String, Vec<TextRange>>>,
 }
 
 // Layout hints are optional. Abandon a growing inferred type before it exhausts the stack.
@@ -144,6 +146,7 @@ impl Database {
         self.check_file(file)
             .iter()
             .filter(|diagnostic| diagnostic.severity() >= Severity::Error)
+            .filter(|diagnostic| !correlated_calls::explains(self, file, diagnostic))
             .map(|diagnostic| RegisteredSourceError::new(file, diagnostic))
             .collect()
     }
@@ -855,6 +858,7 @@ pub(crate) fn check_registered_project<'a>(
         }
     }
     let first_winner = paths.len();
+    let mut profile_exclusions = Vec::new();
     for winner in sources.clone() {
         let crate::dynamic::RegisteredSource {
             path,
@@ -889,9 +893,16 @@ pub(crate) fn check_registered_project<'a>(
         } else {
             session.register_file(&path, &source, kind)?;
         }
+        if let Some((graph, (id, _))) = checked.zip(checked_source) {
+            let ranges = graph.entry_profile.ranges(id).collect::<Vec<_>>();
+            if !ranges.is_empty() {
+                profile_exclusions.push((session.files.len() - 1, ranges));
+            }
+        }
         let original = checked_source.filter(|_| winner.declares_signatures && is_program);
         paths.push((path, is_program, original));
     }
+    session.set_profile_exclusions(profile_exclusions);
     if let Some((cache, true)) = cache {
         cache.restore_selected_diagnostics(&mut session)?;
     } else {
@@ -1956,7 +1967,7 @@ impl Session {
         db.settings.search_paths.try_register_static_roots(&db);
         // Lowering queries types with lints disabled. Tracking the rules invalidates
         // these cached queries when the full check enables diagnostics.
-        DiagnosticRules::new(&db, Arc::default());
+        DiagnosticRules::new(&db, Arc::default(), Arc::default());
         let execution_names =
             system_path_to_file(&db, &execution_names).map_err(|error| error.to_string())?;
         let external_loader_declarations = system_path_to_file(&db, &external_loader_declarations)
@@ -2332,6 +2343,34 @@ impl Session {
         self.copy_for_diagnostics(None, None)
     }
 
+    /// Track the exact suites excluded by the selected entry profile for cross-file diagnostics.
+    pub(crate) fn set_profile_exclusions(
+        &mut self,
+        exclusions: impl IntoIterator<Item = (usize, Vec<TextRange>)>,
+    ) {
+        let exclusions = exclusions
+            .into_iter()
+            .filter(|(_, ranges)| !ranges.is_empty())
+            .map(|(module, ranges)| {
+                (
+                    self.files[module].path(&self.db).as_str().to_owned(),
+                    ranges,
+                )
+            })
+            .collect();
+        DiagnosticRules::get(&self.db)
+            .set_profile_exclusions(&mut self.db)
+            .to(Arc::new(exclusions));
+    }
+
+    fn copy_profile_exclusions_from(&mut self, source: &Self) {
+        let exclusions =
+            Arc::clone(DiagnosticRules::get(&source.db).profile_exclusions(&source.db));
+        DiagnosticRules::get(&self.db)
+            .set_profile_exclusions(&mut self.db)
+            .to(exclusions);
+    }
+
     /// Check a prospective function against the source typing rules before an
     /// unresolved signature can acquire a new registered entry.
     pub(crate) fn registered_body_checks(&self) -> Result<RegisteredBodyChecks, String> {
@@ -2341,7 +2380,11 @@ impl Session {
             ..self.db.clone()
         };
         db.settings.search_paths.try_register_static_roots(&db);
-        DiagnosticRules::new(&db, Arc::clone(&REGISTERED_BODY_RULES));
+        DiagnosticRules::new(
+            &db,
+            Arc::clone(&REGISTERED_BODY_RULES),
+            Arc::clone(DiagnosticRules::get(&self.db).profile_exclusions(&self.db)),
+        );
         // Source rewrites belong to the owning Salsa database. Imports without
         // an override already read their selected bytes from the shared filesystem.
         for &original in self.files.iter().chain(&self.declarations) {
@@ -2429,6 +2472,22 @@ impl Session {
             };
             copy.files.push(file);
         }
+        let exclusions = DiagnosticRules::get(&self.db).profile_exclusions(&self.db);
+        let copied = self
+            .files
+            .iter()
+            .enumerate()
+            .filter_map(|(module, file)| {
+                if registrations.is_some_and(|r| r.provider_sources.contains_key(&module)) {
+                    return None;
+                }
+                exclusions
+                    .get(file.path(&self.db).as_str())
+                    .cloned()
+                    .map(|ranges| (module, ranges))
+            })
+            .collect::<Vec<_>>();
+        copy.set_profile_exclusions(copied);
         for &file in &self.declarations {
             let path = file
                 .path(&self.db)
@@ -4620,6 +4679,7 @@ fn file_errors<'db>(db: &'db dyn LiteralSourceDb, checked: CheckedFile<'db>) -> 
                 _ => CALL_ARGUMENT_RULES.contains(&rule),
             };
             diagnostic.severity() >= Severity::Error
+                && !correlated_calls::explains(db, file, diagnostic)
                 && fallback.as_ref().is_none_or(|parsed| {
                     diagnostic.id().as_str() != "invalid-assignment"
                         || checked.first_party(db)
@@ -5649,6 +5709,7 @@ impl CachedSession {
 
     fn update(&mut self, fresh: &Session, inputs: &crate::SourceInputs) -> Result<(), String> {
         self.session.tuple_spreads.clone_from(&fresh.tuple_spreads);
+        self.session.copy_profile_exclusions_from(fresh);
         for (index, (old, new)) in self.inputs.files.iter_mut().zip(&inputs.files).enumerate() {
             if old.2 == new.2 {
                 continue;
@@ -5723,6 +5784,7 @@ impl AnalysisCache {
                     prior.update_source(fresh, index, path)?;
                 }
             }
+            prior.copy_profile_exclusions_from(fresh);
             *fresh = prior;
         } else {
             fresh.set_closed_program_rules();

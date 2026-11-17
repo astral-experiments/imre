@@ -75,6 +75,12 @@ impl Profile {
         self.suites.is_some()
     }
 
+    pub(crate) fn has_exclusions(&self) -> bool {
+        self.suites
+            .as_ref()
+            .is_some_and(|suites| !suites.is_empty())
+    }
+
     pub(crate) fn excluded(&self, module: ModuleId, start: TextSize) -> Option<&str> {
         self.suites
             .as_ref()?
@@ -217,6 +223,94 @@ def choose(debug: bool) -> str:
                 .err()
                 .unwrap()
                 .contains("no supported branch")
+        );
+    }
+
+    #[test]
+    fn correlated_optional_argument_requires_the_callee_fallback_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("main.py");
+        let profile = dir.path().join("profile.json");
+        fs::write(
+            &entry,
+            "from service import Command, dispatch\nprint(dispatch(Command.check, None))\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("service.py"),
+            r#"
+from enum import Enum
+class Command(Enum):
+    check = 1
+    format = 2
+class Comparison(Enum):
+    selected = 1
+    other = 2
+def check(value: int) -> int:
+    return value
+def format(value: Comparison) -> int:
+    match value:
+        case Comparison.selected:
+            return 1
+        case Comparison.other:
+            return 2
+        case _:
+            raise ValueError("unsupported comparison")
+def dispatch(command: Command, comparison: Comparison | None) -> int:
+    match command:
+        case Command.check:
+            selected, value = check, 1
+        case Command.format:
+            selected, value = format, comparison
+        case _:
+            raise ValueError("unsupported command")
+    return selected(value)
+"#,
+        )
+        .unwrap();
+        let diagnostics = |options: &CompileOptions| {
+            let mut graph = super::super::SourceGraph::load_with(
+                &entry,
+                None,
+                options,
+                Default::default(),
+                &mut None,
+                &mut Default::default(),
+            )?;
+            let (skipped, overloads) = graph.diagnostic_scopes();
+            graph.session.set_closed_program_rules();
+            graph.session.closed_program_errors(
+                &graph.modules,
+                skipped.as_deref(),
+                &overloads,
+                None,
+                None,
+            )
+        };
+        let error = diagnostics(&CompileOptions::default()).unwrap_err();
+        assert!(
+            error.contains("invalid-argument-type") && error.contains("None"),
+            "{error}"
+        );
+        fs::write(
+            &profile,
+            r#"{"service.format":{"value":"Comparison.selected"}}"#,
+        )
+        .unwrap();
+        diagnostics(&CompileOptions {
+            entry_profile: Some(profile.clone()),
+            ..Default::default()
+        })
+        .unwrap();
+        fs::write(&profile, "{}").unwrap();
+        let error = diagnostics(&CompileOptions {
+            entry_profile: Some(profile),
+            ..Default::default()
+        })
+        .unwrap_err();
+        assert!(
+            error.contains("invalid-argument-type") && error.contains("None"),
+            "{error}"
         );
     }
 }

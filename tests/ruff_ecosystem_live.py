@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tempfile
 from pathlib import Path
 
@@ -130,7 +131,8 @@ def main():
         binary = directory / "ruff-ecosystem"
         subprocess.run(
             [args.compiler.resolve(), "build", package / "__main__.py", "--module-root", directory,
-             "--reachable-only", "--entry-profile", EXAMPLE / "markdown-entry.json",
+             "--reachable-only", "--extension-path", sysconfig.get_paths()["purelib"],
+             "--entry-profile", EXAMPLE / "markdown-entry.json",
              "--opt-level", args.opt_level, "--runtime", args.runtime.resolve(), "-o", binary],
             check=True, timeout=300,
         )

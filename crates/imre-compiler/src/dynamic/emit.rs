@@ -49,6 +49,7 @@ pub(super) struct RegisteredBodies<'a> {
     pub(super) functions: HashMap<crate::modules::ModuleId, super::CheckedFunctions>,
     pub(super) call_operands: HashMap<crate::modules::ModuleId, super::FunctionCallOperands>,
     pub(super) modules: &'a [crate::modules::SourceModule],
+    pub(super) profile_exclusions: HashMap<crate::modules::ModuleId, HashMap<TextSize, String>>,
     pub(super) bundled_doctest_prompts: HashMap<String, Vec<Prompt>>,
     // Decoded installed files retain the fingerprint of their original loader bytes.
     pub(super) physical_files: HashMap<PathBuf, PhysicalFile>,
@@ -372,6 +373,7 @@ type CheckedInputs<'a, 'b> = (
     Option<&'a crate::modules::SourceModule>,
     Option<Box<crate::frontend::RegisteredFunction>>,
     Option<&'a super::FunctionCallOperands>,
+    Option<&'a HashMap<TextSize, String>>,
 );
 
 impl<'a, 'p> From<ParsedModule<'a, 'p>> for ParsedInput<'a, 'p> {
@@ -486,7 +488,7 @@ impl<'a> PreparedBody<'a> {
         python_optimization: i32,
         origin: ModuleOrigin<'a, '_>,
         exec_literals: LiteralSites,
-        (operand_types, checked_source, checked_entry, call_operands): CheckedInputs<'a, '_>,
+        (operand_types, checked_source, checked_entry, call_operands, profile_exclusions): CheckedInputs<'a, '_>,
     ) -> Result<Self, String> {
         let ParsedModule { text, parsed } = module;
         #[cfg(test)]
@@ -494,6 +496,12 @@ impl<'a> PreparedBody<'a> {
         // Layouts can parse the same physical bytes in another session.
         let checked_source =
             checked_source.filter(|source| std::ptr::eq(source.source.as_str(), text.as_ref()));
+        if profile_exclusions.is_some() && checked_source.is_none() {
+            return Err(format!(
+                "{}: entry profile source no longer matches the checked module",
+                path.display()
+            ));
+        }
         let interactive = matches!(origin, ModuleOrigin::Interactive(..));
         let keep_docstrings = python_optimization < 2;
         let source = text.as_ref();
@@ -667,6 +675,7 @@ impl<'a> PreparedBody<'a> {
         }
         let mut prepare =
             crate::frontend::SuitePreparation::new(&operations, values, python_optimization == 0);
+        prepare.profile_exclusions = profile_exclusions;
         if let ModuleOrigin::Interactive(_, imports) = origin {
             prepare.unreachable_imports = Some(imports);
         }
@@ -685,7 +694,16 @@ impl<'a> PreparedBody<'a> {
             };
             let start = site.def.start();
             let header = scopes.functions.get_mut(&start).expect("named function");
-            let checked = checked_bodies.and_then(|bodies| bodies.get(&start));
+            // A placed frame may predate profile suite selection. Reprepare a
+            // constrained definition so every excluded branch owns its trap.
+            let constrained = profile_exclusions.is_some_and(|exclusions| {
+                exclusions
+                    .keys()
+                    .any(|start| site.def.range().contains(*start))
+            });
+            let checked = checked_bodies
+                .and_then(|bodies| bodies.get(&start))
+                .filter(|_| !constrained);
             let operands = call_operands
                 .filter(|_| checked.is_none())
                 .and_then(|functions| functions.get(&start));
