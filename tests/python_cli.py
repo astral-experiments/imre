@@ -5506,6 +5506,7 @@ for name in ("md4", "ripemd160"):
             "boxed_min.py",
             "boxed_comprehension_outer_yield.py",
             "boxed_generator_delegation.py",
+            "boxed_glob_resource_cleanup.py",
             "boxed_suspended_operand_positions.py",
             "boxed_lambda_default_positions.py",
             "boxed_mixed_lambda_defaults.py",
