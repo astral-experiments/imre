@@ -3292,7 +3292,7 @@ mod tests {
                 "def check(manager):\n{body}\ndef get_context():\n    return set()\ncheck(get_context())\n"
             );
             let mut graph = SourceGraph::single(&source).unwrap();
-            let Err(error) = lower_with_caller_cache(&mut graph, None, None) else {
+            let Err(error) = lower_with_caller_cache(&mut graph, None) else {
                 panic!("expected a checked list operand");
             };
             assert_eq!(error.kind, Kind::ExactType);

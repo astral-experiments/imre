@@ -2332,16 +2332,6 @@ impl Session {
             .then(|| self.db.registered_source_errors(self.files[module]))
     }
 
-    pub(crate) fn registered_source_errors(&mut self, module: usize) -> Vec<RegisteredSourceError> {
-        if self.uses_registered_body_rules() {
-            return self.db.registered_source_errors(self.files[module]);
-        }
-        self.with_diagnostic_rules(|session| {
-            session.use_registered_body_rules();
-            session.db.registered_source_errors(session.files[module])
-        })
-    }
-
     pub(crate) fn copy_for_diagnostics(
         &self,
         script_entry: Option<File>,
@@ -5668,7 +5658,7 @@ impl AnalysisCache {
     pub(crate) fn restore_hints(
         &mut self,
         graph: &mut crate::modules::SourceGraph,
-    ) -> Result<Option<Session>, String> {
+    ) -> Result<(), String> {
         if let Some(mut hints) = self.hints.take()
             && hints.same_files(&graph.session, &graph.inputs)
         {
@@ -5678,12 +5668,10 @@ impl AnalysisCache {
             for (module, &file) in graph.modules.iter_mut().zip(&hints.session.files) {
                 module.parsed = hints.session.parsed(file);
             }
-            // The discarded fresh session can check source rules without writing to a cached snapshot.
-            let fresh = std::mem::replace(&mut graph.session, hints.session.clone());
+            graph.session = hints.session.clone();
             self.hints = Some(hints);
-            return Ok(Some(fresh));
         }
-        Ok(None)
+        Ok(())
     }
 
     pub(crate) fn retain_hints(

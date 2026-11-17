@@ -1604,7 +1604,7 @@ print(numbers(url_from(request)))
         );
         let mut graph = SourceGraph::single(text).unwrap();
         graph.registered_startup = true;
-        let report = crate::frontend::lower_with_caller_cache(&mut graph, None, None)
+        let report = crate::frontend::lower_with_caller_cache(&mut graph, None)
             .err()
             .unwrap();
         assert!(report.to_string().contains(":3:19:"), "{report}");

@@ -478,37 +478,16 @@ pub(super) fn retain_generator(
     )
 }
 
-/// Inference has released its shared graph borrow, so check the remaining declarations
-/// on their own parser and restore its diagnostic rules before selecting operand layouts.
-pub(super) fn finish_source_checks(
-    graph: &mut SourceGraph,
-    checks: SourceChecks,
-    mut source_checks: Option<&mut crate::analysis::Session>,
-) -> bool {
+/// Check queued declarations through the same independent source checker used during inference.
+pub(super) fn finish_source_checks(graph: &mut SourceGraph, mut checks: SourceChecks) -> bool {
     let mut retry_fixed = false;
-    let mut accepted = |module,
-                        range,
-                        session: &mut crate::analysis::Session,
-                        errors: &mut HashMap<ModuleId, _>| {
-        let errors = errors.entry(module).or_insert_with(|| {
-            source_checks
-                .as_deref_mut()
-                .unwrap_or(session)
-                .registered_source_errors(module)
-        });
-        SourceChecks::accepts_range(errors, range)
-    };
     for ((module, range), source) in checks
         .solved
+        .take()
         .into_iter()
         .flat_map(std::cell::RefCell::into_inner)
     {
-        if !accepted(
-            module,
-            range,
-            &mut graph.session,
-            graph.registered_source_errors.get_mut(),
-        ) {
+        if !checks.accepts(graph, module, range) {
             retry_fixed |= matches!(source, SourceFrame::ReplacesFixed);
             graph.defer_registered_function(
                 module,
@@ -520,18 +499,8 @@ pub(super) fn finish_source_checks(
             );
         }
     }
-    for owner in checks.unresolved {
-        let Some(definition) = generator_definition(&graph.modules, &graph.session, owner) else {
-            continue;
-        };
-        if accepted(
-            owner.module,
-            definition.range(),
-            &mut graph.session,
-            graph.registered_source_errors.get_mut(),
-        ) {
-            retain_generator_body(graph, owner.module, definition);
-        }
+    for &owner in &checks.unresolved {
+        let _ = retain_generator(graph, owner, &checks);
     }
     retry_fixed
 }
@@ -7343,7 +7312,7 @@ print(choose({left}), choose({right}))
         std::fs::write(&path, positive).unwrap();
         crate::check_file(&path, None).unwrap();
         let mut graph = SourceGraph::single(positive).unwrap();
-        let selected = super::super::lower_with_caller_cache(&mut graph, None, None);
+        let selected = super::super::lower_with_caller_cache(&mut graph, None);
         match selected {
             Ok(crate::CheckedProgram::Registered(None)) => {}
             Err(error) | Ok(crate::CheckedProgram::Runtime(error)) => {
@@ -7410,7 +7379,7 @@ print(choose({left}), choose({right}))
             "        accept(candidate)\n",
         );
         let mut graph = SourceGraph::single(source).unwrap();
-        let _ = super::super::lower_with_caller_cache(&mut graph, None, None);
+        let _ = super::super::lower_with_caller_cache(&mut graph, None);
         let registered = graph.registered_functions();
         let checked = &registered[&graph.entry][&TextSize::default()].function;
         let mut comparisons = Vec::new();
