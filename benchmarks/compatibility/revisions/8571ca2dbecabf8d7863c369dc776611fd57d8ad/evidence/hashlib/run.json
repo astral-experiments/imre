@@ -1,0 +1,205 @@
+{
+  "revision": "8571ca2dbecabf8d7863c369dc776611fd57d8ad",
+  "resource_policy": "test.support.use_resources = []",
+  "gate": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/control/run.json",
+  "runs": {
+    "O0": {
+      "build": {
+        "argv": [
+          "/workspace/imre/target/release/imre",
+          "build",
+          "/workspace/scratch/hashlib-857/positive.py",
+          "--module-root",
+          "/workspace/scratch/hashlib-857",
+          "--no-cache",
+          "--opt-level",
+          "0",
+          "--runtime",
+          "/workspace/imre/target/release/libimre_runtime.a",
+          "--clang",
+          "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+          "-o",
+          "/workspace/scratch/hashlib-857/O0.exe",
+          "--extension-path",
+          "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "--include-module",
+          "test.test_hashlib"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 300,
+        "elapsed_seconds": 28.568,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "cf2d7e9a245e2eefa8146b3c00cf80c365ccf895ef0d722939aa9b5a89c44193"
+      },
+      "environment": {
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "IMREFLAGS": "--opt-level 0",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1"
+      },
+      "image_exists": true,
+      "image_sha256": "6532e33bb6e2a75096f17a567d9c7e845b83b14436742e9713a2221fa36419be",
+      "execution": {
+        "argv": [
+          "strace",
+          "-f",
+          "-e",
+          "trace=execve,openat",
+          "-o",
+          "/workspace/imre-857-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/O0.exec-open.trace",
+          "/workspace/scratch/hashlib-857/O0.exe",
+          "test.test_hashlib"
+        ],
+        "exit_code": 1,
+        "timed_out": false,
+        "timeout_seconds": 240,
+        "elapsed_seconds": 39.817,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "bb1fdab4650a0e79a99251789715b2723a696af92e3d599144c1a61e9974478a",
+        "parsed_originals": 82,
+        "summary_totals": [
+          "82"
+        ]
+      },
+      "controls": {
+        "readelf": {
+          "argv": [
+            "readelf",
+            "-d",
+            "/workspace/scratch/hashlib-857/O0.exe"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 0.009,
+          "stdout_sha256": "8e4d80c227e869511f56e580a3c286f387f763f6830ac7acf5b9d371b28f1170",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "ldd": {
+          "argv": [
+            "ldd",
+            "/workspace/scratch/hashlib-857/O0.exe"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 0.016,
+          "stdout_sha256": "f5174bc702c9b8fd8a824f3b244527b595248e27c12e900eb512e74ec25f3854",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "sources_absent": true,
+        "execve_count": 1,
+        "initial_exec_matches_image": true,
+        "child_exec_observed": false,
+        "libpython_observed": false,
+        "trace_sha256": "4e231a83e1093386ad26b0110e0da916b706ea108aee3fefa3d842c8b8671c76",
+        "trace_bytes": 6122,
+        "trace_path": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/O0.exec-open.trace",
+        "passed": true
+      }
+    },
+    "O3": {
+      "build": {
+        "argv": [
+          "/workspace/imre/target/release/imre",
+          "build",
+          "/workspace/scratch/hashlib-857/positive.py",
+          "--module-root",
+          "/workspace/scratch/hashlib-857",
+          "--no-cache",
+          "--opt-level",
+          "3",
+          "--runtime",
+          "/workspace/imre/target/release/libimre_runtime.a",
+          "--clang",
+          "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+          "-o",
+          "/workspace/scratch/hashlib-857/O3.exe",
+          "--extension-path",
+          "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+          "--include-module",
+          "test.test_hashlib"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 600,
+        "elapsed_seconds": 114.613,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "c6a872884e8ac1c2d340eea18e21f25914e5d4dd2b5a2b3882ff9c07b0bc9db9"
+      },
+      "environment": {
+        "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "IMREFLAGS": "--opt-level 3",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1"
+      },
+      "image_exists": true,
+      "image_sha256": "6ba6991ec3eccd692f180f2badfb531c912f968695de778d0cc734eab0ee1529",
+      "execution": {
+        "argv": [
+          "strace",
+          "-f",
+          "-e",
+          "trace=execve,openat",
+          "-o",
+          "/workspace/imre-857-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/O3.exec-open.trace",
+          "/workspace/scratch/hashlib-857/O3.exe",
+          "test.test_hashlib"
+        ],
+        "exit_code": 1,
+        "timed_out": false,
+        "timeout_seconds": 240,
+        "elapsed_seconds": 37.213,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "8de1067608702c5ef32853f049560e9080b145c010065eb464b37590d3224aa8",
+        "parsed_originals": 82,
+        "summary_totals": [
+          "82"
+        ]
+      },
+      "controls": {
+        "readelf": {
+          "argv": [
+            "readelf",
+            "-d",
+            "/workspace/scratch/hashlib-857/O3.exe"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 0.004,
+          "stdout_sha256": "7938928161312796a9606afe986411317b299476351fd9960427316e765a11d0",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "ldd": {
+          "argv": [
+            "ldd",
+            "/workspace/scratch/hashlib-857/O3.exe"
+          ],
+          "exit_code": 0,
+          "timed_out": false,
+          "timeout_seconds": 30,
+          "elapsed_seconds": 0.017,
+          "stdout_sha256": "872895912a3e3405ea53baffecd67cf25d774e3fc932ddffdaf45aa38fb6229a",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "sources_absent": true,
+        "execve_count": 1,
+        "initial_exec_matches_image": true,
+        "child_exec_observed": false,
+        "libpython_observed": false,
+        "trace_sha256": "2e752497f7ad4ee8f85f994114d5c3f48b030acf1aaae4b2aa62476f0b97e8a1",
+        "trace_bytes": 6122,
+        "trace_path": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/O3.exec-open.trace",
+        "passed": true
+      }
+    }
+  }
+}

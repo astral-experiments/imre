@@ -1,0 +1,9 @@
+# hashlib at Imre 8571ca2
+
+The stock observations are explicitly reused from the canonical CPython 3.14.5 default-resource run: `test.support.use_resources = []`, 69 passes and 13 skips across 82 unique `(id, occurrence)` keys. `stock-reuse.json` records the exact source blob/SHA-256, historical invocation, platform, immutable receipt locator, and raw stream hashes; each revision receipt links its exact stock line. No historical native outcome was reused. No resource-enabled observation is included in this default-policy receipt.
+
+The intended positive launcher is `control/positive.py`. The fresh uncached O0 gate prepended an import of the separate first-party `control/type_error.py` (`status: int = True`) to that otherwise identical launcher. With the exact matching runtime and the same suite declaration, the build exited 1 with `expected int, got bool` and produced no image. See `control/run.json` and its raw stderr.
+
+The saved O0 and O3 positive images were built together with the pinned runtime identified in `build.json`. Before either native suite ran, the staged test source, the upstream test source, and the launcher source were moved out of their search roots; matching test/launcher bytecode was enumerated and absent. Each complete native suite ran from its saved image under `strace -f -e trace=execve,openat`. Both traces contain exactly one exec of the saved image, no child exec, and no `libpython` access. `readelf` and `ldd` independently show no `libpython` dependency. `withdrawal.json`, the raw traces, dependency output, and `withdrawal-driver.py` record the controls and source restoration by SHA-256. Images remain saved in the Cloud scratch directory and their hashes are in `run.json`.
+
+Both native tiers reported 67 passes, 14 skips, and one error (`test_threaded_hashing`); stock passed `test_disallow_instantiation`, which native skipped. The strict stock/O0/O3 intersection is 67 pairs.

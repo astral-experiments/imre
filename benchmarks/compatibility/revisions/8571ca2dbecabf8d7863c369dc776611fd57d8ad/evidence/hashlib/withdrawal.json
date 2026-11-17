@@ -1,0 +1,105 @@
+{
+  "sources": [
+    {
+      "path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_hashlib.py",
+      "sha256_before": "9bb4589e1b1a8f62bab957f5c4ff24e08799fa2f3c089f299714bfd1dc7789a0",
+      "custody": "/workspace/scratch/hashlib-857-custody/0-test_hashlib.py",
+      "kind": "source",
+      "sha256_after": "9bb4589e1b1a8f62bab957f5c4ff24e08799fa2f3c089f299714bfd1dc7789a0",
+      "restored": true
+    },
+    {
+      "path": "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_hashlib.py",
+      "sha256_before": "9bb4589e1b1a8f62bab957f5c4ff24e08799fa2f3c089f299714bfd1dc7789a0",
+      "custody": "/workspace/scratch/hashlib-857-custody/1-test_hashlib.py",
+      "kind": "source",
+      "sha256_after": "9bb4589e1b1a8f62bab957f5c4ff24e08799fa2f3c089f299714bfd1dc7789a0",
+      "restored": true
+    },
+    {
+      "path": "/workspace/scratch/hashlib-857/positive.py",
+      "sha256_before": "38b46bbdf06a463186edc67e1b7b21649ab4fe725f5cb4fc8f1bc7e3b06c8bc7",
+      "custody": "/workspace/scratch/hashlib-857-custody/2-positive.py",
+      "kind": "source",
+      "sha256_after": "38b46bbdf06a463186edc67e1b7b21649ab4fe725f5cb4fc8f1bc7e3b06c8bc7",
+      "restored": true
+    }
+  ],
+  "bytecode_before": [],
+  "bytecode_absent_during": true,
+  "runs": {
+    "O0": {
+      "readelf": {
+        "argv": [
+          "readelf",
+          "-d",
+          "/workspace/scratch/hashlib-857/O0.exe"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 30,
+        "elapsed_seconds": 0.009,
+        "stdout_sha256": "8e4d80c227e869511f56e580a3c286f387f763f6830ac7acf5b9d371b28f1170",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "ldd": {
+        "argv": [
+          "ldd",
+          "/workspace/scratch/hashlib-857/O0.exe"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 30,
+        "elapsed_seconds": 0.016,
+        "stdout_sha256": "f5174bc702c9b8fd8a824f3b244527b595248e27c12e900eb512e74ec25f3854",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "sources_absent": true,
+      "execve_count": 1,
+      "initial_exec_matches_image": true,
+      "child_exec_observed": false,
+      "libpython_observed": false,
+      "trace_sha256": "4e231a83e1093386ad26b0110e0da916b706ea108aee3fefa3d842c8b8671c76",
+      "trace_bytes": 6122,
+      "trace_path": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/O0.exec-open.trace",
+      "passed": true
+    },
+    "O3": {
+      "readelf": {
+        "argv": [
+          "readelf",
+          "-d",
+          "/workspace/scratch/hashlib-857/O3.exe"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 30,
+        "elapsed_seconds": 0.004,
+        "stdout_sha256": "7938928161312796a9606afe986411317b299476351fd9960427316e765a11d0",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "ldd": {
+        "argv": [
+          "ldd",
+          "/workspace/scratch/hashlib-857/O3.exe"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 30,
+        "elapsed_seconds": 0.017,
+        "stdout_sha256": "872895912a3e3405ea53baffecd67cf25d774e3fc932ddffdaf45aa38fb6229a",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "sources_absent": true,
+      "execve_count": 1,
+      "initial_exec_matches_image": true,
+      "child_exec_observed": false,
+      "libpython_observed": false,
+      "trace_sha256": "2e752497f7ad4ee8f85f994114d5c3f48b030acf1aaae4b2aa62476f0b97e8a1",
+      "trace_bytes": 6122,
+      "trace_path": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/O3.exec-open.trace",
+      "passed": true
+    }
+  },
+  "restored": true
+}

@@ -1,0 +1,2 @@
+ Compiling /workspace/scratch/hashlib-857/controlled.py (-O0)
+/workspace/scratch/hashlib-857/type_error.py:1:15: Imre: expected int, got bool; annotations are enforced contracts
