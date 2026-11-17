@@ -3016,9 +3016,26 @@ impl Session {
         winners: impl Iterator<Item = (usize, crate::dynamic::RegisteredSource<'a>)> + Clone,
     ) -> Option<Result<(), String>> {
         let physical = |path: &Path, source: &str| {
-            winners.clone().find_map(|(id, winner)| {
+            let result = winners.clone().find_map(|(id, winner)| {
                 (winner.path == path && winner.source == source).then_some(id)
-            })
+            });
+            if cfg!(windows) && result.is_none() {
+                eprintln!(
+                    "PHYSICAL miss path={path:?} source_len={} winners={:?}",
+                    source.len(),
+                    winners
+                        .clone()
+                        .map(|(id, w)| (
+                            id,
+                            w.path,
+                            w.source.len(),
+                            w.path == path,
+                            w.source == source
+                        ))
+                        .collect::<Vec<_>>()
+                );
+            }
+            result
         };
         let module = &graph.modules[owner.module];
         let function_module = physical(&module.path, module.original_source())?;

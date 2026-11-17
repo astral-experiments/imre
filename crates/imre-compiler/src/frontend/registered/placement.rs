@@ -127,8 +127,14 @@ mod tests {
         if result.is_ok() {
             let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
             graph.registered_startup = true;
+            let lowering = crate::frontend::lower_with_caller_cache(&mut graph, None, None)
+                .err()
+                .map(|e| e.to_string());
             let direct = crate::checked_lower(&mut graph).err();
-            let mut probes = vec![("direct".to_owned(), direct)];
+            let mut probes = vec![
+                ("lowering".to_owned(), lowering),
+                ("direct".to_owned(), direct),
+            ];
             for (name, variant) in [
                 (
                     "literal",
