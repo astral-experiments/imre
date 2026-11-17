@@ -1,0 +1,20 @@
+"""Capture unchanged Rich O0 and its separate prepend-only negative control."""
+from pathlib import Path
+import json,os,shutil,sys
+HERE=Path('/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_replay');sys.path.insert(0,str(HERE));import produce as p;v=p.v
+out=HERE.parent/'native_d26_v3';root=Path('/workspace/practical-d26-scratch-retry');archive=root/'rich-O0-harness-blocker';archive.mkdir();shutil.move(out/'evidence/uv-rich/O0',archive/'evidence');scratch=root/'rich-o0-resume';scratch.mkdir();b=v.load(out/'evidence/build.json');env=b['cargo_build']['environment'];src=v.load(p.STOCK/'sources.json')['uv-rich'];original=(p.STOCK/src['vendored']).read_bytes();assert len(original)==297 and b'from __future__ import annotations\n' not in original
+
+def rich_gate(o,entry,work,positive,b,env):
+ assert entry.read_bytes()==original
+ injected=b'import architecture_control\n'+original;module=work/'architecture_control.py';entry.write_bytes(injected);module.write_bytes(b'status: int = True\n');(o/'gate.launcher.py.txt').write_bytes(injected);(o/'gate.module.py.txt').write_bytes(module.read_bytes());image=Path(positive[-1]+'.gate');argv=positive.copy();argv[-1]=str(image);trace=o/'gate.trace';cmd=p.traced(v.GATE_SYSCALLS,trace,[b['probe'],'gate',image,*argv])
+ try:r=p.run_files(o,'gate.',cmd,work,env,90)
+ finally:entry.write_bytes(original);entry.chmod(0o644);module.unlink()
+ calls=v.raw.execs(trace.read_text().splitlines(),v.need);m=v.re.search(rf'^{calls[1][1]}\s+exit_group\((\d+)\)',trace.read_text(),v.re.M);assert m
+ g={'argv':cmd,'build_argv':argv,'image':str(image),'positive_sha256':v.raw.sha(original),'injected_sha256':v.raw.sha(injected),'module_sha256':v.sha(o/'gate.module.py.txt'),'stdout_sha256':r['stdout_sha256'],'stderr_sha256':r['stderr_sha256'],'trace_sha256':v.sha(trace),'probe_exit_code':r['exit_code'],'compiler_exit_code':int(m[1]),'image_absent_after':not image.exists(),'injection':'prepend import architecture_control\\n to negative only'};p.write(o/'gate.json',g)
+ assert not r['timed_out'] and r['exit_code']==0 and g['compiler_exit_code']==1 and not image.exists() and (o/'gate.stdout').read_bytes()==b''
+ expected=f' Compiling {positive[2]} (-O0)\n{module}:1:15: Imre: expected int, got bool; annotations are enforced contracts\n';assert (o/'gate.stderr').read_text()==expected;v.raw.trace_gate(trace.read_text(),argv,b['probe'],str(module),expected,v.need);return g
+
+def validate_rich(o,receipt,source,build,probe):
+ g=receipt['gate'];assert source.read_bytes()==original and (o/'gate.launcher.py.txt').read_bytes()==b'import architecture_control\n'+original and (o/'gate.module.py.txt').read_bytes()==b'status: int = True\n' and g['positive_sha256']==v.raw.sha(original) and g['injected_sha256']==v.sha(o/'gate.launcher.py.txt') and g['compiler_exit_code']==1 and g['image_absent_after']
+p.poison_gate=rich_gate;v.gate=validate_rich;artifacts=[];ref=v.load(p.STOCK/'references/uv-rich/reference.json');p.tier(out,scratch,b,'uv-rich','O0',src,ref,env,artifacts,v.decode_policy(v.git(HERE.parents[3],'show',b['fixture_policy']['commit']+':'+b['fixture_policy']['path'])));r=v.load(out/'evidence/uv-rich/O0/receipt.json');print('CASE uv-rich O0',r['status'],r.get('run',{}).get('comparison_dimensions',{}),flush=True)
+identity=out/'evidence/identity';old=identity/'artifacts.initial.sha256';shutil.copy2(identity/'artifacts.sha256',old);b['rich_o0_controller']=str(Path(__file__).resolve());b['rich_o0_controller_sha256']=v.sha(__file__);p.write(out/'evidence/build.json',b);paths=[line.split('  ',1)[1] for line in old.read_text().splitlines()];paths.extend([b['rich_o0_controller'],*artifacts]);(identity/'artifacts.sha256').write_text(''.join(v.sha(path)+'  '+path+'\n' for path in paths));print('FINAL artifact identity',v.sha(identity/'artifacts.sha256'),flush=True)

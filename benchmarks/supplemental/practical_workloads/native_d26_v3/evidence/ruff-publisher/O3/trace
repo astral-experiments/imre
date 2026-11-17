@@ -1,0 +1,310 @@
+18499 execve("/workspace/practical-d26-scratch-retry/supervisor", ["/workspace/practical-d26-scratch-retry/supervisor", "/workspace/practical-d26-scratch-retry/ruff-publisher-O3/scripts/publish-crates.py", "/workspace/practical-d26-scratch-retry/ruff-publisher-O3.run-only.source", "-", "/workspace/practical-d26-scratch-retry/ruff-publisher-O3.run-only.zip", "/workspace/practical-d26-scratch-retry/ruff-publisher-O3.exe", "scripts/publish-crates.py", "--api-url", "http://127.0.0.1:46643/api/v1", "--cargo", "/workspace/fixture-policy-private/bin/python3.14", "/workspace/practical-d26-scratch-retry/ruff-publisher-O3-external/fixtures/cargo_stub.py", "--no-verify"], 0x7fff5b3763f0 /* 10 vars */) = 0
+18499 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+18499 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+18499 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3/scripts/publish-crates.py", {st_mode=S_IFREG|0644, st_size=6891, ...}, AT_SYMLINK_NOFOLLOW) = 0
+18499 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3.run-only.source", 0x7ffc38b27380, AT_SYMLINK_NOFOLLOW) = -1 ENOENT (No such file or directory)
+18499 rename("/workspace/practical-d26-scratch-retry/ruff-publisher-O3/scripts/publish-crates.py", "/workspace/practical-d26-scratch-retry/ruff-publisher-O3.run-only.source") = 0
+18499 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3/scripts/publish-crates.py", 0x7ffc38b27380, AT_SYMLINK_NOFOLLOW) = -1 ENOENT (No such file or directory)
+18499 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7fdea50eba10) = 18500
+18499 wait4(18500,  <unfinished ...>
+18500 execve("/workspace/practical-d26-scratch-retry/ruff-publisher-O3.exe", ["scripts/publish-crates.py", "--api-url", "http://127.0.0.1:46643/api/v1", "--cargo", "/workspace/fixture-policy-private/bin/python3.14", "/workspace/practical-d26-scratch-retry/ruff-publisher-O3-external/fixtures/cargo_stub.py", "--no-verify"], 0x7ffc38b275c8 /* 10 vars */) = 0
+18500 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+18500 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3
+18500 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3
+18500 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+18500 openat(AT_FDCWD, "/usr/lib/locale/locale-archive", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18500 openat(AT_FDCWD, "/usr/share/locale/locale.alias", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18500 openat(AT_FDCWD, "/usr/lib/locale/C.UTF-8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18500 openat(AT_FDCWD, "/usr/lib/locale/C.utf8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = 3
+18500 openat(AT_FDCWD, "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache", O_RDONLY|O_CLOEXEC) = 3
+18500 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 open("/workspace/practical-d26-scratch-retry/ruff-publisher-O3", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3/scripts/__init__.py", 0x7ffd31179498, 0) = -1 ENOENT (No such file or directory)
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3/scripts/__init__.pyc", 0x7ffd31179498, 0) = -1 ENOENT (No such file or directory)
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3/scripts", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+18500 openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3
+18500 openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 openat(AT_FDCWD, "/usr/share/zoneinfo/UTC", O_RDONLY|O_CLOEXEC) = 3
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+18500 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+18500 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libcrypto.so.3", O_RDONLY|O_CLOEXEC) = 3
+18500 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libz.so.1", O_RDONLY|O_CLOEXEC) = 3
+18500 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libzstd.so.1", O_RDONLY|O_CLOEXEC) = 3
+18500 openat(AT_FDCWD, "/usr/lib/ssl/openssl.cnf", O_RDONLY) = 3
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+18500 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+18500 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libssl.so.3", O_RDONLY|O_CLOEXEC) = 3
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 newfstatat(AT_FDCWD, "/usr/share/locale/C.UTF-8/LC_MESSAGES/messages.mo", 0x7ffd31179448, 0) = -1 ENOENT (No such file or directory)
+18500 newfstatat(AT_FDCWD, "/usr/share/locale/C.UTF-8/LC_MESSAGES/messages.mo", 0x7ffd31179448, 0) = -1 ENOENT (No such file or directory)
+18500 newfstatat(AT_FDCWD, "/usr/share/locale/C.UTF-8/LC_MESSAGES/messages.mo", 0x7ffd31179448, 0) = -1 ENOENT (No such file or directory)
+18500 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18500 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+18500 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7f65f703b810) = 18501
+18501 execve("/workspace/fixture-policy-private/bin/python3.14", ["/workspace/fixture-policy-private/bin/python3.14", "/workspace/practical-d26-scratch-retry/ruff-publisher-O3-external/fixtures/cargo_stub.py", "metadata", "--format-version", "1", "--no-deps"], 0x7ffd3117f0d8 /* 10 vars */) = 0
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/../lib/glibc-hwcaps/x86-64-v4/libpthread.so.0", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 newfstatat(AT_FDCWD, "/workspace/fixture-policy-private/bin/../lib/glibc-hwcaps/x86-64-v4/", 0x7ffda74c45d0, 0) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/../lib/glibc-hwcaps/x86-64-v3/libpthread.so.0", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 newfstatat(AT_FDCWD, "/workspace/fixture-policy-private/bin/../lib/glibc-hwcaps/x86-64-v3/", 0x7ffda74c45d0, 0) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/../lib/glibc-hwcaps/x86-64-v2/libpthread.so.0", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 newfstatat(AT_FDCWD, "/workspace/fixture-policy-private/bin/../lib/glibc-hwcaps/x86-64-v2/", 0x7ffda74c45d0, 0) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/../lib/libpthread.so.0", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 newfstatat(AT_FDCWD, "/workspace/fixture-policy-private/bin/../lib/", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18501 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libpthread.so.0", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/../lib/libdl.so.2", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libdl.so.2", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/../lib/libutil.so.1", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libutil.so.1", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/../lib/librt.so.1", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/librt.so.1", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/../lib/libm.so.6", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/../lib/libc.so.6", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+18501 open("/dev/urandom", O_RDONLY|O_CLOEXEC) = 3
+18501 open("/proc/sys/vm/overcommit_memory", O_RDONLY) = 3
+18501 openat(AT_FDCWD, "/usr/lib/locale/locale-archive", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/usr/share/locale/locale.alias", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/usr/lib/locale/C.UTF-8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/usr/lib/locale/C.utf8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/pyvenv.cfg", O_RDONLY) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/pyvenv.cfg", O_RDONLY) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/python3.14\n._pth", O_RDONLY) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/python3.14._pth", O_RDONLY) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/python3.14._pth", O_RDONLY) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/pybuilddir.txt", O_RDONLY) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/usr/share/zoneinfo/UTC", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/encodings/__pycache__/__init__.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/encodings/__init__.py", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/encodings", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/encodings/__pycache__/aliases.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/encodings/aliases.py", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/encodings/__pycache__/utf_8.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/encodings/utf_8.py", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/site-packages", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/lib-dynload", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/site-packages", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+18501 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3-external/fixtures/cargo_stub.py", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3-external/fixtures/cargo_stub.py", O_RDONLY) = 3
+18501 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3-external/fixtures", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/json/__pycache__/__init__.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/json/__init__.py", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/json", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/json/__pycache__/decoder.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/json/decoder.py", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/re/__pycache__/__init__.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/re/__init__.py", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/__pycache__/enum.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/enum.py", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/__pycache__/types.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/types.py", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/re", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/re/__pycache__/_compiler.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/re/_compiler.py", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/re/__pycache__/_parser.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/re/_parser.py", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/re/__pycache__/_constants.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/re/_constants.py", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/re/__pycache__/_casefix.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/re/_casefix.py", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/__pycache__/functools.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/functools.py", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/collections/__pycache__/__init__.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/collections/__init__.py", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/__pycache__/keyword.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/keyword.py", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/__pycache__/operator.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/operator.py", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/__pycache__/reprlib.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/reprlib.py", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/__pycache__/copyreg.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/copyreg.py", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/json/__pycache__/scanner.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/json/scanner.py", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/json/__pycache__/encoder.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/json/encoder.py", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/pathlib/__pycache__/__init__.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/pathlib/__init__.py", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/__pycache__/glob.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/glob.py", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/__pycache__/contextlib.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/contextlib.py", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/__pycache__/fnmatch.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/fnmatch.py", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/pathlib", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/pathlib/__pycache__/_os.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18501 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/pathlib/_os.py", O_RDONLY|O_CLOEXEC) = 3
+18501 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3/cargo.log", O_WRONLY|O_CREAT|O_APPEND|O_CLOEXEC, 0666) = 3
+18501 exit_group(0)                     = ?
+18500 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=18501, si_uid=1000, si_status=0, si_utime=10 /* 0.10 s */, si_stime=2 /* 0.02 s */} ---
+18500 wait4(18501, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 18501
+18500 openat(AT_FDCWD, "/usr/lib/ssl/cert.pem", O_RDONLY) = 3
+18500 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7f65f703b810) = 18504
+18504 execve("/workspace/fixture-policy-private/bin/python3.14", ["/workspace/fixture-policy-private/bin/python3.14", "/workspace/practical-d26-scratch-retry/ruff-publisher-O3-external/fixtures/cargo_stub.py", "publish", "--workspace", "--exclude", "already", "--no-verify"], 0x7ffd3117f0d8 /* 10 vars */) = 0
+18500 wait4(18504, 0x7ffd3117a0ec, WNOHANG, NULL) = 0
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/../lib/glibc-hwcaps/x86-64-v4/libpthread.so.0", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 newfstatat(AT_FDCWD, "/workspace/fixture-policy-private/bin/../lib/glibc-hwcaps/x86-64-v4/", 0x7ffef78b08d0, 0) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/../lib/glibc-hwcaps/x86-64-v3/libpthread.so.0", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 newfstatat(AT_FDCWD, "/workspace/fixture-policy-private/bin/../lib/glibc-hwcaps/x86-64-v3/", 0x7ffef78b08d0, 0) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/../lib/glibc-hwcaps/x86-64-v2/libpthread.so.0", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 newfstatat(AT_FDCWD, "/workspace/fixture-policy-private/bin/../lib/glibc-hwcaps/x86-64-v2/", 0x7ffef78b08d0, 0) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/../lib/libpthread.so.0", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 newfstatat(AT_FDCWD, "/workspace/fixture-policy-private/bin/../lib/", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18504 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libpthread.so.0", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/../lib/libdl.so.2", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libdl.so.2", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/../lib/libutil.so.1", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libutil.so.1", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/../lib/librt.so.1", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/librt.so.1", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/../lib/libm.so.6", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/../lib/libc.so.6", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+18504 open("/dev/urandom", O_RDONLY|O_CLOEXEC) = 3
+18504 open("/proc/sys/vm/overcommit_memory", O_RDONLY) = 3
+18504 openat(AT_FDCWD, "/usr/lib/locale/locale-archive", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/usr/share/locale/locale.alias", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/usr/lib/locale/C.UTF-8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/usr/lib/locale/C.utf8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/pyvenv.cfg", O_RDONLY) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/pyvenv.cfg", O_RDONLY) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/python3.14\n._pth", O_RDONLY) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/python3.14._pth", O_RDONLY) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/python3.14._pth", O_RDONLY) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/bin/pybuilddir.txt", O_RDONLY) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/usr/share/zoneinfo/UTC", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/encodings/__pycache__/__init__.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/encodings/__init__.py", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/encodings", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/encodings/__pycache__/aliases.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/encodings/aliases.py", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/encodings/__pycache__/utf_8.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/encodings/utf_8.py", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/site-packages", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/lib-dynload", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/site-packages", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+18504 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3-external/fixtures/cargo_stub.py", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3-external/fixtures/cargo_stub.py", O_RDONLY) = 3
+18504 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3-external/fixtures", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/json/__pycache__/__init__.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/json/__init__.py", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/json", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/json/__pycache__/decoder.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/json/decoder.py", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/re/__pycache__/__init__.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/re/__init__.py", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/__pycache__/enum.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/enum.py", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/__pycache__/types.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/types.py", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/re", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/re/__pycache__/_compiler.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/re/_compiler.py", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/re/__pycache__/_parser.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/re/_parser.py", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/re/__pycache__/_constants.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/re/_constants.py", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/re/__pycache__/_casefix.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/re/_casefix.py", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/__pycache__/functools.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/functools.py", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/collections/__pycache__/__init__.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/collections/__init__.py", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/__pycache__/keyword.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/keyword.py", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/__pycache__/operator.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/operator.py", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/__pycache__/reprlib.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/reprlib.py", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/__pycache__/copyreg.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/copyreg.py", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/json/__pycache__/scanner.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/json/scanner.py", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/json/__pycache__/encoder.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/json/encoder.py", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/pathlib/__pycache__/__init__.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/pathlib/__init__.py", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/__pycache__/glob.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/glob.py", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/__pycache__/contextlib.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/contextlib.py", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/__pycache__/fnmatch.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/fnmatch.py", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/pathlib", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/pathlib/__pycache__/_os.cpython-314.pyc", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18504 openat(AT_FDCWD, "/workspace/fixture-policy-private/lib/python3.14/pathlib/_os.py", O_RDONLY|O_CLOEXEC) = 3
+18504 openat(AT_FDCWD, "published.txt", O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC, 0666) = 3
+18504 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/ruff-publisher-O3/cargo.log", O_WRONLY|O_CREAT|O_APPEND|O_CLOEXEC, 0666) = 3
+18504 exit_group(0)                     = ?
+18500 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=18504, si_uid=1000, si_status=0, si_utime=10 /* 0.10 s */, si_stime=1 /* 0.01 s */} ---
+18500 wait4(18504, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 18504
+18500 exit_group(0)                     = ?
+18499 <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 18500
+18499 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=18500, si_uid=1000, si_status=0, si_utime=55 /* 0.55 s */, si_stime=7 /* 0.07 s */} ---
+18499 rename("/workspace/practical-d26-scratch-retry/ruff-publisher-O3.run-only.source", "/workspace/practical-d26-scratch-retry/ruff-publisher-O3/scripts/publish-crates.py") = 0
+18499 exit_group(0)                     = ?

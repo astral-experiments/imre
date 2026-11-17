@@ -1,0 +1,58 @@
+{
+  "ruff-publisher-O0": {
+    "approved_directory_handle_opens": 16,
+    "failed_allowed_cache_attempts": 50,
+    "status": "passed",
+    "successful_forbidden_opens": 0,
+    "trace_sha256": "dd7c878dc75a77b21a7e0150afe348449d8400c1262df432772080d56b6931ae"
+  },
+  "ruff-publisher-O3": {
+    "approved_directory_handle_opens": 16,
+    "failed_allowed_cache_attempts": 50,
+    "status": "passed",
+    "successful_forbidden_opens": 0,
+    "trace_sha256": "15f0c12eca2f74bc6042ff702e2f2884c6003e91917172c26b19d1d28c3ab22b"
+  },
+  "ty-readme-O0": {
+    "approved_directory_handle_opens": 0,
+    "failed_allowed_cache_attempts": 0,
+    "status": "passed",
+    "successful_forbidden_opens": 0,
+    "trace_sha256": "6e33857876dca6f41f6077988b61e6a87aacc6244e3903b7b39834725ba95552"
+  },
+  "ty-readme-O3": {
+    "approved_directory_handle_opens": 0,
+    "failed_allowed_cache_attempts": 0,
+    "status": "passed",
+    "successful_forbidden_opens": 0,
+    "trace_sha256": "3a46659dc4d3da7e59b7613913eb78779c1a8829abb9e2e999374b8197b76b51"
+  },
+  "uv-publisher-O0": {
+    "approved_directory_handle_opens": 16,
+    "failed_allowed_cache_attempts": 50,
+    "status": "passed",
+    "successful_forbidden_opens": 0,
+    "trace_sha256": "3da812ccbe77c3b049f1dab13d706caa3262e577f4525fe2835921b3b517ac00"
+  },
+  "uv-publisher-O3": {
+    "approved_directory_handle_opens": 16,
+    "failed_allowed_cache_attempts": 50,
+    "status": "passed",
+    "successful_forbidden_opens": 0,
+    "trace_sha256": "0d7f0ec6155d6976ca79f979cc7d943da8e9e67b585f96117d325daa3b1dddcf"
+  },
+  "uv-rich-O0": {
+    "approved_directory_handle_opens": 0,
+    "failed_allowed_cache_attempts": 0,
+    "status": "passed",
+    "successful_forbidden_opens": 0,
+    "trace_sha256": "9ff2acaf7f7c5a653b2b9f7ad4ef34062c2bc5b27ef0bcc4cfb31a126841f3d1"
+  },
+  "uv-rich-O3": {
+    "approved_directory_handle_opens": 0,
+    "failed_allowed_cache_attempts": 0,
+    "status": "passed",
+    "successful_forbidden_opens": 0,
+    "trace_sha256": "16df8ce8a0c96aba53b3dbb18f088b96976f1fe094dc4785f36c8d9e17bd1f19"
+  }
+}

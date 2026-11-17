@@ -1,0 +1,175 @@
+{
+  "build": {
+    "argv": [
+      "/workspace/imre/target/release/imre",
+      "build",
+      "/workspace/practical-d26-scratch-retry/ty-readme-O0/scripts/transform_readme.py",
+      "--module-root",
+      "/workspace/practical-d26-scratch-retry/ty-readme-O0",
+      "--no-cache",
+      "--opt-level",
+      "0",
+      "--runtime",
+      "/workspace/imre/target/release/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "-o",
+      "/workspace/practical-d26-scratch-retry/ty-readme-O0.exe"
+    ],
+    "elapsed_seconds": 16.36,
+    "exit_code": 0,
+    "image_exists": true,
+    "image_sha256": "2079845914c72beb841d0c47c5ff70e6ce667ccb045e6cce2d0985ae52b4264f",
+    "stderr_sha256": "b7671a574cfa6a06f5efde9ca4c43a6643f8b608cf866603c53c127d40f44c0c",
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "timed_out": false
+  },
+  "case": "ty-readme",
+  "gate": {
+    "argv": [
+      "/usr/bin/strace",
+      "-f",
+      "-qq",
+      "-s",
+      "512",
+      "-e",
+      "trace=execve,execveat,newfstatat,openat,openat2,clone,clone3,fork,vfork,wait4,exit_group",
+      "-o",
+      "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_d26_v3/evidence/ty-readme/O0/gate.trace",
+      "/workspace/practical-d26-scratch-retry/raw_control_probe",
+      "gate",
+      "/workspace/practical-d26-scratch-retry/ty-readme-O0.exe.gate",
+      "/workspace/imre/target/release/imre",
+      "build",
+      "/workspace/practical-d26-scratch-retry/ty-readme-O0/scripts/transform_readme.py",
+      "--module-root",
+      "/workspace/practical-d26-scratch-retry/ty-readme-O0",
+      "--no-cache",
+      "--opt-level",
+      "0",
+      "--runtime",
+      "/workspace/imre/target/release/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "-o",
+      "/workspace/practical-d26-scratch-retry/ty-readme-O0.exe.gate"
+    ],
+    "build_argv": [
+      "/workspace/imre/target/release/imre",
+      "build",
+      "/workspace/practical-d26-scratch-retry/ty-readme-O0/scripts/transform_readme.py",
+      "--module-root",
+      "/workspace/practical-d26-scratch-retry/ty-readme-O0",
+      "--no-cache",
+      "--opt-level",
+      "0",
+      "--runtime",
+      "/workspace/imre/target/release/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "-o",
+      "/workspace/practical-d26-scratch-retry/ty-readme-O0.exe.gate"
+    ],
+    "compiler_exit_code": 1,
+    "image": "/workspace/practical-d26-scratch-retry/ty-readme-O0.exe.gate",
+    "image_absent_after": true,
+    "injected_sha256": "0e8a8581ff73a770f8b0012d2c3fc9f80a10844a28c143a2498fc125e91126fd",
+    "module_sha256": "14841721c7b84f57d26a6a38a53827c683daf10930b9f297cfc15335bd1257b5",
+    "positive_sha256": "d6a13d50218b55e3b73587974e8357b9bc68b7c364d8bb10d04708fec5e2d64f",
+    "probe_exit_code": 0,
+    "stderr_sha256": "74f5b8c7bd5f65464b743f123c4d3c1710ecb54dc0e2d4b09d083fb449ea5a74",
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "trace_sha256": "a92c7262836ce486291e52b0746555ca90211e0191958625b5758616142f81b6"
+  },
+  "linkage": {
+    "ldd": {
+      "argv": [
+        "ldd",
+        "/workspace/practical-d26-scratch-retry/ty-readme-O0.exe"
+      ],
+      "exit_code": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "92291d1d851c9d45d3c252140733e91d018a90e579047e5cba3beb0d143c062c",
+      "timed_out": false
+    },
+    "readelf": {
+      "argv": [
+        "readelf",
+        "-d",
+        "/workspace/practical-d26-scratch-retry/ty-readme-O0.exe"
+      ],
+      "exit_code": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "7635a4e5390c3c21b7f0656f1dc77d09e40251e799daa66365fca00eb4074d51",
+      "timed_out": false
+    }
+  },
+  "reference_sha256": "764cd766a9ddca783630cc146f8fc9ed47ed3158eab4b8336fbb179631a1e6eb",
+  "run": {
+    "argv": [
+      "/usr/bin/strace",
+      "-f",
+      "-qq",
+      "-s",
+      "512",
+      "-e",
+      "trace=execve,execveat,open,openat,openat2,creat,io_uring_setup,clone,clone3,fork,vfork,rename,renameat,renameat2,newfstatat,wait4,exit_group",
+      "-o",
+      "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_d26_v3/evidence/ty-readme/O0/trace",
+      "/workspace/practical-d26-scratch-retry/supervisor",
+      "/workspace/practical-d26-scratch-retry/ty-readme-O0/scripts/transform_readme.py",
+      "/workspace/practical-d26-scratch-retry/ty-readme-O0.source",
+      "-",
+      "-",
+      "/workspace/practical-d26-scratch-retry/ty-readme-O0.exe",
+      "scripts/transform_readme.py"
+    ],
+    "bytecode_present_before": false,
+    "comparison_dimensions": {
+      "cargo_journal": true,
+      "http_requests": true,
+      "mutations": true,
+      "status": true,
+      "stderr": true,
+      "stdout": true
+    },
+    "cwd": "/workspace/practical-d26-scratch-retry/ty-readme-O0",
+    "environment": {
+      "HOME": "/workspace/practical-d26-scratch-retry/ty-readme-O0/home",
+      "LANG": "C.UTF-8",
+      "LC_ALL": "C.UTF-8",
+      "PATH": "/usr/bin",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONHASHSEED": "0",
+      "PYTHONNOUSERSITE": "1",
+      "TZ": "UTC"
+    },
+    "exit_code": 0,
+    "roles": {
+      "$CORPUS": "/workspace/practical-d26-scratch-retry/ty-readme-O0-external",
+      "$PYTHON": "/workspace/fixture-policy-private/bin/python3.14",
+      "$WORK": "/workspace/practical-d26-scratch-retry/ty-readme-O0"
+    },
+    "source_restored_sha256": "d6a13d50218b55e3b73587974e8357b9bc68b7c364d8bb10d04708fec5e2d64f",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "timed_out": false,
+    "trace_sha256": "6e33857876dca6f41f6077988b61e6a87aacc6244e3903b7b39834725ba95552",
+    "umask": "0077",
+    "workload_argv": [
+      "scripts/transform_readme.py"
+    ],
+    "zip_restored_sha256": null
+  },
+  "source": {
+    "bytes": 2641,
+    "commit": "d4e4bf90906c7677049bc3a29d1735de7d22052d",
+    "git_blob": "4b20727cd3b38ef011b9f779a706d977089c487a",
+    "path": "scripts/transform_readme.py",
+    "repo": "https://github.com/astral-sh/ty",
+    "sha256": "d6a13d50218b55e3b73587974e8357b9bc68b7c364d8bb10d04708fec5e2d64f",
+    "vendored": "sources/ty/scripts/transform_readme.py"
+  },
+  "status": "observed_exact",
+  "tier": "O0"
+}

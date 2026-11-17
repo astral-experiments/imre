@@ -1,0 +1,75 @@
+18441 execve("/workspace/practical-d26-scratch-retry/supervisor", ["/workspace/practical-d26-scratch-retry/supervisor", "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0/scripts/uv-run-remote-script-test.py", "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.source", "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0-external/fixtures/rich-imports.zip", "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.zip", "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.exe", "scripts/uv-run-remote-script-test.py", "Ruff"], 0x7ffc5c6d8958 /* 12 vars */) = 0
+18441 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+18441 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+18441 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0/scripts/uv-run-remote-script-test.py", {st_mode=S_IFREG|0644, st_size=297, ...}, AT_SYMLINK_NOFOLLOW) = 0
+18441 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.source", 0x7ffcdecceaf0, AT_SYMLINK_NOFOLLOW) = -1 ENOENT (No such file or directory)
+18441 rename("/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0/scripts/uv-run-remote-script-test.py", "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.source") = 0
+18441 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0-external/fixtures/rich-imports.zip", {st_mode=S_IFREG|0600, st_size=144132, ...}, AT_SYMLINK_NOFOLLOW) = 0
+18441 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.zip", 0x7ffcdecceaf0, AT_SYMLINK_NOFOLLOW) = -1 ENOENT (No such file or directory)
+18441 rename("/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0-external/fixtures/rich-imports.zip", "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.zip") = 0
+18441 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0/scripts/uv-run-remote-script-test.py", 0x7ffcdecceaf0, AT_SYMLINK_NOFOLLOW) = -1 ENOENT (No such file or directory)
+18441 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0-external/fixtures/rich-imports.zip", 0x7ffcdecceaf0, AT_SYMLINK_NOFOLLOW) = -1 ENOENT (No such file or directory)
+18441 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7ff5ef216a10) = 18442
+18441 wait4(18442,  <unfinished ...>
+18442 execve("/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.exe", ["scripts/uv-run-remote-script-test.py", "Ruff"], 0x7ffcdecced10 /* 12 vars */) = 0
+18442 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+18442 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3
+18442 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3
+18442 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+18442 openat(AT_FDCWD, "/usr/lib/locale/locale-archive", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18442 openat(AT_FDCWD, "/usr/share/locale/locale.alias", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18442 openat(AT_FDCWD, "/usr/lib/locale/C.UTF-8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+18442 openat(AT_FDCWD, "/usr/lib/locale/C.utf8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = 3
+18442 openat(AT_FDCWD, "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache", O_RDONLY|O_CLOEXEC) = 3
+18442 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 open("/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0/scripts/__init__.py", 0x7ffc71032d68, 0) = -1 ENOENT (No such file or directory)
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0/scripts/__init__.pyc", 0x7ffc71032d68, 0) = -1 ENOENT (No such file or directory)
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0/scripts", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3
+18442 openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3
+18442 openat(AT_FDCWD, "/usr/share/zoneinfo/UTC", O_RDONLY|O_CLOEXEC) = 3
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.exe", O_RDONLY|O_CLOEXEC) = 3
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 openat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.exe", O_RDONLY|O_CLOEXEC) = 3
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 newfstatat(AT_FDCWD, "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+18442 exit_group(0)                     = ?
+18441 <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 18442
+18441 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=18442, si_uid=1000, si_status=0, si_utime=50 /* 0.50 s */, si_stime=2 /* 0.02 s */} ---
+18441 rename("/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.zip", "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0-external/fixtures/rich-imports.zip") = 0
+18441 rename("/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.source", "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0/scripts/uv-run-remote-script-test.py") = 0
+18441 exit_group(0)                     = ?

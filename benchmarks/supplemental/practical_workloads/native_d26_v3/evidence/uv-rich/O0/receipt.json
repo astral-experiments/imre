@@ -1,0 +1,188 @@
+{
+  "build": {
+    "argv": [
+      "/workspace/imre/target/release/imre",
+      "build",
+      "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0/scripts/uv-run-remote-script-test.py",
+      "--module-root",
+      "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0",
+      "--no-cache",
+      "--opt-level",
+      "0",
+      "--runtime",
+      "/workspace/imre/target/release/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "--extension-path",
+      "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0-external/fixtures/rich-imports.zip",
+      "-o",
+      "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.exe"
+    ],
+    "elapsed_seconds": 19.61,
+    "exit_code": 0,
+    "image_exists": true,
+    "image_sha256": "b569ecde09c5846410517fed064fd33caf4862da6614d21b50852b29b95f4a50",
+    "stderr_sha256": "c8d578b2f68d60033771795937b819ab53053bf48aed1bd620b0758a180a9548",
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "timed_out": false
+  },
+  "case": "uv-rich",
+  "gate": {
+    "argv": [
+      "/usr/bin/strace",
+      "-f",
+      "-qq",
+      "-s",
+      "512",
+      "-e",
+      "trace=execve,execveat,newfstatat,openat,openat2,clone,clone3,fork,vfork,wait4,exit_group",
+      "-o",
+      "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_d26_v3/evidence/uv-rich/O0/gate.trace",
+      "/workspace/practical-d26-scratch-retry/raw_control_probe",
+      "gate",
+      "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.exe.gate",
+      "/workspace/imre/target/release/imre",
+      "build",
+      "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0/scripts/uv-run-remote-script-test.py",
+      "--module-root",
+      "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0",
+      "--no-cache",
+      "--opt-level",
+      "0",
+      "--runtime",
+      "/workspace/imre/target/release/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "--extension-path",
+      "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0-external/fixtures/rich-imports.zip",
+      "-o",
+      "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.exe.gate"
+    ],
+    "build_argv": [
+      "/workspace/imre/target/release/imre",
+      "build",
+      "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0/scripts/uv-run-remote-script-test.py",
+      "--module-root",
+      "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0",
+      "--no-cache",
+      "--opt-level",
+      "0",
+      "--runtime",
+      "/workspace/imre/target/release/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "--extension-path",
+      "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0-external/fixtures/rich-imports.zip",
+      "-o",
+      "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.exe.gate"
+    ],
+    "compiler_exit_code": 1,
+    "image": "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.exe.gate",
+    "image_absent_after": true,
+    "injected_sha256": "279630e691324966d1d15b0f12475a26b1b56a079e5d50c3f604ae8938d8c241",
+    "injection": "prepend import architecture_control\\n to negative only",
+    "module_sha256": "14841721c7b84f57d26a6a38a53827c683daf10930b9f297cfc15335bd1257b5",
+    "positive_sha256": "a479935e4c75c1b31dcd4805b50464ffa8a37e7240acb7c6457a2e4033ae21b0",
+    "probe_exit_code": 0,
+    "stderr_sha256": "4a27f27058667b10f95547904bfeb593681dc91df7b9e8f51e45d1d0e9c1111f",
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "trace_sha256": "38b7a822356554ea06b8ae67710e753d40682595babe44aa0e72c5890bef32d7"
+  },
+  "linkage": {
+    "ldd": {
+      "argv": [
+        "ldd",
+        "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.exe"
+      ],
+      "exit_code": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "fcfbfd605d7be675e2e96ecf80d073f9e109e5e6370e616717a9262ffd3a1baf",
+      "timed_out": false
+    },
+    "readelf": {
+      "argv": [
+        "readelf",
+        "-d",
+        "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.exe"
+      ],
+      "exit_code": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "a9155331e803e5a80f1d1d9480dab9ee4303d0d73ff4fb5fd0a0033d979c99ff",
+      "timed_out": false
+    }
+  },
+  "reference_sha256": "50ce73e5ea8bad9e7342140a6d62add108be2132565a493ca237921543e20dd6",
+  "run": {
+    "argv": [
+      "/usr/bin/strace",
+      "-f",
+      "-qq",
+      "-s",
+      "512",
+      "-e",
+      "trace=execve,execveat,open,openat,openat2,creat,io_uring_setup,clone,clone3,fork,vfork,rename,renameat,renameat2,newfstatat,wait4,exit_group",
+      "-o",
+      "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_d26_v3/evidence/uv-rich/O0/trace",
+      "/workspace/practical-d26-scratch-retry/supervisor",
+      "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0/scripts/uv-run-remote-script-test.py",
+      "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.source",
+      "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0-external/fixtures/rich-imports.zip",
+      "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.zip",
+      "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0.exe",
+      "scripts/uv-run-remote-script-test.py",
+      "Ruff"
+    ],
+    "bytecode_present_before": false,
+    "comparison_dimensions": {
+      "cargo_journal": true,
+      "http_requests": true,
+      "mutations": true,
+      "status": true,
+      "stderr": true,
+      "stdout": true
+    },
+    "cwd": "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0",
+    "environment": {
+      "COLUMNS": "80",
+      "HOME": "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0/home",
+      "LANG": "C.UTF-8",
+      "LC_ALL": "C.UTF-8",
+      "NO_COLOR": "1",
+      "PATH": "/usr/bin",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONHASHSEED": "0",
+      "PYTHONNOUSERSITE": "1",
+      "PYTHONPATH": "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0-external/fixtures/rich-imports.zip",
+      "TERM": "dumb",
+      "TZ": "UTC"
+    },
+    "exit_code": 0,
+    "roles": {
+      "$CORPUS": "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0-external",
+      "$PYTHON": "/workspace/fixture-policy-private/bin/python3.14",
+      "$WORK": "/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0"
+    },
+    "source_restored_sha256": "a479935e4c75c1b31dcd4805b50464ffa8a37e7240acb7c6457a2e4033ae21b0",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stdout_sha256": "62f2a29fb7c886579cd57d33e0a35e05ee7ed48d7c7ccbcdc6bda7da881da652",
+    "timed_out": false,
+    "trace_sha256": "9ff2acaf7f7c5a653b2b9f7ad4ef34062c2bc5b27ef0bcc4cfb31a126841f3d1",
+    "umask": "0077",
+    "workload_argv": [
+      "scripts/uv-run-remote-script-test.py",
+      "Ruff"
+    ],
+    "zip_restored_sha256": "74efeda34e44bb6995d92a7c914014ed3f9a168797b491ecc2d6be6de3fab3fe"
+  },
+  "source": {
+    "bytes": 297,
+    "commit": "24688aaca1e7fd104437a0909d5db3afdc7dcdb0",
+    "git_blob": "e21e3413afc5fc41942e29ccf7f717af3614ac12",
+    "path": "scripts/uv-run-remote-script-test.py",
+    "repo": "https://github.com/astral-sh/uv",
+    "sha256": "a479935e4c75c1b31dcd4805b50464ffa8a37e7240acb7c6457a2e4033ae21b0",
+    "vendored": "sources/uv/scripts/uv-run-remote-script-test.py"
+  },
+  "status": "observed_exact",
+  "tier": "O0"
+}

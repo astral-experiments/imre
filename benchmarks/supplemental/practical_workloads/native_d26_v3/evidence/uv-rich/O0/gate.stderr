@@ -1,0 +1,2 @@
+ Compiling /workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0/scripts/uv-run-remote-script-test.py (-O0)
+/workspace/practical-d26-scratch-retry/rich-o0-resume/uv-rich-O0/architecture_control.py:1:15: Imre: expected int, got bool; annotations are enforced contracts

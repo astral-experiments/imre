@@ -1,0 +1,58 @@
+"""Audit the saved d26 build and eight captures without compiling or executing images."""
+from pathlib import Path
+import hashlib,json,posixpath,re,shlex,subprocess,sys
+HERE=Path('/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_replay');sys.path.insert(0,str(HERE));import produce as p;v=p.v
+out=HERE.parent/'native_d26_v3';e=out/'evidence';i=e/'identity';b=v.load(e/'build.json');src=Path(b['cargo_build']['cwd']).resolve();pin=b['pin'];target=Path(b['compiler']).parents[1].resolve();log=(out/'build.log').read_text();assert v.git(src,'rev-parse','HEAD').decode().strip()==pin and v.git(src,'rev-parse','HEAD^{tree}').decode().strip()==b['tree'] and v.git(src,'status','--porcelain','--untracked-files=all')==b''
+ls=v.git(src,'ls-tree','-r','-z','--full-tree',pin);tracked={}
+for row in ls.split(b'\0'):
+ if not row:continue
+ header,path=row.split(b'\t',1);mode,kind,oid=header.decode().split();tracked[path.decode()]=(mode,kind,oid)
+expected={'compiler':{'imre-stdlib-sources.rs','imre-stdlib.zip'},'runtime':{'unicode_alnum.rs','unicode_alpha.rs','unicode_general_categories.rs','unicode_identifier_continue.rs','unicode_identifier_start.rs'}};audit={'revision':pin,'tree':b['tree'],'log_sha256':v.sha(out/'build.log'),'depfiles':{},'generated':[]};artifact_add=[]
+for key,crate in (('compiler','imre-compiler'),('runtime','imre-runtime')):
+ assert re.search(rf'Compiling {crate}\b.*\({re.escape(str(src))}/crates/{crate}\)',log);raw=(i/(key+'.d')).read_bytes();assert v.raw.sha(raw)==b['depfiles'][key]['sha256'];left,sep,right=raw.decode().splitlines()[0].partition(': ');assert sep and str(Path(b[key])) in shlex.split(left);paths=shlex.split(right);n=0;generated=[];dotdot=0
+ for lexical in paths:
+  q=Path(lexical);assert q.is_absolute();real=q.resolve(strict=True)
+  if real.is_relative_to(src):
+   rel=real.relative_to(src).as_posix();mode,kind,oid=tracked[rel];assert kind=='blob' and mode in ('100644','100755');data=real.read_bytes();actual=hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest();canonical=v.git(src,'hash-object','--path='+rel,str(real)).decode().strip() if actual!=oid else actual;assert canonical==oid;dotdot+=int('..' in q.parts);n+=1
+  else:
+   assert real==q and real.name in expected[key] and re.fullmatch(re.escape(str(target))+r'/release/build/'+crate+r'-[0-9a-f]+/out/'+re.escape(real.name),str(real));assert 'OUT_DIR='+str(real.parent) in log and crate in log;generated.append(real.name);audit['generated'].append({'crate':crate,'path':str(real),'sha256':v.sha(real),'out_dir':str(real.parent),'provenance':'exact depfile member; OUT_DIR present in captured verbose Cargo build log; crate explicitly recompiled'});artifact_add.append(str(real))
+ assert set(generated)==expected[key] and len(generated)==len(expected[key]);audit['depfiles'][key]={'raw_sha256':v.raw.sha(raw),'inputs':len(paths),'tracked_exact_git_blobs':n,'generated':len(generated),'lexical_dotdot':dotdot};artifact_add.append(str(i/(key+'.d')))
+assert audit['depfiles']['compiler']['inputs']==781 and audit['depfiles']['runtime']['inputs']==604 and len(audit['generated'])==7
+commands={'prebuild_order':['head','tree','status','cargo_build'],'manifest_path':str(i/'commands.json')};argvs={'probe_build':['/usr/bin/cc','-O2','-Wall','-Wextra','-o',b['probe'],str(p.PROBE)],'supervisor_build':['/usr/bin/cc','-O2','-Wall','-Wextra','-o',b['supervisor'],str(HERE/'supervisor.c')],'cargo_version':[b['cargo'],'--version'],'rustc_version':[b['rustc'],'--version'],'clang_version':[b['clang'],'--version'],'cargo_cc_effective':['/usr/bin/readlink','-f',b['cargo_cc_invocation']],'cargo_cc_version':[b['cargo_cc_invocation'],'--version'],'as_built_python_identity':[b['python_fixture'],'-I','-c',v.PY_IDENTITY],'python_identity':[b['python_fixture'],'-I','-B','-c',v.PY_IDENTITY],'head':['git','-C',str(src),'rev-parse','HEAD'],'tree':['git','-C',str(src),'rev-parse','HEAD^{tree}'],'status':['git','-C',str(src),'status','--porcelain','--untracked-files=all']}
+for name,argv in argvs.items():rawname={'as_built_python_identity':'python_identity.raw','python_identity':'python_identity_B.raw'}.get(name,name+'.raw');q=i/rawname;assert q.is_file();commands[name]={'argv':argv,'stdout':rawname,'sha256':v.sha(q),'exit_code':0}
+p.write(i/'commands.json',commands);b.update(python_prefix=json.loads((i/'python_identity_B.raw').read_bytes())['prefix'],stdlib_root=str(Path(b['python_fixture']).parent.parent/'lib/python3.14'),supervisor_source=str(HERE/'supervisor.c'),supervisor_source_sha256=v.sha(HERE/'supervisor.c'),probe_source=str(p.PROBE),stub_sha256=v.sha(p.STOCK/'fixtures/cargo_stub.py'),depfile_audit=str(e/'depfile_audit.json'),audit_controller=str(Path(__file__).resolve()),audit_controller_sha256=v.sha(__file__));p.write(e/'depfile_audit.json',audit);b['depfile_audit_sha256']=v.sha(e/'depfile_audit.json')
+reviewed=v.decode_policy(v.git(HERE.parents[3],'show',b['fixture_policy']['commit']+':'+b['fixture_policy']['path']));stdlib=Path(b['stdlib_root']);approved_cache={str(q.parent/'__pycache__'/(q.stem+'.cpython-314.pyc')) for q in (stdlib/x for x in reviewed['stdlib'])};open_original=v.open_policy;trace_results={}
+def audit_open(lines,cwd,execs,py,stub,reviewed,withdrawn_source=None):
+ fixture={x[1] for x in execs[2:]};remaining=[];failed=[]
+ for line in lines:
+  m=v.raw.OPEN.match(line)
+  if m and line.split(' ',1)[0] in fixture and json.loads(m[1]) in approved_cache and re.search(r'= -1 ENOENT\b',line):failed.append(line);continue
+  remaining.append(line)
+ original_resolver=v.scorecard.successful_open_paths;directory_count=0
+ def resolve(rows,cwd):
+  nonlocal directory_count
+  permitted_dirs={stdlib,stdlib/'site-packages',stdlib/'lib-dynload'}|{(stdlib/x).parent for x in reviewed['stdlib']};dirs=set()
+  for line in rows.splitlines():
+   m=v.raw.OPEN.match(line)
+   if m and line.split(' ',1)[0] in fixture and 'O_DIRECTORY' in line and re.search(r'= [0-9]+$',line):
+    q=Path(posixpath.normpath(json.loads(m[1])))
+    if q in permitted_dirs:dirs.add(q);directory_count+=1
+  return [q for q in original_resolver(rows,cwd) if q not in dirs]
+ v.scorecard.successful_open_paths=resolve
+ try:result=open_original(remaining,cwd,execs,py,stub,reviewed,withdrawn_source)
+ finally:v.scorecard.successful_open_paths=original_resolver
+ audit_open.failed=len(failed);audit_open.directory_count=directory_count;return result
+v.open_policy=audit_open
+for case,s in v.load(p.STOCK/'sources.json').items():
+ ref=v.load(p.STOCK/'references'/case/'reference.json');expected=v.load(p.STOCK/'references'/case/'effects.normalized.json')
+ for tier in ('O0','O3'):
+  o=e/case/tier;r=v.load(o/'receipt.json');assert r['status']=='observed_exact' and all(r['run']['comparison_dimensions'].values()) and v.sha(r['build']['argv'][-1])==r['build']['image_sha256'];assert (o/'stdout').read_bytes()==(p.STOCK/'references'/case/'raw/stdout').read_bytes() and (o/'stderr').read_bytes()==(p.STOCK/'references'/case/'raw/stderr').read_bytes() and v.load(o/'effects.normalized.json')==expected
+  if tier=='O0':
+   if case=='uv-rich':
+    original=(p.STOCK/s['vendored']).read_bytes();g=r['gate'];assert len(original)==297 and (o/'gate.launcher.py.txt').read_bytes()==b'import architecture_control\n'+original and (o/'gate.module.py.txt').read_bytes()==b'status: int = True\n' and g['positive_sha256']==v.raw.sha(original) and g['injected_sha256']==v.sha(o/'gate.launcher.py.txt') and g['compiler_exit_code']==1 and g['image_absent_after'];module=str(Path(r['build']['argv'][r['build']['argv'].index('--module-root')+1])/'architecture_control.py');v.raw.trace_gate((o/'gate.trace').read_text(),g['build_argv'],b['probe'],module,(o/'gate.stderr').read_text(),v.need)
+   else:v.gate(o,r,p.STOCK/s['vendored'],b,b['probe'])
+  archive=None
+  if case=='uv-rich':archive=r['run']['roles']['$CORPUS']+'/fixtures/rich-imports.zip'
+  audit_open.failed=0;v.withdrawal(o,r,b['python_fixture'],b['supervisor'],ref['observation']['exit_code'],case in v.FIXTURE_CASES,archive,[x['argv'] for x in expected['processes']],reviewed);trace_results[case+'-'+tier]={'status':'passed','failed_allowed_cache_attempts':audit_open.failed,'successful_forbidden_opens':0,'approved_directory_handle_opens':audit_open.directory_count,'trace_sha256':v.sha(o/'trace')}
+assert not list(Path(b['python_fixture']).parent.parent.rglob('*.pyc')) and not list(Path(b['python_fixture']).parent.parent.rglob('*.pyo'));p.write(e/'trace_audit.json',trace_results);b['trace_audit']=str(e/'trace_audit.json');b['trace_audit_sha256']=v.sha(e/'trace_audit.json');p.write(e/'build.json',b)
+paths=[line.split('  ',1)[1] for line in (i/'artifacts.sha256').read_text().splitlines()];paths.extend([str(out/'build.log'),str(i/'commands.json'),str(e/'depfile_audit.json'),str(e/'trace_audit.json'),str(Path(__file__).resolve()),b['supervisor_source'],b['probe_source'],*artifact_add,*[str(stdlib/x) for x in reviewed['stdlib']]]);paths=list(dict.fromkeys(paths));(i/'artifacts.sha256').write_text(''.join(v.sha(x)+'  '+x+'\n' for x in paths));print('BUILD',audit['depfiles'],'generated',len(audit['generated']));print('TRACES',trace_results);print('ARTIFACT',v.sha(i/'artifacts.sha256'))

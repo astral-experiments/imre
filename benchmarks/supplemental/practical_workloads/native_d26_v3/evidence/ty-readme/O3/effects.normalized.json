@@ -1,0 +1,17 @@
+{
+  "files": {
+    "created": [],
+    "deleted": [],
+    "modified": [
+      {
+        "bytes": 5755,
+        "kind": "file",
+        "mode": "0o644",
+        "path": "README.md",
+        "sha256": "ea831c09eb6dc99d10dc36f8ba3f4002bec3765b04d2d9d7fac4b117bbe43d2f"
+      }
+    ]
+  },
+  "processes": [],
+  "registry": []
+}
