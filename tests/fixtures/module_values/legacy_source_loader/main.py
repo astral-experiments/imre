@@ -15,6 +15,19 @@ class RecordingLoader(SourceFileLoader):
         self.created += 1
         return ModuleType(spec.name)
 
+    def exec_module(self, module):
+        if sys.implementation.name == "imre":
+            try:
+                super().exec_module(module)
+            except NotImplementedError as exc:
+                assert str(exc) == f"no compiled Python body for <module> ({self.path}:1)"
+            else:
+                raise AssertionError("fresh unlinked source unexpectedly executed")
+            module.owner = sys.modules[module.__name__]
+            module.initializing = getattr(module.__spec__, "_initializing", None)
+        else:
+            super().exec_module(module)
+
 
 class ReplacingLoader(SourceFileLoader):
     def exec_module(self, module):
@@ -103,8 +116,16 @@ with tempfile.TemporaryDirectory() as root:
         stream.write(data)
     assert loader.get_source("labels") == decode_source(data) == "# coding: latin-1\ntitle = 'café'\n"
     module = ModuleType("labels")
-    SourceFileLoader("labels", Path(path)).exec_module(module)
-    assert module.title == "café"
+    if sys.implementation.name == "imre":
+        try:
+            SourceFileLoader("labels", Path(path)).exec_module(module)
+        except NotImplementedError as exc:
+            assert str(exc) == f"no compiled Python body for <module> ({path}:1)"
+        else:
+            raise AssertionError("fresh unlinked source unexpectedly executed")
+    else:
+        SourceFileLoader("labels", Path(path)).exec_module(module)
+        assert module.title == "café"
     os.remove(path)
     try:
         loader.get_source("labels")

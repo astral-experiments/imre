@@ -98,13 +98,42 @@ def write_file_finder_data(project: Path) -> None:
     write_files(project / "file_finder_data", {"main.py": original.replace(execute, read)})
 
 
-def require_file_finder_refusal(
-    build: CompletedProcess[str], source: Path, binary: Path, level: str
+def write_import_registries_data(project: Path) -> None:
+    original = (project / "import_registries" / "main.py").read_text(encoding="utf-8")
+    replacements = {
+        "        scope = {}\n": "",
+        "            exec(direct.get_code(name), scope)\n": (
+            "            assert direct.get_code(name).co_filename == filename\n"
+            "            assert direct.get_data(filename) == b'answer = 42\\n'\n"
+        ),
+        "        assert scope['answer'] == 42 and name not in sys.modules\n":
+            "        assert name not in sys.modules\n",
+        "        assert __import__(name).answer == 42\n": (
+            "        if sys.implementation.name == 'imre':\n"
+            "            try:\n"
+            "                __import__(name)\n"
+            "            except NotImplementedError as exc:\n"
+            "                assert str(exc) == f'no compiled Python body for <module> ({filename}:1)'\n"
+            "            else:\n"
+            "                raise AssertionError('fresh unlinked module unexpectedly imported')\n"
+            "        else:\n"
+            "            assert __import__(name).answer == 42\n"
+        ),
+        "        del sys.modules[name]\n": "        sys.modules.pop(name, None)\n",
+    }
+    for before, after in replacements.items():
+        assert original.count(before) == 1, f"import_registries block changed: {before!r}"
+        original = original.replace(before, after)
+    write_files(project / "import_registries_data", {"main.py": original})
+
+
+def require_linked_exec_refusal(
+    build: CompletedProcess[str], source: Path, binary: Path, level: str, position: str
 ) -> None:
     assert build.returncode == 1 and not build.stdout, build
     diagnostic = build.stderr.removeprefix(f" Compiling {source} (-O{level})\n")
     refusal = (
-        ":36:10: Imre: this call may select builtins.exec without a linked body "
+        f":{position}: Imre: this call may select builtins.exec without a linked body "
         "for its source. Define the handlers as Python functions and select one "
         "by name, or declare the finite modules with --include-module.\n"
     )
@@ -166,6 +195,7 @@ def main() -> None:
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
         write_distribution_archive(project / "distribution_archive")
         write_file_finder_data(project)
+        write_import_registries_data(project)
         for case in sorted(project.iterdir()):
             source = case / "main.py"
             error = ERRORS.get(case.name)
@@ -181,6 +211,10 @@ def main() -> None:
                 if case.name == "file_finder_data":
                     # The optimized filesystem-discovery links can take over 150 seconds.
                     timeout = 900
+                included = {
+                    "live_module_cache": ["--include-module", "pkg.replace_parent"],
+                    "module_cache_cleanup": ["--include-module", "flaky"],
+                }.get(case.name, [])
                 build = run_build(
                     [
                         compiler,
@@ -196,13 +230,15 @@ def main() -> None:
                         level,
                         "-o",
                         str(binary),
+                        *included,
                         *flags,
                     ],
                     temporary,
                     timeout=timeout,
                 )
-                if case.name == "file_finder":
-                    require_file_finder_refusal(build, source, binary, level)
+                if case.name in {"file_finder", "import_registries"}:
+                    position = "36:10" if case.name == "file_finder" else "61:18"
+                    require_linked_exec_refusal(build, source, binary, level, position)
                     checks += 1
                     continue
                 require_success(build)

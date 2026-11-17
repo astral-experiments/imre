@@ -94,8 +94,17 @@ with fresh_imports("_frozen_importlib", "_frozen_importlib_external"):
         spec = machinery.ModuleSpec(name, loader)
         module = type(sys)(name)
         module.__spec__ = spec
-        loader.exec_module(module)
-        assert module.answer == 42
+        if sys.implementation.name == "imre":
+            # Linked executables cannot compile a new Python body created at runtime.
+            try:
+                loader.exec_module(module)
+            except NotImplementedError as exc:
+                assert str(exc) == f"no compiled Python body for <module> ({path}:1)"
+            else:
+                raise AssertionError("fresh unlinked source unexpectedly executed")
+        else:
+            loader.exec_module(module)
+            assert module.answer == 42
 
     source_only = source.import_module("importlib.abc")
     assert issubclass(machinery.FileFinder, source_only.PathEntryFinder)
