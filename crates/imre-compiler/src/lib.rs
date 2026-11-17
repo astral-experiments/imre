@@ -543,62 +543,48 @@ fn object_fallback(
             let call_error = initializer
                 .as_ref()
                 .and_then(analysis::InitializerCheck::fixed_error);
-            if call_error.is_some() {
-                // Both representations reject this initializer. Check it in the ordinary
-                // layout once so an earlier annotated failure keeps its original priority.
-                graph.layout_hint.set(modules::LayoutHint::Disabled);
-            }
-            let baseline = graph.lowering_baseline();
-            let refusal = loop {
-                let error = match lower(&mut graph, cache.as_deref_mut(), call_error)? {
-                    CheckedProgram::Registered(reason) => break reason,
-                    CheckedProgram::Native(mut fixed) => {
-                        let module = &mut fixed.ir.0;
-                        verify_after(module, "lowering")?;
-                        match callables::layouts(module, std::mem::take(&mut fixed.callables)) {
-                            Ok(program) => {
-                                if !options.include_modules.is_empty() {
-                                    return Err(
+            let refusal = match lower(&mut graph, cache.as_deref_mut(), call_error)? {
+                CheckedProgram::Registered(reason) => reason,
+                CheckedProgram::Native(mut fixed) => {
+                    let module = &mut fixed.ir.0;
+                    verify_after(module, "lowering")?;
+                    match callables::layouts(module, std::mem::take(&mut fixed.callables)) {
+                        Ok(program) => {
+                            if !options.include_modules.is_empty() {
+                                return Err(
                                         "--include-module requires a runtime module loader; this entry is fully typed"
                                             .to_owned(),
                                     );
-                                }
-                                let Some(output) = output.as_deref_mut() else {
-                                    return Ok(graph.inputs);
-                                };
-                                fixed.prepare_native_sources(&graph);
-                                let (module, owners) = &mut fixed.ir;
-                                for original in specialize(module)? {
-                                    owners.push(owners[original]);
-                                }
-                                output.emit_fixed(
-                                    &graph,
-                                    &mut fixed,
-                                    options.address_sanitizer,
-                                    program,
-                                );
-                                return Ok(match entry {
-                                    ProgramEntry::Source(_) => SourceInputs::default(),
-                                    ProgramEntry::File(..) => output
-                                        .compilation
-                                        .native_inputs(graph, options.entry_profile.as_deref()),
-                                });
                             }
-                            Err(reason) => {
-                                // Placement needs the original checked operations and their source sites.
-                                fixed.register_definitions(&graph);
-                                reason
+                            let Some(output) = output.as_deref_mut() else {
+                                return Ok(graph.inputs);
+                            };
+                            fixed.prepare_native_sources(&graph);
+                            let (module, owners) = &mut fixed.ir;
+                            for original in specialize(module)? {
+                                owners.push(owners[original]);
                             }
+                            output.emit_fixed(
+                                &graph,
+                                &mut fixed,
+                                options.address_sanitizer,
+                                program,
+                            );
+                            return Ok(match entry {
+                                ProgramEntry::Source(_) => SourceInputs::default(),
+                                ProgramEntry::File(..) => output
+                                    .compilation
+                                    .native_inputs(graph, options.entry_profile.as_deref()),
+                            });
+                        }
+                        Err(reason) => {
+                            // Placement needs the original checked operations and their source sites.
+                            fixed.register_definitions(&graph);
+                            Some(reason)
                         }
                     }
-                    CheckedProgram::Runtime(error) => error,
-                };
-                // A guessed layout must not turn a working object program into a type error,
-                // or mask a diagnostic that the ordinary checked-file path would have issued.
-                if graph.layout_hint.get() != modules::LayoutHint::Applied {
-                    break Some(error);
                 }
-                graph.retry_without_layout_hints(&baseline);
+                CheckedProgram::Runtime(error) => Some(error),
             };
             // Incremental lowering can replace the entry's type database with a cached session.
             graph.closed_initializer =
@@ -1235,14 +1221,7 @@ fn checked_lower_with(
     cache: Option<&mut IncrementalCompiler>,
     call_error: Option<&LoweringDiagnostic>,
 ) -> Result<CheckedProgram, String> {
-    let retry_with_cached_hints =
-        cache.is_some() && graph.layout_hint.get() == modules::LayoutHint::Disabled;
-    let mut cache = cache.filter(|_| !retry_with_cached_hints);
-    // A retry shares the quiet hint snapshot. Use its independent diagnostic session for
-    // both the pending generator declarations and the subsequent closed-program check.
-    let mut retry_checks = (retry_with_cached_hints && call_error.is_none())
-        .then(|| graph.session.diagnostic_copy())
-        .transpose()?;
+    let mut cache = cache;
     let lowered = if let Some(compiler) = cache.as_deref_mut() {
         compiler.cache.restore_hints(graph)?;
         let callers = compiler.callers.prepare(graph);
@@ -1265,16 +1244,6 @@ fn checked_lower_with(
         }
         return Ok(CheckedProgram::Runtime(diagnostic));
     }
-    // The file driver discards a failed speculative lowering before admission.
-    // Only the ordinary attempt needs its closed-program diagnostic checks.
-    if graph.layout_hint.get() == modules::LayoutHint::Applied
-        && let Err(reason) = lowered
-    {
-        if let Some(compiler) = cache {
-            compiler.callers = frontend::CallerCache::default();
-        }
-        return Ok(CheckedProgram::Runtime(reason));
-    }
     let lowered = match lowered {
         Err(report)
             if let LoweringKind::GuardedSignature {
@@ -1285,8 +1254,7 @@ fn checked_lower_with(
         {
             use ruff_text_size::Ranged;
             let operand = graph.modules[owner.module].parsed.suite()[owner.statement].range();
-            let session = retry_checks.as_mut().unwrap_or(&mut graph.session);
-            let session = session.closed_program_session(
+            let session = graph.session.closed_program_session(
                 cache.as_deref_mut().map(|compiler| &mut compiler.cache),
                 &graph.inputs,
             )?;
@@ -1304,7 +1272,6 @@ fn checked_lower_with(
         result => result,
     };
     if cache.is_none()
-        && !retry_with_cached_hints
         && let Err(reason) = lowered
     {
         graph.session.set_closed_program_rules();
@@ -1319,7 +1286,7 @@ fn checked_lower_with(
     // A fully lowered graph has already checked the actual first-party definitions.
     // Keep its existing diagnostics and proof scopes. When a representation is
     // unavailable, the declared Python call contracts still apply to the graph.
-    let session = retry_checks.as_mut().unwrap_or(&mut graph.session);
+    let session = &mut graph.session;
     let result = if lowered.is_ok() {
         lowered.and_then(|ir| {
             if let Some(compiler) = cache.as_deref_mut() {
@@ -2125,10 +2092,7 @@ print("result", call(b=2, a=1))
                 &options,
                 Default::default(),
                 None,
-                |graph, _, call_error| {
-                    graph.layout_hint.set(super::modules::LayoutHint::Disabled);
-                    super::checked_lower_with(graph, None, call_error)
-                },
+                |graph, _, call_error| super::checked_lower_with(graph, None, call_error),
             )
             .map(drop);
             assert_eq!(
@@ -2161,7 +2125,6 @@ print("result", call(b=2, a=1))
             None,
             |graph, _, call_error| {
                 passes += 1;
-                assert!(graph.layout_hint.get() == super::modules::LayoutHint::Disabled);
                 super::checked_lower_with(graph, None, call_error)
             },
         )
@@ -2296,7 +2259,6 @@ print("result", call(b=2, a=1))
                     passes += 1;
                     graph.session.explicit_check = true;
                     let result = super::checked_lower_with(graph, None, call_error)?;
-                    assert!(graph.layout_hint.get() != super::modules::LayoutHint::Applied);
                     if native {
                         assert!(matches!(result, super::CheckedProgram::Native(_)));
                     }
@@ -2352,7 +2314,6 @@ print("result", call(b=2, a=1))
             |graph, _, call_error| {
                 passes += 1;
                 let checked = super::checked_lower_with(graph, None, call_error)?;
-                assert!(graph.layout_hint.get() != super::modules::LayoutHint::Applied);
                 Ok(checked)
             },
         );

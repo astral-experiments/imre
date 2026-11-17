@@ -1411,7 +1411,6 @@ impl Inference {
             let globals = ModuleValues::for_initializers(!registered.is_empty());
             let mut available = HashSet::new();
             let mut errors = Vec::new();
-            let mut layout_refusal = None;
             let mut checked_callers = Vec::new();
             let mut completed_calls = classes.nonreturning_functions.clone();
             let initial_nonreturning = completed_calls.len();
@@ -1916,15 +1915,6 @@ impl Inference {
                             ReturnDiscovery::Waiting(callee);
                     }
                     let owner = signature.method.is_none().then(|| owners[signature.id]);
-                    if physical
-                        && owner.is_some()
-                        && !signature.registered_frame()
-                        && checker.calls.is_empty()
-                        && matches!(&diagnostic, Failure::Diagnostic(report)
-                            if report.kind == Kind::ReturnType && report.operand_declaration().is_some())
-                    {
-                        layout_refusal = Some(body_revision);
-                    }
                     errors.push((*module, owner, diagnostic));
                 } else {
                     if (checked_return || implicit_none)
@@ -2072,10 +2062,6 @@ impl Inference {
                         ..
                     }) => Some(signature),
                     Err(diagnostic) => {
-                        if matches!(&diagnostic, Failure::Diagnostic(report) if report.entry_operand().is_some())
-                        {
-                            layout_refusal = Some(entry_revision);
-                        }
                         errors.push((graph.entry, None, diagnostic));
                         None
                     }
@@ -2149,9 +2135,7 @@ impl Inference {
                     } else {
                         Vec::new()
                     };
-                    if (!checked_bodies.is_empty() || !staged_returns.is_empty())
-                        && !retries_failed_layout(graph)
-                    {
+                    if !checked_bodies.is_empty() || !staged_returns.is_empty() {
                         registered::capture(
                             graph,
                             signatures,
@@ -2220,7 +2204,7 @@ impl Inference {
                 }
                 let mut reports = reports.into_iter();
                 if let Some(primary) = reports.next() {
-                    if primary.kind.is_object() && !retries_failed_layout(graph) {
+                    if primary.kind.is_object() {
                         registered::capture(
                             graph,
                             signatures,
@@ -2249,9 +2233,8 @@ impl Inference {
                     else {
                         continue;
                     };
-                    if !retries_failed_layout(graph)
-                        && (unresolved.kind.is_object()
-                            || matches!(unresolved.kind, Kind::UnresolvedLayout(..)))
+                    if unresolved.kind.is_object()
+                        || matches!(unresolved.kind, Kind::UnresolvedLayout(..))
                     {
                         registered::capture(
                             graph,
@@ -2277,17 +2260,6 @@ impl Inference {
             {
                 method_returns.clear();
                 checked_bodies.clear();
-            } else if let Some(revision) = layout_refusal
-                && retries_failed_layout(graph)
-                && !graph.needs_object_runtime.get()
-                && !skipped
-                && !self.widened.get()
-                && revision == self.revision.get()
-            {
-                // Reconsider inferred returns in this graph before placing functions.
-                // Declarations and checked parameters keep their existing contracts.
-                graph.layout_hint.set(crate::modules::LayoutHint::Disabled);
-                self.layout_changed();
             }
         };
         for (_, _, signature) in definitions.iter_mut() {
