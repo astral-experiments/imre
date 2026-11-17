@@ -3,7 +3,7 @@
 
 Revision `8571ca2dbecabf8d7863c369dc776611fd57d8ad` · CPython **3.14.5** · Linux x86-64. These are original-test receipts at this revision, not cumulative credits.
 
-Frozen 45-family cohort: **546 pinned receipts** of **16,225 raw upstream originals**, **537 observed stock/O0/O3 pass intersections**, **537 verified credited pairs**; **15,679 originals have no validated receipt**.
+Frozen 45-family cohort: **552 pinned receipts** of **16,225 raw upstream originals**, **543 observed stock/O0/O3 pass intersections**, **543 verified credited pairs**; **15,673 originals have no validated receipt**.
 
 Supplemental pilots, outside the frozen cohort: **0 receipts** of **3 originals**, **0 observed intersections**, **0 verified credited pairs**.
 
@@ -37,7 +37,7 @@ Scripts: **0 of 84 original commands have receipts**, **0 observed intersections
 | `math` | 89 | not run | not run | not run | unknown (not run) | unknown (not run) | 85 |
 | `netrc` | 23 | not run | not run | not run | unknown (not run) | unknown (not run) | 22 |
 | `os` | 579 | not run | not run | not run | unknown (not run) | unknown (not run) | 471 |
-| `pathlib` | 1,369 | not run | not run | not run | unknown (not run) | pending (6 staged, unverified) | 968 |
+| `pathlib` | 1,369 | 6 pass, 1,363 not run | 6 pass, 1,363 not run | 6 pass, 1,363 not run | 6 | 6 verified; 1,363 unknown | 968 |
 | `re` | 165 | not run | not run | not run | unknown (not run) | unknown (not run) | 146 |
 | `shutil` | 223 | not run | not run | not run | unknown (not run) | unknown (not run) | 172 |
 | `socket` | 746 | not run | not run | not run | unknown (not run) | unknown (not run) | 110 |
