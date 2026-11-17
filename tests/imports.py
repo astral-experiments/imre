@@ -61,7 +61,23 @@ NULLABLE_FORWARDER = {
     ),
 }
 
+OPTIONAL_DORMANT_PROBE = {
+    "main.py": (
+        "from provider import ready\nfrom io import BytesIO\n"
+        "print(BytesIO(b'x').getbuffer().nbytes)\nprint(ready())\n"
+    ),
+    "provider.py": (
+        "def take(x: int) -> int: return x\ndef dormant(): return take()\n"
+        "try:\n    import sys as optional\n    detail = optional.maxsize\n"
+        "except ImportError:\n    detail = 0\n"
+        "def ready() -> int: return 42\n"
+    ),
+}
+
 REJECTED = {
+    "optional_probe_with_invalid_dormant_call": (
+        OPTIONAL_DORMANT_PROBE, "error[missing-argument]"
+    ),
     "nullable_forwarder_keeps_earlier_error": ({
         **NULLABLE_FORWARDER,
         "main.py": (
@@ -1310,16 +1326,8 @@ ACCEPTED = {
         "main.py": "from helper import value\nprint(value())\n",
     },
     "optional_probe_with_dormant_call": {
-        "main.py": (
-            "from provider import ready\nfrom io import BytesIO\n"
-            "print(BytesIO(b'x').getbuffer().nbytes)\nprint(ready())\n"
-        ),
-        "provider.py": (
-            "def take(x: int) -> int: return x\ndef dormant(): return take()\n"
-            "try:\n    import sys as optional\n    detail = optional.maxsize\n"
-            "except ImportError:\n    detail = 0\n"
-            "def ready() -> int: return 42\n"
-        ),
+        **OPTIONAL_DORMANT_PROBE,
+        "provider.py": OPTIONAL_DORMANT_PROBE["provider.py"].replace("return take()", "return take(42)"),
     },
     "optional_stdlib_probe_in_dependency": {
         "main.py": "from pkg.probe import witness\nprint(witness.checked)\n",
