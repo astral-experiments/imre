@@ -1,0 +1,14 @@
+IMRE_UNITTEST {"event": "collection", "count": 4}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_indent.TestCIndent.test_indent"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_indent.TestCIndent.test_indent0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_indent.TestPyIndent.test_indent"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_indent.TestPyIndent.test_indent0"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_indent.TestCIndent.test_indent"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_indent.TestCIndent.test_indent", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_indent.TestCIndent.test_indent0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_indent.TestCIndent.test_indent0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_indent.TestPyIndent.test_indent"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_indent.TestPyIndent.test_indent", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_indent.TestPyIndent.test_indent0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_indent.TestPyIndent.test_indent0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "summary", "run": 4, "successful": true}

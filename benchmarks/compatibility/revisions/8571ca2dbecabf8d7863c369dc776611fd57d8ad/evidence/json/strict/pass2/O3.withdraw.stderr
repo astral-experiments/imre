@@ -1,0 +1,8 @@
+IMRE_UNITTEST {"event": "collection", "count": 2}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_pass2.TestCPass2.test_parse"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_pass2.TestPyPass2.test_parse"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_pass2.TestCPass2.test_parse"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_pass2.TestCPass2.test_parse", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_pass2.TestPyPass2.test_parse"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_pass2.TestPyPass2.test_parse", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "summary", "run": 2, "successful": true}

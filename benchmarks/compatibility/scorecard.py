@@ -809,21 +809,45 @@ def verify_stdlib_evidence(r):
             require(raw_path.suffix not in {".results"} or run.get("raw_evidence"), f"{r['id']}: derived results require a raw evidence reference")
 
 
+def activated_stdlib_path(staged, entry):
+    """Select a full shard or an explicitly separated verified subset."""
+    if not entry.get('staged_receipt'):
+        require(entry.get('receipt') == staged.relative_to(ROOT).as_posix(), f"activated shard path differs: {staged}")
+        return staged, None
+    locator = staged.relative_to(ROOT).as_posix()
+    require(entry.get('staged_receipt') == locator, f"staged shard path differs: {staged}")
+    checked_file(staged, binding_digest(entry, locator))
+    verified = DATA_ROOT / 'verified' / 'stdlib' / staged.name
+    require(entry.get('receipt') == verified.relative_to(ROOT).as_posix() and verified.is_file() and verified.resolve().is_relative_to(DATA_ROOT.resolve()), f"verified subset path differs: {verified}")
+    originals = {}
+    for line in staged.read_text().splitlines():
+        row = json.loads(line); key = (row.get('id'), row.get('occurrence'))
+        require(row.get('family') == staged.stem and isinstance(key[0], str) and type(key[1]) is int and key not in originals, f"invalid or duplicate staged original: {staged}")
+        canonical_original(row, 'stdlib')
+        originals[key] = row
+    return verified, originals
+
+
 def load_records(kind, names, frozen_scripts=None):
     records = []
     seen = set()
     commands = set()
-    for path in sorted((DATA_ROOT / ("stdlib" if kind == "stdlib" else "scripts")).glob("*.jsonl")):
+    for staged in sorted((DATA_ROOT / ("stdlib" if kind == "stdlib" else "scripts")).glob("*.jsonl")):
+        path, originals = staged, None
         if is_snapshot():
-            require(path.resolve().is_relative_to(DATA_ROOT.resolve()), f"receipt file escapes snapshot: {path}")
-            entry = activation_entry(path.stem, kind)
+            require(staged.resolve().is_relative_to(DATA_ROOT.resolve()), f"receipt file escapes snapshot: {staged}")
+            entry = activation_entry(staged.stem, kind)
             if entry is None: continue
+            if kind == 'stdlib': path, originals = activated_stdlib_path(staged, entry)
             validate_receipt_binding(path, entry)
         if kind == "script": require(path.stem in COHORT["scripts"]["shards"], f"unrecognized script shard: {path}")
         for line_num, line in enumerate(path.read_text().splitlines(), 1):
             try: r = validate_record(json.loads(line), kind, names, frozen_scripts)
             except (ValueError, TypeError, KeyError) as e: raise ValueError(f"{path.relative_to(ROOT)}:{line_num}: {e}") from e
             if is_snapshot() and kind == "stdlib": require(r.get("family") == path.stem, f"receipt family differs from activated shard: {path}")
+            if originals is not None:
+                original = originals.get((r['id'], r['occurrence']))
+                require(original is not None and all(r.get(k) == original.get(k) for k in ('source','platform','imre_revision','kind','family','id','occurrence')), f"verified original identity differs from staged shard: {r['id']}")
             key = (r.get("family"), r["id"], r.get("occurrence")) if kind == "stdlib" else r["id"]
             require(key not in seen, f"duplicate {kind} receipt: {key}")
             seen.add(key)
@@ -857,7 +881,18 @@ def summary():
         summarize_family(row, grouped[name])
         if is_snapshot():
             staged = DATA_ROOT / "stdlib" / f"{name}.jsonl"
-            row["pending"] = sum(bool(line.strip()) for line in staged.read_text().splitlines()) if staged.is_file() and activation_entry(name) is None else 0
+            entry = activation_entry(name)
+            row['pending'] = 0
+            if staged.is_file() and entry is None:
+                row['pending'] = sum(bool(line.strip()) for line in staged.read_text().splitlines())
+            elif entry and entry.get('staged_receipt'):
+                _, originals = activated_stdlib_path(staged, entry)
+                active = {(r['id'],r['occurrence']) for r in grouped[name]}
+                require(len(originals) == row['originals'], f'{name}: partial staged shard does not cover frozen denominator')
+                require(active <= set(originals), f'{name}: verified subset exceeds staged identities')
+                pending = [r for key,r in originals.items() if key not in active]
+                row['pending'] = len(pending)
+                for t in TIERS: row['runs'][t]['not_run'] -= len(pending)
     return fs, scripts
 
 
@@ -885,10 +920,19 @@ def render(view):
         lines.extend(["", f"#### {title}", "", "| Family | Raw originals | Stock | O0 | O3 | Observed stock/O0/O3 passes | Verified credited pairs | Historical mixed-revision credits |", "| --- | ---: | --- | --- | --- | ---: | --- | ---: |"])
         for name, r in sorted(rows.items()):
             n = r["originals"]
-            pair = f"pending ({r['pending']:,} staged, unverified)" if is_snapshot() and r.get("pending") else "unknown (not run)" if not r["receipts"] else f"{r['paired']:,} verified" + (f"; {n-r['receipts']:,} unknown" if r["receipts"] < n else "")
+            if is_snapshot() and r.get('pending'):
+                pair = f"{r['paired']:,} verified; {r['pending']:,} staged, unverified" if r['receipts'] else f"pending ({r['pending']:,} staged, unverified)"
+            else:
+                pair = "unknown (not run)" if not r['receipts'] else f"{r['paired']:,} verified" + (f"; {n-r['receipts']:,} unknown" if r['receipts'] < n else '')
             observed_cell = "unknown (not run)" if not r["receipts"] else f"{r['observed']:,}"
             hist = "—" if r["historical"] is None else f"{r['historical']:,}"
-            lines.append(f"| `{name}` | {n:,} | " + " | ".join(outcome_text(r["runs"][t], n) for t in TIERS) + f" | {observed_cell} | {pair} | {hist} |")
+            outcomes = []
+            for t in TIERS:
+                text = outcome_text(r['runs'][t], n)
+                if r.get('pending') and r['receipts']:
+                    text = (text + '; ' if text else '') + f"{r['pending']:,} staged (unverified; outcomes not checked)"
+                outcomes.append(text)
+            lines.append(f"| `{name}` | {n:,} | " + " | ".join(outcomes) + f" | {observed_cell} | {pair} | {hist} |")
     table("Frozen cohort", frozen if view == "stdlib" else {n: r for n, r in frozen.items() if r["receipts"] or r.get("pending") or n == "argparse"})
     if supplemental: table("Supplemental pilots", supplemental)
     if view == "readme": lines += ["", "The [stdlib report](docs/stdlib.md) lists every frozen family, including those not run."]
@@ -911,7 +955,7 @@ def render_root_summary(fs):
     staged = {name: row for name, row in fs.items() if row["receipts"] or row.get("pending")}
     lines = [ROOT_SUMMARY_START, "### Current compatibility snapshot", "", f"Revision `{pin}` · **{sum(r['receipts'] for r in staged.values()):,} validated receipts**, **{sum(r['paired'] for r in staged.values()):,} verified pairs**.", "", "| Module | Raw originals | Verified pairs / status |", "| --- | ---: | --- |"]
     for name, row in sorted(staged.items()):
-        status = f"pending ({row['pending']:,} staged)" if row.get("pending") else f"{row['paired']:,} verified"
+        status = ((f"{row['paired']:,} verified; " if row['receipts'] else '') + f"pending ({row['pending']:,} staged)") if row.get('pending') else f"{row['paired']:,} verified"
         lines.append(f"| `{name}` | {row['originals']:,} | {status} |")
     lines.extend(["", f"[Full revision table](benchmarks/compatibility/revisions/{pin}/docs/stdlib.md)", ROOT_SUMMARY_END])
     return "\n".join(lines)

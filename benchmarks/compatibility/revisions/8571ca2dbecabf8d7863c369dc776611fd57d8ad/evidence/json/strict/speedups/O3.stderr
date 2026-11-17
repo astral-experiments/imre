@@ -1,0 +1,32 @@
+IMRE_UNITTEST {"event": "collection", "count": 10}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestDecode.test_bad_bool_args"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestDecode.test_make_scanner"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestEncode.test_bad_bool_args"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestEncode.test_bad_markers_argument_to_encoder"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestEncode.test_bad_str_encoder"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestEncode.test_current_indent_level"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestEncode.test_make_encoder"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestEncode.test_unsortable_keys"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestSpeedups.test_encode_basestring_ascii"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_speedups.TestSpeedups.test_scanstring"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_speedups.TestDecode.test_bad_bool_args"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_speedups.TestDecode.test_bad_bool_args", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_speedups.TestDecode.test_make_scanner"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_speedups.TestDecode.test_make_scanner", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_speedups.TestEncode.test_bad_bool_args"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_speedups.TestEncode.test_bad_bool_args", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_speedups.TestEncode.test_bad_markers_argument_to_encoder"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_speedups.TestEncode.test_bad_markers_argument_to_encoder", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_speedups.TestEncode.test_bad_str_encoder"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_speedups.TestEncode.test_bad_str_encoder", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_speedups.TestEncode.test_current_indent_level"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_speedups.TestEncode.test_current_indent_level", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_speedups.TestEncode.test_make_encoder"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_speedups.TestEncode.test_make_encoder", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_speedups.TestEncode.test_unsortable_keys"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_speedups.TestEncode.test_unsortable_keys", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_speedups.TestSpeedups.test_encode_basestring_ascii"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_speedups.TestSpeedups.test_encode_basestring_ascii", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_speedups.TestSpeedups.test_scanstring"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_speedups.TestSpeedups.test_scanstring", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "summary", "run": 10, "successful": true}

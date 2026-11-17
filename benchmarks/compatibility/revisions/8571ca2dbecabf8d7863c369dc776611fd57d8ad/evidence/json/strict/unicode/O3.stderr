@@ -1,0 +1,98 @@
+IMRE_UNITTEST {"event": "collection", "count": 32}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_big_unicode_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_big_unicode_encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_bytes_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_bytes_encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding3"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding4"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding5"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding6"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding7"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_escaped_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_unicode_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestCUnicode.test_unicode_preservation"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_bytes_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_bytes_encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding3"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding4"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding5"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding6"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding7"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_escaped_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_single_surrogate_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_single_surrogate_encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_unicode_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_unicode.TestPyUnicode.test_unicode_preservation"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_encode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_encode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_big_unicode_decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_big_unicode_decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_big_unicode_encode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_big_unicode_encode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_bytes_decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_bytes_decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_bytes_encode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_bytes_encode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding3"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding3", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding4"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding4", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding5"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding5", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding6"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding6", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding7"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_encoding7", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_escaped_decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_escaped_decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_encode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_encode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_unicode_decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_unicode_decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestCUnicode.test_unicode_preservation"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestCUnicode.test_unicode_preservation", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_encode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_encode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_encode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_encode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_bytes_decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_bytes_decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_bytes_encode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_bytes_encode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding3"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding3", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding4"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding4", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding5"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding5", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding6"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding6", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding7"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding7", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_escaped_decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_escaped_decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_single_surrogate_decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_single_surrogate_decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_single_surrogate_encode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_single_surrogate_encode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_unicode_decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_unicode_decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_unicode.TestPyUnicode.test_unicode_preservation"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_unicode.TestPyUnicode.test_unicode_preservation", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "summary", "run": 32, "successful": true}

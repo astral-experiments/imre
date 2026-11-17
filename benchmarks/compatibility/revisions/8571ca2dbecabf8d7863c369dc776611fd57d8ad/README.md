@@ -3,7 +3,7 @@
 
 Revision `8571ca2dbecabf8d7863c369dc776611fd57d8ad` · CPython **3.14.5** · Linux x86-64. These are original-test receipts at this revision, not cumulative credits.
 
-Frozen 45-family cohort: **2,972 pinned receipts** of **16,225 raw upstream originals**, **1,085 observed stock/O0/O3 pass intersections**, **1,085 verified credited pairs**; **13,253 originals have no validated receipt**.
+Frozen 45-family cohort: **3,141 pinned receipts** of **16,225 raw upstream originals**, **1,254 observed stock/O0/O3 pass intersections**, **1,254 verified credited pairs**; **13,084 originals have no validated receipt**.
 
 Supplemental pilots, outside the frozen cohort: **0 receipts** of **3 originals**, **0 observed intersections**, **0 verified credited pairs**.
 
@@ -21,7 +21,7 @@ Scripts: **0 of 84 original commands have receipts**, **0 observed intersections
 | `fnmatch` | 24 | 24 pass | 24 pass | 24 pass | 24 | 24 verified | 24 |
 | `glob` | 24 | not run | not run | not run | unknown (not run) | pending (24 staged, unverified) | 22 |
 | `hashlib` | 82 | 69 pass, 13 skip | 67 pass, 1 error, 14 skip | 67 pass, 1 error, 14 skip | 67 | 67 verified | 78 |
-| `json` | 216 | not run | not run | not run | unknown (not run) | pending (216 staged, unverified) | 207 |
+| `json` | 216 | 169 pass; 47 staged (unverified; outcomes not checked) | 169 pass; 47 staged (unverified; outcomes not checked) | 169 pass; 47 staged (unverified; outcomes not checked) | 169 | 169 verified; 47 staged, unverified | 207 |
 | `logging` | 272 | not run | not run | not run | unknown (not run) | pending (2 staged, unverified) | 220 |
 | `pathlib` | 1,369 | 6 pass, 1,363 not run | 6 pass, 1,363 not run | 6 pass, 1,363 not run | 6 | 6 verified; 1,363 unknown | 968 |
 | `urllib` | 178 | 174 pass, 2 error, 2 skip | 174 pass, 2 error, 2 skip | 174 pass, 2 error, 2 skip | 174 | 174 verified | 173 |

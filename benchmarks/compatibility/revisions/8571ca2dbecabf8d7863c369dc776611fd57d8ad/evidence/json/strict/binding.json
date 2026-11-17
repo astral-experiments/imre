@@ -1,0 +1,1635 @@
+{
+  "schema": "imre.compatibility.raw-control.v1",
+  "family": "json",
+  "cohorts": {
+    "finite-backend": {
+      "kind": "finite",
+      "platform": {
+        "os": "linux",
+        "arch": "x86_64",
+        "release": "6.18.57"
+      },
+      "probe": "/workspace/scratch/json-strict-8571/probe",
+      "artifacts": {
+        "run": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/run.json",
+        "gate": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/gate.json",
+        "positive_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/positive_launcher.py",
+        "negative_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/negative_launcher.py",
+        "poison": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/bad_status.py",
+        "stock_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/positive_launcher.py",
+        "stock_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/stock.stderr",
+        "stock_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/stock.stdout",
+        "stock_capture": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/stock.capture.json",
+        "stock_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/stock-source.py",
+        "head": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/head.raw",
+        "clean": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/clean.raw",
+        "cargo": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/cargo.raw",
+        "platform": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/platform.raw",
+        "identities": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/identity.raw",
+        "stock_version": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/stock_version.raw",
+        "gate_files": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/gate-files.raw",
+        "positive_hash": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/positive.raw",
+        "restored": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/restored.raw",
+        "gate_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/gate.trace",
+        "gate_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/gate.stderr",
+        "gate_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/gate.stdout",
+        "probe_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe.c",
+        "probe_build": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/probe-build.raw",
+        "collector": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/collect.py",
+        "O0_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/O0.stderr",
+        "O0_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/O0.withdraw.stderr",
+        "O0_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/O0.withdraw.stdout",
+        "O0_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/O0.withdraw.trace",
+        "O0_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/O0.readelf.stdout",
+        "O3_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/O3.stderr",
+        "O3_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/O3.withdraw.stderr",
+        "O3_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/O3.withdraw.stdout",
+        "O3_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/O3.withdraw.trace",
+        "O3_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/backend/O3.readelf.stdout"
+      }
+    },
+    "finite-decode": {
+      "kind": "finite",
+      "platform": {
+        "os": "linux",
+        "arch": "x86_64",
+        "release": "6.18.57"
+      },
+      "probe": "/workspace/scratch/json-strict-8571/probe",
+      "artifacts": {
+        "run": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/run.json",
+        "gate": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/gate.json",
+        "positive_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/positive_launcher.py",
+        "negative_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/negative_launcher.py",
+        "poison": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/bad_status.py",
+        "stock_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/positive_launcher.py",
+        "stock_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/stock.stderr",
+        "stock_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/stock.stdout",
+        "stock_capture": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/stock.capture.json",
+        "stock_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/stock-source.py",
+        "head": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/head.raw",
+        "clean": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/clean.raw",
+        "cargo": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/cargo.raw",
+        "platform": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/platform.raw",
+        "identities": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/identity.raw",
+        "stock_version": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/stock_version.raw",
+        "gate_files": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/gate-files.raw",
+        "positive_hash": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/positive.raw",
+        "restored": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/restored.raw",
+        "gate_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/gate.trace",
+        "gate_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/gate.stderr",
+        "gate_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/gate.stdout",
+        "probe_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe.c",
+        "probe_build": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/probe-build.raw",
+        "collector": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/collect.py",
+        "O0_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/O0.stderr",
+        "O0_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/O0.withdraw.stderr",
+        "O0_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/O0.withdraw.stdout",
+        "O0_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/O0.withdraw.trace",
+        "O0_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/O0.readelf.stdout",
+        "O3_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/O3.stderr",
+        "O3_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/O3.withdraw.stderr",
+        "O3_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/O3.withdraw.stdout",
+        "O3_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/O3.withdraw.trace",
+        "O3_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode/O3.readelf.stdout"
+      }
+    },
+    "finite-default": {
+      "kind": "finite",
+      "platform": {
+        "os": "linux",
+        "arch": "x86_64",
+        "release": "6.18.57"
+      },
+      "probe": "/workspace/scratch/json-strict-8571/probe",
+      "artifacts": {
+        "run": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/run.json",
+        "gate": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/gate.json",
+        "positive_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/positive_launcher.py",
+        "negative_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/negative_launcher.py",
+        "poison": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/bad_status.py",
+        "stock_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/positive_launcher.py",
+        "stock_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/stock.stderr",
+        "stock_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/stock.stdout",
+        "stock_capture": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/stock.capture.json",
+        "stock_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/stock-source.py",
+        "head": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/head.raw",
+        "clean": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/clean.raw",
+        "cargo": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/cargo.raw",
+        "platform": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/platform.raw",
+        "identities": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/identity.raw",
+        "stock_version": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/stock_version.raw",
+        "gate_files": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/gate-files.raw",
+        "positive_hash": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/positive.raw",
+        "restored": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/restored.raw",
+        "gate_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/gate.trace",
+        "gate_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/gate.stderr",
+        "gate_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/gate.stdout",
+        "probe_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe.c",
+        "probe_build": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/probe-build.raw",
+        "collector": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/collect.py",
+        "O0_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/O0.stderr",
+        "O0_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/O0.withdraw.stderr",
+        "O0_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/O0.withdraw.stdout",
+        "O0_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/O0.withdraw.trace",
+        "O0_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/O0.readelf.stdout",
+        "O3_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/O3.stderr",
+        "O3_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/O3.withdraw.stderr",
+        "O3_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/O3.withdraw.stdout",
+        "O3_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/O3.withdraw.trace",
+        "O3_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/default/O3.readelf.stdout"
+      }
+    },
+    "finite-dump": {
+      "kind": "finite",
+      "platform": {
+        "os": "linux",
+        "arch": "x86_64",
+        "release": "6.18.57"
+      },
+      "probe": "/workspace/scratch/json-strict-8571/probe",
+      "artifacts": {
+        "run": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/run.json",
+        "gate": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/gate.json",
+        "positive_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/positive_launcher.py",
+        "negative_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/negative_launcher.py",
+        "poison": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/bad_status.py",
+        "stock_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/positive_launcher.py",
+        "stock_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/stock.stderr",
+        "stock_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/stock.stdout",
+        "stock_capture": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/stock.capture.json",
+        "stock_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/stock-source.py",
+        "head": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/head.raw",
+        "clean": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/clean.raw",
+        "cargo": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/cargo.raw",
+        "platform": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/platform.raw",
+        "identities": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/identity.raw",
+        "stock_version": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/stock_version.raw",
+        "gate_files": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/gate-files.raw",
+        "positive_hash": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/positive.raw",
+        "restored": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/restored.raw",
+        "gate_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/gate.trace",
+        "gate_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/gate.stderr",
+        "gate_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/gate.stdout",
+        "probe_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe.c",
+        "probe_build": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/probe-build.raw",
+        "collector": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/collect.py",
+        "O0_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/O0.stderr",
+        "O0_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/O0.withdraw.stderr",
+        "O0_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/O0.withdraw.stdout",
+        "O0_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/O0.withdraw.trace",
+        "O0_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/O0.readelf.stdout",
+        "O3_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/O3.stderr",
+        "O3_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/O3.withdraw.stderr",
+        "O3_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/O3.withdraw.stdout",
+        "O3_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/O3.withdraw.trace",
+        "O3_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/dump/O3.readelf.stdout"
+      }
+    },
+    "finite-encode_basestring_ascii": {
+      "kind": "finite",
+      "platform": {
+        "os": "linux",
+        "arch": "x86_64",
+        "release": "6.18.57"
+      },
+      "probe": "/workspace/scratch/json-strict-8571/probe",
+      "artifacts": {
+        "run": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/run.json",
+        "gate": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/gate.json",
+        "positive_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/positive_launcher.py",
+        "negative_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/negative_launcher.py",
+        "poison": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/bad_status.py",
+        "stock_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/positive_launcher.py",
+        "stock_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/stock.stderr",
+        "stock_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/stock.stdout",
+        "stock_capture": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/stock.capture.json",
+        "stock_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/stock-source.py",
+        "head": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/head.raw",
+        "clean": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/clean.raw",
+        "cargo": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/cargo.raw",
+        "platform": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/platform.raw",
+        "identities": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/identity.raw",
+        "stock_version": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/stock_version.raw",
+        "gate_files": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/gate-files.raw",
+        "positive_hash": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/positive.raw",
+        "restored": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/restored.raw",
+        "gate_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/gate.trace",
+        "gate_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/gate.stderr",
+        "gate_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/gate.stdout",
+        "probe_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe.c",
+        "probe_build": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/probe-build.raw",
+        "collector": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/collect.py",
+        "O0_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/O0.stderr",
+        "O0_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/O0.withdraw.stderr",
+        "O0_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/O0.withdraw.stdout",
+        "O0_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/O0.withdraw.trace",
+        "O0_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/O0.readelf.stdout",
+        "O3_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/O3.stderr",
+        "O3_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/O3.withdraw.stderr",
+        "O3_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/O3.withdraw.stdout",
+        "O3_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/O3.withdraw.trace",
+        "O3_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/encode_basestring_ascii/O3.readelf.stdout"
+      }
+    },
+    "finite-enum": {
+      "kind": "finite",
+      "platform": {
+        "os": "linux",
+        "arch": "x86_64",
+        "release": "6.18.57"
+      },
+      "probe": "/workspace/scratch/json-strict-8571/probe",
+      "artifacts": {
+        "run": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/run.json",
+        "gate": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/gate.json",
+        "positive_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/positive_launcher.py",
+        "negative_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/negative_launcher.py",
+        "poison": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/bad_status.py",
+        "stock_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/positive_launcher.py",
+        "stock_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/stock.stderr",
+        "stock_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/stock.stdout",
+        "stock_capture": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/stock.capture.json",
+        "stock_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/stock-source.py",
+        "head": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/head.raw",
+        "clean": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/clean.raw",
+        "cargo": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/cargo.raw",
+        "platform": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/platform.raw",
+        "identities": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/identity.raw",
+        "stock_version": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/stock_version.raw",
+        "gate_files": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/gate-files.raw",
+        "positive_hash": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/positive.raw",
+        "restored": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/restored.raw",
+        "gate_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/gate.trace",
+        "gate_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/gate.stderr",
+        "gate_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/gate.stdout",
+        "probe_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe.c",
+        "probe_build": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/probe-build.raw",
+        "collector": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/collect.py",
+        "O0_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/O0.stderr",
+        "O0_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/O0.withdraw.stderr",
+        "O0_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/O0.withdraw.stdout",
+        "O0_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/O0.withdraw.trace",
+        "O0_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/O0.readelf.stdout",
+        "O3_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/O3.stderr",
+        "O3_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/O3.withdraw.stderr",
+        "O3_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/O3.withdraw.stdout",
+        "O3_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/O3.withdraw.trace",
+        "O3_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/enum/O3.readelf.stdout"
+      }
+    },
+    "finite-fail": {
+      "kind": "finite",
+      "platform": {
+        "os": "linux",
+        "arch": "x86_64",
+        "release": "6.18.57"
+      },
+      "probe": "/workspace/scratch/json-strict-8571/probe",
+      "artifacts": {
+        "run": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/run.json",
+        "gate": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/gate.json",
+        "positive_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/positive_launcher.py",
+        "negative_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/negative_launcher.py",
+        "poison": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/bad_status.py",
+        "stock_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/positive_launcher.py",
+        "stock_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/stock.stderr",
+        "stock_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/stock.stdout",
+        "stock_capture": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/stock.capture.json",
+        "stock_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/stock-source.py",
+        "head": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/head.raw",
+        "clean": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/clean.raw",
+        "cargo": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/cargo.raw",
+        "platform": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/platform.raw",
+        "identities": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/identity.raw",
+        "stock_version": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/stock_version.raw",
+        "gate_files": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/gate-files.raw",
+        "positive_hash": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/positive.raw",
+        "restored": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/restored.raw",
+        "gate_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/gate.trace",
+        "gate_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/gate.stderr",
+        "gate_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/gate.stdout",
+        "probe_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe.c",
+        "probe_build": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/probe-build.raw",
+        "collector": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/collect.py",
+        "O0_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/O0.stderr",
+        "O0_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/O0.withdraw.stderr",
+        "O0_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/O0.withdraw.stdout",
+        "O0_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/O0.withdraw.trace",
+        "O0_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/O0.readelf.stdout",
+        "O3_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/O3.stderr",
+        "O3_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/O3.withdraw.stderr",
+        "O3_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/O3.withdraw.stdout",
+        "O3_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/O3.withdraw.trace",
+        "O3_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/fail/O3.readelf.stdout"
+      }
+    },
+    "finite-float": {
+      "kind": "finite",
+      "platform": {
+        "os": "linux",
+        "arch": "x86_64",
+        "release": "6.18.57"
+      },
+      "probe": "/workspace/scratch/json-strict-8571/probe",
+      "artifacts": {
+        "run": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/run.json",
+        "gate": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/gate.json",
+        "positive_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/positive_launcher.py",
+        "negative_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/negative_launcher.py",
+        "poison": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/bad_status.py",
+        "stock_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/positive_launcher.py",
+        "stock_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/stock.stderr",
+        "stock_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/stock.stdout",
+        "stock_capture": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/stock.capture.json",
+        "stock_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/stock-source.py",
+        "head": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/head.raw",
+        "clean": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/clean.raw",
+        "cargo": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/cargo.raw",
+        "platform": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/platform.raw",
+        "identities": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/identity.raw",
+        "stock_version": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/stock_version.raw",
+        "gate_files": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/gate-files.raw",
+        "positive_hash": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/positive.raw",
+        "restored": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/restored.raw",
+        "gate_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/gate.trace",
+        "gate_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/gate.stderr",
+        "gate_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/gate.stdout",
+        "probe_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe.c",
+        "probe_build": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/probe-build.raw",
+        "collector": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/collect.py",
+        "O0_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/O0.stderr",
+        "O0_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/O0.withdraw.stderr",
+        "O0_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/O0.withdraw.stdout",
+        "O0_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/O0.withdraw.trace",
+        "O0_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/O0.readelf.stdout",
+        "O3_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/O3.stderr",
+        "O3_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/O3.withdraw.stderr",
+        "O3_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/O3.withdraw.stdout",
+        "O3_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/O3.withdraw.trace",
+        "O3_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/float/O3.readelf.stdout"
+      }
+    },
+    "finite-indent": {
+      "kind": "finite",
+      "platform": {
+        "os": "linux",
+        "arch": "x86_64",
+        "release": "6.18.57"
+      },
+      "probe": "/workspace/scratch/json-strict-8571/probe",
+      "artifacts": {
+        "run": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/run.json",
+        "gate": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/gate.json",
+        "positive_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/positive_launcher.py",
+        "negative_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/negative_launcher.py",
+        "poison": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/bad_status.py",
+        "stock_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/positive_launcher.py",
+        "stock_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/stock.stderr",
+        "stock_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/stock.stdout",
+        "stock_capture": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/stock.capture.json",
+        "stock_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/stock-source.py",
+        "head": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/head.raw",
+        "clean": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/clean.raw",
+        "cargo": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/cargo.raw",
+        "platform": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/platform.raw",
+        "identities": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/identity.raw",
+        "stock_version": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/stock_version.raw",
+        "gate_files": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/gate-files.raw",
+        "positive_hash": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/positive.raw",
+        "restored": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/restored.raw",
+        "gate_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/gate.trace",
+        "gate_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/gate.stderr",
+        "gate_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/gate.stdout",
+        "probe_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe.c",
+        "probe_build": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/probe-build.raw",
+        "collector": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/collect.py",
+        "O0_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/O0.stderr",
+        "O0_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/O0.withdraw.stderr",
+        "O0_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/O0.withdraw.stdout",
+        "O0_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/O0.withdraw.trace",
+        "O0_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/O0.readelf.stdout",
+        "O3_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/O3.stderr",
+        "O3_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/O3.withdraw.stderr",
+        "O3_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/O3.withdraw.stdout",
+        "O3_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/O3.withdraw.trace",
+        "O3_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/indent/O3.readelf.stdout"
+      }
+    },
+    "finite-pass1": {
+      "kind": "finite",
+      "platform": {
+        "os": "linux",
+        "arch": "x86_64",
+        "release": "6.18.57"
+      },
+      "probe": "/workspace/scratch/json-strict-8571/probe",
+      "artifacts": {
+        "run": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/run.json",
+        "gate": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/gate.json",
+        "positive_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/positive_launcher.py",
+        "negative_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/negative_launcher.py",
+        "poison": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/bad_status.py",
+        "stock_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/positive_launcher.py",
+        "stock_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/stock.stderr",
+        "stock_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/stock.stdout",
+        "stock_capture": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/stock.capture.json",
+        "stock_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/stock-source.py",
+        "head": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/head.raw",
+        "clean": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/clean.raw",
+        "cargo": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/cargo.raw",
+        "platform": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/platform.raw",
+        "identities": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/identity.raw",
+        "stock_version": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/stock_version.raw",
+        "gate_files": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/gate-files.raw",
+        "positive_hash": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/positive.raw",
+        "restored": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/restored.raw",
+        "gate_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/gate.trace",
+        "gate_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/gate.stderr",
+        "gate_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/gate.stdout",
+        "probe_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe.c",
+        "probe_build": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/probe-build.raw",
+        "collector": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/collect.py",
+        "O0_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/O0.stderr",
+        "O0_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/O0.withdraw.stderr",
+        "O0_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/O0.withdraw.stdout",
+        "O0_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/O0.withdraw.trace",
+        "O0_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/O0.readelf.stdout",
+        "O3_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/O3.stderr",
+        "O3_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/O3.withdraw.stderr",
+        "O3_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/O3.withdraw.stdout",
+        "O3_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/O3.withdraw.trace",
+        "O3_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass1/O3.readelf.stdout"
+      }
+    },
+    "finite-pass2": {
+      "kind": "finite",
+      "platform": {
+        "os": "linux",
+        "arch": "x86_64",
+        "release": "6.18.57"
+      },
+      "probe": "/workspace/scratch/json-strict-8571/probe",
+      "artifacts": {
+        "run": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/run.json",
+        "gate": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/gate.json",
+        "positive_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/positive_launcher.py",
+        "negative_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/negative_launcher.py",
+        "poison": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/bad_status.py",
+        "stock_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/positive_launcher.py",
+        "stock_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/stock.stderr",
+        "stock_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/stock.stdout",
+        "stock_capture": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/stock.capture.json",
+        "stock_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/stock-source.py",
+        "head": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/head.raw",
+        "clean": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/clean.raw",
+        "cargo": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/cargo.raw",
+        "platform": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/platform.raw",
+        "identities": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/identity.raw",
+        "stock_version": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/stock_version.raw",
+        "gate_files": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/gate-files.raw",
+        "positive_hash": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/positive.raw",
+        "restored": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/restored.raw",
+        "gate_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/gate.trace",
+        "gate_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/gate.stderr",
+        "gate_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/gate.stdout",
+        "probe_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe.c",
+        "probe_build": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/probe-build.raw",
+        "collector": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/collect.py",
+        "O0_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/O0.stderr",
+        "O0_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/O0.withdraw.stderr",
+        "O0_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/O0.withdraw.stdout",
+        "O0_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/O0.withdraw.trace",
+        "O0_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/O0.readelf.stdout",
+        "O3_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/O3.stderr",
+        "O3_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/O3.withdraw.stderr",
+        "O3_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/O3.withdraw.stdout",
+        "O3_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/O3.withdraw.trace",
+        "O3_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass2/O3.readelf.stdout"
+      }
+    },
+    "finite-pass3": {
+      "kind": "finite",
+      "platform": {
+        "os": "linux",
+        "arch": "x86_64",
+        "release": "6.18.57"
+      },
+      "probe": "/workspace/scratch/json-strict-8571/probe",
+      "artifacts": {
+        "run": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/run.json",
+        "gate": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/gate.json",
+        "positive_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/positive_launcher.py",
+        "negative_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/negative_launcher.py",
+        "poison": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/bad_status.py",
+        "stock_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/positive_launcher.py",
+        "stock_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/stock.stderr",
+        "stock_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/stock.stdout",
+        "stock_capture": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/stock.capture.json",
+        "stock_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/stock-source.py",
+        "head": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/head.raw",
+        "clean": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/clean.raw",
+        "cargo": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/cargo.raw",
+        "platform": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/platform.raw",
+        "identities": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/identity.raw",
+        "stock_version": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/stock_version.raw",
+        "gate_files": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/gate-files.raw",
+        "positive_hash": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/positive.raw",
+        "restored": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/restored.raw",
+        "gate_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/gate.trace",
+        "gate_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/gate.stderr",
+        "gate_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/gate.stdout",
+        "probe_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe.c",
+        "probe_build": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/probe-build.raw",
+        "collector": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/collect.py",
+        "O0_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/O0.stderr",
+        "O0_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/O0.withdraw.stderr",
+        "O0_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/O0.withdraw.stdout",
+        "O0_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/O0.withdraw.trace",
+        "O0_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/O0.readelf.stdout",
+        "O3_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/O3.stderr",
+        "O3_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/O3.withdraw.stderr",
+        "O3_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/O3.withdraw.stdout",
+        "O3_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/O3.withdraw.trace",
+        "O3_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/pass3/O3.readelf.stdout"
+      }
+    },
+    "finite-recursion": {
+      "kind": "finite",
+      "platform": {
+        "os": "linux",
+        "arch": "x86_64",
+        "release": "6.18.57"
+      },
+      "probe": "/workspace/scratch/json-strict-8571/probe",
+      "artifacts": {
+        "run": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/run.json",
+        "gate": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/gate.json",
+        "positive_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/positive_launcher.py",
+        "negative_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/negative_launcher.py",
+        "poison": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/bad_status.py",
+        "stock_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/positive_launcher.py",
+        "stock_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/stock.stderr",
+        "stock_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/stock.stdout",
+        "stock_capture": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/stock.capture.json",
+        "stock_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/stock-source.py",
+        "head": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/head.raw",
+        "clean": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/clean.raw",
+        "cargo": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/cargo.raw",
+        "platform": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/platform.raw",
+        "identities": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/identity.raw",
+        "stock_version": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/stock_version.raw",
+        "gate_files": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/gate-files.raw",
+        "positive_hash": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/positive.raw",
+        "restored": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/restored.raw",
+        "gate_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/gate.trace",
+        "gate_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/gate.stderr",
+        "gate_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/gate.stdout",
+        "probe_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe.c",
+        "probe_build": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/probe-build.raw",
+        "collector": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/collect.py",
+        "O0_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/O0.stderr",
+        "O0_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/O0.withdraw.stderr",
+        "O0_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/O0.withdraw.stdout",
+        "O0_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/O0.withdraw.trace",
+        "O0_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/O0.readelf.stdout",
+        "O3_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/O3.stderr",
+        "O3_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/O3.withdraw.stderr",
+        "O3_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/O3.withdraw.stdout",
+        "O3_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/O3.withdraw.trace",
+        "O3_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/recursion/O3.readelf.stdout"
+      }
+    },
+    "finite-scanstring": {
+      "kind": "finite",
+      "platform": {
+        "os": "linux",
+        "arch": "x86_64",
+        "release": "6.18.57"
+      },
+      "probe": "/workspace/scratch/json-strict-8571/probe",
+      "artifacts": {
+        "run": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/run.json",
+        "gate": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/gate.json",
+        "positive_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/positive_launcher.py",
+        "negative_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/negative_launcher.py",
+        "poison": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/bad_status.py",
+        "stock_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/positive_launcher.py",
+        "stock_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/stock.stderr",
+        "stock_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/stock.stdout",
+        "stock_capture": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/stock.capture.json",
+        "stock_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/stock-source.py",
+        "head": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/head.raw",
+        "clean": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/clean.raw",
+        "cargo": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/cargo.raw",
+        "platform": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/platform.raw",
+        "identities": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/identity.raw",
+        "stock_version": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/stock_version.raw",
+        "gate_files": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/gate-files.raw",
+        "positive_hash": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/positive.raw",
+        "restored": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/restored.raw",
+        "gate_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/gate.trace",
+        "gate_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/gate.stderr",
+        "gate_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/gate.stdout",
+        "probe_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe.c",
+        "probe_build": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/probe-build.raw",
+        "collector": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/collect.py",
+        "O0_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/O0.stderr",
+        "O0_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/O0.withdraw.stderr",
+        "O0_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/O0.withdraw.stdout",
+        "O0_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/O0.withdraw.trace",
+        "O0_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/O0.readelf.stdout",
+        "O3_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/O3.stderr",
+        "O3_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/O3.withdraw.stderr",
+        "O3_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/O3.withdraw.stdout",
+        "O3_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/O3.withdraw.trace",
+        "O3_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/scanstring/O3.readelf.stdout"
+      }
+    },
+    "finite-separators": {
+      "kind": "finite",
+      "platform": {
+        "os": "linux",
+        "arch": "x86_64",
+        "release": "6.18.57"
+      },
+      "probe": "/workspace/scratch/json-strict-8571/probe",
+      "artifacts": {
+        "run": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/run.json",
+        "gate": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/gate.json",
+        "positive_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/positive_launcher.py",
+        "negative_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/negative_launcher.py",
+        "poison": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/bad_status.py",
+        "stock_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/positive_launcher.py",
+        "stock_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/stock.stderr",
+        "stock_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/stock.stdout",
+        "stock_capture": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/stock.capture.json",
+        "stock_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/stock-source.py",
+        "head": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/head.raw",
+        "clean": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/clean.raw",
+        "cargo": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/cargo.raw",
+        "platform": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/platform.raw",
+        "identities": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/identity.raw",
+        "stock_version": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/stock_version.raw",
+        "gate_files": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/gate-files.raw",
+        "positive_hash": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/positive.raw",
+        "restored": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/restored.raw",
+        "gate_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/gate.trace",
+        "gate_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/gate.stderr",
+        "gate_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/gate.stdout",
+        "probe_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe.c",
+        "probe_build": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/probe-build.raw",
+        "collector": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/collect.py",
+        "O0_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/O0.stderr",
+        "O0_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/O0.withdraw.stderr",
+        "O0_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/O0.withdraw.stdout",
+        "O0_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/O0.withdraw.trace",
+        "O0_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/O0.readelf.stdout",
+        "O3_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/O3.stderr",
+        "O3_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/O3.withdraw.stderr",
+        "O3_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/O3.withdraw.stdout",
+        "O3_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/O3.withdraw.trace",
+        "O3_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/separators/O3.readelf.stdout"
+      }
+    },
+    "finite-speedups": {
+      "kind": "finite",
+      "platform": {
+        "os": "linux",
+        "arch": "x86_64",
+        "release": "6.18.57"
+      },
+      "probe": "/workspace/scratch/json-strict-8571/probe",
+      "artifacts": {
+        "run": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/run.json",
+        "gate": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/gate.json",
+        "positive_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/positive_launcher.py",
+        "negative_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/negative_launcher.py",
+        "poison": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/bad_status.py",
+        "stock_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/positive_launcher.py",
+        "stock_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/stock.stderr",
+        "stock_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/stock.stdout",
+        "stock_capture": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/stock.capture.json",
+        "stock_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/stock-source.py",
+        "head": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/head.raw",
+        "clean": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/clean.raw",
+        "cargo": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/cargo.raw",
+        "platform": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/platform.raw",
+        "identities": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/identity.raw",
+        "stock_version": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/stock_version.raw",
+        "gate_files": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/gate-files.raw",
+        "positive_hash": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/positive.raw",
+        "restored": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/restored.raw",
+        "gate_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/gate.trace",
+        "gate_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/gate.stderr",
+        "gate_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/gate.stdout",
+        "probe_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe.c",
+        "probe_build": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/probe-build.raw",
+        "collector": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/collect.py",
+        "O0_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/O0.stderr",
+        "O0_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/O0.withdraw.stderr",
+        "O0_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/O0.withdraw.stdout",
+        "O0_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/O0.withdraw.trace",
+        "O0_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/O0.readelf.stdout",
+        "O3_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/O3.stderr",
+        "O3_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/O3.withdraw.stderr",
+        "O3_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/O3.withdraw.stdout",
+        "O3_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/O3.withdraw.trace",
+        "O3_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/O3.readelf.stdout"
+      }
+    },
+    "finite-unicode": {
+      "kind": "finite",
+      "platform": {
+        "os": "linux",
+        "arch": "x86_64",
+        "release": "6.18.57"
+      },
+      "probe": "/workspace/scratch/json-strict-8571/probe",
+      "artifacts": {
+        "run": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/run.json",
+        "gate": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/gate.json",
+        "positive_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/positive_launcher.py",
+        "negative_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/negative_launcher.py",
+        "poison": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/bad_status.py",
+        "stock_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/positive_launcher.py",
+        "stock_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/stock.stderr",
+        "stock_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/stock.stdout",
+        "stock_capture": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/stock.capture.json",
+        "stock_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/stock-source.py",
+        "head": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/head.raw",
+        "clean": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/clean.raw",
+        "cargo": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/cargo.raw",
+        "platform": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/platform.raw",
+        "identities": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/identity.raw",
+        "stock_version": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/stock_version.raw",
+        "gate_files": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/gate-files.raw",
+        "positive_hash": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/positive.raw",
+        "restored": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/restored.raw",
+        "gate_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/gate.trace",
+        "gate_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/gate.stderr",
+        "gate_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/gate.stdout",
+        "probe_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe.c",
+        "probe_build": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/probe-build.raw",
+        "collector": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/collect.py",
+        "O0_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/O0.stderr",
+        "O0_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/O0.withdraw.stderr",
+        "O0_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/O0.withdraw.stdout",
+        "O0_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/O0.withdraw.trace",
+        "O0_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/O0.readelf.stdout",
+        "O3_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/O3.stderr",
+        "O3_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/O3.withdraw.stderr",
+        "O3_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/O3.withdraw.stdout",
+        "O3_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/O3.withdraw.trace",
+        "O3_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/unicode/O3.readelf.stdout"
+      }
+    }
+  },
+  "originals": [
+    {
+      "id": "test.test_json.TestPyTest.test_pyjson",
+      "occurrence": 1,
+      "launcher_cohort": "finite-backend"
+    },
+    {
+      "id": "test.test_json.TestCTest.test_cjson",
+      "occurrence": 1,
+      "launcher_cohort": "finite-backend"
+    },
+    {
+      "id": "test.test_json.TestPyTest.test_pyjson",
+      "occurrence": 2,
+      "launcher_cohort": "finite-backend"
+    },
+    {
+      "id": "test.test_json.TestCTest.test_cjson",
+      "occurrence": 2,
+      "launcher_cohort": "finite-backend"
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_bytes",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_constant_invalid_case",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_decimal",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_decoder_optimizations",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_empty_objects",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_extra_data",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_float",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_invalid_escape",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_invalid_input_type",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_keys_reuse",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_limit_int",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_negative_index",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_nonascii_digits_rejected",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_parse_constant",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_string_with_utf8_bom",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_bytes",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_constant_invalid_case",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_decimal",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_decoder_optimizations",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_empty_objects",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_extra_data",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_float",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_invalid_escape",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_invalid_input_type",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_keys_reuse",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_limit_int",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_negative_index",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_nonascii_digits_rejected",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_parse_constant",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_string_with_utf8_bom",
+      "occurrence": 1,
+      "launcher_cohort": "finite-decode"
+    },
+    {
+      "id": "test.test_json.test_default.TestCDefault.test_default",
+      "occurrence": 1,
+      "launcher_cohort": "finite-default"
+    },
+    {
+      "id": "test.test_json.test_default.TestCDefault.test_ordereddict",
+      "occurrence": 1,
+      "launcher_cohort": "finite-default"
+    },
+    {
+      "id": "test.test_json.test_default.TestPyDefault.test_bad_default",
+      "occurrence": 1,
+      "launcher_cohort": "finite-default"
+    },
+    {
+      "id": "test.test_json.test_default.TestPyDefault.test_default",
+      "occurrence": 1,
+      "launcher_cohort": "finite-default"
+    },
+    {
+      "id": "test.test_json.test_default.TestPyDefault.test_ordereddict",
+      "occurrence": 1,
+      "launcher_cohort": "finite-default"
+    },
+    {
+      "id": "test.test_json.test_dump.TestCDump.test_dump",
+      "occurrence": 1,
+      "launcher_cohort": "finite-dump"
+    },
+    {
+      "id": "test.test_json.test_dump.TestCDump.test_dump_skipkeys",
+      "occurrence": 1,
+      "launcher_cohort": "finite-dump"
+    },
+    {
+      "id": "test.test_json.test_dump.TestCDump.test_dump_skipkeys_indent_empty",
+      "occurrence": 1,
+      "launcher_cohort": "finite-dump"
+    },
+    {
+      "id": "test.test_json.test_dump.TestCDump.test_dumps",
+      "occurrence": 1,
+      "launcher_cohort": "finite-dump"
+    },
+    {
+      "id": "test.test_json.test_dump.TestCDump.test_encode_evil_dict",
+      "occurrence": 1,
+      "launcher_cohort": "finite-dump"
+    },
+    {
+      "id": "test.test_json.test_dump.TestCDump.test_encode_mutated",
+      "occurrence": 1,
+      "launcher_cohort": "finite-dump"
+    },
+    {
+      "id": "test.test_json.test_dump.TestCDump.test_encode_truefalse",
+      "occurrence": 1,
+      "launcher_cohort": "finite-dump"
+    },
+    {
+      "id": "test.test_json.test_dump.TestCDump.test_large_list",
+      "occurrence": 1,
+      "launcher_cohort": "finite-dump"
+    },
+    {
+      "id": "test.test_json.test_dump.TestCDump.test_skipkeys_indent",
+      "occurrence": 1,
+      "launcher_cohort": "finite-dump"
+    },
+    {
+      "id": "test.test_json.test_dump.TestPyDump.test_dump",
+      "occurrence": 1,
+      "launcher_cohort": "finite-dump"
+    },
+    {
+      "id": "test.test_json.test_dump.TestPyDump.test_dump_skipkeys",
+      "occurrence": 1,
+      "launcher_cohort": "finite-dump"
+    },
+    {
+      "id": "test.test_json.test_dump.TestPyDump.test_dump_skipkeys_indent_empty",
+      "occurrence": 1,
+      "launcher_cohort": "finite-dump"
+    },
+    {
+      "id": "test.test_json.test_dump.TestPyDump.test_dumps",
+      "occurrence": 1,
+      "launcher_cohort": "finite-dump"
+    },
+    {
+      "id": "test.test_json.test_dump.TestPyDump.test_encode_evil_dict",
+      "occurrence": 1,
+      "launcher_cohort": "finite-dump"
+    },
+    {
+      "id": "test.test_json.test_dump.TestPyDump.test_encode_mutated",
+      "occurrence": 1,
+      "launcher_cohort": "finite-dump"
+    },
+    {
+      "id": "test.test_json.test_dump.TestPyDump.test_encode_truefalse",
+      "occurrence": 1,
+      "launcher_cohort": "finite-dump"
+    },
+    {
+      "id": "test.test_json.test_dump.TestPyDump.test_skipkeys_indent",
+      "occurrence": 1,
+      "launcher_cohort": "finite-dump"
+    },
+    {
+      "id": "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_encode_basestring_ascii",
+      "occurrence": 1,
+      "launcher_cohort": "finite-encode_basestring_ascii"
+    },
+    {
+      "id": "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_ordered_dict",
+      "occurrence": 1,
+      "launcher_cohort": "finite-encode_basestring_ascii"
+    },
+    {
+      "id": "test.test_json.test_encode_basestring_ascii.TestCEncodeBasestringAscii.test_sorted_dict",
+      "occurrence": 1,
+      "launcher_cohort": "finite-encode_basestring_ascii"
+    },
+    {
+      "id": "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_encode_basestring_ascii",
+      "occurrence": 1,
+      "launcher_cohort": "finite-encode_basestring_ascii"
+    },
+    {
+      "id": "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_ordered_dict",
+      "occurrence": 1,
+      "launcher_cohort": "finite-encode_basestring_ascii"
+    },
+    {
+      "id": "test.test_json.test_encode_basestring_ascii.TestPyEncodeBasestringAscii.test_sorted_dict",
+      "occurrence": 1,
+      "launcher_cohort": "finite-encode_basestring_ascii"
+    },
+    {
+      "id": "test.test_json.test_enum.TestCEnum.test_dict_keys",
+      "occurrence": 1,
+      "launcher_cohort": "finite-enum"
+    },
+    {
+      "id": "test.test_json.test_enum.TestCEnum.test_dict_values",
+      "occurrence": 1,
+      "launcher_cohort": "finite-enum"
+    },
+    {
+      "id": "test.test_json.test_enum.TestCEnum.test_floats",
+      "occurrence": 1,
+      "launcher_cohort": "finite-enum"
+    },
+    {
+      "id": "test.test_json.test_enum.TestCEnum.test_ints",
+      "occurrence": 1,
+      "launcher_cohort": "finite-enum"
+    },
+    {
+      "id": "test.test_json.test_enum.TestCEnum.test_list",
+      "occurrence": 1,
+      "launcher_cohort": "finite-enum"
+    },
+    {
+      "id": "test.test_json.test_enum.TestCEnum.test_weird_floats",
+      "occurrence": 1,
+      "launcher_cohort": "finite-enum"
+    },
+    {
+      "id": "test.test_json.test_enum.TestPyEnum.test_dict_keys",
+      "occurrence": 1,
+      "launcher_cohort": "finite-enum"
+    },
+    {
+      "id": "test.test_json.test_enum.TestPyEnum.test_dict_values",
+      "occurrence": 1,
+      "launcher_cohort": "finite-enum"
+    },
+    {
+      "id": "test.test_json.test_enum.TestPyEnum.test_floats",
+      "occurrence": 1,
+      "launcher_cohort": "finite-enum"
+    },
+    {
+      "id": "test.test_json.test_enum.TestPyEnum.test_ints",
+      "occurrence": 1,
+      "launcher_cohort": "finite-enum"
+    },
+    {
+      "id": "test.test_json.test_enum.TestPyEnum.test_list",
+      "occurrence": 1,
+      "launcher_cohort": "finite-enum"
+    },
+    {
+      "id": "test.test_json.test_enum.TestPyEnum.test_weird_floats",
+      "occurrence": 1,
+      "launcher_cohort": "finite-enum"
+    },
+    {
+      "id": "test.test_json.test_fail.TestCFail.test_extra_data",
+      "occurrence": 1,
+      "launcher_cohort": "finite-fail"
+    },
+    {
+      "id": "test.test_json.test_fail.TestCFail.test_failures",
+      "occurrence": 1,
+      "launcher_cohort": "finite-fail"
+    },
+    {
+      "id": "test.test_json.test_fail.TestCFail.test_linecol",
+      "occurrence": 1,
+      "launcher_cohort": "finite-fail"
+    },
+    {
+      "id": "test.test_json.test_fail.TestCFail.test_non_string_keys_dict",
+      "occurrence": 1,
+      "launcher_cohort": "finite-fail"
+    },
+    {
+      "id": "test.test_json.test_fail.TestCFail.test_not_serializable",
+      "occurrence": 1,
+      "launcher_cohort": "finite-fail"
+    },
+    {
+      "id": "test.test_json.test_fail.TestCFail.test_truncated_input",
+      "occurrence": 1,
+      "launcher_cohort": "finite-fail"
+    },
+    {
+      "id": "test.test_json.test_fail.TestCFail.test_unexpected_data",
+      "occurrence": 1,
+      "launcher_cohort": "finite-fail"
+    },
+    {
+      "id": "test.test_json.test_fail.TestPyFail.test_extra_data",
+      "occurrence": 1,
+      "launcher_cohort": "finite-fail"
+    },
+    {
+      "id": "test.test_json.test_fail.TestPyFail.test_failures",
+      "occurrence": 1,
+      "launcher_cohort": "finite-fail"
+    },
+    {
+      "id": "test.test_json.test_fail.TestPyFail.test_linecol",
+      "occurrence": 1,
+      "launcher_cohort": "finite-fail"
+    },
+    {
+      "id": "test.test_json.test_fail.TestPyFail.test_non_string_keys_dict",
+      "occurrence": 1,
+      "launcher_cohort": "finite-fail"
+    },
+    {
+      "id": "test.test_json.test_fail.TestPyFail.test_not_serializable",
+      "occurrence": 1,
+      "launcher_cohort": "finite-fail"
+    },
+    {
+      "id": "test.test_json.test_fail.TestPyFail.test_truncated_input",
+      "occurrence": 1,
+      "launcher_cohort": "finite-fail"
+    },
+    {
+      "id": "test.test_json.test_fail.TestPyFail.test_unexpected_data",
+      "occurrence": 1,
+      "launcher_cohort": "finite-fail"
+    },
+    {
+      "id": "test.test_json.test_float.TestCFloat.test_allow_nan",
+      "occurrence": 1,
+      "launcher_cohort": "finite-float"
+    },
+    {
+      "id": "test.test_json.test_float.TestCFloat.test_floats",
+      "occurrence": 1,
+      "launcher_cohort": "finite-float"
+    },
+    {
+      "id": "test.test_json.test_float.TestCFloat.test_ints",
+      "occurrence": 1,
+      "launcher_cohort": "finite-float"
+    },
+    {
+      "id": "test.test_json.test_float.TestCFloat.test_out_of_range",
+      "occurrence": 1,
+      "launcher_cohort": "finite-float"
+    },
+    {
+      "id": "test.test_json.test_float.TestPyFloat.test_allow_nan",
+      "occurrence": 1,
+      "launcher_cohort": "finite-float"
+    },
+    {
+      "id": "test.test_json.test_float.TestPyFloat.test_floats",
+      "occurrence": 1,
+      "launcher_cohort": "finite-float"
+    },
+    {
+      "id": "test.test_json.test_float.TestPyFloat.test_ints",
+      "occurrence": 1,
+      "launcher_cohort": "finite-float"
+    },
+    {
+      "id": "test.test_json.test_float.TestPyFloat.test_out_of_range",
+      "occurrence": 1,
+      "launcher_cohort": "finite-float"
+    },
+    {
+      "id": "test.test_json.test_indent.TestCIndent.test_indent",
+      "occurrence": 1,
+      "launcher_cohort": "finite-indent"
+    },
+    {
+      "id": "test.test_json.test_indent.TestCIndent.test_indent0",
+      "occurrence": 1,
+      "launcher_cohort": "finite-indent"
+    },
+    {
+      "id": "test.test_json.test_indent.TestPyIndent.test_indent",
+      "occurrence": 1,
+      "launcher_cohort": "finite-indent"
+    },
+    {
+      "id": "test.test_json.test_indent.TestPyIndent.test_indent0",
+      "occurrence": 1,
+      "launcher_cohort": "finite-indent"
+    },
+    {
+      "id": "test.test_json.test_pass1.TestCPass1.test_parse",
+      "occurrence": 1,
+      "launcher_cohort": "finite-pass1"
+    },
+    {
+      "id": "test.test_json.test_pass1.TestPyPass1.test_parse",
+      "occurrence": 1,
+      "launcher_cohort": "finite-pass1"
+    },
+    {
+      "id": "test.test_json.test_pass2.TestCPass2.test_parse",
+      "occurrence": 1,
+      "launcher_cohort": "finite-pass2"
+    },
+    {
+      "id": "test.test_json.test_pass2.TestPyPass2.test_parse",
+      "occurrence": 1,
+      "launcher_cohort": "finite-pass2"
+    },
+    {
+      "id": "test.test_json.test_pass3.TestCPass3.test_parse",
+      "occurrence": 1,
+      "launcher_cohort": "finite-pass3"
+    },
+    {
+      "id": "test.test_json.test_pass3.TestPyPass3.test_parse",
+      "occurrence": 1,
+      "launcher_cohort": "finite-pass3"
+    },
+    {
+      "id": "test.test_json.test_recursion.TestCRecursion.test_dictrecursion",
+      "occurrence": 1,
+      "launcher_cohort": "finite-recursion"
+    },
+    {
+      "id": "test.test_json.test_recursion.TestCRecursion.test_endless_recursion",
+      "occurrence": 1,
+      "launcher_cohort": "finite-recursion"
+    },
+    {
+      "id": "test.test_json.test_recursion.TestCRecursion.test_highly_nested_objects_decoding",
+      "occurrence": 1,
+      "launcher_cohort": "finite-recursion"
+    },
+    {
+      "id": "test.test_json.test_recursion.TestCRecursion.test_highly_nested_objects_encoding",
+      "occurrence": 1,
+      "launcher_cohort": "finite-recursion"
+    },
+    {
+      "id": "test.test_json.test_recursion.TestCRecursion.test_listrecursion",
+      "occurrence": 1,
+      "launcher_cohort": "finite-recursion"
+    },
+    {
+      "id": "test.test_json.test_recursion.TestPyRecursion.test_defaultrecursion",
+      "occurrence": 1,
+      "launcher_cohort": "finite-recursion"
+    },
+    {
+      "id": "test.test_json.test_recursion.TestPyRecursion.test_dictrecursion",
+      "occurrence": 1,
+      "launcher_cohort": "finite-recursion"
+    },
+    {
+      "id": "test.test_json.test_recursion.TestPyRecursion.test_endless_recursion",
+      "occurrence": 1,
+      "launcher_cohort": "finite-recursion"
+    },
+    {
+      "id": "test.test_json.test_recursion.TestPyRecursion.test_listrecursion",
+      "occurrence": 1,
+      "launcher_cohort": "finite-recursion"
+    },
+    {
+      "id": "test.test_json.test_scanstring.TestCScanstring.test_bad_escapes",
+      "occurrence": 1,
+      "launcher_cohort": "finite-scanstring"
+    },
+    {
+      "id": "test.test_json.test_scanstring.TestCScanstring.test_overflow",
+      "occurrence": 1,
+      "launcher_cohort": "finite-scanstring"
+    },
+    {
+      "id": "test.test_json.test_scanstring.TestCScanstring.test_scanstring",
+      "occurrence": 1,
+      "launcher_cohort": "finite-scanstring"
+    },
+    {
+      "id": "test.test_json.test_scanstring.TestCScanstring.test_surrogates",
+      "occurrence": 1,
+      "launcher_cohort": "finite-scanstring"
+    },
+    {
+      "id": "test.test_json.test_scanstring.TestPyScanstring.test_bad_escapes",
+      "occurrence": 1,
+      "launcher_cohort": "finite-scanstring"
+    },
+    {
+      "id": "test.test_json.test_scanstring.TestPyScanstring.test_overflow",
+      "occurrence": 1,
+      "launcher_cohort": "finite-scanstring"
+    },
+    {
+      "id": "test.test_json.test_scanstring.TestPyScanstring.test_scanstring",
+      "occurrence": 1,
+      "launcher_cohort": "finite-scanstring"
+    },
+    {
+      "id": "test.test_json.test_scanstring.TestPyScanstring.test_surrogates",
+      "occurrence": 1,
+      "launcher_cohort": "finite-scanstring"
+    },
+    {
+      "id": "test.test_json.test_separators.TestCSeparators.test_illegal_separators",
+      "occurrence": 1,
+      "launcher_cohort": "finite-separators"
+    },
+    {
+      "id": "test.test_json.test_separators.TestCSeparators.test_separators",
+      "occurrence": 1,
+      "launcher_cohort": "finite-separators"
+    },
+    {
+      "id": "test.test_json.test_separators.TestPySeparators.test_illegal_separators",
+      "occurrence": 1,
+      "launcher_cohort": "finite-separators"
+    },
+    {
+      "id": "test.test_json.test_separators.TestPySeparators.test_separators",
+      "occurrence": 1,
+      "launcher_cohort": "finite-separators"
+    },
+    {
+      "id": "test.test_json.test_speedups.TestDecode.test_bad_bool_args",
+      "occurrence": 1,
+      "launcher_cohort": "finite-speedups"
+    },
+    {
+      "id": "test.test_json.test_speedups.TestDecode.test_make_scanner",
+      "occurrence": 1,
+      "launcher_cohort": "finite-speedups"
+    },
+    {
+      "id": "test.test_json.test_speedups.TestEncode.test_bad_bool_args",
+      "occurrence": 1,
+      "launcher_cohort": "finite-speedups"
+    },
+    {
+      "id": "test.test_json.test_speedups.TestEncode.test_bad_markers_argument_to_encoder",
+      "occurrence": 1,
+      "launcher_cohort": "finite-speedups"
+    },
+    {
+      "id": "test.test_json.test_speedups.TestEncode.test_bad_str_encoder",
+      "occurrence": 1,
+      "launcher_cohort": "finite-speedups"
+    },
+    {
+      "id": "test.test_json.test_speedups.TestEncode.test_current_indent_level",
+      "occurrence": 1,
+      "launcher_cohort": "finite-speedups"
+    },
+    {
+      "id": "test.test_json.test_speedups.TestEncode.test_make_encoder",
+      "occurrence": 1,
+      "launcher_cohort": "finite-speedups"
+    },
+    {
+      "id": "test.test_json.test_speedups.TestEncode.test_unsortable_keys",
+      "occurrence": 1,
+      "launcher_cohort": "finite-speedups"
+    },
+    {
+      "id": "test.test_json.test_speedups.TestSpeedups.test_encode_basestring_ascii",
+      "occurrence": 1,
+      "launcher_cohort": "finite-speedups"
+    },
+    {
+      "id": "test.test_json.test_speedups.TestSpeedups.test_scanstring",
+      "occurrence": 1,
+      "launcher_cohort": "finite-speedups"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_decode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_encode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestCUnicode.test_big_unicode_decode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestCUnicode.test_big_unicode_encode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestCUnicode.test_bytes_decode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestCUnicode.test_bytes_encode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestCUnicode.test_encoding3",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestCUnicode.test_encoding4",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestCUnicode.test_encoding5",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestCUnicode.test_encoding6",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestCUnicode.test_encoding7",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestCUnicode.test_escaped_decode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_decode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_encode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestCUnicode.test_unicode_decode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestCUnicode.test_unicode_preservation",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_decode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_encode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_decode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_encode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestPyUnicode.test_bytes_decode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestPyUnicode.test_bytes_encode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding3",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding4",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding5",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding6",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestPyUnicode.test_encoding7",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestPyUnicode.test_escaped_decode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestPyUnicode.test_single_surrogate_decode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestPyUnicode.test_single_surrogate_encode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestPyUnicode.test_unicode_decode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    },
+    {
+      "id": "test.test_json.test_unicode.TestPyUnicode.test_unicode_preservation",
+      "occurrence": 1,
+      "launcher_cohort": "finite-unicode"
+    }
+  ]
+}
