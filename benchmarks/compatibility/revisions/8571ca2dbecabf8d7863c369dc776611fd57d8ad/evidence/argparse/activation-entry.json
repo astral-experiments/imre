@@ -11,6 +11,7 @@
     "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/O0.stderr": "49342c4f024da075b53fd1149f401dd7d8c6587a60677e613d1a9ddd99720554",
     "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/O3.readelf.stdout": "ed7cd82fc9c6635cf067e706c22040deae0c0a8b79023e2eaab10583a1a9bad7",
     "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/O3.stderr": "49342c4f024da075b53fd1149f401dd7d8c6587a60677e613d1a9ddd99720554",
+    "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/README.md": "c86fd01be212aa6dd3657d41dd77bfb16abe6ccf6ae0aa610c66ed1a362a4bc5",
     "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/adapter-mismatch-check.py": "0a33a93f1da82aefb171ae77e2b4cd66d89a89ad2d8642e0d21f07c005f6eb2e",
     "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/adapter-readiness.json": "8159f99f84e240a6b551ab461cdc1460838a06e1d807432d4e2ecb24ddc4d974",
     "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/gate.json": "96d9b1a3077c2353589c7143d6b449e751c31fed6b1cf74c539d37b3ae1b1a56",
@@ -23,7 +24,7 @@
     "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/raw-control/O3.stderr": "49342c4f024da075b53fd1149f401dd7d8c6587a60677e613d1a9ddd99720554",
     "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/raw-control/O3.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/raw-control/O3.trace": "d8f83232f752f172d6960b17344838780af6a1a51b7b236d757726c95f97ea6d",
-    "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/raw-control/binding.json": "b8750c167086361c65b2b58bb42e2f7b9fd17e254582e9b0caebdbd72839b4a7",
+    "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/raw-control/binding.json": "492ff0884c3e4d64fcf07315577aae2a27673b797e4854e53765a56937c5d4a6",
     "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/raw-control/cargo.raw": "f5f3fab0411d5c2a581ac266ef82b170c09f62e8371279fb639bbab9b28b8d3c",
     "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/raw-control/clean.raw": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/raw-control/gate-files.raw": "dcc65c61aafdd34dcfa825ec9743dcc69b24c562d348d19561be0b7f7e90b2f6",
@@ -39,6 +40,7 @@
     "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/raw-control/stock_version.raw": "8ec626acd0d3353bb4a7e0f367270a241b0025c9daac7743e9c0b18454c538c4",
     "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/run.finite.json": "474768eb04fc85fd936e722ab6a12c89d85ab3233fca73986829ae7d0bdb36e6",
     "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/run.json": "0cfacdb7547997ae9f4e0fca8c81d368c81756406190b7b467253052d503f84e",
+    "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/stock.finite.capture.json": "4533ef8701ac14483767a4a5e1db27ae97b3fdb881bb058a775c5574076a1e7f",
     "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/stock.finite.json": "888b6a43325b443d947d74f73e8ac854a49e4d4a8135f7fcb2e43ce7427d3a58",
     "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/stock.finite.launcher.py": "dad9a3ce6abfbce49c521073defbbf8c71a8619fde1587143b3e6ed124cb81ec",
     "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/stock.finite.meta.json": "1792f986571700d993bc5b620a3a595d7c4b32796b04db05ce0a3a7d9788c40c",
@@ -46,6 +48,7 @@
     "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/stock.finite.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/stock.launcher.py": "58433b766472878fbaef022ab901575918abaf9a2a35f5e3407acaf2489ed836",
     "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/stock.stderr": "fe3147f1170612b80836adb276239129b5fae62769eb791b8f7278fa520f5a1c",
+    "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/strict-readiness.json": "06e0e2838372e9233a34fc81ed28c2453336b9d1deffd45fff743c2c0f972cd7",
     "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/stdlib/argparse.jsonl": "5a5917f2aef4f31533752c85f7905c096c30cfee69b089bfa1106f030fc87140"
   }
 }

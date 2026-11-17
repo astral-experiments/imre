@@ -1,0 +1,68 @@
+{
+  "validator_source_revision": "d70844513e328ae8debf19a11b18a20818803bd5",
+  "validator_raw_control_sha256": "14b83104f080ea549bf807738c48b78d7c7d26663235fa917813a0ef1dcdea20",
+  "public_main_revision": "d70844513e328ae8debf19a11b18a20818803bd5",
+  "focused_checks": [
+    {
+      "name": "correct finite stock/O0/O3 row",
+      "accepted": true
+    },
+    {
+      "name": "full-stock evidence substituted without changing finite cohort",
+      "accepted": false,
+      "reason": "test.test_argparse.TestAddArgumentMetavar.test_nargs_1_metavar_length0: stock raw original ID, occurrence, outcome or line differs"
+    },
+    {
+      "name": "rehashed paired row and mapping moved to full-stock inventory cohort",
+      "accepted": false,
+      "reason": "credited original cannot use a stock-only cohort"
+    },
+    {
+      "name": "rehashed finite cohort substitutes different full-suite stock launcher archive",
+      "accepted": false,
+      "reason": "credited finite cohort stock launcher bytes differ from native"
+    },
+    {
+      "name": "rehashed finite stock capture source hash mutation",
+      "accepted": false,
+      "reason": "fresh stock capture metadata or raw stdout differs"
+    }
+  ],
+  "full_snapshot_validation": {
+    "exit_code": 0,
+    "active_families": [
+      "configparser",
+      "fnmatch",
+      "pathlib",
+      "urllib",
+      "csv",
+      "base64",
+      "argparse"
+    ],
+    "validated_receipts": 2614,
+    "verified_pairs": 745,
+    "base64_verified": 35,
+    "argparse_verified": 45
+  },
+  "argparse": {
+    "receipts": 1893,
+    "stock_pass": 1893,
+    "native_pass_per_tier": 45,
+    "native_not_run_per_tier": 1848,
+    "paired_intersections": 45,
+    "policy_referenced_not_run": 6,
+    "stock_only_timeout_seconds": 180,
+    "finite_timeout_seconds": 90,
+    "stock_only_config_independent": true,
+    "other_gate_source_provenance_blockers_observed": false
+  },
+  "stock_capture": {
+    "derived": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/stock.finite.capture.json",
+    "original_metadata": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/stock.finite.meta.json",
+    "original_metadata_sha256": "1792f986571700d993bc5b620a3a595d7c4b32796b04db05ce0a3a7d9788c40c",
+    "source_archive_sha256": "bd3892b42c83f276327c141a7d6b38ed08c07a56c6076e4d3aefeddf90515499"
+  },
+  "historical_adapter_readiness": "adapter-readiness.json records the earlier pre-strict adapter behavior, not current validation.",
+  "publication_ready": true,
+  "base64": "active"
+}
