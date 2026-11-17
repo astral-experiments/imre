@@ -360,7 +360,7 @@ fn match_crossing(path: &str, pattern: &str, sensitive: bool, recursive: bool, s
         prefix
             .chars()
             .all(|expected| actual.next().is_some_and(|c| folded(c, expected)))
-            .then(|| actual.as_str())
+            .then_some(actual.as_str())
     };
     let Some(path) = path else { return false };
     let mut first_component = true;
