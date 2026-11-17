@@ -126,7 +126,7 @@ REJECTED = {
             "    return SourceLoader\n"
             "print(take('x'))\n"
         ),
-    }, "invalid-argument-type"),
+    }, "main.py:5:12: Imre: expected int, got str"),
     "unused_source_loader_preserves_typed_call": ({
         "scores.py": "def take(value: int) -> int: return value\n",
         "main.py": (
@@ -150,7 +150,7 @@ REJECTED = {
             "def unused() -> int: return take('x')\n"
             "print(MemoryLoader().get_filename('rules'))\n"
         ),
-    }, "invalid-argument-type"),
+    }, "main.py:3:34: Imre: expected int, got str"),
     "unused_reload_preserves_typed_call": ({
         "scores.py": "def take(value: int) -> int: return value\n",
         "main.py": (
@@ -176,7 +176,7 @@ REJECTED = {
             "def unused() -> int: return typed('wrong')\n"
             "print(convert(Decimal('1.25')))\n"
         ),
-    }, "invalid-argument-type"),
+    }, "main.py:4:35: Imre: expected int, got str"),
     "clock_lookup_preserves_typed_call": ({
         "main.py": "import time\n" + HELPER + "f('wrong')\nprint(getattr(time, 'monotonic_ns')())\n",
     }, "expected int, got str"),
@@ -253,7 +253,7 @@ REJECTED = {
             "def typed(n: int) -> int: return n\n"
         ),
         "main.py": "from helper import values, typed\nprint(next(values()))\ntyped('wrong')\n",
-    }, "invalid-argument-type"),
+    }, "main.py:3:7: Imre: expected int, got str"),
     "docfile_suite_preserves_typed_call": ({
         "main.py": (
             "from doctest import DocFileSuite\n"
@@ -261,7 +261,7 @@ REJECTED = {
             "DocFileSuite()\n"
             "typed('wrong')\n"
         ),
-    }, "expected int, got str"),
+    }, "error[invalid-argument-type]"),
     "unittest_method_skip_preserves_typed_call": ({
         "main.py": (
             "import unittest\n"
@@ -312,7 +312,7 @@ REJECTED = {
             "print(lcm(6, 10))\n"
             "typed('wrong')\n"
         ),
-    }, "invalid-argument-type"),
+    }, "main.py:4:7: Imre: expected int, got str"),
     "math_constants_preserve_typed_call": ({
         "main.py": (
             "from math import e, inf, nan, pi, tau\n"
@@ -544,7 +544,7 @@ REJECTED = {
             "from collections import deque\ndef identity(n: int) -> int:\n    return n\n"
             "render = deque.__repr__\nrender(deque([1]))\nidentity('wrong')\n"
         ),
-    }, "invalid-argument-type"),
+    }, "main.py:6:10: Imre: expected int, got str"),
     "patch_object_checks_replacement": ({
         "main.py": (
             "from unittest.mock import patch\nclass Owner:\n    value = 0\n"
@@ -565,14 +565,14 @@ REJECTED = {
             "def take(n: int) -> int:\n    return n\n"
             "print(resolve_name('builtins:int'), take('wrong'))\n"
         ),
-    }, "invalid-argument-type"),
+    }, "main.py:4:42: Imre: expected int, got str"),
     "platform_iot_preserves_checked_calls": ({
         "main.py": (
             "import helper\ndef typed(value: int) -> int:\n    return value + 1\n"
             "print(helper.win32_is_iot(), typed('wrong'))\n"
         ),
         "helper.py": "from platform import win32_is_iot\n",
-    }, "invalid-argument-type"),
+    }, "main.py:4:36: Imre: expected int, got str"),
     "unused_queue_listener_preserves_assignment": ({
         "main.py": (
             "from logging.handlers import QueueListener\ndef run() -> None:\n"
@@ -585,7 +585,7 @@ REJECTED = {
             "def run() -> None:\n    constructor = Handler\n    print(constructor.__name__)\n"
             "    take('wrong')\nrun()\n"
         ),
-    }, "invalid-argument-type"),
+    }, "main.py:7:10: Imre: expected int, got str"),
     "unused_chdir_preserves_checked_calls": ({
         "main.py": "from os import chdir\ndef path(n: int) -> int:\n    return n\npath('wrong')\n",
     }, "expected int, got str"),
@@ -597,13 +597,13 @@ REJECTED = {
             "from os import chdir\ndef path(n: int) -> int:\n    return n\n"
             "move = chdir\nmove('.')\npath('wrong')\n"
         ),
-    }, "invalid-argument-type"),
+    }, "main.py:6:6: Imre: expected int, got str"),
     "captured_chdir_checks_nested_missing_argument": ({
         "main.py": (
             "from os import chdir\ndef path(n: int) -> str:\n    return '.'\n"
             "move = chdir\nmove(path())\n"
         ),
-    }, "missing-argument"),
+    }, "main.py:5:6: Imre: missing required argument \"n\""),
     "captured_chdir_checks_user_overload": ({
         "main.py": (
             "from os import chdir\nfrom typing import overload\n"
@@ -612,13 +612,13 @@ REJECTED = {
             "def path(n: int, m: int = 0) -> str: return '.'\n"
             "move = chdir\nmove(path())\n"
         ),
-    }, "no-matching-overload"),
+    }, "main.py:9:6: Imre: missing required argument \"n\""),
     "captured_chdir_checks_user_keyword": ({
         "main.py": (
             "from os import chdir\ndef path(n: int = 0) -> int:\n    return n\n"
             "move = chdir\nmove('.')\npath(typo=1)\n"
         ),
-    }, "unknown-argument"),
+    }, "main.py:6:6: Imre: unexpected keyword argument \"typo\""),
     "captured_chdir_preserves_callable_parameter": ({
         "main.py": (
             "from os import chdir\nfrom typing import Callable\n"
@@ -626,7 +626,7 @@ REJECTED = {
             "    move = chdir\n    move('.')\n    return cb('wrong')\n"
             "def identity(n: int) -> int:\n    return n\nprint(invoke(identity))\n"
         ),
-    }, "invalid-argument-type"),
+    }, "main.py:6:15: Imre: expected int, got str"),
     "chdir_keeps_subsequent_checks": ({
         "main.py": "import os\ndef path(n: int) -> int:\n    return n\nos.chdir('.')\npath('wrong')\n",
     }, "expected int, got str"),
@@ -693,7 +693,6 @@ REJECTED = {
         "helper.py": HELPER,
     }, "unsupported"),
     "nested": ({"main.py": "def f() -> None:\n    import math\nf()\n"}, "unsupported"),
-    "conditional": ({"main.py": "if False:\n    import math\n"}, "unsupported"),
     "conditional_missing_export": ({
         "main.py": "from helper import chosen\n",
         "helper.py": "if False:\n    def chosen():\n        return 1\n",
@@ -717,7 +716,7 @@ REJECTED = {
             "def helper() -> float: return float.fromhex('0x1p0')\n"
             "def unused() -> int: return typed('wrong')\n"
         ),
-    }, "invalid-argument-type"),
+    }, "main.py:3:35: Imre: expected int, got str"),
     "namedtuple_descriptor_preserves_typed_call": ({
         "main.py": (
             "from collections import namedtuple\n"
@@ -750,7 +749,6 @@ REJECTED = {
             "print(read(5))\n"
         ),
     }, "rebinding a builtin, definition, or imported module"),
-    "unbound_alias": ({"main.py": "import helper\n", "helper.py": "Pair = tuple[Missing, int]\n"}, "name is not a local value"),
     "unused_bad_type": ({"main.py": IMPORT, "helper.py": HELPER + 'def unused() -> int:\n    return "wrong"\n'}, "helper.py"),
     "unused_resource_function": ({
         "main.py": "from importlib.resources import files\nx: int = 'wrong'\n",
@@ -770,7 +768,7 @@ REJECTED = {
             "print_list([])\n"
             "typed('wrong')\n"
         ),
-    }, "invalid-argument-type"),
+    }, "main.py:4:7: Imre: expected int, got str"),
     "contextmanager_wrong_generator_return": ({
         "main.py": "import helper\nimport sys\nsys.exit(0)\n",
         "helper.py": (
@@ -797,7 +795,7 @@ REJECTED = {
     "live_traceback_and_invalid_return": ({
         "main.py": "from helper import bad, render\nprint(render())\nprint(bad())\n",
         "helper.py": "import traceback as tb\ndef render():\n    return tb.format_exc()\ndef bad() -> int:\n    return 'wrong'\n",
-    }, "invalid-return-type"),
+    }, "helper.py:5:12: Imre: expected int, got str"),
     "unused_lzma_exports_preserve_typed_call": ({
         "main.py": (
             "from lzma import decompress, LZMAError, FORMAT_AUTO, FORMAT_XZ, FORMAT_ALONE\n"
@@ -814,12 +812,11 @@ REJECTED = {
         ),
     }, "expected int, got str"),
     "unused_unsupported": ({"main.py": IMPORT, "helper.py": HELPER + 'def unused() -> int:\n    return eval("1")\n'}, "unsupported"),
-    "inactive_guard": ({"main.py": IMPORT, "helper.py": HELPER + 'if __name__ == "__main__":\n    eval("1")\n'}, "unsupported"),
+    "inactive_guard": ({"main.py": IMPORT, "helper.py": HELPER + 'if __name__ == "__main__":\n    eval("1")\n'}, "builtins.eval without a linked body for its source"),
     "wrong_imported_argument": ({"main.py": 'from helper import f\nprint(f("wrong"))\n', "helper.py": HELPER}, "int"),
     "cycle": ({"main.py": "import first\n", "first.py": "import second\n", "second.py": "import first\n"}, "cyclic import"),
     "relative_beyond_root": ({"main.py": "from .helper import f\n", "helper.py": HELPER}, "relative import"),
     "parameter_module_shadow": ({"main.py": "import helper\ndef f(helper: int) -> int:\n    return helper\n", "helper.py": HELPER}, "rebinding"),
-    "parameter_function_shadow": ({"main.py": "from helper import f\ndef g(f: int) -> int:\n    return f\n", "helper.py": HELPER}, "rebinding"),
     "local_module_shadow": ({"main.py": "import helper\ndef g() -> None:\n    helper = 1\n", "helper.py": HELPER}, "rebinding"),
     "local_function_shadow": ({"main.py": "from helper import f\ndef g() -> None:\n    f = 1\n", "helper.py": HELPER}, "rebinding"),
     "module_rebinding": ({"main.py": "from helper import f\ndef f(value: int) -> int:\n    return value\n", "helper.py": HELPER}, "cannot be rebound"),
@@ -924,10 +921,20 @@ REJECTED = {
     "opcode_typed_argument": ({"main.py": "import _opcode as op\ndef text(x: str) -> None:\n    print(x)\ntext(op.ENABLE_SPECIALIZATION)\n"}, "expected str, got int"),
     "unstubbed_builtin_shadow": ({"main.py": "import _types\n", "_types.py": HELPER}, "standard-library"),
     "imported_surrogate": ({"main.py": IMPORT, "helper.py": '"\\ud800"\n' + HELPER}, "surrogate"),
-    "imported_encoding": ({"main.py": IMPORT, "helper.py": "# coding: latin1\n" + HELPER}, "encoding"),
+}
+
+RUNTIME_ERRORS = {
+    "unbound_alias": ({"main.py": "import helper\n", "helper.py": "Pair = tuple[Missing, int]\n"},
+                      "NameError: name 'Missing' is not defined"),
 }
 
 ACCEPTED = {
+    "conditional": {"main.py": "if False:\n    import math\nprint('done')\n"},
+    "parameter_function_shadow": {
+        "main.py": "from helper import f\ndef g(f: int) -> int:\n    return f\nprint(g(7))\n",
+        "helper.py": HELPER,
+    },
+    "imported_encoding": {"main.py": IMPORT, "helper.py": "# coding: latin1\n" + HELPER},
     "nullable_forwarder_uses_live_target_and_default": {
         **NULLABLE_FORWARDER,
         "main.py": (
@@ -2425,6 +2432,11 @@ def main() -> None:
                            *build_flags]
                 if name == "reload_source_plugin":
                     command += ["--include-module", "plugins.report"]
+                if name == "zip_source_spec":
+                    command += ["--extension-path", str(case / "zip-provider"), "--include-module", "zipfile"]
+                    for pkg in ("stored", "deflated"):
+                        command += ["--extension-path", str(case / f"{pkg}.zip"),
+                                    "--include-module", pkg, "--include-module", f"{pkg}.leaf"]
                 if args.sanitize:
                     command.append("--sanitize")
                 # Optimizing these bundled-module integration cases can take several minutes.
@@ -2638,6 +2650,24 @@ def main() -> None:
             result = run([compiler, "check", str(case / "main.py")], temporary)
             assert result.returncode != 0 and expected in result.stderr, (name, result.stdout, result.stderr)
             checks += 1
+
+        for name, (files, exception) in RUNTIME_ERRORS.items():
+            case = temporary / name
+            write_files(case, files)
+            baseline = run([args.python, "-E", "-m", "main"], case)
+            assert baseline.returncode == 1 and baseline.stderr.splitlines()[-1] == exception, baseline
+            for level in args.opt_levels:
+                executable = temporary / f"error-{name}-{level}"
+                command = [compiler, "build", str(case / "main.py"), "-o", str(executable),
+                           "--runtime", runtime, "--clang", args.clang, "--opt-level", str(level),
+                           *build_flags]
+                if args.sanitize:
+                    command.append("--sanitize")
+                require_success(run(command, temporary, timeout=build_timeout))
+                result = run([str(executable)], temporary)
+                assert result.returncode == 1 and result.stdout == baseline.stdout, result
+                assert result.stderr.splitlines()[-1] == exception, result
+                checks += 1
 
         # A provider can return to the application's check without acquiring its signature policy.
         app = temporary / "provider-owner"
