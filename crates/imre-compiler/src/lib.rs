@@ -2282,7 +2282,10 @@ print("result", call(b=2, a=1))
                         }
                         let result = super::checked_lower_with(graph, None, call_error)?;
                         if passes == 1 && !disable_hint {
-                            assert_eq!(graph.layout_hint.get() == LayoutHint::Applied, hint_applied);
+                            assert_eq!(
+                                graph.layout_hint.get() == LayoutHint::Applied,
+                                hint_applied
+                            );
                             if hint_applied && live_write {
                                 assert!(matches!(result, super::CheckedProgram::Native(_)));
                             }
