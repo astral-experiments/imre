@@ -1338,6 +1338,7 @@ impl Inference {
         let mut method_returns = HashMap::new();
         // Completed returns that use only bound locals survive unrelated revisions.
         let mut local_returns = HashMap::new();
+        let mut discovered_set_bodies = Vec::new();
         let mut checked_before_registration = HashSet::new();
         let sources = (|| {
             let pending = self.pending.borrow();
@@ -1630,20 +1631,50 @@ impl Inference {
                                 false,
                                 |_| false,
                             ));
+                // Preserve the actual operations when an open return may be settled by a
+                // fresh native set. This queries the existing semantic index, not the suite.
+                let reads_set = Cell::new(false);
+                let keep_set_body = infer_return
+                    && document_return.is_none()
+                    && physical
+                    && signature.method.is_none()
+                    && function.returns.is_none()
+                    && fixed_frame_entry(function)
+                    && !signature.registered_frame()
+                    && !checker.fault_enabled()
+                    && signature.params.iter().all(|param| {
+                        param.default.is_none() && param.ty.builtin_scalar_name().is_some()
+                    })
+                    && graph.session.function_reads_only(
+                        *module,
+                        function,
+                        crate::analysis::EagerDisplays::Excluded,
+                        |_| true,
+                        |name| {
+                            if name == "set" {
+                                reads_set.set(true);
+                            }
+                            module_builtin_name(&graph.modules[*module], name)
+                        },
+                        |_| true,
+                    )
+                    && reads_set.get();
                 // A settled native body needs its instructions even without Python operand sites.
-                checker.placement_only = !keep_return || signature.physical_frame;
+                checker.placement_only =
+                    !keep_set_body && (!keep_return || signature.physical_frame);
                 let mut method_storage =
-                    keep_return.then(|| (helpers.len(), globals.types().len()));
-                if keep_return {
+                    (keep_return || keep_set_body).then(|| (helpers.len(), globals.types().len()));
+                if keep_return || keep_set_body {
                     checker.frame = LexicalFrame::Named(function.name.id.clone());
-                    checker.fixed_sites = (signature.physical_frame
-                        || signature.method.is_none()
-                            && fixed_frame_provider(graph, owners[signature.id], function))
+                    checker.fixed_sites = (keep_return
+                        && (signature.physical_frame
+                            || signature.method.is_none()
+                                && fixed_frame_provider(graph, owners[signature.id], function)))
                     .then(|| fixed_body_source::SourceSites::new(signature.physical_frame));
                 }
                 // Solving an open signature invalidates a method's layout. Check its operand
                 // sites as usual, but only keep the instructions when they can survive the round.
-                let mut return_body = (keep_return
+                let mut return_body = ((keep_return || keep_set_body)
                     && (signature.method.is_none() || signatures_settled || !self.unresolved()))
                 .then(|| (Vec::new(), Vec::new()));
                 let statements = checker.function_statements(function);
@@ -1651,6 +1682,7 @@ impl Inference {
                 let mut implicit_none = false;
                 let mut superseded_returns = false;
                 let mut checked_call_cannot_return = false;
+                let mut discovered_set_return = None;
                 // A reachable call to a definition that already declined fixed lowering
                 // can use its live Python binding. Keep the frame only in its settled round.
                 if physical
@@ -1833,6 +1865,19 @@ impl Inference {
                         }
                         implicit_none =
                             ty == Type::None && falls_through && !checker.explicit_return;
+                        if keep_set_body
+                            && !falls_through
+                            && returns.iter().all(|&other| other == ty)
+                            && types
+                                .element(ty)
+                                .is_some_and(|element| element.builtin_scalar_name().is_some())
+                            && checker
+                                .inferred_containers
+                                .iter()
+                                .any(|&slot| types.set_element(checker.locals[slot]).is_some())
+                        {
+                            discovered_set_return = Some(ty);
+                        }
                         self.pending.borrow_mut()[signature.id].returns = Some(ty);
                         self.revision.set(self.revision.get() + 1);
                     }
@@ -2024,7 +2069,20 @@ impl Inference {
                         self.pending.borrow_mut()[signature.id].discovery =
                             ReturnDiscovery::Checked;
                     }
-                    if infer_return && revision == body_revision + 1 && !checked_call_cannot_return
+                    if let Some(ty) = discovered_set_return
+                        && revision == body_revision + 1
+                        && settled_return_inputs
+                        && !checked_call_cannot_return
+                        && checker.calls.is_empty()
+                        && checker.class_reads.borrow().is_empty()
+                        && checker.unrepresented.borrow().is_none()
+                        && method_storage == Some((helpers.len(), globals.types().len()))
+                        && let Some((params, body)) = return_body.take()
+                    {
+                        checker.returns = ty;
+                        local_returns.insert(signature.id, PreparedBody::Fixed(checker.completed_body(params, body, None, false)));
+                        discovered_set_bodies.push(signature.id);
+                    } else if infer_return && revision == body_revision + 1 && !checked_call_cannot_return
                         && let Some((params, body)) = &mut return_body
                         && let [Statement::Return(value)] = body.as_slice()
                         && let ExprKind::Builtin(Builtin::ParseArgs { process_argv: true, .. }, args) = &value.kind
@@ -2327,6 +2385,31 @@ impl Inference {
         }
         let needs_registered_entry =
             !suspended_bodies.is_empty() || signatures.values().any(Signature::registered_frame);
+        // A body checked before return publication has no Python operand sites. Its
+        // exact ABI must still match the solved signature, and a registered graph
+        // must take the ordinary placement path instead.
+        for id in discovered_set_bodies {
+            let signature = &definitions[id].2;
+            let keep = !needs_registered_entry
+                && !graph.registered_startup
+                && !graph.needs_object_runtime.get()
+                && local_returns.get(&id).is_some_and(|body| {
+                    let PreparedBody::Fixed((body, _)) = body else {
+                        return false;
+                    };
+                    body.function.returns == signature.returns
+                        && body.function.params.len() == signature.params.len()
+                        && body
+                            .function
+                            .params
+                            .iter()
+                            .zip(&signature.params)
+                            .all(|(&slot, param)| body.function.locals[slot] == param.ty)
+                });
+            if !keep {
+                local_returns.remove(&id);
+            }
+        }
         // Registered captures use the complete unchanged round. A failed fixed
         // initializer can keep independent checks. Its callee and wrapper facts
         // must still be published by the ordinary fixed pass.
@@ -2971,6 +3054,38 @@ print(Reader().read())
             crate::checked_lower(&mut graph).unwrap(),
             crate::CheckedProgram::Native(_)
         ));
+    }
+
+    #[test]
+    fn an_inferred_set_body_is_not_lowered_again_after_return_publication() {
+        let text = concat!(
+            "def gather(text):\n",
+            "    values = set()\n",
+            "    for char in text:\n",
+            "        values.add(char)\n",
+            "    return sorted(values)\n",
+            "print(gather('aba'))\n",
+        );
+        let mut graph = SourceGraph::single(text).unwrap();
+        let (checked, lowered) =
+            caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
+        assert!(!lowered.iter().any(|name| name == "gather"), "{lowered:?}");
+        let crate::CheckedProgram::Native(fixed) = checked else {
+            panic!("native gather");
+        };
+        let mut constructor = false;
+        let mut insertion = false;
+        ir::walk_expressions(
+            &fixed.ir.0.functions[0].body,
+            &mut |value| match value.kind {
+                ExprKind::Set {
+                    element: Type::Str, ..
+                } => constructor = true,
+                ExprKind::Builtin(Builtin::SetAdd, _) => insertion = true,
+                _ => {}
+            },
+        );
+        assert!(constructor && insertion);
     }
 
     #[test]
