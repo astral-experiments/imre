@@ -94,10 +94,58 @@ fn glob_matches(
     if let Some(matched) = match_literal_components(path, pattern, sensitive, recursive, sep) {
         return Ok(matched);
     }
+    if !pattern.contains('*')
+        && pattern.contains('[')
+        && !pattern.contains(sep)
+        && !path.contains(sep)
+        && let Some(matched) = match_simple_ranges(path, pattern, sensitive)
+    {
+        return Ok(matched);
+    }
     complex_glob_matches(path, pattern, sensitive, recursive, sep)
 }
 
-// Keep token and regex compilation out of the literal-component loop.
+/// Scan fixed-width range classes directly without allocating shell tokens or classes.
+fn match_simple_ranges(path: &str, pattern: &str, sensitive: bool) -> Option<bool> {
+    let mut pattern = pattern.chars().peekable();
+    let mut path = path.chars();
+    let mut matched = true;
+    while let Some(token) = pattern.next() {
+        let accepts = match token {
+            '*' => return None,
+            '[' => {
+                let negated = pattern.next_if_eq(&'!').is_some();
+                let start = pattern.next()?;
+                if matches!(start, '[' | ']' | '-' | '!') || pattern.next()? != '-' {
+                    return None;
+                }
+                let end = pattern.next()?;
+                if matches!(end, '[' | ']' | '-') || start > end || pattern.next()? != ']' {
+                    return None;
+                }
+                path.next().is_some_and(|actual| {
+                    if sensitive {
+                        (start <= actual && actual <= end) != negated
+                    } else {
+                        folded_class(actual, negated, &[(start, end)])
+                    }
+                })
+            }
+            '?' => path.next().is_some(),
+            expected => path.next().is_some_and(|actual| {
+                if sensitive {
+                    actual == expected
+                } else {
+                    folded(actual, expected)
+                }
+            }),
+        };
+        matched &= accepts;
+    }
+    Some(matched && path.next().is_none())
+}
+
+// Keep token compilation out of the literal-component loop.
 #[inline(never)]
 fn complex_glob_matches(
     path: &str,
@@ -106,10 +154,7 @@ fn complex_glob_matches(
     recursive: bool,
     sep: char,
 ) -> Result<bool> {
-    if let Some(matched) = match_components(path, pattern, sensitive, recursive, sep) {
-        return Ok(matched);
-    }
-    Ok(glob_regex(pattern, sensitive, recursive, sep)?.is_match(path))
+    Ok(match_components(path, pattern, sensitive, recursive, sep))
 }
 
 /// Match recursive components directly, using flat states when a character class can cross separators.
@@ -119,9 +164,10 @@ fn match_components(
     sensitive: bool,
     recursive: bool,
     sep: char,
-) -> Option<bool> {
+) -> bool {
     if pattern.contains('[') && pattern.split(sep).any(|part| {
-        matches!(Pattern::component(part), Pattern::Wildcard(tokens) if tokens.iter().any(|token| {
+        let Some(first) = part.find('[') else { return false };
+        matches!(Pattern::component(&part[first..]), Pattern::Wildcard(tokens) if tokens.iter().any(|token| {
             matches!(token, Token::Class { .. }) && token.matches(sep)
         }))
     }) {
@@ -136,7 +182,7 @@ fn match_components(
         let part = &pattern[token..end];
         if recursive && part == "**" {
             if end == pattern.len() {
-                return Some(true);
+                return true;
             }
             token = end + sep.len_utf8();
             star = Some((token, at, at));
@@ -145,7 +191,7 @@ fn match_components(
         let name_end = path[at..].find(sep).map_or(path.len(), |end| at + end);
         if match_component(&path[at..name_end], part, sensitive) && (part != "*" || name_end > at) {
             if end == pattern.len() && name_end == path.len() {
-                return Some(true);
+                return true;
             }
             if end < pattern.len() && name_end < path.len() {
                 token = end + sep.len_utf8();
@@ -154,12 +200,12 @@ fn match_components(
             }
         }
         let Some((retry, start, search)) = star.as_mut() else {
-            return Some(false);
+            return false;
         };
         let mut rest = &path[*search..];
         loop {
             let Some(offset) = rest.find(sep) else {
-                return Some(false);
+                return false;
             };
             let slash = *search + offset;
             *search = slash + sep.len_utf8();
@@ -204,6 +250,7 @@ fn match_component(path: &str, pattern: &str, sensitive: bool) -> bool {
 
 fn folded(actual: char, expected: char) -> bool {
     actual == expected
+        || (actual.is_ascii() && expected.is_ascii() && actual.eq_ignore_ascii_case(&expected))
         || super::super::warnings::literal_fold(actual)
             == super::super::warnings::literal_fold(expected)
 }
@@ -232,6 +279,12 @@ fn folded_class(character: char, negated: bool, ranges: &[(char, char)]) -> bool
         let folding = super::super::warnings::literal_fold(character);
         char::from_u32(folding)
             .is_some_and(|c| c.is_ascii() && (contains(c) || contains(c.to_ascii_uppercase())))
+    } else if char::from_u32(super::super::warnings::literal_fold(character)).is_some_and(contains)
+        || matches!(unicode_case_mapping::to_uppercase(character), [upper, 0, 0] if char::from_u32(upper).is_some_and(|upper| {
+            contains(upper) && super::super::warnings::literal_fold(character) == super::super::warnings::literal_fold(upper)
+        }))
+    {
+        true
     } else {
         let mut equivalents = ClassUnicode::new([ClassUnicodeRange::new(character, character)]);
         if matches!(character, 'i' | 'I' | 'İ' | 'ı') {
@@ -302,7 +355,7 @@ enum GlobToken {
     RecursiveTail,
 }
 
-fn append_component(tokens: &mut Vec<GlobToken>, part: &str) {
+fn append_component(tokens: &mut Vec<GlobToken>, part: &str, whole_component: bool) {
     match Pattern::component(part) {
         Pattern::Literal(text) => {
             tokens.extend(text.chars().map(|c| GlobToken::Shell(Token::Literal(c))))
@@ -313,7 +366,7 @@ fn append_component(tokens: &mut Vec<GlobToken>, part: &str) {
                     .chars()
                     .map(|c| GlobToken::Shell(Token::Literal(c))),
             );
-            if part == "*" {
+            if part == "*" && whole_component {
                 tokens.push(GlobToken::Shell(Token::Any));
             }
             tokens.push(GlobToken::Shell(Token::Star));
@@ -327,85 +380,99 @@ fn append_component(tokens: &mut Vec<GlobToken>, part: &str) {
     }
 }
 
-fn epsilon(mut active: u128, one: u128, two: u128) -> u128 {
+/// Add one state and its deterministic epsilon successors once for this generation.
+fn activate_state(
+    mut index: usize,
+    tokens: &[GlobToken],
+    states: &mut Vec<usize>,
+    marks: &mut [usize],
+    generation: usize,
+) {
     loop {
-        let extended = active | ((active & one) << 1) | ((active & two) << 2);
-        if extended == active {
-            return active;
+        if marks[index] == generation {
+            return;
         }
-        active = extended;
+        marks[index] = generation;
+        states.push(index);
+        match tokens.get(index) {
+            Some(GlobToken::Shell(Token::Star) | GlobToken::RecursiveTail) => index += 1,
+            Some(GlobToken::RecursiveStart) => index += 2,
+            _ => return,
+        }
     }
 }
 
-/// Match at most 127 flat states. Larger patterns retain the general regex path.
-fn match_crossing(
-    path: &str,
-    pattern: &str,
-    sensitive: bool,
-    recursive: bool,
-    sep: char,
-) -> Option<bool> {
+/// Store active token positions in flat arrays. Generation marks suppress duplicate
+/// states without clearing a pattern-sized array for every input character.
+fn match_crossing(path: &str, pattern: &str, sensitive: bool, recursive: bool, sep: char) -> bool {
+    let first = pattern.find(['*', '?', '[']).unwrap_or(pattern.len());
+    let (prefix, pattern) = pattern.split_at(first);
+    let path = if sensitive {
+        path.strip_prefix(prefix)
+    } else {
+        let mut actual = path.chars();
+        prefix
+            .chars()
+            .all(|expected| actual.next().is_some_and(|c| folded(c, expected)))
+            .then_some(actual.as_str())
+    };
+    let Some(path) = path else { return false };
+    let mut first_component = true;
     let mut tokens = Vec::new();
     let mut parts = pattern.split(sep).peekable();
     while let Some(part) = parts.next() {
-        if recursive && part == "**" {
+        let whole = !first_component || prefix.is_empty() || prefix.ends_with(sep);
+        if recursive && part == "**" && whole {
             if parts.peek().is_some() {
                 tokens.extend([GlobToken::RecursiveStart, GlobToken::RecursiveBody]);
             } else {
                 tokens.push(GlobToken::RecursiveTail);
             }
         } else {
-            append_component(&mut tokens, part);
+            append_component(&mut tokens, part, whole);
             if parts.peek().is_some() {
                 tokens.push(GlobToken::Shell(Token::Literal(sep)));
             }
         }
-        if tokens.len() > 127 {
-            return None;
-        }
+        first_component = false;
     }
-    let (mut one, mut two) = (0, 0);
-    for (index, token) in tokens.iter().enumerate() {
-        match token {
-            GlobToken::Shell(Token::Star) | GlobToken::RecursiveTail => one |= 1u128 << index,
-            GlobToken::RecursiveStart => two |= 1u128 << index,
-            _ => {}
-        }
-    }
-    let mut active = epsilon(1, one, two);
-    for character in path.chars() {
-        let mut next = 0;
-        let mut states = active;
-        while states != 0 {
-            let index = states.trailing_zeros() as usize;
-            states &= states - 1;
-            let Some(token) = tokens.get(index) else {
+    let mut marks = vec![0; tokens.len() + 1];
+    let mut current = Vec::new();
+    let mut next = Vec::new();
+    let mut generation = 1;
+    activate_state(0, &tokens, &mut current, &mut marks, generation);
+    for (index, character) in path.chars().enumerate() {
+        generation = index + 2;
+        next.clear();
+        for &state in &current {
+            let Some(token) = tokens.get(state) else {
                 continue;
             };
+            let mut add = |index| activate_state(index, &tokens, &mut next, &mut marks, generation);
             match token {
-                GlobToken::Shell(Token::Star) if character != sep => next |= 1u128 << index,
-                GlobToken::Shell(Token::Any) if character != sep => next |= 1u128 << (index + 1),
+                GlobToken::Shell(Token::Star) if character != sep => add(state),
+                GlobToken::Shell(Token::Any) if character != sep => add(state + 1),
                 GlobToken::Shell(Token::Star | Token::Any) => {}
                 GlobToken::Shell(token) if token_matches(token, character, sensitive) => {
-                    next |= 1u128 << (index + 1)
+                    add(state + 1)
                 }
                 GlobToken::Shell(_) => {}
-                GlobToken::RecursiveStart => next |= 1u128 << (index + 1),
+                GlobToken::RecursiveStart => add(state + 1),
                 GlobToken::RecursiveBody => {
-                    next |= 1u128 << index;
+                    add(state);
                     if character == sep {
-                        next |= 1u128 << (index + 1);
+                        add(state + 1);
                     }
                 }
-                GlobToken::RecursiveTail => next |= 1u128 << index,
+                GlobToken::RecursiveTail => add(state),
             }
         }
-        active = epsilon(next, one, two);
-        if active == 0 {
-            return Some(false);
+        if next.is_empty() {
+            return false;
         }
+        std::mem::swap(&mut current, &mut next);
     }
-    Some(active & (1u128 << tokens.len()) != 0)
+    marks[tokens.len()] == generation
 }
 
 /// Question marks, literals, and character classes each consume one character.
@@ -669,6 +736,8 @@ mod tests {
             "docs/RÉSUMÉ_2026.TXT",
             "src/Kelvin.txt",
             "src/İstanbul.txt",
+            "éé",
+            "ÉÉ",
         ];
         let patterns = [
             "**",
@@ -693,6 +762,8 @@ mod tests {
             "src/[İ]*.TXT",
             "a[.-0]b",
             "*[!x]*b",
+            "[À-Ö][À-Ö]",
+            "[!À-Ö][À-Ö]",
         ];
         for path in paths {
             for pattern in patterns {
@@ -727,6 +798,27 @@ mod tests {
         );
         assert!(
             !glob_matches("testconfig.py", "t*[!a-z]*f*.py", true, false, '/')
+                .ok()
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn crossing_patterns_have_no_token_limit() {
+        for width in [128, 256, 512] {
+            let prefix = "a".repeat(width);
+            let path = format!("{prefix}/b");
+            for pattern in [format!("{prefix}[!x]b"), format!("{prefix}*[!x]*b")] {
+                assert!(glob_matches(&path, &pattern, true, true, '/').ok().unwrap());
+            }
+        }
+        assert!(
+            glob_matches("foo/x", "foo*/[!a]", true, true, '/')
+                .ok()
+                .unwrap()
+        );
+        assert!(
+            !glob_matches("foo/bar/x", "foo**/[!a]", true, true, '/')
                 .ok()
                 .unwrap()
         );
