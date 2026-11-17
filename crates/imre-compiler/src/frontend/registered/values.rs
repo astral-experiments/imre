@@ -563,7 +563,10 @@ pub(crate) fn exec_source_operand(call: &ast::ExprCall) -> Option<&ast::Expr> {
     }
     let args = &call.arguments.args;
     let source = args.first()?;
-    if !matches!(source, ast::Expr::StringLiteral(_) | ast::Expr::Name(_)) {
+    if !matches!(
+        source,
+        ast::Expr::StringLiteral(_) | ast::Expr::Name(_) | ast::Expr::Subscript(_)
+    ) {
         return None;
     }
     if args.len() > 3 || args.iter().any(ast::Expr::is_starred_expr) {

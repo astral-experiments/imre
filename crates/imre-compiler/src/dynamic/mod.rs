@@ -180,8 +180,10 @@ struct Imports {
     literal_calls: Vec<TextRange>,
     has_open_exec: bool,
     computed_import: bool,
+    argument_imports: Vec<usize>,
     imports_logging: bool,
     sys_names: HashSet<String>,
+    importlib_names: HashSet<String>,
     operator_names: HashSet<String>,
     opcode_names: HashSet<String>,
     hashlib_names: HashSet<String>,
@@ -230,6 +232,7 @@ struct LiteralImports {
     origins: HashMap<usize, (bool, bool, ImportOrigin)>,
     seeded_winners: usize,
     open_exec: HashSet<usize>,
+    linked_exec: HashMap<usize, HashSet<TextRange>>,
 }
 
 impl LiteralImports {
@@ -457,7 +460,10 @@ impl<'a> Visitor<'a> for Imports {
                             .is_none(),
                         "unittest" => self.unittest_names.insert(bound.to_string()),
                         "pkgutil" => self.pkgutil_names.insert(bound.to_string()),
-                        "importlib" => self.machinery_names.insert(format!("{bound}.machinery")),
+                        "importlib" => {
+                            self.importlib_names.insert(bound.to_string());
+                            self.machinery_names.insert(format!("{bound}.machinery"))
+                        }
                         "importlib.machinery" => self.machinery_names.insert(bound.to_string()),
                         _ => false,
                     };
@@ -550,6 +556,24 @@ impl<'a> Visitor<'a> for Imports {
         visitor::walk_stmt(self, s);
     }
     fn visit_expr(&mut self, e: &'a Expr) {
+        if let Expr::Call(call) = e
+            && let Expr::Attribute(function) = &*call.func
+            && function.attr.as_str() == "import_module"
+            && let Expr::Name(importlib) = &*function.value
+            && self.importlib_names.contains(importlib.id.as_str())
+            && let Some(Expr::Subscript(operand)) = call.arguments.find_argument_value("name", 0)
+            && let Expr::Attribute(argv) = &*operand.value
+            && argv.attr.as_str() == "argv"
+            && matches!(&*argv.value, Expr::Name(sys) if self.sys_names.contains(sys.id.as_str()))
+            && let Expr::NumberLiteral(literal) = &*operand.slice
+            && let ast::Number::Int(index) = &literal.value
+            && let Some(index) = index
+                .as_i64()
+                .and_then(|index| usize::try_from(index).ok())
+                .and_then(|index| index.checked_sub(1))
+        {
+            self.argument_imports.push(index);
+        }
         if let Expr::Call(call) = e
             && call
                 .func
@@ -947,6 +971,7 @@ pub(crate) enum EntryStart<'a> {
 #[derive(Clone, Copy)]
 pub(crate) struct RegisteredSource<'a> {
     pub(crate) has_open_exec: bool,
+    pub(crate) linked_exec: Option<&'a HashSet<TextRange>>,
     pub(crate) unit: Option<usize>,
     /// The first application initializer and its selected startup predecessor, if any.
     pub(crate) initial: Option<EntryStart<'a>>,
@@ -996,6 +1021,7 @@ impl<'a> RegisteredSource<'a> {
     ) -> Self {
         Self {
             has_open_exec: false,
+            linked_exec: None,
             unit: None,
             name,
             path,
@@ -1264,9 +1290,19 @@ pub(crate) fn compile(
     for name in &options.include_modules {
         first.add(0, name);
     }
+    for index in std::mem::take(&mut first.argument_imports) {
+        if let Some(name) = options
+            .launcher_arguments
+            .get(index)
+            .and_then(Option::as_deref)
+            && crate::modules::valid_module_operand(name)
+        {
+            first.add(0, name);
+        }
+    }
     let registered_imports = typed_graph
         .filter(|_| object_imports && first.invalid_executable.is_none())
-        .map(import_module::registered_imports)
+        .map(|graph| import_module::registered_imports(graph, &options.launcher_arguments))
         .unwrap_or_default();
     first
         .names
@@ -1543,7 +1579,15 @@ pub(crate) fn compile(
                         source.as_str(),
                         flags,
                         &candidates,
+                        &options.launcher_arguments,
                     );
+                    if !options.launcher_arguments.is_empty() && !sites.is_empty() {
+                        literals
+                            .linked_exec
+                            .entry(unit)
+                            .or_default()
+                            .extend(sites.iter().map(|(site, _)| site.call));
+                    }
                     let names = literals.forest.record_root(unit, sites);
                     imports.push((unit, names));
                 }
@@ -2620,6 +2664,7 @@ pub(crate) fn compile(
                 }
             }
             registration.has_open_exec = literals.open_exec.contains(&id);
+            registration.linked_exec = literals.linked_exec.get(&id);
             registration.unit = output.is_some().then_some(id);
             registration.declares_signatures = application;
             if application && let Some(graph) = checked_graph {

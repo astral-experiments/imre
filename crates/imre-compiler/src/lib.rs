@@ -110,6 +110,8 @@ pub struct CompileOptions {
     pub path_entry: bool,
     /// Flags and executable for a file launched through the Python command line.
     pub script_startup: Option<(CommandFlags, String)>,
+    /// Program arguments known to the Python launcher before native compilation.
+    pub launcher_arguments: Vec<Option<String>>,
     /// A file describing the branches to include in a closed executable.
     pub entry_profile: Option<PathBuf>,
     /// Limit native lowering to definitions a closed entry program can use.
