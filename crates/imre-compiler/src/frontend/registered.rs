@@ -2501,7 +2501,15 @@ impl<'a> SuitePreparation<'a> {
             }
             _ => None,
         };
-        header.prepare_signature(def, site.thread_entry, fixed_parameters);
+        let bound_candidate = if refusal.is_none() && child_refusal.is_none() {
+            match body.as_ref() {
+                RegisteredBody::Function(frame) => Some(frame),
+                RegisteredBody::Suite(_) => None,
+            }
+        } else {
+            None
+        };
+        header.prepare_signature(def, site.thread_entry, fixed_parameters, bound_candidate);
         header.body = Some(body);
         // A residual suite may stop at a return before reaching a refused lexical child.
         if let Some(refusal) = refusal.or(child_refusal) {
@@ -2753,6 +2761,16 @@ impl<'a> SuitePreparation<'a> {
         let mut suites = Vec::new();
         let mut operands = Vec::new();
         for stmt in stmts {
+            // A closed declaration walk has no normal edge on which later source
+            // statements can execute or publish their lexical children.
+            if !body.falls_through && body.check_from.is_none() {
+                if let Some(imports) = &mut self.unreachable_imports
+                    && matches!(stmt, ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_))
+                {
+                    imports.insert(stmt.range());
+                }
+                continue;
+            }
             if let Some(transfer) = statements::loop_transfer(stmt) {
                 body.statements.push(transfer);
                 body.falls_through = false;
@@ -3847,6 +3865,11 @@ impl SourceScope<'_> {
             && disabled_while(loop_)
             && let Some(Statement::While(_, _, otherwise)) = body.pop()
         {
+            // The selected else retains this frame's slots, but its normal edge
+            // still follows physical control flow through literal branches.
+            let mut visit = None::<fn(RequiredSite)>;
+            let continues =
+                continues && RequiredSite::visit_block(&otherwise, true, None, &mut visit);
             suite.check_run(preparation);
             suite.statements.extend(otherwise);
             suite.falls_through &= continues;

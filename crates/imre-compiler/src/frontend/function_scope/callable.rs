@@ -102,6 +102,7 @@ impl NamedFunction<'_> {
         def: &ast::StmtFunctionDef,
         thread_entry: Option<imre_ast::ThreadEntry>,
         checked: Option<&crate::frontend::RegisteredFunction>,
+        bound_candidate: Option<&crate::frontend::RegisteredFunction>,
     ) {
         let suspended = self.metadata.suspension_flags() != 0;
         let signature = &mut self.metadata.layout;
@@ -112,10 +113,12 @@ impl NamedFunction<'_> {
             Some(imre_ast::ThreadEntry::Captured(names)) => {
                 signature["thread_captured_locks"] = json!(names);
             }
-            Some(imre_ast::ThreadEntry::Bound(field)) => {
-                signature["thread_bound_lock_field"] = json!(field);
-            }
             None => {}
+        }
+        if let Some((field, selector)) =
+            bound_candidate.and_then(|frame| thread_projected_call(def, frame))
+        {
+            signature["thread_projected_call"] = json!([field, selector]);
         }
         let Some(annotations) = self
             .annotations
@@ -156,6 +159,74 @@ impl NamedFunction<'_> {
             }
         }
     }
+}
+
+/// Borrow one checked ordered method call from a complete, ordinary bound-method body.
+/// The selector is only a lookup key; native Thread admission resolves its operation.
+fn thread_projected_call<'a>(
+    def: &ast::StmtFunctionDef,
+    frame: &'a crate::frontend::RegisteredFunction,
+) -> Option<(&'a str, &'a str)> {
+    use crate::ir::{self, Builtin, Expr, ExprKind, Statement};
+    if def.is_async
+        || def.returns.is_some()
+        || def.parameters.vararg.is_some()
+        || def.parameters.kwarg.is_some()
+        || !def.parameters.kwonlyargs.is_empty()
+    {
+        return None;
+    }
+    let mut positional = def
+        .parameters
+        .posonlyargs
+        .iter()
+        .chain(&def.parameters.args);
+    let formal = positional.next()?.name();
+    if positional.next().is_some() || formal.starts_with("__") {
+        return None;
+    }
+    let [
+        Statement::Position(..),
+        Statement::Expr(Expr {
+            kind: ExprKind::Invoke { callable, args },
+            ..
+        }),
+    ] = frame.function.body.as_slice()
+    else {
+        return None;
+    };
+    if !args.values.is_empty() || !args.order.is_empty() || args.exhaustive_enum_match {
+        return None;
+    }
+    let site = args.site.python()?;
+    if site.scope.is_some() || !matches!(site.call.arguments, ir::RegisteredArguments::Positional) {
+        return None;
+    }
+    let ir::RegisteredCallTarget::Method { name: selector, .. } = &site.call.target else {
+        return None;
+    };
+    let ExprKind::Builtin(
+        Builtin::RegisteredAttribute {
+            action: ir::AttributeAction::Load,
+            name: field,
+            ..
+        },
+        operands,
+    ) = &callable.without_location().kind
+    else {
+        return None;
+    };
+    let [owner] = operands.as_slice() else {
+        return None;
+    };
+    let original = match &owner.without_location().kind {
+        ExprKind::Local(slot) => frame.function.params.as_slice() == [*slot],
+        ExprKind::Builtin(Builtin::RegisteredName(name), operands) => {
+            operands.is_empty() && name.as_str() == formal.as_str()
+        }
+        _ => false,
+    };
+    (original && !field.id.starts_with("__")).then_some((field.id.as_str(), selector.as_str()))
 }
 
 /// Serializes a placed callable without copying its lexical scope or parameter names.

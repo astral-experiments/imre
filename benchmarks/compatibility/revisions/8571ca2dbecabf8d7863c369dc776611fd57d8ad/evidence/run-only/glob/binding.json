@@ -1,0 +1,190 @@
+{
+  "schema": "imre.compatibility.raw-control.v1",
+  "family": "glob",
+  "cohorts": {
+    "finite-native": {
+      "kind": "finite",
+      "platform": {
+        "os": "linux",
+        "arch": "x86_64",
+        "release": "6.18.57"
+      },
+      "probe": "/workspace/scratch/glob-strict-8571/raw-control-probe",
+      "strict_source_control": "native-content-v1",
+      "withdraw_sources": [
+        "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/launcher.py",
+        "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock.source.py"
+      ],
+      "artifacts": {
+        "run": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/run.json",
+        "gate": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/gate.json",
+        "positive_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/launcher.py",
+        "negative_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/gate.launcher.py",
+        "poison": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/glob_poison.py",
+        "stock_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/launcher.py",
+        "stock_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock.source.py",
+        "stock_capture": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock.capture.json",
+        "stock_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock.stdout",
+        "stock_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock.stderr",
+        "identities": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/identities.raw",
+        "gate_files": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/gate-files.raw",
+        "positive_hash": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/positive.raw",
+        "restored": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/restored.raw",
+        "extra_restored": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/extra-restored.raw",
+        "gate_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/gate.trace",
+        "gate_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/gate.stderr",
+        "gate_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/gate.stdout",
+        "probe_build": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/probe-build.raw",
+        "collector": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/controller.py",
+        "direct_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/direct.launcher.py",
+        "direct_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/direct.trace",
+        "direct_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/direct.stderr",
+        "direct_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/direct.stdout",
+        "direct_command": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/direct.command.json",
+        "direct_files": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/direct-files.raw",
+        "stock_all_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock-all-launcher.py",
+        "stock_all_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock-all.stderr",
+        "stock_all_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock-all.stdout",
+        "stock_all_capture": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock-all.json",
+        "gate_command": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/gate.command.json",
+        "O0_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/O0.stderr",
+        "O0_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/glob/O0/stderr.raw",
+        "O0_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/glob/O0/stdout.raw",
+        "O0_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/glob/O0/trace.raw",
+        "O0_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/O0.readelf.stdout",
+        "O0_build_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/O0.build.stdout",
+        "O0_build_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/O0.build.stderr",
+        "O0_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/O0.stdout",
+        "O3_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/O3.stderr",
+        "O3_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/glob/O3/stderr.raw",
+        "O3_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/glob/O3/stdout.raw",
+        "O3_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/glob/O3/trace.raw",
+        "O3_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/O3.readelf.stdout",
+        "O3_build_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/O3.build.stdout",
+        "O3_build_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/O3.build.stderr",
+        "O3_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/O3.stdout",
+        "head": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/head.raw",
+        "clean": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/clean.raw",
+        "cargo": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/cargo.raw",
+        "platform": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/platform.raw",
+        "stock_version": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock-version.raw",
+        "probe_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe_sources.c",
+        "original_collector": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/collect.py",
+        "archive": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/archive.json",
+        "policy": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/policy.json",
+        "policy_helper_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/os-helper.zip",
+        "original_binding": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/binding.json",
+        "O0_recapture": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/glob/O0/run.json",
+        "O3_recapture": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/glob/O3/run.json",
+        "policy_glob_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock.source.py"
+      }
+    }
+  },
+  "originals": [
+    {
+      "id": "test.test_glob.GlobTests.test_escape",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_glob.GlobTests.test_glob0",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_glob.GlobTests.test_glob1",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_glob.GlobTests.test_glob_broken_symlinks",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_glob.GlobTests.test_glob_bytes_directory_with_trailing_slash",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_glob.GlobTests.test_glob_directory_names",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_glob.GlobTests.test_glob_directory_with_trailing_slash",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_glob.GlobTests.test_glob_empty_pattern",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_glob.GlobTests.test_glob_literal",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_glob.GlobTests.test_glob_named_pipe",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_glob.GlobTests.test_glob_nested_directory",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_glob.GlobTests.test_glob_non_directory",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_glob.GlobTests.test_glob_one_directory",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_glob.GlobTests.test_glob_symlinks",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_glob.GlobTests.test_hidden_glob",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_glob.GlobTests.test_recursive_glob",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_glob.GlobTests.test_translate",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_glob.GlobTests.test_translate_include_hidden",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_glob.GlobTests.test_translate_matching",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_glob.GlobTests.test_translate_recursive",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_glob.GlobTests.test_translate_seps",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    }
+  ]
+}

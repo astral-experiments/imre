@@ -1303,8 +1303,8 @@ fn checked_lower_with(
     // A fully lowered graph has already checked the actual first-party definitions.
     // Keep its existing diagnostics and proof scopes. When a representation is
     // unavailable, the declared Python call contracts still apply to the graph.
-    let session = &mut graph.session;
     let result = if lowered.is_ok() {
+        let session = &mut graph.session;
         lowered.and_then(|ir| {
             if let Some(compiler) = cache.as_deref_mut() {
                 compiler
@@ -1322,6 +1322,11 @@ fn checked_lower_with(
             Ok(ir)
         })
     } else {
+        let entry_filename = (
+            graph.entry,
+            graph.module_filename(graph.entry).to_path_buf(),
+        );
+        let session = &mut graph.session;
         let native = lowered.as_ref().err();
         let checked = session
             .closed_program_session(
@@ -1329,7 +1334,14 @@ fn checked_lower_with(
                 &graph.inputs,
             )
             .and_then(|owner| {
-                owner.closed_program_errors(&graph.modules, skipped, &overloads, native, None)
+                owner.closed_program_errors_with_entry(
+                    &graph.modules,
+                    skipped,
+                    &overloads,
+                    native,
+                    None,
+                    Some((entry_filename.0, &entry_filename.1)),
+                )
             });
         // An inapplicable object representation cannot replace a native source or ABI
         // diagnostic. A real registration checks this result before emitting its body.

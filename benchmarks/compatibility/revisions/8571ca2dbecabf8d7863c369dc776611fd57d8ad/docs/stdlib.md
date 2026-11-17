@@ -3,7 +3,7 @@
 
 Revision `8571ca2dbecabf8d7863c369dc776611fd57d8ad` · CPython **3.14.5** · Linux x86-64. These are original-test receipts at this revision, not cumulative credits.
 
-Frozen 45-family cohort: **3,141 pinned receipts** of **16,225 raw upstream originals**, **1,254 observed stock/O0/O3 pass intersections**, **1,254 verified credited pairs**; **13,084 originals have no validated receipt**.
+Frozen 45-family cohort: **3,163 pinned receipts** of **16,225 raw upstream originals**, **1,276 observed stock/O0/O3 pass intersections**, **1,276 verified credited pairs**; **13,062 originals have no validated receipt**.
 
 Supplemental pilots, outside the frozen cohort: **0 receipts** of **3 originals**, **0 observed intersections**, **0 verified credited pairs**.
 
@@ -25,7 +25,7 @@ Scripts: **0 of 84 original commands have receipts**, **0 observed intersections
 | `fnmatch` | 24 | 24 pass | 24 pass | 24 pass | 24 | 24 verified | 24 |
 | `fractions` | 50 | not run | not run | not run | unknown (not run) | unknown (not run) | 50 |
 | `functools` | 329 | not run | not run | not run | unknown (not run) | unknown (not run) | 316 |
-| `glob` | 24 | not run | not run | not run | unknown (not run) | pending (24 staged, unverified) | 22 |
+| `glob` | 24 | 21 pass; 3 staged (unverified; outcomes not checked) | 21 pass; 3 staged (unverified; outcomes not checked) | 21 pass; 3 staged (unverified; outcomes not checked) | 21 | 21 verified; 3 staged, unverified | 22 |
 | `gzip` | 75 | not run | not run | not run | unknown (not run) | unknown (not run) | 74 |
 | `hashlib` | 82 | 69 pass, 13 skip | 67 pass, 1 error, 14 skip | 67 pass, 1 error, 14 skip | 67 | 67 verified | 78 |
 | `importlib` | 1,345 | not run | not run | not run | unknown (not run) | unknown (not run) | 432 |
@@ -33,7 +33,7 @@ Scripts: **0 of 84 original commands have receipts**, **0 observed intersections
 | `io` | 1,038 | not run | not run | not run | unknown (not run) | unknown (not run) | 959 |
 | `itertools` | 138 | not run | not run | not run | unknown (not run) | unknown (not run) | 111 |
 | `json` | 216 | 169 pass; 47 staged (unverified; outcomes not checked) | 169 pass; 47 staged (unverified; outcomes not checked) | 169 pass; 47 staged (unverified; outcomes not checked) | 169 | 169 verified; 47 staged, unverified | 207 |
-| `logging` | 272 | not run | not run | not run | unknown (not run) | pending (2 staged, unverified) | 220 |
+| `logging` | 272 | 1 pass, 270 not run; 1 staged (unverified; outcomes not checked) | 1 pass, 270 not run; 1 staged (unverified; outcomes not checked) | 1 pass, 270 not run; 1 staged (unverified; outcomes not checked) | 1 | 1 verified; 1 staged, unverified | 220 |
 | `math` | 89 | not run | not run | not run | unknown (not run) | unknown (not run) | 85 |
 | `netrc` | 23 | not run | not run | not run | unknown (not run) | unknown (not run) | 22 |
 | `os` | 579 | not run | not run | not run | unknown (not run) | unknown (not run) | 471 |

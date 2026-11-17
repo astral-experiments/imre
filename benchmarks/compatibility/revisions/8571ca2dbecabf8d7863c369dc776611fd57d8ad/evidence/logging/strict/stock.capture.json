@@ -1,0 +1,34 @@
+{
+  "argv": [
+    "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "-B",
+    "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/launcher.py"
+  ],
+  "cwd": "/workspace/scratch/logging-strict-8571/empty",
+  "environment": {
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+    "TMPDIR": "/workspace/scratch/logging-strict-8571/tmp",
+    "PYTHONPATH": "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib"
+  },
+  "timeout_seconds": 180,
+  "seconds": 0.668,
+  "exit_code": 0,
+  "timed_out": false,
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "a71155c90219b6bbfbb7fabad6c8fa99cf9e14d8f21132637aa7a8fc9e9bce88",
+  "collection": 1,
+  "inventory_complete": true,
+  "summary": {
+    "event": "summary",
+    "run": 1,
+    "successful": true
+  },
+  "launcher_sha256": "d3a8f0ea4b89cf97b496da290321c63120818ae5f85ccebdccdb7b16f9b8f5ec",
+  "python_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+  "version": "Python 3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+  "source_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "source_archive_sha256": "4c20c1b660201205d308f1eded635a194336f619ea07232b14407f191f07029e"
+}

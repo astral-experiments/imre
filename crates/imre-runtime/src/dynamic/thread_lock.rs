@@ -277,6 +277,21 @@ impl Acquire {
         })
     }
 
+    /// Extract an unexecuted default wait on the selected exact primitive receiver.
+    pub(super) fn native_primitive(
+        self,
+        ctx: &Context,
+        receiver: Id,
+    ) -> Option<Arc<PrimitiveLock>> {
+        if self.receiver != receiver || !self.blocking || self.timeout.is_some() {
+            return None;
+        }
+        match ctx.heap.get(self.receiver) {
+            Value::PrimitiveLock(lock) => Some(Arc::clone(lock)),
+            _ => None,
+        }
+    }
+
     /// # Safety
     /// Run in the preparing thread and context before any intervening Python call or
     /// collection, while the selected receiver is still live.
