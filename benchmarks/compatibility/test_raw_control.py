@@ -115,6 +115,33 @@ class RawControlTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'native opened CPython, libpython, withdrawn source or matching bytecode'):
                     self.rows()
 
+    def rehashed_mixed_case_csv_creat(self, tmp, relative):
+        entry = self.entries['csv']
+        self.rehashed_csv_trace(tmp, f'creat("{relative}", 0666) = 3')
+        binding_path = scorecard.ROOT / entry['sources']['binding']
+        binding = json.loads(binding_path.read_text())
+        artifacts = binding['cohorts']['finite-native']['artifacts']
+        gate = json.loads((scorecard.ROOT / artifacts['gate']).read_text())
+        run = json.loads((scorecard.ROOT / artifacts['run']).read_text())
+        # The real fixture has a mixed-case "Lib" component. Rebind cwd,
+        # metadata, trace and binding so hash checks cannot mask the hole.
+        run['runs']['O0']['cwd'] = scorecard.option(gate['command'], '--extension-path') + '/Work'
+        meta = tmp/'mixed-case-run.json'; meta.write_text(json.dumps(run)+'\n')
+        artifacts['run'] = locator(meta); entry['files'][locator(meta)] = digest(meta)
+        binding_path.write_text(json.dumps(binding)+'\n')
+        entry['files'][entry['sources']['binding']] = digest(binding_path)
+
+    def test_rehashed_mixed_case_cwd_relative_creat_is_rejected(self):
+        with tempfile.TemporaryDirectory(dir=SNAPSHOT/'evidence/csv/raw-control') as tmp:
+            self.rehashed_mixed_case_csv_creat(Path(tmp), '../test/support/created.py')
+            with self.assertRaisesRegex(ValueError, 'native opened CPython, libpython, withdrawn source or matching bytecode'):
+                self.rows()
+
+    def test_rehashed_relative_creat_preserves_posix_case(self):
+        with tempfile.TemporaryDirectory(dir=SNAPSHOT/'evidence/csv/raw-control') as tmp:
+            self.rehashed_mixed_case_csv_creat(Path(tmp), '../Test/support/created.py')
+            self.assertEqual(sum(r['paired'] for r in self.rows() if r['family']=='csv'), 122)
+
     def test_rehashed_failed_child_exec_attempt_is_rejected(self):
         with tempfile.TemporaryDirectory(dir=SNAPSHOT/'evidence/csv/raw-control') as tmp:
             self.rehashed_csv_trace(Path(tmp), 'execve("/usr/bin/python3", ["/usr/bin/python3"], 0x0) = -1 ENOENT (No such file or directory)')

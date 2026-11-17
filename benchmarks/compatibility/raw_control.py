@@ -106,17 +106,18 @@ def trace_withdraw(api, text, image, probe, tree, stash, leaf, cwd, require):
         require(not re.search(r'\bio_uring_setup\(.*= [0-9]+$', line), 'native io_uring may hide file access')
         m = OPEN.match(line) or re.match(r'^\d+\s+newfstatat\(.*?("(?:[^"\\]|\\.)*")', line)
         if m:
-            path = json.loads(m[1]).lower()
-            name = Path(path).name
-            python_probe = 'libpython' in path or any(part.startswith('python') for part in Path(path).parts)
+            path = json.loads(m[1])
+            folded = path.lower()
+            name = Path(path).name.lower()
+            python_probe = 'libpython' in folded or any(part.startswith('python') for part in Path(folded).parts)
             require(not python_probe, 'native probed CPython or libpython')
             resolved = Path(normpath(path if Path(path).is_absolute() else str(Path(cwd)/path)))
             withdrawn = (name == stem+'.py'
                 or name in {stem+'.pyc', stem+'.pyo'}
                 or (name.startswith(stem+'.') and name.endswith(('.pyc', '.pyo')))
-                or resolved.is_relative_to(Path(tree.lower()))
-                or resolved.is_relative_to(Path(stash.lower()))
-                or Path(stash).name.lower() in Path(path).parts)
+                or resolved.is_relative_to(Path(tree))
+                or resolved.is_relative_to(Path(stash))
+                or Path(stash).name in Path(path).parts)
             # Only an explicit ENOENT proves this withdrawn path was absent.
             require(not withdrawn or re.search(r'\) = -1 ENOENT(?: \([^)]*\))?$', line),
                     'native opened CPython, libpython, withdrawn source or matching bytecode')
