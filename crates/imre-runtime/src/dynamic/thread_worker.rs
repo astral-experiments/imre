@@ -2,7 +2,7 @@
 
 use super::calls::RegisteredCall;
 use super::thread_callback::Callback;
-use super::thread_lock::NativeWait;
+use super::thread_lock::OwnedWait;
 use super::value::{Heap, ParkedExecution};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak, atomic::Ordering, mpsc};
 use std::thread::{self, JoinHandle};
@@ -66,9 +66,9 @@ impl Join {
     /// The registered caller owns this context on the current thread through wait and resumption.
     #[inline(never)]
     pub(super) unsafe fn run(self, context: *mut Context) -> Result<Id> {
+        let mut wait = OwnedWait::Join(self.deadline, self.handle, Completion::Join);
         // SAFETY: the registered caller owns the interrupted frame through signal dispatch.
-        let result =
-            unsafe { NativeWait::Join(self.deadline, &self.handle, Completion::Join).run(context) };
+        let result = unsafe { wait.run(context) };
         // SAFETY: the native wait and any signal callback have returned to their owner.
         let ctx = unsafe { &mut *context };
         result.map_err(|error| super::stdlib::io::qualify_error(ctx, error, None))?;
@@ -742,9 +742,10 @@ unsafe fn join_shutdown_handles(context: *mut Context) -> Result<()> {
             .find(|handle| handle.awaiting_exit())
             .cloned();
         let Some(handle) = handle else { break };
+        let mut wait = OwnedWait::Join(None, handle, Completion::Shutdown);
         // SAFETY: the registered caller owns the context through signal dispatch.
         // Only the owned native handle crosses the wait.
-        unsafe { NativeWait::Join(None, &handle, Completion::Shutdown).run(context) }?;
+        unsafe { wait.run(context) }?;
     }
     // Other workers may have published completion during an interruptible wait.
     // Finish their native joins, which can still block in native thread teardown.
