@@ -195,11 +195,9 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       # The native runtime depends on POSIX process and filesystem APIs.
-      - name: Probe guarded Windows class linking
-        continue-on-error: true
-        run: cargo test -p imre-compiler --lib --locked analysis::closed_program_tests::a_guarded_class_annotation_can_use_its_locally_imported_implementation -- --exact --nocapture
-      - name: Probe Windows nested placement
-        run: cargo test -p imre-compiler --lib --locked frontend::registered::placement::tests::a_direct_local_body_checks_the_element_type_before_placing_its_caller -- --exact --nocapture
+      - run: cargo test -p imre-compiler --lib --locked analysis::closed_program_tests::a_guarded_class_annotation_can_use_its_locally_imported_implementation -- --exact
+      - run: cargo test -p imre-compiler --lib --locked analysis::closed_program_tests::a_guarded_module_checks_arguments_after_its_callees_settle -- --exact
+      - run: cargo test -p imre-compiler --lib --locked frontend::registered::placement::tests::a_direct_local_body_checks_the_element_type_before_placing_its_caller -- --exact
 
   check:
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.sys_source && !inputs.unittest_source)
@@ -242,6 +240,8 @@ jobs:
         run: python3 -B benchmarks/cpython_stdlib/full/support_table.py --imre target/release/imre --check
       - name: Compare interrupted socket calls and fd reuse with CPython
         run: python3 tests/socket_eintr.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18
+      - name: Build the bundled standard library providers for native suites
+        run: python3 scripts/build-bundled-providers.py target/release/imre --clang /usr/bin/clang-18
       - &cpython-reference
         name: Get the pinned CPython unittest support and extension docstrings
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262

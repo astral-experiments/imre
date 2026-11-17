@@ -2037,8 +2037,10 @@ pub(crate) fn compile(
                                         let program = initial[..path0_len].contains(root);
                                         let checked = graph_file.and_then(|(graph, id)| {
                                             let checked = &graph.modules[id];
-                                            (checked.path == member.path
-                                                && checked.original_source() == member.source)
+                                            (crate::modules::same_source_path(
+                                                &checked.path,
+                                                &member.path,
+                                            ) && checked.original_source() == member.source)
                                                 .then_some(id)
                                         });
                                         if origin == ImportOrigin::Startup && owner.is_empty() {

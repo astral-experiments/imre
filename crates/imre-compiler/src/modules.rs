@@ -17,6 +17,23 @@ use crate::ir::{
 };
 use crate::watch::FileSystem;
 
+/// Compare a selected source spelling with the checked graph's physical file.
+/// Windows temp paths can use an 8.3 name while canonical paths use a verbatim long name.
+pub(crate) fn same_source_path(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        std::fs::canonicalize(left)
+            .ok()
+            .zip(std::fs::canonicalize(right).ok())
+            .is_some_and(|(left, right)| left == right)
+    }
+    #[cfg(not(windows))]
+    false
+}
+
 mod boxed_exports;
 mod declarations;
 pub(crate) mod doctest;
@@ -3540,7 +3557,7 @@ impl SourceGraph {
     ) -> Option<bool> {
         let module = &self.modules[id];
         let path = if module.is_package { init } else { file };
-        let matches = module.path == path
+        let matches = same_source_path(&module.path, path)
             || self.inputs.directories.iter().any(|(spelling, identity)| {
                 spelling == root
                     && module

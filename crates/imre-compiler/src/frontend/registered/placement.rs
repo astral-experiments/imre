@@ -105,58 +105,29 @@ mod tests {
     #[test]
     fn a_direct_local_body_checks_the_element_type_before_placing_its_caller() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("__main__.py");
-        let source = concat!(
-            "def report(value: int) -> str:\n",
-            "    def clean(x: int) -> str:\n",
-            "        xs: list[int] = []\n",
-            "        flag: bool = True\n",
-            "        xs.append(flag)\n",
-            "        return str(x)\n",
-            "    return clean(value)\n",
-            "print(report(40))\n",
-        );
-        std::fs::write(&path, source).unwrap();
+        std::fs::write(
+            dir.path().join("__main__.py"),
+            concat!(
+                "def report(value: int) -> str:\n",
+                "    def clean(x: int) -> str:\n",
+                "        xs: list[int] = []\n",
+                "        flag: bool = True\n",
+                "        xs.append(flag)\n",
+                "        return str(x)\n",
+                "    return clean(value)\n",
+                "print(report(40))\n",
+            ),
+        )
+        .unwrap();
         let options = crate::CompileOptions {
             path_entry: true,
             module_entry: Some("__main__".into()),
             script_startup: Some((Default::default(), "imre".into())),
             ..Default::default()
         };
-        let result = crate::compile_file(dir.path(), None, &options);
-        if result.is_ok() {
-            let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
-            graph.registered_startup = true;
-            let lowering = crate::frontend::lower_with_caller_cache(&mut graph, None, None)
-                .err()
-                .map(|e| e.to_string());
-            let direct = crate::checked_lower(&mut graph).err();
-            let mut probes = vec![
-                ("lowering".to_owned(), lowering),
-                ("direct".to_owned(), direct),
-            ];
-            for (name, variant) in [
-                (
-                    "literal",
-                    source.replace("xs.append(flag)", "xs.append(True)"),
-                ),
-                (
-                    "string",
-                    source.replace("flag: bool = True", "flag: str = 'bad'"),
-                ),
-            ] {
-                std::fs::write(&path, variant).unwrap();
-                probes.push((
-                    name.to_owned(),
-                    crate::compile_file(dir.path(), None, &options).err(),
-                ));
-            }
-            panic!(
-                "nested append admitted on {}; probes: {probes:?}",
-                std::env::consts::OS
-            );
-        }
-        let error = result.err().unwrap();
+        let error = crate::compile_file(dir.path(), None, &options)
+            .err()
+            .expect("the nested append must enforce its annotated element type");
         assert!(
             error.contains("5:19: Imre: expected int, got bool"),
             "{error}"
