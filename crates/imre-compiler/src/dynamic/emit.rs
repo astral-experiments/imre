@@ -692,6 +692,7 @@ impl<'a> PreparedBody<'a> {
         // Preparing inner declarations first lets their binding sites consume
         // the selected body's decision in the enclosing suite.
         use crate::frontend::DeclarationSite;
+        let mut module_bodies = super::CheckedFunctions::default();
         for declaration in sites.declarations.into_iter().rev() {
             let site = match declaration {
                 DeclarationSite::Function(site) => site,
@@ -723,6 +724,8 @@ impl<'a> PreparedBody<'a> {
                         || matches!(body.inputs, crate::frontend::FrameInputs::Protocol { .. })
                 }),
                 operands,
+                &mut module_bodies,
+                bundled || python_provider,
             );
         }
         let initializer = if interactive {
@@ -744,6 +747,7 @@ impl<'a> PreparedBody<'a> {
             exec_literals,
             annotation_children,
             scopes,
+            module_bodies,
             #[cfg(test)]
             statement_sites,
             python_optimization,
@@ -1006,6 +1010,8 @@ struct SourceInfo<'a> {
     annotation_children:
         indexmap::IndexMap<String, crate::frontend::AnnotationBody<Box<SourceInfo<'static>>>>,
     scopes: crate::frontend::function_scope::ScopeFacts<'a>,
+    // Provider frames are owned by the selected source unit, keyed by their physical site.
+    module_bodies: super::CheckedFunctions,
     lambdas: HashMap<ruff_text_size::TextSize, RegisteredLambda>,
     generators: HashMap<TextRange, RegisteredGenerator>,
     type_aliases: HashMap<ruff_text_size::TextSize, TypeAliasDefinition>,
@@ -1168,7 +1174,7 @@ impl SourceMap<'_> {
                         function.frame.callable = Some(&header.metadata);
                         function.declared_globals = &header.globals;
                         function.frame.declare_globals(function.declared_globals);
-                        header.body()
+                        header.body(&self.module_bodies)
                     }
                     Callable::Lambda(lambda, _) => {
                         RegisteredBody::Function(lambda.body.as_ref().expect("checked lambda body"))
@@ -2307,7 +2313,7 @@ mod tests {
         }
 
         fn definition_body(&self, site: TextSize) -> RegisteredBody<'_> {
-            self.scopes.functions[&site].body()
+            self.scopes.functions[&site].body(&self.module_bodies)
         }
 
         fn take_prepared_function(
@@ -2315,10 +2321,11 @@ mod tests {
             site: TextSize,
         ) -> crate::frontend::RegisteredFunction {
             let body = self.scopes.functions.get_mut(&site).unwrap().body.take();
-            let Some(NamedBody::Owned(checked)) = body else {
-                panic!("expected an owned complete function");
-            };
-            *checked
+            match body {
+                Some(NamedBody::Owned(checked)) => *checked,
+                Some(NamedBody::Module(start)) => self.module_bodies.remove(&start).unwrap(),
+                _ => panic!("expected an owned complete function"),
+            }
         }
 
         fn prepared_function_mut(
@@ -2326,10 +2333,11 @@ mod tests {
             site: TextSize,
         ) -> &mut crate::frontend::RegisteredFunction {
             let body = &mut self.scopes.functions.get_mut(&site).unwrap().body;
-            let Some(NamedBody::Owned(checked)) = body else {
-                panic!("expected an owned complete function");
-            };
-            checked
+            match body {
+                Some(NamedBody::Owned(checked)) => checked,
+                Some(NamedBody::Module(start)) => self.module_bodies.get_mut(start).unwrap(),
+                _ => panic!("expected an owned complete function"),
+            }
         }
     }
 
@@ -3861,7 +3869,7 @@ mod tests {
         assert_eq!(bindings, [start(method)]);
         assert!(matches!(
             module.source.scopes.functions[&start(method)].body.as_ref(),
-            Some(NamedBody::Owned(_))
+            Some(NamedBody::Module(_))
         ));
     }
 
@@ -6337,6 +6345,35 @@ second = (lambda data: data)(t'{client.lookup(*args)}{(lambda v: v)(values)}')",
             }
         });
         assert_eq!(names, ["list", "str"]);
+    }
+
+    #[test]
+    fn provider_frames_are_retained_by_the_selected_source_unit() {
+        let text =
+            "def outer(value: int):\n    def inner(): return value\n    return lambda: inner()\n";
+        let path = Path::new("provider.py");
+        for origin in [ModuleOrigin::Bundled(None), ModuleOrigin::Provider(None)] {
+            let (prepared, events) = crate::single_emission_tests::observe_preparation(|| {
+                PreparedBody::module("provider", path, text, 0, origin).unwrap()
+            });
+            assert!(
+                matches!(events.as_slice(), [crate::single_emission_tests::Phase::Prepared(p, _)] if p == path)
+            );
+            assert_eq!(prepared.source.module_bodies.len(), 2);
+            for offset in [0, text.find("def inner").unwrap()] {
+                let site = TextSize::try_from(offset).unwrap();
+                assert!(
+                    matches!(prepared.source.scopes.functions[&site].body, Some(NamedBody::Module(index)) if index == site)
+                );
+                let retained = &prepared.source.module_bodies[&site];
+                assert!(std::ptr::eq(
+                    prepared.source.definition_body(site).checked(),
+                    retained
+                ));
+                crate::verify::registered(retained.region()).unwrap();
+            }
+            assert_eq!(prepared.source.lambdas.len(), 1);
+        }
     }
 
     #[test]

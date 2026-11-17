@@ -1811,6 +1811,7 @@ fn bind_operand(operands: &mut Vec<PhysicalOperand>, value: PhysicalOperand, ty:
 pub(crate) enum NamedBody<'p> {
     Borrowed(&'p RegisteredFunction),
     Owned(Box<RegisteredFunction>),
+    Module(TextSize),
     Suite(Box<RegisteredSuite>),
 }
 
@@ -1829,10 +1830,26 @@ impl NamedBody<'_> {
         }
     }
 
-    pub(crate) fn as_ref(&self) -> RegisteredBody<'_> {
+    /// Move a complete provider frame into its source unit's checked body map.
+    /// Residual suites retain their own operands and cannot be transferred.
+    fn retain_in(self, site: TextSize, bodies: &mut crate::dynamic::CheckedFunctions) -> Self {
+        match self {
+            Self::Owned(body) => {
+                assert!(bodies.insert(site, *body).is_none());
+                Self::Module(site)
+            }
+            body => body,
+        }
+    }
+
+    pub(crate) fn as_ref<'s>(
+        &'s self,
+        bodies: &'s crate::dynamic::CheckedFunctions,
+    ) -> RegisteredBody<'s> {
         match self {
             Self::Borrowed(body) => RegisteredBody::Function(body),
             Self::Owned(body) => RegisteredBody::Function(body),
+            Self::Module(site) => RegisteredBody::Function(&bodies[site]),
             Self::Suite(suite) => RegisteredBody::Suite(suite),
         }
     }
@@ -2442,6 +2459,8 @@ impl<'a> SuitePreparation<'a> {
         site: FunctionSite<'_>,
         checked: Option<&'p RegisteredFunction>,
         call_operands: Option<&'a std::cell::RefCell<crate::dynamic::CallOperands>>,
+        module_bodies: &mut crate::dynamic::CheckedFunctions,
+        retain_provider: bool,
     ) {
         let def = site.def;
         header.type_params = site.parameters;
@@ -2491,9 +2510,14 @@ impl<'a> SuitePreparation<'a> {
             let refusal = suite.refusal;
             (NamedBody::from_suite(suite), refusal)
         };
+        let body = if retain_provider {
+            body.retain_in(def.start(), module_bodies)
+        } else {
+            body
+        };
         // Only a module-level function with checked parameters fixes a scalar
         // argument. Other functions bind through their live annotation references.
-        let fixed_parameters = match body.as_ref() {
+        let fixed_parameters = match body.as_ref(module_bodies) {
             RegisteredBody::Function(frame)
                 if site.module_scope && !matches!(frame.inputs, FrameInputs::Protocol { .. }) =>
             {

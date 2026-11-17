@@ -65,11 +65,14 @@ pub(crate) struct NamedFunction<'p> {
 }
 
 impl NamedFunction<'_> {
-    pub(crate) fn body(&self) -> RegisteredBody<'_> {
+    pub(crate) fn body<'s>(
+        &'s self,
+        bodies: &'s crate::dynamic::CheckedFunctions,
+    ) -> RegisteredBody<'s> {
         self.body
             .as_ref()
             .expect("prepared named function")
-            .as_ref()
+            .as_ref(bodies)
     }
 
     pub(super) fn prepare(
