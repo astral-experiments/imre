@@ -1,3 +1,5 @@
+AUXILIARY CONTROLLED OBSERVATION ONLY. The provisional receipt update was withdrawn because its prior stock run used different limits. No pair credit is granted from this window pending matching fresh stock.
+
 This bounded continuation uses the unchanged saved O0 and O3 images from the original gated JSON launcher. Compiler, runtime and saved-image SHA-256 values were verified before use. The original CPython skip_if_unlimited_stack_size decorator isolates the expensive recursion methods under RLIMIT_STACK=unlimited; RLIMIT_NPROC=0 prevents tool tests from starting child processes. These are explicit window controls, not runtime fixes.
 
 All 19 exact staged JSON test sources and the original launcher source were withdrawn, no test bytecode was present, and every source was restored by SHA-256. Fresh readelf/ldd and raw exec/open traces show no libpython and no child executable after prlimit hands off to the saved image. Each window collected the same 216 ordered original occurrence keys as stock. Only the 92 previously not-run receipt rows were updated. The original decoding timeout remains unchanged and uncredited, with no omission.

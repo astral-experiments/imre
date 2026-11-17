@@ -283,7 +283,7 @@
     "base_commit": "85f8f6772ccc8d71b87d9104a28a364d39aeb32a",
     "receipt_preimage_sha256": "a915837768d403cc5378068c70420905f74c7686b8c39e8cbdbddc71b84da7b8",
     "receipt_postimage_sha256": "20373fc98627ffc4b11118acad4eb8757d0fa6ac73536fb562e2d87584588f5f",
-    "stock_reused_exact_from_staged_data": true,
+    "stock_reused_exact_from_staged_data": false,
     "stock_capture_sha256": "56a417b524616187cdced92b16d6b4fac21840420f5801db4e59f1e601abf536",
     "stock_stderr_sha256": "4c68de34619cb947c0f92916dcb4b0caa0577895252fe2bae125d7d99287b820",
     "stock_invocation": [
@@ -306,8 +306,8 @@
       "platform"
     ],
     "updated_original_occurrences": 92,
-    "new_pairs": 55,
-    "total_pairs": 169,
+    "new_pairs": 0,
+    "total_pairs": 114,
     "counts": {
       "stock": {
         "pass": 215,
@@ -337,6 +337,7 @@
         "O0": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/O0.stderr#L464",
         "O3": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/O3.stderr#L464"
       }
-    }
+    },
+    "status": "withdrawn: prior stock did not use matching stack/process controls"
   }
 }
