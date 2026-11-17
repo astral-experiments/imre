@@ -1,0 +1,217 @@
+test_DER_to_PEM (__main__.BasicSocketTests.test_DER_to_PEM) ... ok
+test_asn1object (__main__.BasicSocketTests.test_asn1object) ... ok
+test_cert_time_to_seconds (__main__.BasicSocketTests.test_cert_time_to_seconds) ... ok
+test_cert_time_to_seconds_locale (__main__.BasicSocketTests.test_cert_time_to_seconds_locale) ... skipped 'locale-specific month name needs to be different from C locale'
+test_cert_time_to_seconds_timezone (__main__.BasicSocketTests.test_cert_time_to_seconds_timezone) ... ok
+test_connect_ex_error (__main__.BasicSocketTests.test_connect_ex_error) ... ok
+test_constants (__main__.BasicSocketTests.test_constants) ... ok
+test_dealloc_warn (__main__.BasicSocketTests.test_dealloc_warn) ... ok
+test_empty_cert (__main__.BasicSocketTests.test_empty_cert)
+Wrapping with an empty cert file ... ok
+test_enum_certificates (__main__.BasicSocketTests.test_enum_certificates) ... skipped 'Windows specific'
+test_enum_crls (__main__.BasicSocketTests.test_enum_crls) ... skipped 'Windows specific'
+test_get_default_verify_paths (__main__.BasicSocketTests.test_get_default_verify_paths) ... ok
+test_malformed_cert (__main__.BasicSocketTests.test_malformed_cert)
+Wrapping with a badly formatted certificate (syntax error) ... ok
+test_malformed_key (__main__.BasicSocketTests.test_malformed_key)
+Wrapping with a badly formatted key (syntax error) ... ok
+test_openssl111_deprecations (__main__.BasicSocketTests.test_openssl111_deprecations) ... ok
+test_openssl_version (__main__.BasicSocketTests.test_openssl_version) ... ok
+test_options (__main__.BasicSocketTests.test_options) ... ok
+test_parse_all_sans (__main__.BasicSocketTests.test_parse_all_sans) ... ok
+test_parse_cert (__main__.BasicSocketTests.test_parse_cert) ... ok
+test_parse_cert_CVE_2013_4238 (__main__.BasicSocketTests.test_parse_cert_CVE_2013_4238) ... ok
+test_parse_cert_CVE_2019_5010 (__main__.BasicSocketTests.test_parse_cert_CVE_2019_5010) ... ok
+test_private_init (__main__.BasicSocketTests.test_private_init) ... ok
+test_purpose_enum (__main__.BasicSocketTests.test_purpose_enum) ... ok
+test_random (__main__.BasicSocketTests.test_random) ... ok
+test_read_write_zero (__main__.BasicSocketTests.test_read_write_zero) ... ok
+test_refcycle (__main__.BasicSocketTests.test_refcycle) ... ok
+test_server_side (__main__.BasicSocketTests.test_server_side) ... ok
+test_ssl_types (__main__.BasicSocketTests.test_ssl_types) ... ok
+test_str_for_enums (__main__.BasicSocketTests.test_str_for_enums) ... ok
+test_timeout (__main__.BasicSocketTests.test_timeout) ... ok
+test_tls_unique_channel_binding (__main__.BasicSocketTests.test_tls_unique_channel_binding) ... ok
+test_unknown_channel_binding (__main__.BasicSocketTests.test_unknown_channel_binding) ... ok
+test_unsupported_dtls (__main__.BasicSocketTests.test_unsupported_dtls) ... ok
+test_wrapped_unconnected (__main__.BasicSocketTests.test_wrapped_unconnected) ... ok
+test__create_stdlib_context (__main__.ContextTests.test__create_stdlib_context) ... ok
+test_cert_store_stats (__main__.ContextTests.test_cert_store_stats) ... ok
+test_check_hostname (__main__.ContextTests.test_check_hostname) ... ok
+test_ciphers (__main__.ContextTests.test_ciphers) ... ok
+test_constructor (__main__.ContextTests.test_constructor) ... ok
+test_context_client_server (__main__.ContextTests.test_context_client_server) ... ok
+test_context_custom_class (__main__.ContextTests.test_context_custom_class) ... ok
+test_create_default_context (__main__.ContextTests.test_create_default_context) ... ok
+test_get_ca_certs (__main__.ContextTests.test_get_ca_certs) ... ok
+test_get_ciphers (__main__.ContextTests.test_get_ciphers) ... ok
+test_hostname_checks_common_name (__main__.ContextTests.test_hostname_checks_common_name) ... ok
+test_load_cert_chain (__main__.ContextTests.test_load_cert_chain) ... ok
+test_load_cert_chain_thread_safety (__main__.ContextTests.test_load_cert_chain_thread_safety) ... ok
+test_load_default_certs (__main__.ContextTests.test_load_default_certs) ... ok
+test_load_default_certs_env (__main__.ContextTests.test_load_default_certs_env) ... ok
+test_load_default_certs_env_windows (__main__.ContextTests.test_load_default_certs_env_windows) ... skipped 'Windows specific'
+test_load_dh_params (__main__.ContextTests.test_load_dh_params) ... ok
+test_load_verify_cadata (__main__.ContextTests.test_load_verify_cadata) ... ok
+test_load_verify_locations (__main__.ContextTests.test_load_verify_locations) ... ok
+test_min_max_version (__main__.ContextTests.test_min_max_version) ... ok
+test_num_tickest (__main__.ContextTests.test_num_tickest) ... ok
+test_options (__main__.ContextTests.test_options) ... ok
+test_python_ciphers (__main__.ContextTests.test_python_ciphers) ... ok
+test_refcycle_keylog_filename (__main__.ContextTests.test_refcycle_keylog_filename) ... ok
+test_refcycle_msg_callback (__main__.ContextTests.test_refcycle_msg_callback) ... ok
+test_refcycle_psk_client_callback (__main__.ContextTests.test_refcycle_psk_client_callback) ... ok
+test_refcycle_psk_server_callback (__main__.ContextTests.test_refcycle_psk_server_callback) ... ok
+test_security_level (__main__.ContextTests.test_security_level) ... ok
+test_session_stats (__main__.ContextTests.test_session_stats) ... ok
+test_set_default_verify_paths (__main__.ContextTests.test_set_default_verify_paths) ... ok
+test_set_ecdh_curve (__main__.ContextTests.test_set_ecdh_curve) ... ok
+test_sni_callback (__main__.ContextTests.test_sni_callback) ... ok
+test_sni_callback_on_dead_references (__main__.ContextTests.test_sni_callback_on_dead_references) ... ok
+test_sni_callback_refcycle (__main__.ContextTests.test_sni_callback_refcycle) ... ok
+test_verify_flags (__main__.ContextTests.test_verify_flags) ... ok
+test_verify_mode_protocol (__main__.ContextTests.test_verify_mode_protocol) ... ok
+test_buffer_types (__main__.MemoryBIOTests.test_buffer_types) ... ok
+test_eof (__main__.MemoryBIOTests.test_eof) ... ok
+test_error_types (__main__.MemoryBIOTests.test_error_types) ... ok
+test_pending (__main__.MemoryBIOTests.test_pending) ... ok
+test_read_write (__main__.MemoryBIOTests.test_read_write) ... ok
+test_get_server_certificate_ipv6 (__main__.NetworkedTests.test_get_server_certificate_ipv6) ... skipped "Resource 'ipv6.google.com' is not available"
+test_timeout_connect_ex (__main__.NetworkedTests.test_timeout_connect_ex) ... skipped "Resource 'self-signed.pythontest.net' is not available"
+test_bad_server_hostname (__main__.SSLErrorTests.test_bad_server_hostname) ... ok
+test_lib_reason (__main__.SSLErrorTests.test_lib_reason) ... ok
+test_str (__main__.SSLErrorTests.test_str) ... ok
+test_subclass (__main__.SSLErrorTests.test_subclass) ... ok
+test_private_init (__main__.SSLObjectTests.test_private_init) ... ok
+test_unwrap (__main__.SSLObjectTests.test_unwrap) ... ok
+test_bio_handshake (__main__.SimpleBackgroundTests.test_bio_handshake) ... ok
+test_bio_read_write_data (__main__.SimpleBackgroundTests.test_bio_read_write_data) ... ok
+test_ciphers (__main__.SimpleBackgroundTests.test_ciphers) ... ok
+test_connect (__main__.SimpleBackgroundTests.test_connect) ... ok
+test_connect_cadata (__main__.SimpleBackgroundTests.test_connect_cadata) ... ok
+test_connect_capath (__main__.SimpleBackgroundTests.test_connect_capath) ... ok
+test_connect_ex (__main__.SimpleBackgroundTests.test_connect_ex) ... ok
+test_connect_fail (__main__.SimpleBackgroundTests.test_connect_fail) ... ok
+test_connect_with_context (__main__.SimpleBackgroundTests.test_connect_with_context) ... ok
+test_connect_with_context_fail (__main__.SimpleBackgroundTests.test_connect_with_context_fail) ... ok
+test_context_setget (__main__.SimpleBackgroundTests.test_context_setget) ... ok
+test_get_ca_certs_capath (__main__.SimpleBackgroundTests.test_get_ca_certs_capath) ... ok
+test_get_server_certificate (__main__.SimpleBackgroundTests.test_get_server_certificate) ... ok
+test_get_server_certificate_fail (__main__.SimpleBackgroundTests.test_get_server_certificate_fail) ... ok
+test_get_server_certificate_sni (__main__.SimpleBackgroundTests.test_get_server_certificate_sni) ... ok
+test_get_server_certificate_timeout (__main__.SimpleBackgroundTests.test_get_server_certificate_timeout) ... ok
+test_makefile_close (__main__.SimpleBackgroundTests.test_makefile_close) ... ok
+test_non_blocking_connect_ex (__main__.SimpleBackgroundTests.test_non_blocking_connect_ex) ... ok
+test_non_blocking_handshake (__main__.SimpleBackgroundTests.test_non_blocking_handshake) ... ok
+test_transport_eof (__main__.SimpleBackgroundTests.test_transport_eof) ... ok
+test_alertdescription (__main__.TestEnumerations.test_alertdescription) ... ok
+test_options (__main__.TestEnumerations.test_options) ... ok
+test_sslerrornumber (__main__.TestEnumerations.test_sslerrornumber) ... ok
+test_sslmethod (__main__.TestEnumerations.test_sslmethod) ... ok
+test_tlsalerttype (__main__.TestEnumerations.test_tlsalerttype) ... ok
+test_tlscontenttype (__main__.TestEnumerations.test_tlscontenttype) ... ok
+test_tlsmessagetype (__main__.TestEnumerations.test_tlsmessagetype) ... ok
+test_tlsversion (__main__.TestEnumerations.test_tlsversion) ... ok
+test_verifyflags (__main__.TestEnumerations.test_verifyflags) ... ok
+test_verifymode (__main__.TestEnumerations.test_verifymode) ... ok
+test_bpo37428_pha_cert_none (__main__.TestPostHandshakeAuth.test_bpo37428_pha_cert_none) ... ok
+test_certificate_chain (__main__.TestPostHandshakeAuth.test_certificate_chain) ... ok
+test_internal_chain_client (__main__.TestPostHandshakeAuth.test_internal_chain_client) ... ok
+test_internal_chain_server (__main__.TestPostHandshakeAuth.test_internal_chain_server) ... ok
+test_pha_no_pha_client (__main__.TestPostHandshakeAuth.test_pha_no_pha_client) ... ok
+test_pha_no_pha_server (__main__.TestPostHandshakeAuth.test_pha_no_pha_server) ... ok
+test_pha_not_tls13 (__main__.TestPostHandshakeAuth.test_pha_not_tls13) ... ok
+test_pha_optional (__main__.TestPostHandshakeAuth.test_pha_optional) ... ok
+test_pha_optional_nocert (__main__.TestPostHandshakeAuth.test_pha_optional_nocert) ... ok
+test_pha_required (__main__.TestPostHandshakeAuth.test_pha_required) ... ok
+test_pha_required_nocert (__main__.TestPostHandshakeAuth.test_pha_required_nocert) ... ok
+test_pha_setter (__main__.TestPostHandshakeAuth.test_pha_setter) ... ok
+test_https_client_non_tls_response_ignored (__main__.TestPreHandshakeClose.test_https_client_non_tls_response_ignored) ... ok
+test_preauth_data_to_tls_client (__main__.TestPreHandshakeClose.test_preauth_data_to_tls_client) ... ok
+test_preauth_data_to_tls_server (__main__.TestPreHandshakeClose.test_preauth_data_to_tls_server) ... ok
+test_keylog_defaults (__main__.TestSSLDebug.test_keylog_defaults) ... ok
+test_keylog_env (__main__.TestSSLDebug.test_keylog_env) ... ok
+test_keylog_filename (__main__.TestSSLDebug.test_keylog_filename) ... ok
+test_msg_callback (__main__.TestSSLDebug.test_msg_callback) ... ok
+test_msg_callback_deadlock_bpo43577 (__main__.TestSSLDebug.test_msg_callback_deadlock_bpo43577) ... ok
+test_msg_callback_tls12 (__main__.TestSSLDebug.test_msg_callback_tls12) ... ok
+test_PROTOCOL_TLS (__main__.ThreadedTests.test_PROTOCOL_TLS)
+Connecting to an SSLv23 server with various client options ... ok
+test_alpn_protocols (__main__.ThreadedTests.test_alpn_protocols) ... ok
+test_asyncore_server (__main__.ThreadedTests.test_asyncore_server)
+Check the example asyncore integration. ... ok
+test_check_hostname (__main__.ThreadedTests.test_check_hostname) ... ok
+test_check_hostname_idn (__main__.ThreadedTests.test_check_hostname_idn) ... ok
+test_compression (__main__.ThreadedTests.test_compression) ... ok
+test_compression_disabled (__main__.ThreadedTests.test_compression_disabled) ... ok
+test_crl_check (__main__.ThreadedTests.test_crl_check) ... ok
+test_default_ecdh_curve (__main__.ThreadedTests.test_default_ecdh_curve) ... ok
+test_dh_params (__main__.ThreadedTests.test_dh_params) ... skipped "libssl doesn't support ephemeral DH"
+test_do_handshake_enotconn (__main__.ThreadedTests.test_do_handshake_enotconn) ... ok
+test_dual_rsa_ecc (__main__.ThreadedTests.test_dual_rsa_ecc) ... ok
+test_ecc_cert (__main__.ThreadedTests.test_ecc_cert) ... ok
+test_ecdh_curve (__main__.ThreadedTests.test_ecdh_curve) ... ok
+test_echo (__main__.ThreadedTests.test_echo)
+Basic test of an SSL client connecting to a server ... ok
+test_getpeercert (__main__.ThreadedTests.test_getpeercert) ... ok
+test_getpeercert_enotconn (__main__.ThreadedTests.test_getpeercert_enotconn) ... ok
+test_handshake_timeout (__main__.ThreadedTests.test_handshake_timeout) ... ok
+test_hostname_checks_common_name (__main__.ThreadedTests.test_hostname_checks_common_name) ... ok
+test_legacy_server_connect (__main__.ThreadedTests.test_legacy_server_connect) ... ok
+test_min_max_version_mismatch (__main__.ThreadedTests.test_min_max_version_mismatch) ... skipped 'TLSv1 is not available.'
+test_min_max_version_sslv3 (__main__.ThreadedTests.test_min_max_version_sslv3) ... skipped 'SSLv3 is not available.'
+test_min_max_version_tlsv1_1 (__main__.ThreadedTests.test_min_max_version_tlsv1_1) ... skipped 'TLSv1_1 is not available.'
+test_min_max_version_tlsv1_2 (__main__.ThreadedTests.test_min_max_version_tlsv1_2) ... skipped 'TLSv1 is not available.'
+test_no_legacy_server_connect (__main__.ThreadedTests.test_no_legacy_server_connect) ... ok
+test_no_shared_ciphers (__main__.ThreadedTests.test_no_shared_ciphers) ... ok
+test_nonblocking_send (__main__.ThreadedTests.test_nonblocking_send) ... ok
+test_npn_protocols (__main__.ThreadedTests.test_npn_protocols) ... ok
+test_protocol_sslv3 (__main__.ThreadedTests.test_protocol_sslv3)
+Connecting to an SSLv3 server with various client options ... skipped 'SSLv3 is not available.'
+test_protocol_tlsv1 (__main__.ThreadedTests.test_protocol_tlsv1)
+Connecting to a TLSv1 server with various client options ... skipped 'TLSv1 is not available.'
+test_protocol_tlsv1_1 (__main__.ThreadedTests.test_protocol_tlsv1_1)
+Connecting to a TLSv1.1 server with various client options. ... skipped 'TLSv1_1 is not available.'
+test_protocol_tlsv1_2 (__main__.ThreadedTests.test_protocol_tlsv1_2)
+Connecting to a TLSv1.2 server with various client options. ... ok
+test_psk (__main__.ThreadedTests.test_psk) ... ok
+test_psk_tls1_3 (__main__.ThreadedTests.test_psk_tls1_3) ... ok
+test_read_write_after_close_raises_valuerror (__main__.ThreadedTests.test_read_write_after_close_raises_valuerror) ... ok
+test_recv_into_buffer_protocol_len (__main__.ThreadedTests.test_recv_into_buffer_protocol_len) ... ok
+test_recv_send (__main__.ThreadedTests.test_recv_send)
+Test recv(), send() and friends. ... ok
+test_recv_zero (__main__.ThreadedTests.test_recv_zero) ... ok
+test_rude_shutdown (__main__.ThreadedTests.test_rude_shutdown)
+A brutal shutdown of an SSL server should raise an OSError ... ok
+test_selected_alpn_protocol (__main__.ThreadedTests.test_selected_alpn_protocol) ... ok
+test_selected_alpn_protocol_if_server_uses_alpn (__main__.ThreadedTests.test_selected_alpn_protocol_if_server_uses_alpn) ... ok
+test_sendfile (__main__.ThreadedTests.test_sendfile) ... ok
+test_server_accept (__main__.ThreadedTests.test_server_accept) ... ok
+test_session (__main__.ThreadedTests.test_session) ... ok
+test_session_handling (__main__.ThreadedTests.test_session_handling) ... ok
+test_shared_ciphers (__main__.ThreadedTests.test_shared_ciphers) ... ok
+test_sni_callback (__main__.ThreadedTests.test_sni_callback) ... ok
+test_sni_callback_alert (__main__.ThreadedTests.test_sni_callback_alert) ... ok
+test_sni_callback_raising (__main__.ThreadedTests.test_sni_callback_raising) ... ok
+test_sni_callback_wrong_return_type (__main__.ThreadedTests.test_sni_callback_wrong_return_type) ... ok
+test_socketserver (__main__.ThreadedTests.test_socketserver)
+Using socketserver to create and manage SSL connections. ... ok
+test_ssl_cert_verify_error (__main__.ThreadedTests.test_ssl_cert_verify_error) ... ok
+test_ssl_in_multiple_threads (__main__.ThreadedTests.test_ssl_in_multiple_threads) ... skipped 'test is only useful if the GIL is disabled'
+test_starttls (__main__.ThreadedTests.test_starttls)
+Switching from clear text to encrypted and back again. ... ok
+test_thread_recv_while_main_thread_sends (__main__.ThreadedTests.test_thread_recv_while_main_thread_sends) ... ok
+test_tls1_3 (__main__.ThreadedTests.test_tls1_3) ... ok
+test_tls_unique_channel_binding (__main__.ThreadedTests.test_tls_unique_channel_binding)
+Test tls-unique channel binding. ... ok
+test_verify_strict (__main__.ThreadedTests.test_verify_strict) ... ok
+test_version_basic (__main__.ThreadedTests.test_version_basic)
+Basic tests for SSLSocket.version(). ... ok
+test_wrong_cert_tls12 (__main__.ThreadedTests.test_wrong_cert_tls12)
+Connecting when the server rejects the client's certificate ... ok
+test_wrong_cert_tls13 (__main__.ThreadedTests.test_wrong_cert_tls13) ... ok
+
+----------------------------------------------------------------------
+Ran 195 tests in 44.275s
+
+OK (skipped=15)

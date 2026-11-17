@@ -1,0 +1,958 @@
+test_ssl: testing with 'OpenSSL 3.5.6 7 Apr 2026' (3, 5, 0, 6, 0)
+          under 'Linux-6.18.57-x86_64-with-glibc2.41'
+          HAS_SNI = True
+          OP_ALL = 0x80000050
+          OP_NO_TLSv1_1 = 0x10000000
+
+{'OCSP': ('http://ocsp.verisign.com',),
+ 'caIssuers': ('http://SVRIntl-G3-aia.verisign.com/SVRIntlG3.cer',),
+ 'crlDistributionPoints': ('http://SVRIntl-G3-crl.verisign.com/SVRIntlG3.crl',),
+ 'issuer': ((('countryName', 'US'),),
+            (('organizationName', 'VeriSign, Inc.'),),
+            (('organizationalUnitName', 'VeriSign Trust Network'),),
+            (('organizationalUnitName',
+              'Terms of use at https://www.verisign.com/rpa (c)10'),),
+            (('commonName', 'VeriSign Class 3 International Server CA - G3'),)),
+ 'notAfter': 'Sep 20 23:59:59 2012 GMT',
+ 'notBefore': 'Sep 21 00:00:00 2011 GMT',
+ 'serialNumber': '2EE6EA7640A075CEE5005F4D7C79549A',
+ 'subject': ((('countryName', 'FI'),),
+             (('stateOrProvinceName', 'Espoo'),),
+             (('localityName', 'Espoo'),),
+             (('organizationName', 'Nokia'),),
+             (('organizationalUnitName', 'BI'),),
+             (('commonName', 'projects.developer.nokia.com'),)),
+ 'subjectAltName': (('DNS', 'projects.developer.nokia.com'),
+                    ('DNS', 'projects.forum.nokia.com')),
+ 'version': 3}
+
+{'issuer': ((('countryName', 'US'),),
+            (('stateOrProvinceName', 'Oregon'),),
+            (('localityName', 'Beaverton'),),
+            (('organizationName', 'Python Software Foundation'),),
+            (('organizationalUnitName', 'Python Core Development'),),
+            (('commonName', 'null.python.org\x00example.org'),),
+            (('emailAddress', 'python-dev@python.org'),)),
+ 'notAfter': 'Aug  7 13:12:52 2013 GMT',
+ 'notBefore': 'Aug  7 13:11:52 2013 GMT',
+ 'serialNumber': '00',
+ 'subject': ((('countryName', 'US'),),
+             (('stateOrProvinceName', 'Oregon'),),
+             (('localityName', 'Beaverton'),),
+             (('organizationName', 'Python Software Foundation'),),
+             (('organizationalUnitName', 'Python Core Development'),),
+             (('commonName', 'null.python.org\x00example.org'),),
+             (('emailAddress', 'python-dev@python.org'),)),
+ 'subjectAltName': (('DNS', 'altnull.python.org\x00example.com'),
+                    ('email', 'null@python.org\x00user@example.org'),
+                    ('URI', 'http://null.python.org\x00http://example.org'),
+                    ('IP Address', '192.0.2.1'),
+                    ('IP Address', '2001:DB8:0:0:0:0:0:1')),
+ 'version': 3}
+
+{'issuer': ((('countryName', 'UK'),), (('commonName', 'cody-ca'),)),
+ 'notAfter': 'Jun 14 18:00:58 2028 GMT',
+ 'notBefore': 'Jun 18 18:00:58 2018 GMT',
+ 'serialNumber': '02',
+ 'subject': ((('countryName', 'UK'),),
+             (('commonName', 'codenomicon-vm-2.test.lal.cisco.com'),)),
+ 'subjectAltName': (('DNS', 'codenomicon-vm-2.test.lal.cisco.com'),),
+ 'version': 3}
+
+ RAND_status is 1 (sufficient randomness)
+ server:  new connection from ('127.0.0.1', 60396)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 60396)
+ server:  new connection from ('127.0.0.1', 40460)
+Needed 2 calls to complete do_handshake().
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+Needed 4 calls to complete unwrap().
+ server:  new connection from ('127.0.0.1', 40668)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+Needed 2 calls to complete do_handshake().
+Needed 1 calls to complete write().
+Needed 3 calls to complete read().
+Needed 2 calls to complete unwrap().
+ connection timeout TimeoutError('timed out')
+ server:  new connection from ('127.0.0.1', 59814)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 59814)
+ server:  new connection from ('127.0.0.1', 59820)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 59820)
+ server:  new connection from ('127.0.0.1', 33042)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 33042)
+ server:  new connection from ('127.0.0.1', 33048)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 33048)
+ server:  new connection from ('127.0.0.1', 46100)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 46100)
+ server:  new connection from ('127.0.0.1', 46108)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 46108)
+ connection timeout TimeoutError('timed out')
+ server:  new connection from ('127.0.0.1', 58770)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 58770)
+ server:  new connection from ('127.0.0.1', 58784)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 58784)
+ server:  new connection from ('127.0.0.1', 58492)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 58492)
+ server:  new connection from ('127.0.0.1', 36940)
+
+ server:  bad connection attempt from ('127.0.0.1', 36940):
+Traceback (most recent call last):
+   File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_ssl.py", line 2439, in wrap_conn
+    self.sslconn = self.server.context.wrap_socket(
+                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self.sock, server_side=True)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 457, in wrap_socket
+    return self.sslsocket_class._create(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        sock=sock,
+        ^^^^^^^^^^
+    ...<5 lines>...
+        session=session
+        ^^^^^^^^^^^^^^^
+    )
+    ^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1088, in _create
+    self.do_handshake()
+    ~~~~~~~~~~~~~~~~~^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1384, in do_handshake
+    self._sslobj.do_handshake()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+ ssl.SSLError: [SSL: TLSV1_ALERT_UNKNOWN_CA] tlsv1 alert unknown ca (_ssl.c:1081)
+ server:  new connection from ('127.0.0.1', 32800)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 32800)
+ server:  new connection from ('127.0.0.1', 32814)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 32814)
+ server:  new connection from ('127.0.0.1', 32818)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 32818)
+ server:  new connection from ('127.0.0.1', 43984)
+
+ server:  bad connection attempt from ('127.0.0.1', 43984):
+Traceback (most recent call last):
+   File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_ssl.py", line 2439, in wrap_conn
+    self.sslconn = self.server.context.wrap_socket(
+                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self.sock, server_side=True)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 457, in wrap_socket
+    return self.sslsocket_class._create(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        sock=sock,
+        ^^^^^^^^^^
+    ...<5 lines>...
+        session=session
+        ^^^^^^^^^^^^^^^
+    )
+    ^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1088, in _create
+    self.do_handshake()
+    ~~~~~~~~~~~~~~~~~^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1384, in do_handshake
+    self._sslobj.do_handshake()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+ ssl.SSLError: [SSL: TLSV1_ALERT_UNKNOWN_CA] tlsv1 alert unknown ca (_ssl.c:1081)
+ server:  new connection from ('127.0.0.1', 39102)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 39102)
+ server:  new connection from ('127.0.0.1', 41580)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 41580)
+ server:  new connection from ('127.0.0.1', 40866)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 40866)
+ server:  new connection from ('127.0.0.1', 40878)
+
+Verified certificate for localhost:57629 is
+-----BEGIN CERTIFICATE-----
+MIIF8zCCBFugAwIBAgIJAMstgJlaaVJcMA0GCSqGSIb3DQEBCwUAME0xCzAJBgNV
+BAYTAlhZMSYwJAYDVQQKDB1QeXRob24gU29mdHdhcmUgRm91bmRhdGlvbiBDQTEW
+MBQGA1UEAwwNb3VyLWNhLXNlcnZlcjAgFw0xODA4MjkxNDIzMTZaGA8yNTI1MTAy
+ODE0MjMxNlowXzELMAkGA1UEBhMCWFkxFzAVBgNVBAcMDkNhc3RsZSBBbnRocmF4
+MSMwIQYDVQQKDBpQeXRob24gU29mdHdhcmUgRm91bmRhdGlvbjESMBAGA1UEAwwJ
+bG9jYWxob3N0MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEA7jZwqmFq
+ILsyiAdz8DrKEcyPMIDXccd0YiCUiLRSEpQIAeF5GMzwaYuZxUfBgqquyFEEPomM
+HWWt8h+l9dSHZawseIA3UBUhTnoJxuNaKr+xsARBb6usZaMKaGhsPuf/P7CV/1VO
+OKy/f34jFU23oTITEv8+Z00mEgAle7EV58FuE+pdjne+xczwY52hRQza+RiKIg+J
+jUid+bdObZYhnM9CMhOUxkepCBBTSB+bYXh6CSeCQuLi8licHiacQ8ddJ41kcCjf
+7V5vBZx0DzEQFJdsDNO0GRCNcn81K9NP6BtnaT5z8jYfuqdpXfCUtINvz3dqUC/D
+rZjNnA3DeRPqghFtVFSCef/2nfKVHKEMMkSAUTiW2pKr+hXFU3YE6IKKuVbvk+k1
+RS0iEr1b6bFdDLU/x/f/U7Qp6jsJYhPLPJG9zY0E/Hu9lRzXeN21TxOA3kPl5WzK
+Cs1fhjpkh0n80jmQfZEnEphneWA/O/N02y/P+zZ9REUHVqmosRiN+vgRAgMBAAGj
+ggHAMIIBvDAUBgNVHREEDTALgglsb2NhbGhvc3QwDgYDVR0PAQH/BAQDAgWgMB0G
+A1UdJQQWMBQGCCsGAQUFBwMBBggrBgEFBQcDAjAMBgNVHRMBAf8EAjAAMB0GA1Ud
+DgQWBBQWIsmqINT0ju2cprsj9fIpRO3yHjB9BgNVHSMEdjB0gBTACisoQ95fyX1H
+5UebNvJljGc74qFRpE8wTTELMAkGA1UEBhMCWFkxJjAkBgNVBAoMHVB5dGhvbiBT
+b2Z0d2FyZSBGb3VuZGF0aW9uIENBMRYwFAYDVQQDDA1vdXItY2Etc2VydmVyggkA
+yy2AmVppUlswgYMGCCsGAQUFBwEBBHcwdTA8BggrBgEFBQcwAoYwaHR0cDovL3Rl
+c3RjYS5weXRob250ZXN0Lm5ldC90ZXN0Y2EvcHljYWNlcnQuY2VyMDUGCCsGAQUF
+BzABhilodHRwOi8vdGVzdGNhLnB5dGhvbnRlc3QubmV0L3Rlc3RjYS9vY3NwLzBD
+BgNVHR8EPDA6MDigNqA0hjJodHRwOi8vdGVzdGNhLnB5dGhvbnRlc3QubmV0L3Rl
+c3RjYS9yZXZvY2F0aW9uLmNybDANBgkqhkiG9w0BAQsFAAOCAYEAQ4IfGLTLerdO
+rMNlLrdXOvB4s7IgPr17JPfnF8xiwLhj8C4wDFS+yZR8VNRABm6SnXIsRPXjwUo/
+JuQhyrrvT6NQVu6JXNxbmLwM6dsWmPBMP2W52eAuvYOexxv3T4dfdf9nXQr/zvoL
+8dWLWCMrkie4Ff9mwvlo4u1koErgQousNWpnZPXLqQA3IFbdOgJu2A+0Xf+Sow1l
+/C6rTje8ftZbHFV4oG6pLlUxz2HwG0z+/mB1dujZofUU8EMzTVIFvjP/2jGUvQ3l
+Taju0fOSNMI2kTc6bewg37Oeol3Q8KHi/7eFzgnjyEpqk6Su7MFnQveOL2TK13Zy
+vz/vZP8Q3aI+LfWqAs8x8G2Ta1ZMsIiVVNzUrNzBiCeL2ZxOZpP43V50QSaa7+jI
+RlzV9PzNzGfHM2IucJvROd40/a2duUhh54lTYmLwQGxoL+HaQGEqUK/JQW2YFq/L
+YwPsBJngOZhgrqpqV5slcwMWv3jI1y/r/GR/x3iMNBVbZkCYhuYK
+-----END CERTIFICATE-----
+
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 40878)
+ server:  new connection from ('127.0.0.1', 38968)
+[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1081)
+
+ server:  bad connection attempt from ('127.0.0.1', 38968):
+Traceback (most recent call last):
+   File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_ssl.py", line 2439, in wrap_conn
+    self.sslconn = self.server.context.wrap_socket(
+                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self.sock, server_side=True)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 457, in wrap_socket
+    return self.sslsocket_class._create(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        sock=sock,
+        ^^^^^^^^^^
+    ...<5 lines>...
+        session=session
+        ^^^^^^^^^^^^^^^
+    )
+    ^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1088, in _create
+    self.do_handshake()
+    ~~~~~~~~~~~~~~~~~^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1384, in do_handshake
+    self._sslobj.do_handshake()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+ ssl.SSLError: [SSL: TLSV1_ALERT_UNKNOWN_CA] tlsv1 alert unknown ca (_ssl.c:1081)
+ connection timeout TimeoutError('timed out')
+ server:  new connection from ('127.0.0.1', 41478)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 41478)
+ server:  new connection from ('127.0.0.1', 41482)
+
+Verified certificate for localhost:43585 is
+-----BEGIN CERTIFICATE-----
+MIIF8zCCBFugAwIBAgIJAMstgJlaaVJcMA0GCSqGSIb3DQEBCwUAME0xCzAJBgNV
+BAYTAlhZMSYwJAYDVQQKDB1QeXRob24gU29mdHdhcmUgRm91bmRhdGlvbiBDQTEW
+MBQGA1UEAwwNb3VyLWNhLXNlcnZlcjAgFw0xODA4MjkxNDIzMTZaGA8yNTI1MTAy
+ODE0MjMxNlowXzELMAkGA1UEBhMCWFkxFzAVBgNVBAcMDkNhc3RsZSBBbnRocmF4
+MSMwIQYDVQQKDBpQeXRob24gU29mdHdhcmUgRm91bmRhdGlvbjESMBAGA1UEAwwJ
+bG9jYWxob3N0MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEA7jZwqmFq
+ILsyiAdz8DrKEcyPMIDXccd0YiCUiLRSEpQIAeF5GMzwaYuZxUfBgqquyFEEPomM
+HWWt8h+l9dSHZawseIA3UBUhTnoJxuNaKr+xsARBb6usZaMKaGhsPuf/P7CV/1VO
+OKy/f34jFU23oTITEv8+Z00mEgAle7EV58FuE+pdjne+xczwY52hRQza+RiKIg+J
+jUid+bdObZYhnM9CMhOUxkepCBBTSB+bYXh6CSeCQuLi8licHiacQ8ddJ41kcCjf
+7V5vBZx0DzEQFJdsDNO0GRCNcn81K9NP6BtnaT5z8jYfuqdpXfCUtINvz3dqUC/D
+rZjNnA3DeRPqghFtVFSCef/2nfKVHKEMMkSAUTiW2pKr+hXFU3YE6IKKuVbvk+k1
+RS0iEr1b6bFdDLU/x/f/U7Qp6jsJYhPLPJG9zY0E/Hu9lRzXeN21TxOA3kPl5WzK
+Cs1fhjpkh0n80jmQfZEnEphneWA/O/N02y/P+zZ9REUHVqmosRiN+vgRAgMBAAGj
+ggHAMIIBvDAUBgNVHREEDTALgglsb2NhbGhvc3QwDgYDVR0PAQH/BAQDAgWgMB0G
+A1UdJQQWMBQGCCsGAQUFBwMBBggrBgEFBQcDAjAMBgNVHRMBAf8EAjAAMB0GA1Ud
+DgQWBBQWIsmqINT0ju2cprsj9fIpRO3yHjB9BgNVHSMEdjB0gBTACisoQ95fyX1H
+5UebNvJljGc74qFRpE8wTTELMAkGA1UEBhMCWFkxJjAkBgNVBAoMHVB5dGhvbiBT
+b2Z0d2FyZSBGb3VuZGF0aW9uIENBMRYwFAYDVQQDDA1vdXItY2Etc2VydmVyggkA
+yy2AmVppUlswgYMGCCsGAQUFBwEBBHcwdTA8BggrBgEFBQcwAoYwaHR0cDovL3Rl
+c3RjYS5weXRob250ZXN0Lm5ldC90ZXN0Y2EvcHljYWNlcnQuY2VyMDUGCCsGAQUF
+BzABhilodHRwOi8vdGVzdGNhLnB5dGhvbnRlc3QubmV0L3Rlc3RjYS9vY3NwLzBD
+BgNVHR8EPDA6MDigNqA0hjJodHRwOi8vdGVzdGNhLnB5dGhvbnRlc3QubmV0L3Rl
+c3RjYS9yZXZvY2F0aW9uLmNybDANBgkqhkiG9w0BAQsFAAOCAYEAQ4IfGLTLerdO
+rMNlLrdXOvB4s7IgPr17JPfnF8xiwLhj8C4wDFS+yZR8VNRABm6SnXIsRPXjwUo/
+JuQhyrrvT6NQVu6JXNxbmLwM6dsWmPBMP2W52eAuvYOexxv3T4dfdf9nXQr/zvoL
+8dWLWCMrkie4Ff9mwvlo4u1koErgQousNWpnZPXLqQA3IFbdOgJu2A+0Xf+Sow1l
+/C6rTje8ftZbHFV4oG6pLlUxz2HwG0z+/mB1dujZofUU8EMzTVIFvjP/2jGUvQ3l
+Taju0fOSNMI2kTc6bewg37Oeol3Q8KHi/7eFzgnjyEpqk6Su7MFnQveOL2TK13Zy
+vz/vZP8Q3aI+LfWqAs8x8G2Ta1ZMsIiVVNzUrNzBiCeL2ZxOZpP43V50QSaa7+jI
+RlzV9PzNzGfHM2IucJvROd40/a2duUhh54lTYmLwQGxoL+HaQGEqUK/JQW2YFq/L
+YwPsBJngOZhgrqpqV5slcwMWv3jI1y/r/GR/x3iMNBVbZkCYhuYK
+-----END CERTIFICATE-----
+
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 41482)
+ server:  new connection from ('127.0.0.1', 48840)
+
+ server:  bad connection attempt from ('127.0.0.1', 48840):
+Traceback (most recent call last):
+   File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_ssl.py", line 2439, in wrap_conn
+    self.sslconn = self.server.context.wrap_socket(
+                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self.sock, server_side=True)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 457, in wrap_socket
+    return self.sslsocket_class._create(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        sock=sock,
+        ^^^^^^^^^^
+    ...<5 lines>...
+        session=session
+        ^^^^^^^^^^^^^^^
+    )
+    ^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1088, in _create
+    self.do_handshake()
+    ~~~~~~~~~~~~~~~~~^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1384, in do_handshake
+    self._sslobj.do_handshake()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+ ssl.SSLEOFError: [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1081)
+ server:  new connection from ('127.0.0.1', 43266)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 43266)
+ connection timeout TimeoutError('timed out')
+ server:  new connection from ('127.0.0.1', 58650)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 58650)
+ connection timeout TimeoutError('timed out')
+ server:  new connection from ('127.0.0.1', 55100)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+
+Needed 2 calls to do_handshake() to establish session.
+ Connection reset by peer: ('127.0.0.1', 55100)
+ connection timeout TimeoutError('timed out')
+ server:  new connection from ('127.0.0.1', 37004)
+Needed 2 calls to complete do_handshake().
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 37004)
+ connection timeout TimeoutError('timed out')
+ connection timeout TimeoutError('timed out')
+ connection timeout TimeoutError('timed out')
+
+ connection timeout TimeoutError('timed out')
+
+ connection timeout TimeoutError('timed out')
+ server:  new connection from ('127.0.0.1', 46988)
+ client cert is None
+ client did not provide a cert
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+TLS: (<ssl.SSLSocket fd=7, family=2, type=1, proto=0, laddr=('127.0.0.1', 47559), raddr=('127.0.0.1', 46988)>, 'write', <TLSVersion.TLSv1_3: 772>, <_TLSContentType.ALERT: 21>, <_TLSAlertType.CERTIFICATE_REQUIRED: 116>, b'\x02t')
+Test server failure:
+Traceback (most recent call last):
+   File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_ssl.py", line 2523, in run
+    msg = self.read()
+   File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_ssl.py", line 2500, in read
+    return self.sslconn.read()
+           ~~~~~~~~~~~~~~~~~^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1152, in read
+    return self._sslobj.read(len)
+           ~~~~~~~~~~~~~~~~~^^^^^
+ ssl.SSLError: [SSL: PEER_DID_NOT_RETURN_A_CERTIFICATE] peer did not return a certificate (_ssl.c:2711)
+TLS: (<ssl.SSLSocket fd=6, family=2, type=1, proto=0, laddr=('127.0.0.1', 46988)>, 'read', <TLSVersion.TLSv1_3: 772>, <_TLSContentType.ALERT: 21>, <_TLSAlertType.CERTIFICATE_REQUIRED: 116>, b'\x02t')
+ connection timeout TimeoutError('timed out')
+
+ PROTOCOL_TLS->PROTOCOL_TLS CERT_NONE
+ PROTOCOL_TLS->PROTOCOL_TLS CERT_OPTIONAL
+ connection timeout TimeoutError('timed out')
+ PROTOCOL_TLS->PROTOCOL_TLS CERT_REQUIRED
+ PROTOCOL_TLS->PROTOCOL_TLS CERT_NONE
+ server:  new connection from ('127.0.0.1', 50182)
+ client:  sending b'FOO\n'...
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ client:  read b'foo\n'
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  closing connection.
+ server:  new connection from ('127.0.0.1', 38116)
+ client:  sending b'FOO\n'...
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ client:  read b'foo\n'
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  closing connection.
+ server:  new connection from ('127.0.0.1', 59122)
+ client:  sending b'FOO\n'...
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ client:  read b'foo\n'
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  closing connection.
+ server:  new connection from ('127.0.0.1', 51666)
+ client:  sending b'FOO\n'...
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ client:  read b'foo\n'
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  closing connection.
+
+ server:  new connection from 127.0.0.1:43340
+ client:  sending b'FOO\n'...
+ server:  read b'FOO\n' from client
+ client:  read b'foo\n'
+ client:  closing connection.
+ client:  connection closed.
+ cleanup: stopping server.
+ server:  read b'over\n' from client
+ cleanup: joining server thread.
+ server:  closed connection <ssl.SSLSocket [closed] fd=-1, family=2, type=1, proto=0>
+ server:  read b'' from client
+ cleanup: successfully joined.
+
+ server:  new connection from ('127.0.0.1', 46804)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 46804)
+ server:  new connection from ('127.0.0.1', 55114)
+
+ server:  bad connection attempt from ('127.0.0.1', 55114):
+Traceback (most recent call last):
+   File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_ssl.py", line 2439, in wrap_conn
+    self.sslconn = self.server.context.wrap_socket(
+                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self.sock, server_side=True)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 457, in wrap_socket
+    return self.sslsocket_class._create(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        sock=sock,
+        ^^^^^^^^^^
+    ...<5 lines>...
+        session=session
+        ^^^^^^^^^^^^^^^
+    )
+    ^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1088, in _create
+    self.do_handshake()
+    ~~~~~~~~~~~~~~~~~^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1384, in do_handshake
+    self._sslobj.do_handshake()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+ ConnectionResetError: [Errno 104] Connection reset by peer
+ connection timeout TimeoutError('timed out')
+
+ server:  new connection from ('127.0.0.1', 38030)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 38030)
+ server:  new connection from ('127.0.0.1', 38466)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 38466)
+ server:  new connection from ('127.0.0.1', 52856)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 52856)
+ server:  new connection from ('127.0.0.1', 42970)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 42970)
+ connection timeout TimeoutError('timed out')
+ server:  new connection from ('127.0.0.1', 40736)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 40736)
+ server:  new connection from ('127.0.0.1', 40972)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 40972)
+ server:  new connection from ('127.0.0.1', 51964)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 51964)
+ server:  new connection from ('127.0.0.1', 42720)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 42720)
+ connection timeout TimeoutError('timed out')
+ server:  new connection from ('127.0.0.1', 47264)
+
+ server:  bad connection attempt from ('127.0.0.1', 47264):
+Traceback (most recent call last):
+   File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_ssl.py", line 2439, in wrap_conn
+    self.sslconn = self.server.context.wrap_socket(
+                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self.sock, server_side=True)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 457, in wrap_socket
+    return self.sslsocket_class._create(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        sock=sock,
+        ^^^^^^^^^^
+    ...<5 lines>...
+        session=session
+        ^^^^^^^^^^^^^^^
+    )
+    ^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1088, in _create
+    self.do_handshake()
+    ~~~~~~~~~~~~~~~~~^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1384, in do_handshake
+    self._sslobj.do_handshake()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+ ssl.SSLError: [SSL: SSLV3_ALERT_BAD_CERTIFICATE] ssl/tls alert bad certificate (_ssl.c:1081)
+ connection timeout TimeoutError('timed out')
+ connection timeout TimeoutError('timed out')
+ server:  new connection from ('127.0.0.1', 39442)
+ client:  sending b'FOO\n'...
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ client:  read b'foo\n'
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  closing connection.
+ got compression: None
+ server:  new connection from ('127.0.0.1', 40496)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  closing connection.
+ connection timeout TimeoutError('timed out')
+
+ server:  new connection from ('127.0.0.1', 34690)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 34690)
+ server:  new connection from ('127.0.0.1', 53438)
+
+ server:  bad connection attempt from ('127.0.0.1', 53438):
+Traceback (most recent call last):
+   File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_ssl.py", line 2439, in wrap_conn
+    self.sslconn = self.server.context.wrap_socket(
+                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self.sock, server_side=True)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 457, in wrap_socket
+    return self.sslsocket_class._create(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        sock=sock,
+        ^^^^^^^^^^
+    ...<5 lines>...
+        session=session
+        ^^^^^^^^^^^^^^^
+    )
+    ^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1088, in _create
+    self.do_handshake()
+    ~~~~~~~~~~~~~~~~~^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1384, in do_handshake
+    self._sslobj.do_handshake()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+ ConnectionResetError: [Errno 104] Connection reset by peer
+ server:  new connection from ('127.0.0.1', 45574)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 45574)
+ connection timeout TimeoutError('timed out')
+ server:  new connection from ('127.0.0.1', 46986)
+ server: connection cipher is now ('ECDHE-RSA-AES256-GCM-SHA384', 'TLSv1.2', 256)
+ connection timeout TimeoutError('timed out')
+ server:  new connection from ('127.0.0.1', 36728)
+ server: connection cipher is now ('ECDHE-ECDSA-AES256-GCM-SHA384', 'TLSv1.2', 256)
+ connection timeout TimeoutError('timed out')
+ server:  new connection from ('127.0.0.1', 40374)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 40374)
+ server:  new connection from ('127.0.0.1', 46754)
+ client:  sending b'FOO\n'...
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ client:  read b'foo\n'
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  closing connection.
+ server:  new connection from ('127.0.0.1', 41408)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  closing connection.
+ connection timeout TimeoutError('timed out')
+ server:  new connection from ('127.0.0.1', 44930)
+
+ server:  bad connection attempt from ('127.0.0.1', 44930):
+Traceback (most recent call last):
+   File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_ssl.py", line 2439, in wrap_conn
+    self.sslconn = self.server.context.wrap_socket(
+                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self.sock, server_side=True)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 457, in wrap_socket
+    return self.sslsocket_class._create(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        sock=sock,
+        ^^^^^^^^^^
+    ...<5 lines>...
+        session=session
+        ^^^^^^^^^^^^^^^
+    )
+    ^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1088, in _create
+    self.do_handshake()
+    ~~~~~~~~~~~~~~~~~^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1384, in do_handshake
+    self._sslobj.do_handshake()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+ ssl.SSLError: [SSL: NO_SUITABLE_KEY_SHARE] no suitable key share (_ssl.c:1081)
+
+ server:  new connection from ('127.0.0.1', 40514)
+ client:  sending b'FOO\n'...
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ client:  read b'foo\n'
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  closing connection.
+ connection timeout TimeoutError('timed out')
+ connection timeout TimeoutError('timed out')
+ connection timeout TimeoutError('timed out')
+
+{'OCSP': ('http://testca.pythontest.net/testca/ocsp/',),
+ 'caIssuers': ('http://testca.pythontest.net/testca/pycacert.cer',),
+ 'crlDistributionPoints': ('http://testca.pythontest.net/testca/revocation.crl',),
+ 'issuer': ((('countryName', 'XY'),),
+            (('organizationName', 'Python Software Foundation CA'),),
+            (('commonName', 'our-ca-server'),)),
+ 'notAfter': 'Oct 28 14:23:16 2525 GMT',
+ 'notBefore': 'Aug 29 14:23:16 2018 GMT',
+ 'serialNumber': 'CB2D80995A69525C',
+ 'subject': ((('countryName', 'XY'),),
+             (('localityName', 'Castle Anthrax'),),
+             (('organizationName', 'Python Software Foundation'),),
+             (('commonName', 'localhost'),)),
+ 'subjectAltName': (('DNS', 'localhost'),),
+ 'version': 3}
+Connection cipher is ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256).
+ connection timeout TimeoutError('timed out')
+ server:  new connection from ('127.0.0.1', 33056)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 33056)
+ server:  new connection from ('127.0.0.1', 49832)
+
+ server:  bad connection attempt from ('127.0.0.1', 49832):
+Traceback (most recent call last):
+   File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_ssl.py", line 2439, in wrap_conn
+    self.sslconn = self.server.context.wrap_socket(
+                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self.sock, server_side=True)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 457, in wrap_socket
+    return self.sslsocket_class._create(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        sock=sock,
+        ^^^^^^^^^^
+    ...<5 lines>...
+        session=session
+        ^^^^^^^^^^^^^^^
+    )
+    ^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1088, in _create
+    self.do_handshake()
+    ~~~~~~~~~~~~~~~~~^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1384, in do_handshake
+    self._sslobj.do_handshake()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+ ssl.SSLError: [SSL: SSLV3_ALERT_BAD_CERTIFICATE] ssl/tls alert bad certificate (_ssl.c:1081)
+ server:  new connection from ('127.0.0.1', 52448)
+ client:  sending b'FOO\n'...
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ client:  read b'foo\n'
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  closing connection.
+ server:  new connection from ('127.0.0.1', 59476)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  closing connection.
+ connection timeout TimeoutError('timed out')
+ server:  new connection from ('127.0.0.1', 40512)
+
+ server:  bad connection attempt from ('127.0.0.1', 40512):
+Traceback (most recent call last):
+   File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_ssl.py", line 2439, in wrap_conn
+    self.sslconn = self.server.context.wrap_socket(
+                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self.sock, server_side=True)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 457, in wrap_socket
+    return self.sslsocket_class._create(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        sock=sock,
+        ^^^^^^^^^^
+    ...<5 lines>...
+        session=session
+        ^^^^^^^^^^^^^^^
+    )
+    ^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1088, in _create
+    self.do_handshake()
+    ~~~~~~~~~~~~~~~~~^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1384, in do_handshake
+    self._sslobj.do_handshake()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+ ssl.SSLError: [SSL: NO_SHARED_CIPHER] no shared cipher (_ssl.c:1081)
+ server:  new connection from ('127.0.0.1', 48146)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 48146)
+ connection timeout TimeoutError('timed out')
+
+ PROTOCOL_TLSv1_2->PROTOCOL_TLSv1_2 CERT_NONE
+ {PROTOCOL_TLS->PROTOCOL_TLSv1_2} CERT_NONE
+ PROTOCOL_TLSv1_2->PROTOCOL_TLS CERT_NONE
+ connection timeout TimeoutError('timed out')
+ server:  new connection from ('127.0.0.1', 49690)
+ server: connection cipher is now ('ECDHE-PSK-CHACHA20-POLY1305', 'TLSv1.2', 256)
+ server:  new connection from ('127.0.0.1', 60430)
+
+ server:  bad connection attempt from ('127.0.0.1', 60430):
+Traceback (most recent call last):
+   File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_ssl.py", line 2439, in wrap_conn
+    self.sslconn = self.server.context.wrap_socket(
+                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self.sock, server_side=True)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 457, in wrap_socket
+    return self.sslsocket_class._create(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        sock=sock,
+        ^^^^^^^^^^
+    ...<5 lines>...
+        session=session
+        ^^^^^^^^^^^^^^^
+    )
+    ^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1088, in _create
+    self.do_handshake()
+    ~~~~~~~~~~~~~~~~~^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1384, in do_handshake
+    self._sslobj.do_handshake()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+ ssl.SSLError: [SSL: RECORD_LAYER_FAILURE] record layer failure (_ssl.c:1081)
+ server:  new connection from ('127.0.0.1', 54302)
+ server: connection cipher is now ('ECDHE-PSK-CHACHA20-POLY1305', 'TLSv1.2', 256)
+ server:  new connection from ('127.0.0.1', 38322)
+ server: connection cipher is now ('ECDHE-PSK-CHACHA20-POLY1305', 'TLSv1.2', 256)
+ server:  new connection from ('127.0.0.1', 37078)
+ server: connection cipher is now ('TLS_CHACHA20_POLY1305_SHA256', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 37078)
+ server:  new connection from ('127.0.0.1', 34378)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+
+ server:  new connection from ('127.0.0.1', 33824)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ connection timeout TimeoutError('timed out')
+ server:  new connection from ('127.0.0.1', 57676)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ server:  new connection from ('127.0.0.1', 59940)
+ client:  sending b'FOO\n'...
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ client:  read b'foo\n'
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  closing connection.
+ server:  new connection from ('127.0.0.1', 44006)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  sending b'FOO\n'...
+ client:  read b'foo\n'
+ client:  closing connection.
+ connection timeout TimeoutError('timed out')
+ server:  new connection from ('127.0.0.1', 45728)
+ server: connection cipher is now ('ECDHE-RSA-AES256-GCM-SHA384', 'TLSv1.2', 256)
+ connection timeout TimeoutError('timed out')
+ server:  new connection from ('127.0.0.1', 39574)
+ server: connection cipher is now ('ECDHE-RSA-AES256-GCM-SHA384', 'TLSv1.2', 256)
+ server:  new connection from ('127.0.0.1', 37806)
+ server: connection cipher is now ('ECDHE-RSA-AES256-GCM-SHA384', 'TLSv1.2', 256)
+ server:  new connection from ('127.0.0.1', 32890)
+ server: connection cipher is now ('ECDHE-RSA-AES256-GCM-SHA384', 'TLSv1.2', 256)
+ connection timeout TimeoutError('timed out')
+ server:  new connection from ('127.0.0.1', 34766)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ server:  new connection from ('127.0.0.1', 43234)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ server:  new connection from ('127.0.0.1', 37672)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ server:  new connection from ('127.0.0.1', 55444)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ connection timeout TimeoutError('timed out')
+ connection timeout TimeoutError('timed out')
+
+ server (('127.0.0.1', 39323):39323 ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)):
+   [17/Nov/2026 11:10:44] "GET /test_ssl.py HTTP/1.1" 200 -
+ client: read 238973 bytes from remote server '<HTTPSServerThread <HTTPSServer localhost:39323>>'
+stopping HTTPS server
+joining HTTPS thread
+
+ server:  new connection from ('127.0.0.1', 43006)
+
+ server:  bad connection attempt from ('127.0.0.1', 43006):
+Traceback (most recent call last):
+   File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_ssl.py", line 2439, in wrap_conn
+    self.sslconn = self.server.context.wrap_socket(
+                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self.sock, server_side=True)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 457, in wrap_socket
+    return self.sslsocket_class._create(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        sock=sock,
+        ^^^^^^^^^^
+    ...<5 lines>...
+        session=session
+        ^^^^^^^^^^^^^^^
+    )
+    ^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1088, in _create
+    self.do_handshake()
+    ~~~~~~~~~~~~~~~~~^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1384, in do_handshake
+    self._sslobj.do_handshake()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+ ssl.SSLError: [SSL: TLSV1_ALERT_UNKNOWN_CA] tlsv1 alert unknown ca (_ssl.c:1081)
+ server:  new connection from ('127.0.0.1', 47344)
+
+ client:  sending b'msg 1'...
+ server: read b'msg 1' (unencrypted), sending back b'msg 1' (unencrypted)...
+ client:  read b'msg 1' from server
+ client:  sending b'MSG 2'...
+ server: read b'MSG 2' (unencrypted), sending back b'msg 2' (unencrypted)...
+ client:  read b'msg 2' from server
+ client:  sending b'STARTTLS'...
+ server: read STARTTLS from client, sending OK...
+ client:  read b'ok' from server, starting TLS...
+ client:  sending b'MSG 3'...
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ server: read b'MSG 3' (encrypted), sending back b'msg 3' (encrypted)...
+ client:  read b'msg 3' from server
+ client:  sending b'msg 4'...
+ server: read b'msg 4' (encrypted), sending back b'msg 4' (encrypted)...
+ client:  read b'msg 4' from server
+ client:  sending b'ENDTLS'...
+ server: read ENDTLS from client, sending OK...
+ client:  read b'ok' from server, ending TLS...
+ server: connection is now unencrypted...
+ client:  sending b'msg 5'...
+ server: read b'msg 5' (unencrypted), sending back b'msg 5' (unencrypted)...
+ client:  read b'msg 5' from server
+ client:  sending b'msg 6'...
+ server: read b'msg 6' (unencrypted), sending back b'msg 6' (unencrypted)...
+ client:  read b'msg 6' from server
+ client:  closing connection.
+ server: client closed connection
+ server:  new connection from ('127.0.0.1', 38082)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ connection timeout TimeoutError('timed out')
+ server:  new connection from ('127.0.0.1', 60100)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 60100)
+
+ server:  new connection from ('127.0.0.1', 47262)
+ server: connection cipher is now ('ECDHE-RSA-AES256-GCM-SHA384', 'TLSv1.2', 256)
+ got channel binding data: b'NT\xf7\xe3\xf4*\x87^Q[\xbc\x89'
+ server:  new connection from ('127.0.0.1', 47276)
+ server: connection cipher is now ('ECDHE-RSA-AES256-GCM-SHA384', 'TLSv1.2', 256)
+got another channel binding data: b'L\xec]x{\xb0\xae\xb1\xa7\xb6aM'
+ server:  new connection from ('127.0.0.1', 58490)
+
+ server:  bad connection attempt from ('127.0.0.1', 58490):
+Traceback (most recent call last):
+   File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_ssl.py", line 2439, in wrap_conn
+    self.sslconn = self.server.context.wrap_socket(
+                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self.sock, server_side=True)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 457, in wrap_socket
+    return self.sslsocket_class._create(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        sock=sock,
+        ^^^^^^^^^^
+    ...<5 lines>...
+        session=session
+        ^^^^^^^^^^^^^^^
+    )
+    ^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1088, in _create
+    self.do_handshake()
+    ~~~~~~~~~~~~~~~~~^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1384, in do_handshake
+    self._sslobj.do_handshake()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+ ssl.SSLError: [SSL: SSLV3_ALERT_CERTIFICATE_UNKNOWN] ssl/tls alert certificate unknown (_ssl.c:1081)
+ server:  new connection from ('127.0.0.1', 59334)
+ server: connection cipher is now ('TLS_AES_256_GCM_SHA384', 'TLSv1.3', 256)
+ Connection reset by peer: ('127.0.0.1', 59334)
+ server:  new connection from ('127.0.0.1', 34548)
+
+ server:  bad connection attempt from ('127.0.0.1', 34548):
+Traceback (most recent call last):
+   File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_ssl.py", line 2439, in wrap_conn
+    self.sslconn = self.server.context.wrap_socket(
+                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self.sock, server_side=True)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 457, in wrap_socket
+    return self.sslsocket_class._create(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        sock=sock,
+        ^^^^^^^^^^
+    ...<5 lines>...
+        session=session
+        ^^^^^^^^^^^^^^^
+    )
+    ^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1088, in _create
+    self.do_handshake()
+    ~~~~~~~~~~~~~~~~~^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1384, in do_handshake
+    self._sslobj.do_handshake()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+ ssl.SSLCertVerificationError: [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate (_ssl.c:1081)
+
+SSLError is SSLError(1, '[SSL: TLSV1_ALERT_UNKNOWN_CA] tlsv1 alert unknown ca (_ssl.c:1081)')
+ server:  new connection from ('127.0.0.1', 56070)
+
+ server:  bad connection attempt from ('127.0.0.1', 56070):
+Traceback (most recent call last):
+   File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_ssl.py", line 2439, in wrap_conn
+    self.sslconn = self.server.context.wrap_socket(
+                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self.sock, server_side=True)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 457, in wrap_socket
+    return self.sslsocket_class._create(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        sock=sock,
+        ^^^^^^^^^^
+    ...<5 lines>...
+        session=session
+        ^^^^^^^^^^^^^^^
+    )
+    ^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1088, in _create
+    self.do_handshake()
+    ~~~~~~~~~~~~~~~~~^^
+   File "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/ssl.py", line 1384, in do_handshake
+    self._sslobj.do_handshake()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+ ssl.SSLCertVerificationError: [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate (_ssl.c:1081)

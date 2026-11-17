@@ -1,0 +1,200 @@
+test_DER_to_PEM (test.test_ssl.BasicSocketTests.test_DER_to_PEM) ... ok
+test_asn1object (test.test_ssl.BasicSocketTests.test_asn1object) ... ok
+test_cert_time_to_seconds (test.test_ssl.BasicSocketTests.test_cert_time_to_seconds) ... ok
+test_cert_time_to_seconds_locale (test.test_ssl.BasicSocketTests.test_cert_time_to_seconds_locale) ... skipped 'locale-specific month name needs to be different from C locale'
+test_cert_time_to_seconds_timezone (test.test_ssl.BasicSocketTests.test_cert_time_to_seconds_timezone) ... ok
+test_connect_ex_error (test.test_ssl.BasicSocketTests.test_connect_ex_error) ... ok
+test_constants (test.test_ssl.BasicSocketTests.test_constants) ... ok
+test_dealloc_warn (test.test_ssl.BasicSocketTests.test_dealloc_warn) ... ok
+test_empty_cert (test.test_ssl.BasicSocketTests.test_empty_cert) ... ok
+test_enum_certificates (test.test_ssl.BasicSocketTests.test_enum_certificates) ... skipped 'Windows specific'
+test_enum_crls (test.test_ssl.BasicSocketTests.test_enum_crls) ... skipped 'Windows specific'
+test_get_default_verify_paths (test.test_ssl.BasicSocketTests.test_get_default_verify_paths) ... ok
+test_malformed_cert (test.test_ssl.BasicSocketTests.test_malformed_cert) ... ok
+test_malformed_key (test.test_ssl.BasicSocketTests.test_malformed_key) ... ok
+test_openssl111_deprecations (test.test_ssl.BasicSocketTests.test_openssl111_deprecations) ... ok
+test_openssl_version (test.test_ssl.BasicSocketTests.test_openssl_version) ... ok
+test_options (test.test_ssl.BasicSocketTests.test_options) ... ok
+test_parse_all_sans (test.test_ssl.BasicSocketTests.test_parse_all_sans) ... ok
+test_parse_cert (test.test_ssl.BasicSocketTests.test_parse_cert) ... ok
+test_parse_cert_CVE_2013_4238 (test.test_ssl.BasicSocketTests.test_parse_cert_CVE_2013_4238) ... ok
+test_parse_cert_CVE_2019_5010 (test.test_ssl.BasicSocketTests.test_parse_cert_CVE_2019_5010) ... ok
+test_private_init (test.test_ssl.BasicSocketTests.test_private_init) ... ok
+test_purpose_enum (test.test_ssl.BasicSocketTests.test_purpose_enum) ... ok
+test_random (test.test_ssl.BasicSocketTests.test_random) ... ok
+test_read_write_zero (test.test_ssl.BasicSocketTests.test_read_write_zero) ... ok
+test_refcycle (test.test_ssl.BasicSocketTests.test_refcycle) ... ok
+test_server_side (test.test_ssl.BasicSocketTests.test_server_side) ... ok
+test_ssl_types (test.test_ssl.BasicSocketTests.test_ssl_types) ... ok
+test_str_for_enums (test.test_ssl.BasicSocketTests.test_str_for_enums) ... ok
+test_timeout (test.test_ssl.BasicSocketTests.test_timeout) ... ok
+test_tls_unique_channel_binding (test.test_ssl.BasicSocketTests.test_tls_unique_channel_binding) ... ok
+test_unknown_channel_binding (test.test_ssl.BasicSocketTests.test_unknown_channel_binding) ... ok
+test_unsupported_dtls (test.test_ssl.BasicSocketTests.test_unsupported_dtls) ... ok
+test_wrapped_unconnected (test.test_ssl.BasicSocketTests.test_wrapped_unconnected) ... ok
+test__create_stdlib_context (test.test_ssl.ContextTests.test__create_stdlib_context) ... ok
+test_cert_store_stats (test.test_ssl.ContextTests.test_cert_store_stats) ... ok
+test_check_hostname (test.test_ssl.ContextTests.test_check_hostname) ... ok
+test_ciphers (test.test_ssl.ContextTests.test_ciphers) ... ok
+test_constructor (test.test_ssl.ContextTests.test_constructor) ... ok
+test_context_client_server (test.test_ssl.ContextTests.test_context_client_server) ... ok
+test_context_custom_class (test.test_ssl.ContextTests.test_context_custom_class) ... ok
+test_create_default_context (test.test_ssl.ContextTests.test_create_default_context) ... ok
+test_get_ca_certs (test.test_ssl.ContextTests.test_get_ca_certs) ... ok
+test_get_ciphers (test.test_ssl.ContextTests.test_get_ciphers) ... ok
+test_hostname_checks_common_name (test.test_ssl.ContextTests.test_hostname_checks_common_name) ... ok
+test_load_cert_chain (test.test_ssl.ContextTests.test_load_cert_chain) ... ok
+test_load_cert_chain_thread_safety (test.test_ssl.ContextTests.test_load_cert_chain_thread_safety) ... ok
+test_load_default_certs (test.test_ssl.ContextTests.test_load_default_certs) ... ok
+test_load_default_certs_env (test.test_ssl.ContextTests.test_load_default_certs_env) ... ok
+test_load_default_certs_env_windows (test.test_ssl.ContextTests.test_load_default_certs_env_windows) ... skipped 'Windows specific'
+test_load_dh_params (test.test_ssl.ContextTests.test_load_dh_params) ... ok
+test_load_verify_cadata (test.test_ssl.ContextTests.test_load_verify_cadata) ... ok
+test_load_verify_locations (test.test_ssl.ContextTests.test_load_verify_locations) ... ok
+test_min_max_version (test.test_ssl.ContextTests.test_min_max_version) ... ok
+test_num_tickest (test.test_ssl.ContextTests.test_num_tickest) ... ok
+test_options (test.test_ssl.ContextTests.test_options) ... ok
+test_python_ciphers (test.test_ssl.ContextTests.test_python_ciphers) ... ok
+test_refcycle_keylog_filename (test.test_ssl.ContextTests.test_refcycle_keylog_filename) ... ok
+test_refcycle_msg_callback (test.test_ssl.ContextTests.test_refcycle_msg_callback) ... ok
+test_refcycle_psk_client_callback (test.test_ssl.ContextTests.test_refcycle_psk_client_callback) ... ok
+test_refcycle_psk_server_callback (test.test_ssl.ContextTests.test_refcycle_psk_server_callback) ... ok
+test_security_level (test.test_ssl.ContextTests.test_security_level) ... ok
+test_session_stats (test.test_ssl.ContextTests.test_session_stats) ... ok
+test_set_default_verify_paths (test.test_ssl.ContextTests.test_set_default_verify_paths) ... ok
+test_set_ecdh_curve (test.test_ssl.ContextTests.test_set_ecdh_curve) ... ok
+test_sni_callback (test.test_ssl.ContextTests.test_sni_callback) ... ok
+test_sni_callback_on_dead_references (test.test_ssl.ContextTests.test_sni_callback_on_dead_references) ... ok
+test_sni_callback_refcycle (test.test_ssl.ContextTests.test_sni_callback_refcycle) ... ok
+test_verify_flags (test.test_ssl.ContextTests.test_verify_flags) ... ok
+test_verify_mode_protocol (test.test_ssl.ContextTests.test_verify_mode_protocol) ... ok
+test_buffer_types (test.test_ssl.MemoryBIOTests.test_buffer_types) ... ok
+test_eof (test.test_ssl.MemoryBIOTests.test_eof) ... ok
+test_error_types (test.test_ssl.MemoryBIOTests.test_error_types) ... ok
+test_pending (test.test_ssl.MemoryBIOTests.test_pending) ... ok
+test_read_write (test.test_ssl.MemoryBIOTests.test_read_write) ... ok
+test_get_server_certificate_ipv6 (test.test_ssl.NetworkedTests.test_get_server_certificate_ipv6) ... skipped "Resource 'ipv6.google.com' is not available"
+test_timeout_connect_ex (test.test_ssl.NetworkedTests.test_timeout_connect_ex) ... skipped "Resource 'self-signed.pythontest.net' is not available"
+test_bad_server_hostname (test.test_ssl.SSLErrorTests.test_bad_server_hostname) ... ok
+test_lib_reason (test.test_ssl.SSLErrorTests.test_lib_reason) ... ok
+test_str (test.test_ssl.SSLErrorTests.test_str) ... ok
+test_subclass (test.test_ssl.SSLErrorTests.test_subclass) ... ok
+test_private_init (test.test_ssl.SSLObjectTests.test_private_init) ... ok
+test_unwrap (test.test_ssl.SSLObjectTests.test_unwrap) ... ok
+test_bio_handshake (test.test_ssl.SimpleBackgroundTests.test_bio_handshake) ... ok
+test_bio_read_write_data (test.test_ssl.SimpleBackgroundTests.test_bio_read_write_data) ... ok
+test_ciphers (test.test_ssl.SimpleBackgroundTests.test_ciphers) ... ok
+test_connect (test.test_ssl.SimpleBackgroundTests.test_connect) ... ok
+test_connect_cadata (test.test_ssl.SimpleBackgroundTests.test_connect_cadata) ... ok
+test_connect_capath (test.test_ssl.SimpleBackgroundTests.test_connect_capath) ... ok
+test_connect_ex (test.test_ssl.SimpleBackgroundTests.test_connect_ex) ... ok
+test_connect_fail (test.test_ssl.SimpleBackgroundTests.test_connect_fail) ... ok
+test_connect_with_context (test.test_ssl.SimpleBackgroundTests.test_connect_with_context) ... ok
+test_connect_with_context_fail (test.test_ssl.SimpleBackgroundTests.test_connect_with_context_fail) ... ok
+test_context_setget (test.test_ssl.SimpleBackgroundTests.test_context_setget) ... ok
+test_get_ca_certs_capath (test.test_ssl.SimpleBackgroundTests.test_get_ca_certs_capath) ... ok
+test_get_server_certificate (test.test_ssl.SimpleBackgroundTests.test_get_server_certificate) ... ok
+test_get_server_certificate_fail (test.test_ssl.SimpleBackgroundTests.test_get_server_certificate_fail) ... ok
+test_get_server_certificate_sni (test.test_ssl.SimpleBackgroundTests.test_get_server_certificate_sni) ... ok
+test_get_server_certificate_timeout (test.test_ssl.SimpleBackgroundTests.test_get_server_certificate_timeout) ... ok
+test_makefile_close (test.test_ssl.SimpleBackgroundTests.test_makefile_close) ... ok
+test_non_blocking_connect_ex (test.test_ssl.SimpleBackgroundTests.test_non_blocking_connect_ex) ... ok
+test_non_blocking_handshake (test.test_ssl.SimpleBackgroundTests.test_non_blocking_handshake) ... ok
+test_transport_eof (test.test_ssl.SimpleBackgroundTests.test_transport_eof) ... ok
+test_alertdescription (test.test_ssl.TestEnumerations.test_alertdescription) ... ok
+test_options (test.test_ssl.TestEnumerations.test_options) ... ok
+test_sslerrornumber (test.test_ssl.TestEnumerations.test_sslerrornumber) ... ok
+test_sslmethod (test.test_ssl.TestEnumerations.test_sslmethod) ... ok
+test_tlsalerttype (test.test_ssl.TestEnumerations.test_tlsalerttype) ... ok
+test_tlscontenttype (test.test_ssl.TestEnumerations.test_tlscontenttype) ... ok
+test_tlsmessagetype (test.test_ssl.TestEnumerations.test_tlsmessagetype) ... ok
+test_tlsversion (test.test_ssl.TestEnumerations.test_tlsversion) ... ok
+test_verifyflags (test.test_ssl.TestEnumerations.test_verifyflags) ... ok
+test_verifymode (test.test_ssl.TestEnumerations.test_verifymode) ... ok
+test_bpo37428_pha_cert_none (test.test_ssl.TestPostHandshakeAuth.test_bpo37428_pha_cert_none) ... ok
+test_certificate_chain (test.test_ssl.TestPostHandshakeAuth.test_certificate_chain) ... ok
+test_internal_chain_client (test.test_ssl.TestPostHandshakeAuth.test_internal_chain_client) ... ok
+test_internal_chain_server (test.test_ssl.TestPostHandshakeAuth.test_internal_chain_server) ... ok
+test_pha_no_pha_client (test.test_ssl.TestPostHandshakeAuth.test_pha_no_pha_client) ... ok
+test_pha_no_pha_server (test.test_ssl.TestPostHandshakeAuth.test_pha_no_pha_server) ... ok
+test_pha_not_tls13 (test.test_ssl.TestPostHandshakeAuth.test_pha_not_tls13) ... ok
+test_pha_optional (test.test_ssl.TestPostHandshakeAuth.test_pha_optional) ... ok
+test_pha_optional_nocert (test.test_ssl.TestPostHandshakeAuth.test_pha_optional_nocert) ... ok
+test_pha_required (test.test_ssl.TestPostHandshakeAuth.test_pha_required) ... ok
+test_pha_required_nocert (test.test_ssl.TestPostHandshakeAuth.test_pha_required_nocert) ... ok
+test_pha_setter (test.test_ssl.TestPostHandshakeAuth.test_pha_setter) ... ok
+test_https_client_non_tls_response_ignored (test.test_ssl.TestPreHandshakeClose.test_https_client_non_tls_response_ignored) ... ok
+test_preauth_data_to_tls_client (test.test_ssl.TestPreHandshakeClose.test_preauth_data_to_tls_client) ... ok
+test_preauth_data_to_tls_server (test.test_ssl.TestPreHandshakeClose.test_preauth_data_to_tls_server) ... ok
+test_keylog_defaults (test.test_ssl.TestSSLDebug.test_keylog_defaults) ... ok
+test_keylog_env (test.test_ssl.TestSSLDebug.test_keylog_env) ... ok
+test_keylog_filename (test.test_ssl.TestSSLDebug.test_keylog_filename) ... ok
+test_msg_callback (test.test_ssl.TestSSLDebug.test_msg_callback) ... ok
+test_msg_callback_deadlock_bpo43577 (test.test_ssl.TestSSLDebug.test_msg_callback_deadlock_bpo43577) ... ok
+test_msg_callback_tls12 (test.test_ssl.TestSSLDebug.test_msg_callback_tls12) ... ok
+test_PROTOCOL_TLS (test.test_ssl.ThreadedTests.test_PROTOCOL_TLS) ... ok
+test_alpn_protocols (test.test_ssl.ThreadedTests.test_alpn_protocols) ... ok
+test_asyncore_server (test.test_ssl.ThreadedTests.test_asyncore_server) ... ok
+test_check_hostname (test.test_ssl.ThreadedTests.test_check_hostname) ... ok
+test_check_hostname_idn (test.test_ssl.ThreadedTests.test_check_hostname_idn) ... ok
+test_compression (test.test_ssl.ThreadedTests.test_compression) ... ok
+test_compression_disabled (test.test_ssl.ThreadedTests.test_compression_disabled) ... ok
+test_crl_check (test.test_ssl.ThreadedTests.test_crl_check) ... ok
+test_default_ecdh_curve (test.test_ssl.ThreadedTests.test_default_ecdh_curve) ... ok
+test_dh_params (test.test_ssl.ThreadedTests.test_dh_params) ... skipped "libssl doesn't support ephemeral DH"
+test_do_handshake_enotconn (test.test_ssl.ThreadedTests.test_do_handshake_enotconn) ... ok
+test_dual_rsa_ecc (test.test_ssl.ThreadedTests.test_dual_rsa_ecc) ... ok
+test_ecc_cert (test.test_ssl.ThreadedTests.test_ecc_cert) ... ok
+test_ecdh_curve (test.test_ssl.ThreadedTests.test_ecdh_curve) ... ok
+test_echo (test.test_ssl.ThreadedTests.test_echo) ... ok
+test_getpeercert (test.test_ssl.ThreadedTests.test_getpeercert) ... ok
+test_getpeercert_enotconn (test.test_ssl.ThreadedTests.test_getpeercert_enotconn) ... ok
+test_handshake_timeout (test.test_ssl.ThreadedTests.test_handshake_timeout) ... ok
+test_hostname_checks_common_name (test.test_ssl.ThreadedTests.test_hostname_checks_common_name) ... ok
+test_legacy_server_connect (test.test_ssl.ThreadedTests.test_legacy_server_connect) ... ok
+test_min_max_version_mismatch (test.test_ssl.ThreadedTests.test_min_max_version_mismatch) ... skipped 'TLSv1 is not available.'
+test_min_max_version_sslv3 (test.test_ssl.ThreadedTests.test_min_max_version_sslv3) ... skipped 'SSLv3 is not available.'
+test_min_max_version_tlsv1_1 (test.test_ssl.ThreadedTests.test_min_max_version_tlsv1_1) ... skipped 'TLSv1_1 is not available.'
+test_min_max_version_tlsv1_2 (test.test_ssl.ThreadedTests.test_min_max_version_tlsv1_2) ... skipped 'TLSv1 is not available.'
+test_no_legacy_server_connect (test.test_ssl.ThreadedTests.test_no_legacy_server_connect) ... ok
+test_no_shared_ciphers (test.test_ssl.ThreadedTests.test_no_shared_ciphers) ... ok
+test_nonblocking_send (test.test_ssl.ThreadedTests.test_nonblocking_send) ... ok
+test_npn_protocols (test.test_ssl.ThreadedTests.test_npn_protocols) ... ok
+test_protocol_sslv3 (test.test_ssl.ThreadedTests.test_protocol_sslv3) ... skipped 'SSLv3 is not available.'
+test_protocol_tlsv1 (test.test_ssl.ThreadedTests.test_protocol_tlsv1) ... skipped 'TLSv1 is not available.'
+test_protocol_tlsv1_1 (test.test_ssl.ThreadedTests.test_protocol_tlsv1_1) ... skipped 'TLSv1_1 is not available.'
+test_protocol_tlsv1_2 (test.test_ssl.ThreadedTests.test_protocol_tlsv1_2) ... ok
+test_psk (test.test_ssl.ThreadedTests.test_psk) ... ok
+test_psk_tls1_3 (test.test_ssl.ThreadedTests.test_psk_tls1_3) ... ok
+test_read_write_after_close_raises_valuerror (test.test_ssl.ThreadedTests.test_read_write_after_close_raises_valuerror) ... ok
+test_recv_into_buffer_protocol_len (test.test_ssl.ThreadedTests.test_recv_into_buffer_protocol_len) ... ok
+test_recv_send (test.test_ssl.ThreadedTests.test_recv_send) ... ok
+test_recv_zero (test.test_ssl.ThreadedTests.test_recv_zero) ... ok
+test_rude_shutdown (test.test_ssl.ThreadedTests.test_rude_shutdown) ... ok
+test_selected_alpn_protocol (test.test_ssl.ThreadedTests.test_selected_alpn_protocol) ... ok
+test_selected_alpn_protocol_if_server_uses_alpn (test.test_ssl.ThreadedTests.test_selected_alpn_protocol_if_server_uses_alpn) ... ok
+test_sendfile (test.test_ssl.ThreadedTests.test_sendfile) ... ok
+test_server_accept (test.test_ssl.ThreadedTests.test_server_accept) ... ok
+test_session (test.test_ssl.ThreadedTests.test_session) ... ok
+test_session_handling (test.test_ssl.ThreadedTests.test_session_handling) ... ok
+test_shared_ciphers (test.test_ssl.ThreadedTests.test_shared_ciphers) ... ok
+test_sni_callback (test.test_ssl.ThreadedTests.test_sni_callback) ... ok
+test_sni_callback_alert (test.test_ssl.ThreadedTests.test_sni_callback_alert) ... ok
+test_sni_callback_raising (test.test_ssl.ThreadedTests.test_sni_callback_raising) ... ok
+test_sni_callback_wrong_return_type (test.test_ssl.ThreadedTests.test_sni_callback_wrong_return_type) ... ok
+test_socketserver (test.test_ssl.ThreadedTests.test_socketserver) ... ok
+test_ssl_cert_verify_error (test.test_ssl.ThreadedTests.test_ssl_cert_verify_error) ... ok
+test_ssl_in_multiple_threads (test.test_ssl.ThreadedTests.test_ssl_in_multiple_threads) ... skipped 'test is only useful if the GIL is disabled'
+test_starttls (test.test_ssl.ThreadedTests.test_starttls) ... ok
+test_thread_recv_while_main_thread_sends (test.test_ssl.ThreadedTests.test_thread_recv_while_main_thread_sends) ... ok
+test_tls1_3 (test.test_ssl.ThreadedTests.test_tls1_3) ... ok
+test_tls_unique_channel_binding (test.test_ssl.ThreadedTests.test_tls_unique_channel_binding) ... ok
+test_verify_strict (test.test_ssl.ThreadedTests.test_verify_strict) ... ok
+test_version_basic (test.test_ssl.ThreadedTests.test_version_basic) ... ok
+test_wrong_cert_tls12 (test.test_ssl.ThreadedTests.test_wrong_cert_tls12) ... ok
+test_wrong_cert_tls13 (test.test_ssl.ThreadedTests.test_wrong_cert_tls13) ... ok
+
+----------------------------------------------------------------------
+Ran 195 tests in 40.914s
+
+OK (skipped=15)

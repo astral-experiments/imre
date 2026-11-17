@@ -1,0 +1,1177 @@
+{
+  "originals": [
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_DER_to_PEM",
+      "occurrence": 1,
+      "stock_evidence_line": 1,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_asn1object",
+      "occurrence": 1,
+      "stock_evidence_line": 2,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_cert_time_to_seconds",
+      "occurrence": 1,
+      "stock_evidence_line": 3,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_cert_time_to_seconds_locale",
+      "occurrence": 1,
+      "stock_evidence_line": 4,
+      "stock_outcome": "skip"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_cert_time_to_seconds_timezone",
+      "occurrence": 1,
+      "stock_evidence_line": 5,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_connect_ex_error",
+      "occurrence": 1,
+      "stock_evidence_line": 6,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_constants",
+      "occurrence": 1,
+      "stock_evidence_line": 7,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_dealloc_warn",
+      "occurrence": 1,
+      "stock_evidence_line": 8,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_empty_cert",
+      "occurrence": 1,
+      "stock_evidence_line": 9,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_enum_certificates",
+      "occurrence": 1,
+      "stock_evidence_line": 10,
+      "stock_outcome": "skip"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_enum_crls",
+      "occurrence": 1,
+      "stock_evidence_line": 11,
+      "stock_outcome": "skip"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_get_default_verify_paths",
+      "occurrence": 1,
+      "stock_evidence_line": 12,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_malformed_cert",
+      "occurrence": 1,
+      "stock_evidence_line": 13,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_malformed_key",
+      "occurrence": 1,
+      "stock_evidence_line": 14,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_openssl111_deprecations",
+      "occurrence": 1,
+      "stock_evidence_line": 15,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_openssl_version",
+      "occurrence": 1,
+      "stock_evidence_line": 16,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_options",
+      "occurrence": 1,
+      "stock_evidence_line": 17,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_parse_all_sans",
+      "occurrence": 1,
+      "stock_evidence_line": 18,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_parse_cert",
+      "occurrence": 1,
+      "stock_evidence_line": 19,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_parse_cert_CVE_2013_4238",
+      "occurrence": 1,
+      "stock_evidence_line": 20,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_parse_cert_CVE_2019_5010",
+      "occurrence": 1,
+      "stock_evidence_line": 21,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_private_init",
+      "occurrence": 1,
+      "stock_evidence_line": 22,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_purpose_enum",
+      "occurrence": 1,
+      "stock_evidence_line": 23,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_random",
+      "occurrence": 1,
+      "stock_evidence_line": 24,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_read_write_zero",
+      "occurrence": 1,
+      "stock_evidence_line": 25,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_refcycle",
+      "occurrence": 1,
+      "stock_evidence_line": 26,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_server_side",
+      "occurrence": 1,
+      "stock_evidence_line": 27,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_ssl_types",
+      "occurrence": 1,
+      "stock_evidence_line": 28,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_str_for_enums",
+      "occurrence": 1,
+      "stock_evidence_line": 29,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_timeout",
+      "occurrence": 1,
+      "stock_evidence_line": 30,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_tls_unique_channel_binding",
+      "occurrence": 1,
+      "stock_evidence_line": 31,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_unknown_channel_binding",
+      "occurrence": 1,
+      "stock_evidence_line": 32,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_unsupported_dtls",
+      "occurrence": 1,
+      "stock_evidence_line": 33,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.BasicSocketTests.test_wrapped_unconnected",
+      "occurrence": 1,
+      "stock_evidence_line": 34,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test__create_stdlib_context",
+      "occurrence": 1,
+      "stock_evidence_line": 35,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_cert_store_stats",
+      "occurrence": 1,
+      "stock_evidence_line": 36,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_check_hostname",
+      "occurrence": 1,
+      "stock_evidence_line": 37,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_ciphers",
+      "occurrence": 1,
+      "stock_evidence_line": 38,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_constructor",
+      "occurrence": 1,
+      "stock_evidence_line": 39,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_context_client_server",
+      "occurrence": 1,
+      "stock_evidence_line": 40,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_context_custom_class",
+      "occurrence": 1,
+      "stock_evidence_line": 41,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_create_default_context",
+      "occurrence": 1,
+      "stock_evidence_line": 42,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_get_ca_certs",
+      "occurrence": 1,
+      "stock_evidence_line": 43,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_get_ciphers",
+      "occurrence": 1,
+      "stock_evidence_line": 44,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_hostname_checks_common_name",
+      "occurrence": 1,
+      "stock_evidence_line": 45,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_load_cert_chain",
+      "occurrence": 1,
+      "stock_evidence_line": 46,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_load_cert_chain_thread_safety",
+      "occurrence": 1,
+      "stock_evidence_line": 47,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_load_default_certs",
+      "occurrence": 1,
+      "stock_evidence_line": 48,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_load_default_certs_env",
+      "occurrence": 1,
+      "stock_evidence_line": 49,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_load_default_certs_env_windows",
+      "occurrence": 1,
+      "stock_evidence_line": 50,
+      "stock_outcome": "skip"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_load_dh_params",
+      "occurrence": 1,
+      "stock_evidence_line": 51,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_load_verify_cadata",
+      "occurrence": 1,
+      "stock_evidence_line": 52,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_load_verify_locations",
+      "occurrence": 1,
+      "stock_evidence_line": 53,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_min_max_version",
+      "occurrence": 1,
+      "stock_evidence_line": 54,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_num_tickest",
+      "occurrence": 1,
+      "stock_evidence_line": 55,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_options",
+      "occurrence": 1,
+      "stock_evidence_line": 56,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_python_ciphers",
+      "occurrence": 1,
+      "stock_evidence_line": 57,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_refcycle_keylog_filename",
+      "occurrence": 1,
+      "stock_evidence_line": 58,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_refcycle_msg_callback",
+      "occurrence": 1,
+      "stock_evidence_line": 59,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_refcycle_psk_client_callback",
+      "occurrence": 1,
+      "stock_evidence_line": 60,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_refcycle_psk_server_callback",
+      "occurrence": 1,
+      "stock_evidence_line": 61,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_security_level",
+      "occurrence": 1,
+      "stock_evidence_line": 62,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_session_stats",
+      "occurrence": 1,
+      "stock_evidence_line": 63,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_set_default_verify_paths",
+      "occurrence": 1,
+      "stock_evidence_line": 64,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_set_ecdh_curve",
+      "occurrence": 1,
+      "stock_evidence_line": 65,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_sni_callback",
+      "occurrence": 1,
+      "stock_evidence_line": 66,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_sni_callback_on_dead_references",
+      "occurrence": 1,
+      "stock_evidence_line": 67,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_sni_callback_refcycle",
+      "occurrence": 1,
+      "stock_evidence_line": 68,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_verify_flags",
+      "occurrence": 1,
+      "stock_evidence_line": 69,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ContextTests.test_verify_mode_protocol",
+      "occurrence": 1,
+      "stock_evidence_line": 70,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.MemoryBIOTests.test_buffer_types",
+      "occurrence": 1,
+      "stock_evidence_line": 71,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.MemoryBIOTests.test_eof",
+      "occurrence": 1,
+      "stock_evidence_line": 72,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.MemoryBIOTests.test_error_types",
+      "occurrence": 1,
+      "stock_evidence_line": 73,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.MemoryBIOTests.test_pending",
+      "occurrence": 1,
+      "stock_evidence_line": 74,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.MemoryBIOTests.test_read_write",
+      "occurrence": 1,
+      "stock_evidence_line": 75,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.NetworkedTests.test_get_server_certificate_ipv6",
+      "occurrence": 1,
+      "stock_evidence_line": 76,
+      "stock_outcome": "skip"
+    },
+    {
+      "id": "test.test_ssl.NetworkedTests.test_timeout_connect_ex",
+      "occurrence": 1,
+      "stock_evidence_line": 77,
+      "stock_outcome": "skip"
+    },
+    {
+      "id": "test.test_ssl.SSLErrorTests.test_bad_server_hostname",
+      "occurrence": 1,
+      "stock_evidence_line": 78,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.SSLErrorTests.test_lib_reason",
+      "occurrence": 1,
+      "stock_evidence_line": 79,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.SSLErrorTests.test_str",
+      "occurrence": 1,
+      "stock_evidence_line": 80,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.SSLErrorTests.test_subclass",
+      "occurrence": 1,
+      "stock_evidence_line": 81,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.SSLObjectTests.test_private_init",
+      "occurrence": 1,
+      "stock_evidence_line": 82,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.SSLObjectTests.test_unwrap",
+      "occurrence": 1,
+      "stock_evidence_line": 83,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.SimpleBackgroundTests.test_bio_handshake",
+      "occurrence": 1,
+      "stock_evidence_line": 84,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.SimpleBackgroundTests.test_bio_read_write_data",
+      "occurrence": 1,
+      "stock_evidence_line": 85,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.SimpleBackgroundTests.test_ciphers",
+      "occurrence": 1,
+      "stock_evidence_line": 86,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.SimpleBackgroundTests.test_connect",
+      "occurrence": 1,
+      "stock_evidence_line": 87,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.SimpleBackgroundTests.test_connect_cadata",
+      "occurrence": 1,
+      "stock_evidence_line": 88,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.SimpleBackgroundTests.test_connect_capath",
+      "occurrence": 1,
+      "stock_evidence_line": 89,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.SimpleBackgroundTests.test_connect_ex",
+      "occurrence": 1,
+      "stock_evidence_line": 90,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.SimpleBackgroundTests.test_connect_fail",
+      "occurrence": 1,
+      "stock_evidence_line": 91,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.SimpleBackgroundTests.test_connect_with_context",
+      "occurrence": 1,
+      "stock_evidence_line": 92,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.SimpleBackgroundTests.test_connect_with_context_fail",
+      "occurrence": 1,
+      "stock_evidence_line": 93,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.SimpleBackgroundTests.test_context_setget",
+      "occurrence": 1,
+      "stock_evidence_line": 94,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.SimpleBackgroundTests.test_get_ca_certs_capath",
+      "occurrence": 1,
+      "stock_evidence_line": 95,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.SimpleBackgroundTests.test_get_server_certificate",
+      "occurrence": 1,
+      "stock_evidence_line": 96,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.SimpleBackgroundTests.test_get_server_certificate_fail",
+      "occurrence": 1,
+      "stock_evidence_line": 97,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.SimpleBackgroundTests.test_get_server_certificate_sni",
+      "occurrence": 1,
+      "stock_evidence_line": 98,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.SimpleBackgroundTests.test_get_server_certificate_timeout",
+      "occurrence": 1,
+      "stock_evidence_line": 99,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.SimpleBackgroundTests.test_makefile_close",
+      "occurrence": 1,
+      "stock_evidence_line": 100,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.SimpleBackgroundTests.test_non_blocking_connect_ex",
+      "occurrence": 1,
+      "stock_evidence_line": 101,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.SimpleBackgroundTests.test_non_blocking_handshake",
+      "occurrence": 1,
+      "stock_evidence_line": 102,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.SimpleBackgroundTests.test_transport_eof",
+      "occurrence": 1,
+      "stock_evidence_line": 103,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestEnumerations.test_alertdescription",
+      "occurrence": 1,
+      "stock_evidence_line": 104,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestEnumerations.test_options",
+      "occurrence": 1,
+      "stock_evidence_line": 105,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestEnumerations.test_sslerrornumber",
+      "occurrence": 1,
+      "stock_evidence_line": 106,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestEnumerations.test_sslmethod",
+      "occurrence": 1,
+      "stock_evidence_line": 107,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestEnumerations.test_tlsalerttype",
+      "occurrence": 1,
+      "stock_evidence_line": 108,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestEnumerations.test_tlscontenttype",
+      "occurrence": 1,
+      "stock_evidence_line": 109,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestEnumerations.test_tlsmessagetype",
+      "occurrence": 1,
+      "stock_evidence_line": 110,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestEnumerations.test_tlsversion",
+      "occurrence": 1,
+      "stock_evidence_line": 111,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestEnumerations.test_verifyflags",
+      "occurrence": 1,
+      "stock_evidence_line": 112,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestEnumerations.test_verifymode",
+      "occurrence": 1,
+      "stock_evidence_line": 113,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestPostHandshakeAuth.test_bpo37428_pha_cert_none",
+      "occurrence": 1,
+      "stock_evidence_line": 114,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestPostHandshakeAuth.test_certificate_chain",
+      "occurrence": 1,
+      "stock_evidence_line": 115,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestPostHandshakeAuth.test_internal_chain_client",
+      "occurrence": 1,
+      "stock_evidence_line": 116,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestPostHandshakeAuth.test_internal_chain_server",
+      "occurrence": 1,
+      "stock_evidence_line": 117,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestPostHandshakeAuth.test_pha_no_pha_client",
+      "occurrence": 1,
+      "stock_evidence_line": 118,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestPostHandshakeAuth.test_pha_no_pha_server",
+      "occurrence": 1,
+      "stock_evidence_line": 119,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestPostHandshakeAuth.test_pha_not_tls13",
+      "occurrence": 1,
+      "stock_evidence_line": 120,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestPostHandshakeAuth.test_pha_optional",
+      "occurrence": 1,
+      "stock_evidence_line": 121,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestPostHandshakeAuth.test_pha_optional_nocert",
+      "occurrence": 1,
+      "stock_evidence_line": 122,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestPostHandshakeAuth.test_pha_required",
+      "occurrence": 1,
+      "stock_evidence_line": 123,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestPostHandshakeAuth.test_pha_required_nocert",
+      "occurrence": 1,
+      "stock_evidence_line": 124,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestPostHandshakeAuth.test_pha_setter",
+      "occurrence": 1,
+      "stock_evidence_line": 125,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestPreHandshakeClose.test_https_client_non_tls_response_ignored",
+      "occurrence": 1,
+      "stock_evidence_line": 126,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestPreHandshakeClose.test_preauth_data_to_tls_client",
+      "occurrence": 1,
+      "stock_evidence_line": 127,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestPreHandshakeClose.test_preauth_data_to_tls_server",
+      "occurrence": 1,
+      "stock_evidence_line": 128,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestSSLDebug.test_keylog_defaults",
+      "occurrence": 1,
+      "stock_evidence_line": 129,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestSSLDebug.test_keylog_env",
+      "occurrence": 1,
+      "stock_evidence_line": 130,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestSSLDebug.test_keylog_filename",
+      "occurrence": 1,
+      "stock_evidence_line": 131,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestSSLDebug.test_msg_callback",
+      "occurrence": 1,
+      "stock_evidence_line": 132,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestSSLDebug.test_msg_callback_deadlock_bpo43577",
+      "occurrence": 1,
+      "stock_evidence_line": 133,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.TestSSLDebug.test_msg_callback_tls12",
+      "occurrence": 1,
+      "stock_evidence_line": 134,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_PROTOCOL_TLS",
+      "occurrence": 1,
+      "stock_evidence_line": 135,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_alpn_protocols",
+      "occurrence": 1,
+      "stock_evidence_line": 136,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_asyncore_server",
+      "occurrence": 1,
+      "stock_evidence_line": 137,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_check_hostname",
+      "occurrence": 1,
+      "stock_evidence_line": 138,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_check_hostname_idn",
+      "occurrence": 1,
+      "stock_evidence_line": 139,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_compression",
+      "occurrence": 1,
+      "stock_evidence_line": 140,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_compression_disabled",
+      "occurrence": 1,
+      "stock_evidence_line": 141,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_crl_check",
+      "occurrence": 1,
+      "stock_evidence_line": 142,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_default_ecdh_curve",
+      "occurrence": 1,
+      "stock_evidence_line": 143,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_dh_params",
+      "occurrence": 1,
+      "stock_evidence_line": 144,
+      "stock_outcome": "skip"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_do_handshake_enotconn",
+      "occurrence": 1,
+      "stock_evidence_line": 145,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_dual_rsa_ecc",
+      "occurrence": 1,
+      "stock_evidence_line": 146,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_ecc_cert",
+      "occurrence": 1,
+      "stock_evidence_line": 147,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_ecdh_curve",
+      "occurrence": 1,
+      "stock_evidence_line": 148,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_echo",
+      "occurrence": 1,
+      "stock_evidence_line": 149,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_getpeercert",
+      "occurrence": 1,
+      "stock_evidence_line": 150,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_getpeercert_enotconn",
+      "occurrence": 1,
+      "stock_evidence_line": 151,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_handshake_timeout",
+      "occurrence": 1,
+      "stock_evidence_line": 152,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_hostname_checks_common_name",
+      "occurrence": 1,
+      "stock_evidence_line": 153,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_legacy_server_connect",
+      "occurrence": 1,
+      "stock_evidence_line": 154,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_min_max_version_mismatch",
+      "occurrence": 1,
+      "stock_evidence_line": 155,
+      "stock_outcome": "skip"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_min_max_version_sslv3",
+      "occurrence": 1,
+      "stock_evidence_line": 156,
+      "stock_outcome": "skip"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_min_max_version_tlsv1_1",
+      "occurrence": 1,
+      "stock_evidence_line": 157,
+      "stock_outcome": "skip"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_min_max_version_tlsv1_2",
+      "occurrence": 1,
+      "stock_evidence_line": 158,
+      "stock_outcome": "skip"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_no_legacy_server_connect",
+      "occurrence": 1,
+      "stock_evidence_line": 159,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_no_shared_ciphers",
+      "occurrence": 1,
+      "stock_evidence_line": 160,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_nonblocking_send",
+      "occurrence": 1,
+      "stock_evidence_line": 161,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_npn_protocols",
+      "occurrence": 1,
+      "stock_evidence_line": 162,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_protocol_sslv3",
+      "occurrence": 1,
+      "stock_evidence_line": 163,
+      "stock_outcome": "skip"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_protocol_tlsv1",
+      "occurrence": 1,
+      "stock_evidence_line": 164,
+      "stock_outcome": "skip"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_protocol_tlsv1_1",
+      "occurrence": 1,
+      "stock_evidence_line": 165,
+      "stock_outcome": "skip"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_protocol_tlsv1_2",
+      "occurrence": 1,
+      "stock_evidence_line": 166,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_psk",
+      "occurrence": 1,
+      "stock_evidence_line": 167,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_psk_tls1_3",
+      "occurrence": 1,
+      "stock_evidence_line": 168,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_read_write_after_close_raises_valuerror",
+      "occurrence": 1,
+      "stock_evidence_line": 169,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_recv_into_buffer_protocol_len",
+      "occurrence": 1,
+      "stock_evidence_line": 170,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_recv_send",
+      "occurrence": 1,
+      "stock_evidence_line": 171,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_recv_zero",
+      "occurrence": 1,
+      "stock_evidence_line": 172,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_rude_shutdown",
+      "occurrence": 1,
+      "stock_evidence_line": 173,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_selected_alpn_protocol",
+      "occurrence": 1,
+      "stock_evidence_line": 174,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_selected_alpn_protocol_if_server_uses_alpn",
+      "occurrence": 1,
+      "stock_evidence_line": 175,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_sendfile",
+      "occurrence": 1,
+      "stock_evidence_line": 176,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_server_accept",
+      "occurrence": 1,
+      "stock_evidence_line": 177,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_session",
+      "occurrence": 1,
+      "stock_evidence_line": 178,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_session_handling",
+      "occurrence": 1,
+      "stock_evidence_line": 179,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_shared_ciphers",
+      "occurrence": 1,
+      "stock_evidence_line": 180,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_sni_callback",
+      "occurrence": 1,
+      "stock_evidence_line": 181,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_sni_callback_alert",
+      "occurrence": 1,
+      "stock_evidence_line": 182,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_sni_callback_raising",
+      "occurrence": 1,
+      "stock_evidence_line": 183,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_sni_callback_wrong_return_type",
+      "occurrence": 1,
+      "stock_evidence_line": 184,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_socketserver",
+      "occurrence": 1,
+      "stock_evidence_line": 185,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_ssl_cert_verify_error",
+      "occurrence": 1,
+      "stock_evidence_line": 186,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_ssl_in_multiple_threads",
+      "occurrence": 1,
+      "stock_evidence_line": 187,
+      "stock_outcome": "skip"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_starttls",
+      "occurrence": 1,
+      "stock_evidence_line": 188,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_thread_recv_while_main_thread_sends",
+      "occurrence": 1,
+      "stock_evidence_line": 189,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_tls1_3",
+      "occurrence": 1,
+      "stock_evidence_line": 190,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_tls_unique_channel_binding",
+      "occurrence": 1,
+      "stock_evidence_line": 191,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_verify_strict",
+      "occurrence": 1,
+      "stock_evidence_line": 192,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_version_basic",
+      "occurrence": 1,
+      "stock_evidence_line": 193,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_wrong_cert_tls12",
+      "occurrence": 1,
+      "stock_evidence_line": 194,
+      "stock_outcome": "pass"
+    },
+    {
+      "id": "test.test_ssl.ThreadedTests.test_wrong_cert_tls13",
+      "occurrence": 1,
+      "stock_evidence_line": 195,
+      "stock_outcome": "pass"
+    }
+  ],
+  "raw_denominator": 195,
+  "stock_occurrences": 195,
+  "unique_ids": 195
+}
