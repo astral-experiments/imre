@@ -8,6 +8,7 @@ use std::fmt::{self, Write};
 
 use smallvec::SmallVec;
 
+use super::words::WordKind;
 use super::{Bytes, Error, Kind, List, Object, Storage, StorageCell, Str, Words, fail, object};
 
 /// Sorts original indices instead of moving key owners. Reversing comparison,
@@ -115,7 +116,16 @@ pub(super) fn stable_sort<T: Copy>(values: &mut [T], compare: impl FnMut(&T, &T)
 /// Each word is an immutable string rooted for the entire sort.
 pub(super) unsafe fn sort_strings(values: &mut [usize], mode: StringSort) {
     // SAFETY: the list keeps these owners live, including while they move.
-    let bytes = |word: usize| unsafe { (&*(word as *const Str)).as_bytes() };
+    sort_string_words(values, mode, |word| unsafe {
+        (&*(word as *const Str)).as_bytes()
+    });
+}
+
+fn sort_string_words<'a>(
+    values: &mut [usize],
+    mode: StringSort,
+    bytes: impl Fn(usize) -> &'a [u8],
+) {
     let skip = shared_prefix(values.iter().map(|&word| bytes(word)));
     let compare = |&left: &usize, &right: &usize| bytes(left)[skip..].cmp(&bytes(right)[skip..]);
     match mode {
@@ -475,7 +485,8 @@ pub unsafe extern "C" fn imre_sort_restore(
 /// Kind 2 denotes List, all others a Sequence Object. Keys are ordered scalars or
 /// immutable tuples whose fields have a compiler-proved total order.
 /// Values own each element independently and cannot be accessed reentrantly.
-/// The same list may supply both pointers: key reading ends before any mutation.
+/// When both pointers name one list, element_kind describes its storage. An
+/// object list may supply exact string keys through its rooted element boxes.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_sort_by_keys(
     values: *const (),
@@ -484,19 +495,17 @@ pub unsafe extern "C" fn imre_sort_by_keys(
     key_kind: u32,
     reverse: u32,
 ) {
-    if values == keys && key_kind == 3 {
-        // Without a key function, the string list itself owns every comparison
-        // operand. A stable sort can move those owners directly.
-        // SAFETY: the exclusive list access roots both strings across comparison.
+    if values == keys && element_kind == WordKind::STR.raw() {
+        // SAFETY: the list keeps its native string owners live through the sort.
         unsafe {
             object(values.cast()).0.with_mut(|storage| {
-                let values = match storage.sequence_mut() {
+                let words = match storage.sequence_mut() {
                     Ok(words) => words,
                     Err(error) => return error.raise(),
                 };
-                values.check_kind(key_kind);
+                words.check_kind(key_kind);
                 sort_strings(
-                    &mut values.values,
+                    &mut words.values,
                     StringSort::Stable {
                         reverse: reverse != 0,
                     },
@@ -504,6 +513,36 @@ pub unsafe extern "C" fn imre_sort_by_keys(
             });
         }
         return;
+    }
+    if values == keys && element_kind == WordKind::OBJECT.raw() && key_kind == WordKind::STR.raw() {
+        let mode = StringSort::Stable {
+            reverse: reverse != 0,
+        };
+        // SAFETY: the list owns each comparison operand throughout the sort.
+        // Exclude the list itself before borrowing any projected object's storage.
+        let result = unsafe {
+            object(values.cast()).0.with_mut(|storage| {
+                let words = storage.sequence_mut()?;
+                words.check_kind(element_kind);
+                let bytes = |word: usize| {
+                    if word == 0 || word == values as usize {
+                        return None;
+                    }
+                    let text = object(word as *const Object)
+                        .0
+                        .with(super::boxed_values::exact_text_word)?;
+                    Some((&*(text as *const Str)).as_bytes())
+                };
+                if words.values.iter().any(|&word| bytes(word).is_none()) {
+                    return Err(Error::new(Kind::TypeError, "expected an exact str"));
+                }
+                sort_string_words(&mut words.values, mode, |word| {
+                    bytes(word).expect("checked string payload")
+                });
+                Ok(())
+            })
+        };
+        return super::exceptions::finish(result, ());
     }
     // SAFETY: both exact list owners remain rooted throughout this operation.
     let Some(mut order) = (unsafe { key_order(keys, key_kind, reverse != 0) }) else {

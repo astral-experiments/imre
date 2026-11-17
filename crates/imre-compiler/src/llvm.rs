@@ -5710,7 +5710,7 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::SortByKeys
+            Builtin::SortByKeys(_)
             | Builtin::SortByComparator
             | Builtin::SortDetach
             | Builtin::ListExtendBuffer
