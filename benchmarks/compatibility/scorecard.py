@@ -888,7 +888,8 @@ def summary():
             elif entry and entry.get('staged_receipt'):
                 _, originals = activated_stdlib_path(staged, entry)
                 active = {(r['id'],r['occurrence']) for r in grouped[name]}
-                require(len(originals) <= row['originals'] and active <= set(originals), f'{name}: partial shard exceeds frozen denominator or staged identities')
+                require(len(originals) == row['originals'], f'{name}: partial staged shard does not cover frozen denominator')
+                require(active <= set(originals), f'{name}: verified subset exceeds staged identities')
                 pending = [r for key,r in originals.items() if key not in active]
                 row['pending'] = len(pending)
                 for t in TIERS: row['runs'][t]['not_run'] -= len(pending)

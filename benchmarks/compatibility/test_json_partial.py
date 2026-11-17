@@ -101,26 +101,37 @@ class PartialJsonTests(unittest.TestCase):
 
     def test_rehashed_forged_staged_claim_cannot_change_validated_totals(self):
         verified = self.verified[0]
-        key = (verified['id'], verified['occurrence'])
-        original = next((r for r in self.staged if (r['id'], r['occurrence']) == key))
-        pending = copy.deepcopy(next((r for r in self.staged if '.test_tool.' in r['id'])))
+        staged_rows = copy.deepcopy(self.staged)
+        pending = next((r for r in staged_rows if '.test_tool.' in r['id']))
         with tempfile.TemporaryDirectory(dir=scorecard.ROOT) as tmp:
             root = Path(tmp)
-            staged, _, entry = self.make_partial_fixture(root, [original, pending], [verified])
+            staged, _, entry = self.make_partial_fixture(root, staged_rows, [verified])
             choose = lambda name, kind='stdlib': entry if name == 'json' and kind == 'stdlib' else None
             with patch.object(scorecard, 'DATA_ROOT', root), patch.object(scorecard, 'activation_entry', side_effect=choose), patch.object(scorecard, 'load_records', side_effect=lambda kind, *args: [verified] if kind == 'stdlib' else []):
                 before = scorecard.summary()[0]['json']
                 pending['paired'] = True
                 for t in scorecard.TIERS:
                     pending['runs'][t]['outcome'] = 'pass'
-                staged.write_text(''.join((json.dumps(r) + '\n' for r in [original, pending])))
+                staged.write_text(''.join((json.dumps(r) + '\n' for r in staged_rows)))
                 entry['files'][L(staged)] = H(staged)
                 after = scorecard.summary()[0]['json']
                 self.assertEqual((before['receipts'], before['paired'], before['pending']), (after['receipts'], after['paired'], after['pending']))
-                self.assertEqual((after['receipts'], after['paired'], after['pending']), (1, 1, 1))
+                self.assertEqual((after['receipts'], after['paired'], after['pending']), (1, 1, 215))
                 html = scorecard.render('readme')
                 self.assertNotIn('raw:', html)
                 self.assertIn('staged (unverified; outcomes not checked)', html)
+
+    def test_rehashed_truncated_staged_shard_fails(self):
+        verified = {(r['id'], r['occurrence']) for r in self.verified}
+        pending = next(r for r in self.staged if (r['id'], r['occurrence']) not in verified)
+        rows = [r for r in self.staged if (r['id'], r['occurrence']) != (pending['id'], pending['occurrence'])]
+        with tempfile.TemporaryDirectory(dir=scorecard.ROOT) as tmp:
+            root = Path(tmp)
+            _, _, entry = self.make_partial_fixture(root, rows, self.verified)
+            choose = lambda name, kind='stdlib': entry if name == 'json' and kind == 'stdlib' else None
+            with patch.object(scorecard, 'DATA_ROOT', root), patch.object(scorecard, 'activation_entry', side_effect=choose), patch.object(scorecard, 'load_records', side_effect=lambda kind, *args: self.verified if kind == 'stdlib' else []):
+                with self.assertRaisesRegex(ValueError, 'partial staged shard does not cover frozen denominator'):
+                    scorecard.summary()
 
     def test_rehashed_malformed_stock_capture_fails(self):
         row = next((r for r in self.verified if 'test_unicode' in r['id']))
