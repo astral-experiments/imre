@@ -1297,7 +1297,10 @@ pub(crate) fn annotation_expression(
 ) -> Option<ruff_python_parser::Parsed<ast::ModExpression>> {
     let parsed = imre_ast::forward_refs::parse(text).ok()?;
     imre_ast::forward_refs::validate(&parsed).ok()?;
-    (!parsed.syntax().body.is_name_expr()).then_some(parsed)
+    let bare_name = parsed.syntax().body.as_name_expr().is_some_and(|name| {
+        text.trim_matches([' ', '\t', '\n', '\r', '\x0c']) == &text[name.range()]
+    });
+    (!bare_name).then_some(parsed)
 }
 
 #[derive(Clone)]

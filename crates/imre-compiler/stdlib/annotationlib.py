@@ -314,14 +314,12 @@ class ForwardRef:
             raise error
         source = _rewrite_star_unpack(arg)
         try:
+            _validate_forward_ref(source)
+        except SyntaxError:
+            raise SyntaxError(f"Forward reference must be an expression -- got {arg!r}")
+        try:
             return _eval_type_expression(source, globals, locals)
         except SyntaxError:
-            # Parsing fails before CPython enters its symbolic fallback. An
-            # exception from the expression itself, however, still permits it.
-            try:
-                _validate_forward_ref(source)
-            except SyntaxError:
-                raise SyntaxError(f"Forward reference must be an expression -- got {arg!r}")
             if format == Format.VALUE:
                 raise
         except NameError as error:

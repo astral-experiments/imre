@@ -229,6 +229,24 @@ def current():
     assert module.get_annotations(manual, globals=namespace, eval_str=True) == {"value": 23}
     assert "__builtins__" in namespace
 
+    def grouped(a: "(int)", b: "(((int)))", c: "int # declared"):
+        pass
+
+    assert module.get_annotations(grouped, eval_str=True) == {"a": int, "b": int, "c": int}
+    for spelling in (" int", "\tint", "int ", "\nint"):
+        manual.__annotations__ = {"value": spelling}
+        namespace = {}
+        assert module.get_annotations(manual, globals=namespace, eval_str=True) == {"value": int}
+        assert "__builtins__" in namespace
+    manual.__annotations__ = {"value": "("}
+    namespace = {}
+    try:
+        module.get_annotations(manual, globals=namespace, eval_str=True)
+    except SyntaxError:
+        assert "__builtins__" in namespace
+    else:
+        raise AssertionError("expected syntax error")
+
     def compound(value: "list[Choice]"):
         pass
 
@@ -253,3 +271,16 @@ def current():
     for name, ref in refs.items():
         assert type(ref) is module.ForwardRef and ref.__owner__ is sums
         assert ref.__forward_arg__ == texts[name]
+
+
+def unsupported():
+    def manual(value):
+        pass
+
+    manual.__annotations__ = {"value": "int # runtime-only"}
+    try:
+        annotationlib.get_annotations(manual, eval_str=True)
+    except NotImplementedError as error:
+        assert "declare the annotation in source or avoid eval_str" in str(error)
+    else:
+        raise AssertionError("unlinked manual annotation expression executed")

@@ -822,6 +822,11 @@ pub(super) fn original_points(
     Ok(Some(points))
 }
 
+/// Apply eval's preprocessing without changing compile or AST source positions.
+fn eval_source_text(source: &str) -> &str {
+    source.trim_start_matches([' ', '\t'])
+}
+
 /// Normalize physical line endings before parsing and measuring offsets.
 fn normalized_source(source: &str) -> Cow<'_, str> {
     if source.contains('\r') {
@@ -2289,7 +2294,7 @@ impl Context {
             );
         }
         let source = if strip_indent {
-            source.trim_start_matches([' ', '\t'])
+            eval_source_text(&source)
         } else {
             &source
         };
@@ -2853,20 +2858,21 @@ impl Context {
             (globals != NONE).then_some(globals),
             (locals != NONE).then_some(locals),
         )?;
+        let (checked_locals, builtins) =
+            self.checked_source_namespaces(globals, locals, None, "eval")?;
         if let Some(entry) = self.linked_expression(text) {
             let filename = self.text("<string>");
             let code = self.native_module_code(entry, filename, None);
             return self.eval_namespace_code(code, globals, locals.unwrap_or(globals));
         }
-        let source = self.str_value(text)?;
+        let source =
+            eval_source_text(self.str_value(text)?).trim_matches([' ', '\t', '\n', '\r', '\x0c']);
         if crate::objects::python_isidentifier(source)
             && !ruff_python_stdlib::keyword::is_keyword(source)
         {
             let normalized = crate::objects::normalize_unicode("NFKC", source)?;
             let name = copy_label(normalized.as_deref().unwrap_or(source))?;
-            let (locals, builtins) =
-                self.checked_source_namespaces(globals, locals, None, "eval")?;
-            if let Some(locals) = locals {
+            if let Some(locals) = checked_locals {
                 match self.load_exec_name(locals, &name) {
                     Err(error) if self.is_builtin_error(&error, "KeyError") => {}
                     value => return value,
@@ -2881,9 +2887,11 @@ impl Context {
             );
         }
         let filename = self.text("<string>");
-        let code =
-            self.compile_source_with_flags(text, filename, "eval", self.inherited_compile_flags())?;
-        self.eval_namespace_code(code, globals, locals.unwrap_or(globals))
+        self.prepare_source_program(text, filename, "eval", true, self.inherited_compile_flags())?;
+        Err(Error::new(
+            "NotImplementedError",
+            "annotation source expression has no checked AOT body; declare the annotation in source or avoid eval_str",
+        ))
     }
 
     /// Resolve explicit namespaces or the active Python frame as eval and exec do.
