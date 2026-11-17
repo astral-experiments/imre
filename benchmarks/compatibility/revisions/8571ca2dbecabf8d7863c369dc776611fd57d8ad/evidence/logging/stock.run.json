@@ -1,0 +1,23 @@
+{
+  "argv": [
+    "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "-B",
+    "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_logging.py",
+    "-v",
+    "BasicFilterTest.test_empty_filter"
+  ],
+  "cwd": "/workspace/scratch/8571-refresh/logging",
+  "timeout_seconds": 120,
+  "exit_code": 0,
+  "timed_out": false,
+  "elapsed_seconds": 0.629,
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "a85a1ac60887d3fc6a3b1d818f541aa9c4cb2a80232f8892c75025327ce8521b",
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "TMPDIR": "/workspace/scratch/stdlib-work/tmp"
+  }
+}

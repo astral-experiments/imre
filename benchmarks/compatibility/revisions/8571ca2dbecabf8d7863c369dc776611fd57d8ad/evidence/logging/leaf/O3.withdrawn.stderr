@@ -1,0 +1,7 @@
+[guard: execve/execveat denied; no libpython mapped]
+test_default (__main__.BufferingFormatterTest.test_default) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.867s
+
+OK

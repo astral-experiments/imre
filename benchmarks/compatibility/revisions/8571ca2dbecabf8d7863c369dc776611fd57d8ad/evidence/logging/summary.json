@@ -1,0 +1,32 @@
+{
+  "family": "logging",
+  "revision": "8571ca2dbecabf8d7863c369dc776611fd57d8ad",
+  "gate_passed": true,
+  "status": "replayed",
+  "receipts": 2,
+  "frozen_family_denominator": 272,
+  "missing_family_originals": 270,
+  "tiers": {
+    "stock": {
+      "pass": 2
+    },
+    "O0": {
+      "not_run": 1,
+      "pass": 1
+    },
+    "O3": {
+      "not_run": 1,
+      "pass": 1
+    }
+  },
+  "paired": 1,
+  "historical_stock_reused": false,
+  "saved_images": {
+    "leaf_O0": "/workspace/scratch/8571-refresh/logging/leaf/O0.exe",
+    "leaf_O3": "/workspace/scratch/8571-refresh/logging/leaf/O3.exe"
+  },
+  "launcher_controls": [
+    "gate.json",
+    "leaf/gate.json"
+  ]
+}

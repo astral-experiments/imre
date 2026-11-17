@@ -1,0 +1,2 @@
+ Compiling /workspace/scratch/8571-refresh/logging/gate/Lib/test/test_logging.py (-O0)
+/workspace/scratch/8571-refresh/logging/gate/Lib/logging_poison.py:1:15: Imre: expected int, got bool; annotations are enforced contracts

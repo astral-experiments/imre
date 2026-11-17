@@ -1,0 +1,38 @@
+{
+  "argv": [
+    "/workspace/imre/target/release/imre",
+    "build",
+    "/workspace/scratch/8571-refresh/logging/leaf/launcher.py",
+    "--module-root",
+    "/workspace/scratch/8571-refresh/logging/leaf",
+    "--extension-path",
+    "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+    "--no-cache",
+    "--opt-level",
+    "0",
+    "--runtime",
+    "/workspace/imre/target/release/libimre_runtime.a",
+    "--clang",
+    "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+    "-o",
+    "/workspace/scratch/8571-refresh/logging/leaf/O0.exe"
+  ],
+  "cwd": "/workspace/scratch/8571-refresh/logging/leaf",
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "IMREFLAGS": "--opt-level 0",
+    "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+  },
+  "timeout_seconds": 60,
+  "exit_code": 0,
+  "timed_out": false,
+  "elapsed_seconds": 15.258,
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "250cbdfae4f204c04f2e52d318f156d28cc78959e0da91670afe5eb71ab276d8",
+  "executable_exists": true,
+  "executable_sha256": "20b79eba46717bcbbb635b35437e921a29723693f6261263aac53efc3b6cd681"
+}
