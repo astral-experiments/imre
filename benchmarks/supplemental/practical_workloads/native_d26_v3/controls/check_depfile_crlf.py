@@ -22,7 +22,7 @@ def verify(source, evidence):
         if row:
             meta,path=row.split(b'\t',1); mode,kind,blob=meta.decode().split(); tree[path.decode()]=(mode,kind,blob)
     attrs=git(source,'show',REV+':.gitattributes'); assert b'crates/imre-compiler/stdlib/venv/scripts/common/Activate.ps1 text eol=crlf\n' in attrs and b'crates/imre-compiler/stdlib/venv/scripts/nt/*.bat text eol=crlf\n' in attrs
-    result={'revision':REV,'tracked_gitattributes':{'blob_oid':tree['.gitattributes'][2],'content_sha256':sha(attrs),'rules':['crates/imre-compiler/stdlib/venv/scripts/common/Activate.ps1 text eol=crlf','crates/imre-compiler/stdlib/venv/scripts/nt/*.bat text eol=crlf']},'depfiles':{},'transforms':[]}
+    result={'derivation':'retrospective post-capture source-only verification; not a contemporaneous measurement','revision':REV,'tracked_gitattributes':{'blob_oid':tree['.gitattributes'][2],'content_sha256':sha(attrs),'rules':['crates/imre-compiler/stdlib/venv/scripts/common/Activate.ps1 text eol=crlf','crates/imre-compiler/stdlib/venv/scripts/nt/*.bat text eol=crlf']},'depfiles':{},'transforms':[]}
     generated_audit=json.loads((evidence/'depfile_audit.json').read_bytes())['generated']
     allowed_generated={row['path']:row for row in generated_audit}
     for key in ('compiler','runtime'):

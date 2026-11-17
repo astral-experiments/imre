@@ -1,0 +1,121 @@
+{
+  "archived_capture_sources": [
+    {
+      "archived_path": "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_d26_v3/evidence/controllers/resume_capture.py.txt",
+      "observed_path": "/workspace/practical-d26-scratch-retry/resume_capture.py",
+      "role": "capture_controller",
+      "sha256": "59103fb0911107cc682f07427b0144630ffdf71be9dd97bc09e6a69479a1ac92"
+    },
+    {
+      "archived_path": "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_d26_v3/evidence/controllers/resume_rich_o0.py.txt",
+      "observed_path": "/workspace/practical-d26-scratch-retry/resume_rich_o0.py",
+      "role": "rich_o0_controller",
+      "sha256": "1756cfc02e3483b567f274c8f6daa020e70ca1cc43eeaf707305708e46b5c84e"
+    },
+    {
+      "archived_path": "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_d26_v3/evidence/controllers/audit_capture.py.txt",
+      "observed_path": "/workspace/practical-d26-scratch-retry/audit_capture.py",
+      "role": "audit_controller",
+      "sha256": "0fa80a8984d0b6f89c2edfb2550fab3eb3876063299fd814aec65f9e34858127"
+    },
+    {
+      "archived_path": "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_d26_v3/evidence/controllers/recapture_publishers.py.txt",
+      "observed_path": "/workspace/practical-d26-scratch-retry/recapture_publishers.py",
+      "role": "publisher_run_recapture_controller",
+      "sha256": "6e23eb37ca8d334ac70d181ec4ece8d9247eff94317965a9625d6d620f0c8eb8"
+    }
+  ],
+  "as_built_producer": "/workspace/practical-d26-scratch-retry/as-built/produce.py",
+  "as_built_producer_sha256": "cf1d0a00e789446870712670fabec4c6e12890571b6bbed3dd6e7a9705b8bd37",
+  "as_built_validator": "/workspace/practical-d26-scratch-retry/as-built/validate_native.py",
+  "as_built_validator_sha256": "0db84e41ac44073ec4154c6bdf05f8dfd6cbb2fc227fd40e4394293d4a1ee507",
+  "audit_controller": "/workspace/practical-d26-scratch-retry/audit_capture.py",
+  "audit_controller_sha256": "0fa80a8984d0b6f89c2edfb2550fab3eb3876063299fd814aec65f9e34858127",
+  "capture_controller": "/workspace/practical-d26-scratch-retry/resume_capture.py",
+  "capture_controller_sha256": "59103fb0911107cc682f07427b0144630ffdf71be9dd97bc09e6a69479a1ac92",
+  "cargo": "/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo",
+  "cargo_build": {
+    "argv": [
+      "/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo",
+      "build",
+      "--offline",
+      "--release",
+      "--locked",
+      "-vv",
+      "-p",
+      "imre-compiler",
+      "-p",
+      "imre-runtime",
+      "--target-dir",
+      "/workspace/imre/target"
+    ],
+    "cwd": "/workspace/imre-public-d26",
+    "environment": {
+      "CARGO_HOME": "/workspace/.toolchains/cargo",
+      "CC": "/usr/bin/cc",
+      "HOME": "/workspace",
+      "PATH": "/usr/bin:/bin",
+      "RUSTC": "/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc",
+      "RUSTUP_HOME": "/workspace/.toolchains/rustup",
+      "TMPDIR": "/workspace/practical-d26-scratch-retry/tmp"
+    },
+    "exit_code": 0,
+    "log_sha256": "31d4d4051475bd347485096608ddfe494a4411b98fdddb7f1a6994cf87133481"
+  },
+  "cargo_cc": "/usr/bin/x86_64-linux-gnu-gcc-14",
+  "cargo_cc_invocation": "/usr/bin/cc",
+  "cargo_cc_sha256": "a23ecab8ff08f09ad8c80602c2c5df7f49e09c25905cb8975902e101bf72635f",
+  "cargo_sha256": "da77c8b33849312255ccde3179198ada4c8deb370488d050286146b1d1b27e14",
+  "clang": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+  "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+  "compiler": "/workspace/imre/target/release/imre",
+  "compiler_sha256": "3ba8589edc6db18ace7eed2ddf3480c5214e4090418a5bcc54d563c4e4bbb087",
+  "depfile_audit": "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_d26_v3/evidence/depfile_audit.json",
+  "depfile_audit_sha256": "182433aa1837081e4c4201d18c1364283264d85164a0fc17f4bfd35fe0195d2d",
+  "depfiles": {
+    "compiler": {
+      "path": "/workspace/imre/target/release/imre.d",
+      "sha256": "d1280bfa57e6c4b2dc0e803367c06cef0573beb0011068aebc6f95baa6d454a2"
+    },
+    "runtime": {
+      "path": "/workspace/imre/target/release/libimre_runtime.d",
+      "sha256": "5b14c33c7da7caadde520d027330453bfd41d0b2315683c3cf799322547c3fba"
+    }
+  },
+  "fixture_policy": {
+    "blob": "a2aac2f74a0dce1b3f8ef0395d7e1ccb6080fc47",
+    "commit": "eacb0ab16a828c35dd3c86ed627d188fcedad8c7",
+    "path": "benchmarks/supplemental/practical_workloads/fixture_policy_v1/policy.json",
+    "sha256": "1e6049866e848aa52e04d886ef833604d6d4a785cc2286700d047385aa7df8ce"
+  },
+  "manifest_path": "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_d26_v3/evidence/build.json",
+  "pin": "d26f19448c70c00039c305f105a85c215f820577",
+  "probe": "/workspace/practical-d26-scratch-retry/raw_control_probe",
+  "probe_sha256": "10cdd30ddd59ff46ea6f5c8c88bc21124fc7ceb3763daae50e883ca95f2530aa",
+  "probe_source": "/workspace/imre-practical-publish/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe.c",
+  "producer": "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_replay/produce.py",
+  "producer_sha256": "cf1d0a00e789446870712670fabec4c6e12890571b6bbed3dd6e7a9705b8bd37",
+  "publisher_run_recapture": "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_d26_v3/evidence/publisher_run_recapture.json",
+  "publisher_run_recapture_sha256": "081248226146f19292c3893cb1d642edc692e0774d8887c67ad40f26bd04a1ce",
+  "python_fixture": "/workspace/fixture-policy-private/bin/python3.14",
+  "python_fixture_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+  "python_prefix": "/workspace/fixture-policy-private",
+  "rich_o0_controller": "/workspace/practical-d26-scratch-retry/resume_rich_o0.py",
+  "rich_o0_controller_sha256": "1756cfc02e3483b567f274c8f6daa020e70ca1cc43eeaf707305708e46b5c84e",
+  "runtime": "/workspace/imre/target/release/libimre_runtime.a",
+  "runtime_sha256": "84a459c2c3dc56120954c29188d095fdcd6fb4d73f3ff8d39229860cd92ca0c3",
+  "rustc": "/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc",
+  "rustc_sha256": "859254978c0a0402c32f949f6de0d99aee73be8d15f45aac00ae1448aac51e74",
+  "stdlib_root": "/workspace/fixture-policy-private/lib/python3.14",
+  "stub_sha256": "4a57e30e3cfc44ad1836a66760a844ceb628c68bf52031c2fac6f89e9356e85e",
+  "supervisor": "/workspace/practical-d26-scratch-retry/supervisor",
+  "supervisor_sha256": "36cce31bde9b0e1e7847d20d4a0821b2b509dca186d0b7c0231bb3e5fb14c88a",
+  "supervisor_source": "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_replay/supervisor.c",
+  "supervisor_source_sha256": "26625b22872021736e0014cc2b3135dda70b5bf372563311a76e6102f1b654b3",
+  "tmpdir": "/workspace/practical-d26-scratch-retry/tmp",
+  "trace_audit": "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_d26_v3/evidence/trace_audit.json",
+  "trace_audit_sha256": "ed702e86e0097b9ca439a74f43d9236a58803f155096c6c2dcb52a4c97e3d37a",
+  "tree": "8b348fa97435d3cb433cad3579ec93ea8279a5f5",
+  "validator": "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_replay/validate_native.py",
+  "validator_sha256": "0db84e41ac44073ec4154c6bdf05f8dfd6cbb2fc227fd40e4394293d4a1ee507"
+}

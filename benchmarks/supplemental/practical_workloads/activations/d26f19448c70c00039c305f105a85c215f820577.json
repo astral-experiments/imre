@@ -1,5 +1,5 @@
 {
-  "artifact_identity_sha256": "6d06492d3d3e9a2d88fbe62021d4f299f3374bbf61c9edfc53d440e2221a787e",
+  "artifact_identity_sha256": "ceafa0a7da1c1b1694f81229055380fc97e16f60ee8b04f505b1f094ce30e0bd",
   "fixture_policy": {
     "blob": "a2aac2f74a0dce1b3f8ef0395d7e1ccb6080fc47",
     "commit": "eacb0ab16a828c35dd3c86ed627d188fcedad8c7",
@@ -10,6 +10,7 @@
     "Raw syscall traces do not cover mutation syscalls such as symlink or unlink, or directory visibility. They do not establish adversarial immutability."
   ],
   "native_revision": "d26f19448c70c00039c305f105a85c215f820577",
+  "retrospective_checkpoint_custody_sha256": "8186726673da31c7e6e659718cda34f728b9158a71599a44f74dd1fe9b3f9c44",
   "schema": "imre.prospective.activation.v1",
   "stage_status": "uncredited",
   "strict_credit": 0

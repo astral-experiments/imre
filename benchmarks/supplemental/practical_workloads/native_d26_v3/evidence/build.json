@@ -71,11 +71,11 @@
   "compiler": "/workspace/imre/target/release/imre",
   "compiler_sha256": "3ba8589edc6db18ace7eed2ddf3480c5214e4090418a5bcc54d563c4e4bbb087",
   "depfile_audit": "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_d26_v3/evidence/depfile_audit.json",
-  "depfile_audit_sha256": "70bf93f0d118e424a4e0ebb5e36c62a34b5574e4f2b029efabc8faa25c0b7cf3",
+  "depfile_audit_sha256": "eb76cd937d279f7e8521c9ce44793a63943db54a61d6abe01aa227edaccf5f26",
   "depfile_correction_proof": "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_d26_v3/evidence/depfile_crlf_proof.json",
-  "depfile_correction_proof_sha256": "5019d454020f84a9a4ec43c7bd05e8a299d4b581ad80910f3215a065c7fd4b99",
+  "depfile_correction_proof_sha256": "a0b810efdc94c44afea9ac3c71ce95dddc6cca63461d8127f048e06cd8581c36",
   "depfile_correction_verifier": "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_d26_v3/controls/check_depfile_crlf.py",
-  "depfile_correction_verifier_sha256": "eadc5d28ea5194d00e9e0f44603dce7538a93f8a54fe3447e1dd5e3b60e7cd9b",
+  "depfile_correction_verifier_sha256": "798872e2cac0d7fe50b53ff86ad824820f501b5270da3bea9d824e68b4516ea4",
   "depfiles": {
     "compiler": {
       "path": "/workspace/imre/target/release/imre.d",
@@ -104,6 +104,8 @@
   "python_fixture": "/workspace/fixture-policy-private/bin/python3.14",
   "python_fixture_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
   "python_prefix": "/workspace/fixture-policy-private",
+  "retrospective_checkpoint_custody": "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_d26_v3/evidence/capture_checkpoint_custody.json",
+  "retrospective_checkpoint_custody_sha256": "8186726673da31c7e6e659718cda34f728b9158a71599a44f74dd1fe9b3f9c44",
   "rich_o0_controller": "/workspace/practical-d26-scratch-retry/resume_rich_o0.py",
   "rich_o0_controller_sha256": "1756cfc02e3483b567f274c8f6daa020e70ca1cc43eeaf707305708e46b5c84e",
   "runtime": "/workspace/imre/target/release/libimre_runtime.a",
