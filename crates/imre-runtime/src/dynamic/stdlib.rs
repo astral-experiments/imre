@@ -101,8 +101,8 @@ pub(super) mod zlib;
 /// Format a type for CPython diagnostics, including a non-default module and its qualname.
 pub(super) fn qualified_type(ctx: &mut Context, class: Id) -> Result<Id> {
     let name = match ctx.own_class_attr(class, "__qualname__") {
-        Some(name) => name,
-        None => ctx.text(ctx.class_name(class).to_owned()),
+        Some(name) if ctx.string_storage(name).is_some() => name,
+        _ => ctx.text(ctx.class_name(class).to_owned()),
     };
     let Some(module) = ctx.own_class_attr(class, "__module__") else {
         return Ok(name);
@@ -3691,6 +3691,33 @@ pub(super) fn call(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn qualified_type_resolves_the_builtin_type_descriptor() {
+        let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let class = ctx.builtin("type");
+        let slot = ctx.own_class_attr(class, "__qualname__").unwrap();
+        assert!(matches!(ctx.heap.get(slot), Value::LayoutDescriptor(..)));
+        let name = qualified_type(&mut ctx, class).unwrap();
+        assert_eq!(ctx.str_value(name).unwrap(), "type");
+
+        let scope = ctx.scope("qualified_type_test", None);
+        ctx.heap
+            .enter(scope, NONE, super::super::FrameOwner::Module(NONE));
+        let name = ctx.text("Inner");
+        let qualname_key = ctx.text("__qualname__");
+        let qualname = ctx.text("Outer.Inner");
+        let module_key = ctx.text("__module__");
+        let module = ctx.text("example");
+        let namespace = ctx.dict(vec![(qualname_key, qualname), (module_key, module)]);
+        let bases = ctx.alloc(Value::Tuple(Vec::new()));
+        let user = ctx
+            .call(class, vec![name, bases, namespace], vec![])
+            .unwrap();
+        let name = qualified_type(&mut ctx, user).unwrap();
+        assert_eq!(ctx.str_value(name).unwrap(), "example.Outer.Inner");
+        ctx.heap.leave(NONE, false);
+    }
 
     #[test]
     fn equal_prompt_names_and_bytes_keep_their_compiled_module() {
