@@ -86,3 +86,17 @@ print(derived_mapping.last["kind"])
 assert derived_mapping._reference()["kind"].upper() == "DERIVED"
 assert Pairs().make()["b"][0] == 3
 assert Pairs().pairs["a"][1] == 2
+
+
+class Reassigned:
+    value: int
+
+    def __init__(self) -> None:
+        self.value = 2
+        self.prepare()
+
+    def prepare(self) -> None:
+        self.value = 1
+
+
+print(Reassigned().value)
