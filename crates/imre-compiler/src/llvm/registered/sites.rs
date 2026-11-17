@@ -143,6 +143,11 @@ pub(crate) struct Declaration<'p> {
 
 #[derive(Clone)]
 pub(crate) struct CompiledExec {
+    pub(crate) alternatives: Vec<CompiledExecAlternative>,
+}
+
+#[derive(Clone)]
+pub(crate) struct CompiledExecAlternative {
     pub(crate) entry: String,
     pub(crate) flags: u32,
     pub(crate) source: String,

@@ -181,6 +181,8 @@ struct Imports {
     has_open_exec: bool,
     computed_import: bool,
     argument_imports: Vec<usize>,
+    site_names: HashMap<String, Option<usize>>,
+    site_directories: Vec<(Option<usize>, SiteDirectory)>,
     imports_logging: bool,
     sys_names: HashSet<String>,
     importlib_names: HashSet<String>,
@@ -194,6 +196,11 @@ struct Imports {
     get_data_names: HashSet<String>,
     machinery_names: HashSet<String>,
     machinery_attributes: HashSet<(String, String)>,
+}
+
+enum SiteDirectory {
+    Literal(PathBuf),
+    Argument(usize),
 }
 
 fn literal_path(expr: &Expr) -> Option<PathBuf> {
@@ -259,6 +266,38 @@ impl LiteralImports {
 }
 
 impl Imports {
+    fn argument_index(&self, expression: &Expr) -> Option<usize> {
+        let operand = expression.as_subscript_expr()?;
+        let argv = operand.value.as_attribute_expr()?;
+        if argv.attr.as_str() != "argv"
+            || !matches!(&*argv.value, Expr::Name(sys) if self.sys_names.contains(sys.id.as_str()))
+        {
+            return None;
+        }
+        let ast::Number::Int(index) = &operand.slice.as_number_literal_expr()?.value else {
+            return None;
+        };
+        usize::try_from(index.as_i64()?).ok()?.checked_sub(1)
+    }
+
+    fn site_binding(&self, expression: &Expr) -> Option<Option<usize>> {
+        let call = expression.as_call_expr()?;
+        let function = call.func.as_attribute_expr()?;
+        if function.attr.as_str() != "import_module"
+            || !matches!(&*function.value, Expr::Name(name) if self.importlib_names.contains(name.id.as_str()))
+        {
+            return None;
+        }
+        let operand = call.arguments.find_argument_value("name", 0)?;
+        if operand
+            .as_string_literal_expr()
+            .is_some_and(|value| value.value.to_string() == "site")
+        {
+            Some(None)
+        } else {
+            self.argument_index(operand).map(Some)
+        }
+    }
     fn invalid(error: Box<ModuleSyntaxError>) -> Self {
         Self {
             invalid_executable: Some(error),
@@ -451,6 +490,7 @@ impl<'a> Visitor<'a> for Imports {
                     }
                     match name {
                         "sys" => self.sys_names.insert(bound.to_string()),
+                        "site" => self.site_names.insert(bound.to_string(), None).is_none(),
                         "operator" => self.operator_names.insert(bound.to_string()),
                         "_opcode" => self.opcode_names.insert(bound.to_string()),
                         "hashlib" => self.hashlib_names.insert(bound.to_string()),
@@ -547,15 +587,37 @@ impl<'a> Visitor<'a> for Imports {
                 }
                 self.runtime_imports = true;
             }
-            Stmt::Assign(a) if a.targets.iter().any(|t| self.sys_path(t)) => {
-                self.runtime_imports = true;
-                self.paths(&a.value);
+            Stmt::Assign(a) => {
+                if a.targets.iter().any(|t| self.sys_path(t)) {
+                    self.runtime_imports = true;
+                    self.paths(&a.value);
+                }
+                if let Some(binding) = self.site_binding(&a.value) {
+                    for target in &a.targets {
+                        if let Expr::Name(name) = target {
+                            self.site_names.insert(name.id.to_string(), binding);
+                        }
+                    }
+                }
             }
             _ => {}
         }
         visitor::walk_stmt(self, s);
     }
     fn visit_expr(&mut self, e: &'a Expr) {
+        if let Expr::Call(call) = e
+            && let Expr::Attribute(function) = &*call.func
+            && function.attr.as_str() == "addsitedir"
+            && let Expr::Name(name) = &*function.value
+            && let Some(&module) = self.site_names.get(name.id.as_str())
+            && let Some(operand) = call.arguments.find_argument_value("sitedir", 0)
+            && let Some(directory) = literal_path(operand)
+                .map(SiteDirectory::Literal)
+                .or_else(|| self.argument_index(operand).map(SiteDirectory::Argument))
+        {
+            self.site_directories.push((module, directory));
+            self.runtime_imports = true;
+        }
         if let Expr::Call(call) = e
             && let Expr::Attribute(function) = &*call.func
             && function.attr.as_str() == "import_module"
@@ -1373,12 +1435,71 @@ pub(crate) fn compile(
         .filter(|p| !startup_paths.contains(p))
         .cloned()
         .collect();
-    let explicit_roots: Vec<_> = first
+    let mut explicit_roots: Vec<_> = first
         .explicit_roots
         .iter()
         .filter(|_| !source_entry)
         .map(|path| cwd.join(path))
         .collect();
+    let mut site_lines = Vec::new();
+    let mut site_inputs = SourceInputs::default();
+    for (module, directory) in &first.site_directories {
+        if module.is_some_and(|index| {
+            options
+                .launcher_arguments
+                .get(index)
+                .and_then(Option::as_deref)
+                != Some("site")
+        }) {
+            continue;
+        }
+        let directory = match directory {
+            SiteDirectory::Literal(path) => cwd.join(path),
+            SiteDirectory::Argument(index) => {
+                let Some(path) = options
+                    .launcher_arguments
+                    .get(*index)
+                    .and_then(Option::as_deref)
+                else {
+                    continue;
+                };
+                cwd.join(path)
+            }
+        };
+        explicit_roots.push(directory.clone());
+        let files = filesystem.site_path_files(&directory);
+        site_inputs
+            .site_path_files
+            .push((directory.clone(), files.clone()));
+        for path in files {
+            let Ok(identity) = filesystem.canonicalize(&path) else {
+                continue;
+            };
+            let Ok(bytes) = filesystem.read_source(&identity) else {
+                continue;
+            };
+            let digest = blake3::hash(&bytes).to_hex().to_string();
+            site_inputs.files.push((path, identity, digest));
+            let bytes = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&bytes);
+            let Ok(text) = std::str::from_utf8(bytes) else {
+                continue;
+            };
+            for line in text.lines() {
+                if line.starts_with("import ") || line.starts_with("import\t") {
+                    if !site_lines.iter().any(|known| known == line) {
+                        site_lines.push(line.to_owned());
+                    }
+                    if let Ok((imports, _)) =
+                        scan_imports(line, SourceKind::Command, None, None, None, false)
+                    {
+                        first.names.extend(imports.names);
+                    }
+                } else if !line.starts_with('#') && !line.trim().is_empty() {
+                    explicit_roots.push(directory.join(line.trim_end()));
+                }
+            }
+        }
+    }
     let mut installed_roots = Vec::new();
     for dir in options.installed_dirs() {
         installed_roots.push(dir.clone());
@@ -1396,7 +1517,7 @@ pub(crate) fn compile(
     let mut roots: Vec<_> = ordered.into_iter().cloned().collect();
     let implicit_dirs = roots[first_implicit..].to_vec();
     let bundled_root = BUNDLED_SOURCE_ROOT;
-    let mut inputs = SourceInputs::default();
+    let mut inputs = site_inputs;
     let mut archives = HashMap::new();
     let mut registrations = emit::RegisteredBodies::default();
     let mut syntax = None;
@@ -1581,7 +1702,7 @@ pub(crate) fn compile(
                         source.as_str(),
                         flags,
                         &candidates,
-                        &options.launcher_arguments,
+                        (&options.launcher_arguments, &[]),
                     );
                     if !options.launcher_arguments.is_empty() && !sites.is_empty() {
                         literals
@@ -2563,6 +2684,31 @@ pub(crate) fn compile(
                 (name.into(), Path::new(bundled_root).join(file), body.into())
             })
             .collect();
+    if !site_lines.is_empty()
+        && let Some((index, (_, _, source))) = builtins
+            .iter()
+            .enumerate()
+            .find(|(_, (name, _, _))| name == "site")
+    {
+        let unit = sources.len() + index;
+        let (imports, _) = scan_imports(source, SourceKind::File, None, None, None, false)?;
+        let session = crate::analysis::Session::registered_syntax(&mut syntax, &root, &roots)?;
+        let virtual_path = root.join("<imre site provider>.py");
+        session.seed(&virtual_path, source)?;
+        let (file, parsed, text) = session.selected_file(&virtual_path)?;
+        let sites = session.select_literal_level(
+            file,
+            &parsed,
+            text.as_str(),
+            imports.module_flags,
+            &imports.literal_calls,
+            (&[], &site_lines),
+        );
+        literals.forest.record_root(unit, sites);
+        while literals.forest.has_pending() {
+            literals.forest.advance(session);
+        }
+    }
     // runpy selects __main__ for a package, including a namespace package.
     let module_body = module_entry.and_then(|name| {
         let main;
@@ -2628,7 +2774,11 @@ pub(crate) fn compile(
         literals
             .forest
             .finish(session, python_optimization, |unit| {
-                let (name, path, _) = &sources[unit];
+                let (name, path, _) = if unit < sources.len() {
+                    &sources[unit]
+                } else {
+                    &builtins[unit - sources.len()]
+                };
                 registrations
                     .provider_origin(unit, path.starts_with(bundled_root))
                     .is_some_and(|origin| origin.python_annotations(name))

@@ -192,7 +192,7 @@ fn run() -> Result<ExitCode, String> {
             return Ok(ExitCode::from(2));
         }
         let uses_argument_source = |source: &str| {
-            ["exec", "import_module", "find_spec"]
+            ["exec", "import_module", "find_spec", "addsitedir"]
                 .iter()
                 .any(|name| source.contains(name))
         };

@@ -26,6 +26,7 @@ enum Fact {
     Identity(Result<PathBuf, String>),
     Bytes(Result<blake3::Hash, String>),
     WheelRecords(Vec<PathBuf>),
+    SitePathFiles(Vec<PathBuf>),
 }
 
 fn outcome<T, U>(result: &io::Result<T>, map: impl FnOnce(&T) -> U) -> Result<U, String> {
@@ -81,6 +82,12 @@ impl FileSystem<'_> {
         let records = crate::installed_wheels::records(path);
         self.record(path, || Fact::WheelRecords(records.clone()));
         records
+    }
+
+    pub(crate) fn site_path_files(&mut self, path: &Path) -> Vec<PathBuf> {
+        let files = crate::site_path_files(path);
+        self.record(path, || Fact::SitePathFiles(files.clone()));
+        files
     }
 
     pub(crate) fn is_file(&mut self, path: &Path) -> bool {
@@ -140,6 +147,7 @@ impl Inputs {
     fn fresh(&self) -> bool {
         self.0.iter().all(|(path, fact)| match fact {
             Fact::WheelRecords(value) => crate::installed_wheels::records(path) == *value,
+            Fact::SitePathFiles(value) => crate::site_path_files(path) == *value,
             Fact::File(value) => path.is_file() == *value,
             Fact::Directory(value) => path.is_dir() == *value,
             Fact::Exists(value) => path.exists() == *value,
@@ -195,7 +203,7 @@ impl WatchPaths {
         }
 
         for (root, fact) in &inputs.0 {
-            if matches!(fact, Fact::WheelRecords(_))
+            if matches!(fact, Fact::WheelRecords(_) | Fact::SitePathFiles(_))
                 && let Ok(real) = root.canonicalize()
                 && real.is_dir()
             {
@@ -238,7 +246,9 @@ impl Subscription {
                         let names = watched_names.lock().unwrap();
                         if !event.paths.iter().any(|p| {
                             names.iter().any(|name| name.starts_with(p))
-                                || (p.extension().is_some_and(|e| e == "dist-info")
+                                || (p
+                                    .extension()
+                                    .is_some_and(|e| e == "dist-info" || e == "pth")
                                     && p.parent().is_some_and(|parent| names.contains(parent)))
                         }) {
                             return;

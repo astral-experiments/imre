@@ -1231,7 +1231,7 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
     }
 
     fn exec_literal_at(&mut self, site: TextRange) -> Option<sites::CompiledExec> {
-        let child = self.source.exec_literals.body(site)?;
+        let children = self.source.exec_literals.bodies(site)?;
         let output = &mut self.frame.output;
         if output.diagnostic.is_some() {
             return None;
@@ -1241,34 +1241,38 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
             std::collections::hash_map::Entry::Occupied(entry) => return Some(entry.get().clone()),
             std::collections::hash_map::Entry::Vacant(entry) => entry,
         };
-        let child = match child {
-            Ok(child) => child,
+        let children = match children {
+            Ok(children) => children,
             Err((operand, reason)) => {
                 output.diagnostic = Some(self.source.literal_diagnostic(operand, reason));
                 return None;
             }
         };
         let file = output.data(b"<string>");
-        // A decoded module interns its own constants when its prologue runs.
-        let parent_names = std::mem::take(&mut output.interned_identifiers);
-        let compiled = child.body.emit(output, self.source.unit, &file);
-        output.interned_identifiers = parent_names;
-        let code = match compiled {
-            Ok(code) => code,
-            Err(error) => {
-                output.diagnostic = Some(error);
-                return None;
-            }
-        };
-        let text = child
-            .original_text
-            .as_deref()
-            .unwrap_or(&child.body.source.text);
-        let compiled = sites::CompiledExec {
-            entry: code,
-            flags: child.body.source.future_flags,
-            source: output.data(text.as_bytes()),
-        };
+        let mut alternatives = Vec::with_capacity(children.len());
+        for child in children {
+            // A decoded module interns its own constants when its prologue runs.
+            let parent_names = std::mem::take(&mut output.interned_identifiers);
+            let compiled = child.body.emit(output, self.source.unit, &file);
+            output.interned_identifiers = parent_names;
+            let code = match compiled {
+                Ok(code) => code,
+                Err(error) => {
+                    output.diagnostic = Some(error);
+                    return None;
+                }
+            };
+            let text = child
+                .original_text
+                .as_deref()
+                .unwrap_or(&child.body.source.text);
+            alternatives.push(sites::CompiledExecAlternative {
+                entry: code,
+                flags: child.body.source.future_flags,
+                source: output.data(text.as_bytes()),
+            });
+        }
+        let compiled = sites::CompiledExec { alternatives };
         Some(entry.insert(compiled).clone())
     }
 }

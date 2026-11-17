@@ -294,6 +294,26 @@ pub struct SourceInputs {
     /// Installed distribution RECORD paths visible in each searched wheel root.
     #[serde(default)]
     pub wheel_records: Vec<(PathBuf, Vec<PathBuf>)>,
+    /// Visible path configuration files in explicitly discovered site directories.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub site_path_files: Vec<(PathBuf, Vec<PathBuf>)>,
+}
+
+pub(crate) fn site_path_files(directory: &Path) -> Vec<PathBuf> {
+    let mut files: Vec<_> = std::fs::read_dir(directory)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| !name.starts_with('.') && name.ends_with(".pth"))
+        })
+        .map(|entry| entry.path())
+        .collect();
+    files.sort_unstable();
+    files
 }
 
 impl SourceInputs {
@@ -322,6 +342,10 @@ impl SourceInputs {
                 .wheel_records
                 .iter()
                 .all(|(root, expected)| &installed_wheels::records(root) == expected)
+            && self
+                .site_path_files
+                .iter()
+                .all(|(root, expected)| &site_path_files(root) == expected)
             && self
                 .declared_file_resolutions
                 .iter()
