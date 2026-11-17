@@ -14,8 +14,8 @@ from pathlib import Path
 
 from collect_unittest_results import parse
 
-EXEC = re.compile(r'^(\d+) execve\(("(?:[^"\\]|\\.)*"), (\[.*\]), .*\) = 0$')
-OPEN = re.compile(r'^\d+ (?:open|openat|openat2|creat)\(.*?("(?:[^"\\]|\\.)*")')
+EXEC = re.compile(r'^(\d+)\s+execve\(("(?:[^"\\]|\\.)*"), (\[.*\]), .*\) = 0$')
+OPEN = re.compile(r'^\d+\s+(?:open|openat|openat2|creat)\(.*?("(?:[^"\\]|\\.)*")')
 SHA = re.compile(r'^([0-9a-f]{64})  (.+)$')
 
 
@@ -50,12 +50,12 @@ def find(lines, pattern, start=0):
 
 def stat(lines, pid, path, absent, start=0):
     tail = r'= -1 ENOENT\b' if absent else r'= 0$'
-    return find(lines, rf'^{pid} newfstatat\(AT_FDCWD, {re.escape(json.dumps(path))}, .*{tail}', start)
+    return find(lines, rf'^{pid}\s+newfstatat\(AT_FDCWD, {re.escape(json.dumps(path))}, .*{tail}', start)
 
 
 def exits(lines, parent, child, code, start):
-    end = find(lines, rf'^{child} exit_group\({code}\)', start)
-    waited = find(lines, rf'^{parent} (?:<\.\.\. wait4 resumed>|wait4\({child},).*WEXITSTATUS\(s\) == {code}.*= {child}$', end + 1)
+    end = find(lines, rf'^{child}\s+exit_group\({code}\)', start)
+    waited = find(lines, rf'^{parent}\s+(?:<\.\.\. wait4 resumed>|wait4\({child},).*WEXITSTATUS\(s\) == {code}.*= {child}$', end + 1)
     return waited
 
 
@@ -72,11 +72,11 @@ def trace_gate(text, command, probe, poison_path, diagnostic, require):
             m = OPEN.match(line)
             if m and line.startswith(target[1] + ' ') and json.loads(m[1]) == path and re.search(r'= [0-9]+$', line): found = True
         require(found, 'gate compiler did not open the actual launcher and imported poison')
-    m = re.search(rf'^{target[1]} exit_group\(([1-9][0-9]*)\)', text, re.M)
+    m = re.search(rf'^{target[1]}\s+exit_group\(([1-9][0-9]*)\)', text, re.M)
     require(m is not None, 'gate compiler did not exit nonzero')
     waited = exits(lines, first[1], target[1], int(m[1]), target[0])
     after = stat(lines, first[1], out, True, waited + 1)
-    find(lines, rf'^{first[1]} exit_group\(0\)', after + 1)
+    find(lines, rf'^{first[1]}\s+exit_group\(0\)', after + 1)
     require(poison_path in diagnostic and re.search(r'expected\s+int,\s*got\s+bool', diagnostic), 'missing imported int/bool diagnostic')
 
 
@@ -87,16 +87,16 @@ def trace_withdraw(api, text, image, probe, tree, stash, leaf, cwd, require):
         and target[2:] == (image, [image]), 'withdrawal did not run the saved image directly')
     pre = stat(lines, first[1], leaf, False, first[0]+1)
     missing_stash = stat(lines, first[1], stash, True, pre+1)
-    mv = find(lines, rf'^{first[1]} rename\({re.escape(json.dumps(tree))}, {re.escape(json.dumps(stash))}\) = 0$', missing_stash+1)
+    mv = find(lines, rf'^{first[1]}\s+rename\({re.escape(json.dumps(tree))}, {re.escape(json.dumps(stash))}\) = 0$', missing_stash+1)
     a = stat(lines, first[1], tree, True, mv+1)
     b = stat(lines, first[1], leaf, True, a+1)
     require(b < target[0], 'test source tree was not absent before native exec')
     waited = exits(lines, first[1], target[1], 0, target[0])
     a = stat(lines, first[1], tree, True, waited+1)
     b = stat(lines, first[1], leaf, True, a+1)
-    restored = find(lines, rf'^{first[1]} rename\({re.escape(json.dumps(stash))}, {re.escape(json.dumps(tree))}\) = 0$', b+1)
+    restored = find(lines, rf'^{first[1]}\s+rename\({re.escape(json.dumps(stash))}, {re.escape(json.dumps(tree))}\) = 0$', b+1)
     exists = stat(lines, first[1], leaf, False, restored+1)
-    find(lines, rf'^{first[1]} exit_group\(0\)', exists+1)
+    find(lines, rf'^{first[1]}\s+exit_group\(0\)', exists+1)
     stem = Path(leaf).stem.lower()
     for line in lines[target[0]:waited+1]:
         # A successful io_uring setup would permit unobserved asynchronous opens.
