@@ -1961,8 +1961,9 @@ impl Checker<'_> {
             };
             let exact_tuple_equality = cmp.as_single().is_some_and(|(left, op, right)| {
                 matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
-                    && left.is_tuple_expr()
-                    && right.is_tuple_expr()
+                    && [left, right].into_iter().all(|operand| {
+                        matches!(display_elements(operand), Some((_, DisplayKind::Tuple)))
+                    })
             });
             let mut previous_fixed = false;
             if !exact_tuple_equality
