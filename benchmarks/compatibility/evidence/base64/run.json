@@ -122,5 +122,16 @@
       "configure --without-ensurepip",
       "make -j4"
     ]
-  }
+  },
+  "architecture_controls": {
+    "file": {
+      "receipt": "benchmarks/compatibility/evidence/base64/architecture-control-file.json",
+      "passed": false,
+      "image_produced": true,
+      "expected_diagnostic": false
+    }
+  },
+  "pair_credit_withheld": 40,
+  "source_withdrawal": "Not performed: the replay removed its positive images, and rebuilding and rerunning full suites was outside the conservative finish instruction.",
+  "native_execution": "Native observations came from the pinned Imre-built image. No stock CPython was used to execute a native launcher; native child interpreter selection was IMRE_PYTHON where configured."
 }
