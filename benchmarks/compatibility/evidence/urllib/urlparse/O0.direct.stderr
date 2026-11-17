@@ -1,0 +1,94 @@
+test_splitattr_deprecation (__main__.DeprecationTest.test_splitattr_deprecation) ... ok
+test_splithost_deprecation (__main__.DeprecationTest.test_splithost_deprecation) ... ok
+test_splitnport_deprecation (__main__.DeprecationTest.test_splitnport_deprecation) ... ok
+test_splitpasswd_deprecation (__main__.DeprecationTest.test_splitpasswd_deprecation) ... ok
+test_splitport_deprecation (__main__.DeprecationTest.test_splitport_deprecation) ... ok
+test_splitquery_deprecation (__main__.DeprecationTest.test_splitquery_deprecation) ... ok
+test_splittag_deprecation (__main__.DeprecationTest.test_splittag_deprecation) ... ok
+test_splittype_deprecation (__main__.DeprecationTest.test_splittype_deprecation) ... ok
+test_splituser_deprecation (__main__.DeprecationTest.test_splituser_deprecation) ... ok
+test_splitvalue_deprecation (__main__.DeprecationTest.test_splitvalue_deprecation) ... ok
+test_to_bytes_deprecation (__main__.DeprecationTest.test_to_bytes_deprecation) ... ok
+test_Quoter_repr (__main__.UrlParseTestCase.test_Quoter_repr) ... ok
+test_RFC1808 (__main__.UrlParseTestCase.test_RFC1808) ... ok
+test_RFC2368 (__main__.UrlParseTestCase.test_RFC2368) ... ok
+test_RFC2396 (__main__.UrlParseTestCase.test_RFC2396) ... ok
+test_RFC2732 (__main__.UrlParseTestCase.test_RFC2732) ... ok
+test_RFC2732_invalid (__main__.UrlParseTestCase.test_RFC2732_invalid) ... ok
+test_RFC3986 (__main__.UrlParseTestCase.test_RFC3986) ... ok
+test_all (__main__.UrlParseTestCase.test_all) ... ok
+test_anyscheme (__main__.UrlParseTestCase.test_anyscheme) ... ok
+test_attributes_bad_port (__main__.UrlParseTestCase.test_attributes_bad_port)
+Check handling of invalid ports. ... 
+  test_attributes_bad_port (__main__.UrlParseTestCase.test_attributes_bad_port) (port='६', parse=<functools._lru_cache_wrapper object at 0x6ddf>, bytes=True)
+Check handling of invalid ports. ... skipped 'non-ASCII bytes'
+  test_attributes_bad_port (__main__.UrlParseTestCase.test_attributes_bad_port) (port='६', parse=<function urlparse at 0x679a>, bytes=True)
+Check handling of invalid ports. ... skipped 'non-ASCII bytes'
+test_attributes_bad_scheme (__main__.UrlParseTestCase.test_attributes_bad_scheme)
+Check handling of invalid schemes. ... 
+  test_attributes_bad_scheme (__main__.UrlParseTestCase.test_attributes_bad_scheme) (scheme='६http', parse=<functools._lru_cache_wrapper object at 0x6ddf>, bytes=True)
+Check handling of invalid schemes. ... skipped 'non-ASCII bytes'
+  test_attributes_bad_scheme (__main__.UrlParseTestCase.test_attributes_bad_scheme) (scheme='६http', parse=<function urlparse at 0x679a>, bytes=True)
+Check handling of invalid schemes. ... skipped 'non-ASCII bytes'
+test_attributes_without_netloc (__main__.UrlParseTestCase.test_attributes_without_netloc) ... ok
+test_clear_cache_for_code_coverage (__main__.UrlParseTestCase.test_clear_cache_for_code_coverage) ... ok
+test_default_scheme (__main__.UrlParseTestCase.test_default_scheme) ... ok
+test_http_roundtrips (__main__.UrlParseTestCase.test_http_roundtrips) ... ok
+test_invalid_bracketed_hosts (__main__.UrlParseTestCase.test_invalid_bracketed_hosts) ... ok
+test_issue14072 (__main__.UrlParseTestCase.test_issue14072) ... ok
+test_mixed_types_rejected (__main__.UrlParseTestCase.test_mixed_types_rejected) ... ok
+test_noslash (__main__.UrlParseTestCase.test_noslash) ... ok
+test_parse_fragments (__main__.UrlParseTestCase.test_parse_fragments) ... ok
+test_parse_qs_encoding (__main__.UrlParseTestCase.test_parse_qs_encoding) ... ok
+test_parse_qs_separator (__main__.UrlParseTestCase.test_parse_qs_separator) ... ok
+test_parse_qsl_bytes (__main__.UrlParseTestCase.test_parse_qsl_bytes) ... ok
+test_parse_qsl_encoding (__main__.UrlParseTestCase.test_parse_qsl_encoding) ... ok
+test_parse_qsl_errors (__main__.UrlParseTestCase.test_parse_qsl_errors) ... ok
+test_parse_qsl_false_value (__main__.UrlParseTestCase.test_parse_qsl_false_value) ... ok
+test_parse_qsl_max_num_fields (__main__.UrlParseTestCase.test_parse_qsl_max_num_fields) ... ok
+test_parse_qsl_separator (__main__.UrlParseTestCase.test_parse_qsl_separator) ... ok
+test_port_casting_failure_message (__main__.UrlParseTestCase.test_port_casting_failure_message) ... ok
+test_portseparator (__main__.UrlParseTestCase.test_portseparator) ... ok
+test_qs (__main__.UrlParseTestCase.test_qs) ... ok
+test_qsl (__main__.UrlParseTestCase.test_qsl) ... ok
+test_quote_errors (__main__.UrlParseTestCase.test_quote_errors) ... ok
+test_quote_from_bytes (__main__.UrlParseTestCase.test_quote_from_bytes) ... ok
+test_result_pairs (__main__.UrlParseTestCase.test_result_pairs) ... ok
+test_roundtrips (__main__.UrlParseTestCase.test_roundtrips) ... 
+  test_roundtrips (__main__.UrlParseTestCase.test_roundtrips) (url='schème:path/to/file', parsed=('', '', 'schème:path/to/file', '', '', ''), split=('', '', 'schème:path/to/file', '', ''), bytes=True) ... skipped 'non-ASCII bytes'
+test_roundtrips_normalization (__main__.UrlParseTestCase.test_roundtrips_normalization) ... ok
+test_splitting_bracketed_hosts (__main__.UrlParseTestCase.test_splitting_bracketed_hosts) ... ok
+test_telurl_params (__main__.UrlParseTestCase.test_telurl_params) ... ok
+test_unparse_parse (__main__.UrlParseTestCase.test_unparse_parse) ... ok
+test_unquote_to_bytes (__main__.UrlParseTestCase.test_unquote_to_bytes) ... ok
+test_urldefrag (__main__.UrlParseTestCase.test_urldefrag) ... ok
+test_urlencode_quote_via (__main__.UrlParseTestCase.test_urlencode_quote_via) ... ok
+test_urlencode_sequences (__main__.UrlParseTestCase.test_urlencode_sequences) ... ok
+test_urljoins (__main__.UrlParseTestCase.test_urljoins) ... ok
+test_urljoins_relative_base (__main__.UrlParseTestCase.test_urljoins_relative_base) ... ok
+test_urllib_parse_getattr_failure (__main__.UrlParseTestCase.test_urllib_parse_getattr_failure)
+Test that urllib.parse.__getattr__() fails correctly. ... ok
+test_urlsplit_attributes (__main__.UrlParseTestCase.test_urlsplit_attributes) ... ok
+test_urlsplit_normalization (__main__.UrlParseTestCase.test_urlsplit_normalization) ... ok
+test_urlsplit_remove_unsafe_bytes (__main__.UrlParseTestCase.test_urlsplit_remove_unsafe_bytes) ... ok
+test_urlsplit_scoped_IPv6 (__main__.UrlParseTestCase.test_urlsplit_scoped_IPv6) ... ok
+test_urlsplit_strip_url (__main__.UrlParseTestCase.test_urlsplit_strip_url) ... ok
+test_usingsys (__main__.UrlParseTestCase.test_usingsys) ... ok
+test_withoutscheme (__main__.UrlParseTestCase.test_withoutscheme) ... ok
+test_splitattr (__main__.Utility_Tests.test_splitattr) ... ok
+test_splithost (__main__.Utility_Tests.test_splithost) ... ok
+test_splitnport (__main__.Utility_Tests.test_splitnport) ... ok
+test_splitpasswd (__main__.Utility_Tests.test_splitpasswd) ... ok
+test_splitport (__main__.Utility_Tests.test_splitport) ... ok
+test_splitquery (__main__.Utility_Tests.test_splitquery) ... ok
+test_splittag (__main__.Utility_Tests.test_splittag) ... ok
+test_splittype (__main__.Utility_Tests.test_splittype) ... ok
+test_splituser (__main__.Utility_Tests.test_splituser) ... ok
+test_splitvalue (__main__.Utility_Tests.test_splitvalue) ... ok
+test_to_bytes (__main__.Utility_Tests.test_to_bytes) ... ok
+test_unwrap (__main__.Utility_Tests.test_unwrap) ... ok
+
+----------------------------------------------------------------------
+Ran 77 tests in 4.931s
+
+OK (skipped=5)
