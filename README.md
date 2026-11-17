@@ -179,6 +179,8 @@ The [stdlib report](docs/stdlib.md) lists every frozen family, including those n
 An observed intersection means the same original passed stock, O0 and O3; frozen credited pairs also require the launcher to pass its imported bad-type control and any required source-withdrawal check. Script passes also require independently anchored frozen preimages and reference observations, plus exact exit, stdout, stderr and effect comparisons. Skips, omissions, unsupported diagnostics, exclusions, timeouts and non-stock successes never earn credited pairs. Historical credits come from the [frozen mixed-revision ledger](benchmarks/cpython_stdlib/full/frozen-stock-intersection-8818.tsv) and are separate from the pinned result. [Receipts and replay instructions](benchmarks/compatibility/README.md).
 <!-- compatibility-scorecard:end -->
 
+[Compatibility snapshot at revision 8571ca2d](benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/README.md)
+
 ### Historical whole-suite runs (mixed revisions)
 
 These historical Linux runs span earlier revisions and are not results for the pinned scorecard. They started with the unchanged CPython 3.14.5 test files. Each paired pass identifies the same original test passing on CPython and at both Imre optimization levels. [Individual results](benchmarks/cpython_stdlib/paired-recheck-8074-and-8092.tsv)
