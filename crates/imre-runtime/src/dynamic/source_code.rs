@@ -920,11 +920,22 @@ impl IndentationDiagnostic {
         source: &str,
         file_input: bool,
         first_statement_end: Option<ruff_text_size::TextSize>,
+        expression_input: bool,
     ) -> Option<Self> {
         use ast::token::TokenKind::{Dedent, Indent};
         let mut depth = 0usize;
         for token in parsed.tokens() {
             match token.kind() {
+                Indent if expression_input && depth == 0 => {
+                    if parsed
+                        .errors()
+                        .first()
+                        .is_some_and(|e| e.location.start() < token.start())
+                    {
+                        return None;
+                    }
+                    return Some(Self::unexpected(source, token.end().to_usize()));
+                }
                 Indent if depth == MAX_INDENT_LEVELS => {
                     if first_statement_end.is_some_and(|end| token.start() >= end)
                         || parsed
@@ -957,7 +968,37 @@ impl IndentationDiagnostic {
                 _ => {}
             }
         }
+        if expression_input
+            && parsed.errors().is_empty()
+            && let Some(token) = parsed.tokens().iter().last()
+            && token.kind() == ast::token::TokenKind::Newline
+            && token.end().to_usize() < source.len()
+            && source[token.end().to_usize()..]
+                .bytes()
+                .all(|b| matches!(b, b' ' | b'\t' | b'\x0c'))
+        {
+            return Some(Self::unexpected(source, source.len()));
+        }
         None
+    }
+
+    /// Locate an unexpected top-level indentation prefix in an expression input.
+    fn unexpected(source: &str, end: usize) -> Self {
+        let start = source[..end].rfind('\n').map_or(0, |i| i + 1);
+        let row = 1 + source[..start].bytes().filter(|&b| b == b'\n').count() as i64;
+        let text = source[start..]
+            .split_inclusive('\n')
+            .next()
+            .unwrap_or_default()
+            .to_owned();
+        Self {
+            kind: "IndentationError",
+            message: "unexpected indent",
+            column: source[start..end].chars().count() as i64,
+            end_column: -1,
+            row,
+            text,
+        }
     }
 
     pub(super) fn raise<T>(self, ctx: &mut Context, filename: Id) -> Result<T> {
@@ -2311,7 +2352,8 @@ impl Context {
             (true, ast::Mod::Module(module)) => module.body.first().map(Ranged::end),
             _ => None,
         };
-        if let Some(limit) = IndentationDiagnostic::find(&parsed, source, exec, first_statement_end)
+        if let Some(limit) =
+            IndentationDiagnostic::find(&parsed, source, exec, first_statement_end, mode == "eval")
         {
             return limit.raise(self, filename_id);
         }
@@ -2858,10 +2900,10 @@ impl Context {
             (globals != NONE).then_some(globals),
             (locals != NONE).then_some(locals),
         )?;
-        // ForwardRef can supply passive compile metadata. It has no executable body.
-        if matches!(self.heap.get(text), Value::Code(code) if matches!(code.body, Body::Parsed { .. }))
-        {
-            return self.eval_namespace_code(text, globals, locals.unwrap_or(globals));
+        // ForwardRef validation returns no checked body for valid unlinked source.
+        if text == NONE {
+            self.checked_source_namespaces(globals, locals, None, "eval")?;
+            return Err(Self::missing_body_error("<module>", "<string>", 1));
         }
         if let Some(entry) = self.linked_expression(text) {
             let filename = self.text("<string>");

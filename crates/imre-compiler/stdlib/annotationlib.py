@@ -314,12 +314,11 @@ class ForwardRef:
             raise error
         source = _rewrite_star_unpack(arg)
         try:
-            linked = _validate_forward_ref(source)
-            code = source if linked else compile(source, "<string>", "eval")
+            checked = _validate_forward_ref(source)
         except SyntaxError:
             raise SyntaxError(f"Forward reference must be an expression -- got {arg!r}")
         try:
-            return _eval_type_expression(code, globals, locals)
+            return _eval_type_expression(checked, globals, locals)
         except SyntaxError:
             if format == Format.VALUE:
                 raise
@@ -340,7 +339,7 @@ class ForwardRef:
             owner, names, self.__forward_is_class__,
         )
         try:
-            result = _eval_type_expression(code, globals, symbolic)
+            result = _eval_type_expression(checked, globals, symbolic)
         except Exception:
             return self
         symbolic.finish()

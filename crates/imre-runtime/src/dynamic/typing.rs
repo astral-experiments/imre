@@ -2602,10 +2602,10 @@ pub(super) fn call(
                 ctx.heap.linked_sources.get(text),
                 Some(super::LinkedSource::Expression(_))
             ) {
-                return Ok(TRUE);
+                return Ok(*text);
             }
             ctx.check_annotation(*text, true)?;
-            Ok(FALSE)
+            Ok(NONE)
         }
         // Read the base type descriptor directly, bypassing a custom metaclass's
         // __annotations__ or __dict__. Static types have no annotation storage.
