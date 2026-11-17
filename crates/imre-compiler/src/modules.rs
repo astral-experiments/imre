@@ -4315,8 +4315,20 @@ impl SourceGraph {
         let entry = fs
             .canonicalize(entry)
             .map_err(|error| format!("{}: {error}", entry.display()))?;
-        if entry.extension().and_then(|value| value.to_str()) != Some("py") {
+        let extension = entry.extension().and_then(|value| value.to_str());
+        if extension.is_some() && extension != Some("py") {
             return Err("entry source must be a .py file".into());
+        }
+        let bytes = fs
+            .read_source(&entry)
+            .map_err(|error| format!("{}: {error}", entry.display()))?;
+        // Installed console scripts are commonly extensionless. Keep their imports
+        // in the checked graph rather than treating a missing suffix as a reason to
+        // skip checking the original source contracts.
+        if extension.is_none() && !bytes.starts_with(b"#!") {
+            return Err(
+                "entry source must be a .py file or an extensionless script with a shebang".into(),
+            );
         }
         if entry.file_name().and_then(|value| value.to_str()) == Some("__init__.py") {
             return Err("use a program module or package __main__.py as the entry source".into());
@@ -4330,7 +4342,7 @@ impl SourceGraph {
                 .parent()
                 .ok_or("entry source has no parent")?
                 .to_path_buf();
-            while site_probes.is_file(&mut fs, root.join("__init__.py")) {
+            while extension.is_some() && site_probes.is_file(&mut fs, root.join("__init__.py")) {
                 root = root
                     .parent()
                     .ok_or("package has no module root")?
@@ -4354,16 +4366,19 @@ impl SourceGraph {
                     .ok_or("module paths must be valid UTF-8")
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let name = parts.join(".");
+        // An extensionless script cannot be imported by its filename. In particular,
+        // a console launcher named `tool` must not displace an installed `tool` package.
+        let name = if extension.is_none() {
+            "__main__".to_owned()
+        } else {
+            parts.join(".")
+        };
         // Keep the physical FILE's import identity even if scanning its imports
         // selects the registered runtime. A literal dot in a filename is not a
         // package separator.
-        if parts.len() > 1 && parts.iter().all(|part| !part.contains('.')) {
+        if extension.is_some() && parts.len() > 1 && parts.iter().all(|part| !part.contains('.')) {
             site_probes.packaged_file_module = Some(name.clone());
         }
-        let bytes = fs
-            .read_source(&entry)
-            .map_err(|error| format!("{}: {error}", entry.display()))?;
         let source = ModuleText::disk(&entry, bytes)?;
         let mut loader = Loader::new(
             root,

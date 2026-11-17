@@ -2620,9 +2620,11 @@ pub(crate) fn compile(
                         file_origins.push((sources.len(), origin == ImportOrigin::Startup, index));
                         let registration = (prefix.clone(), path, src.into());
                         if winner && !loader_error {
-                            // Only path zero belongs to the program. With safe path
-                            // the first remaining search entry may be an installation.
-                            let program = initial[..path0_len].contains(root);
+                            // Path zero and explicitly declared finite application roots
+                            // retain source contracts; other installations do not become
+                            // first party merely because they are searched.
+                            let program = initial[..path0_len].contains(root)
+                                || options.application_roots.contains(root);
                             if let Some(parsed) = parsed {
                                 registrations
                                     .checked_units
@@ -2833,10 +2835,11 @@ pub(crate) fn compile(
             });
             semantic_files.insert(path.as_path(), physical.join(relative));
         }
-        let application = entry_owner
-            .as_ref()
-            .and_then(|owner| owner.is_program(root, path))
-            .unwrap_or_else(|| initial[..path0_len].contains(root));
+        let application = options.application_roots.contains(root)
+            || entry_owner
+                .as_ref()
+                .and_then(|owner| owner.is_program(root, path))
+                .unwrap_or_else(|| initial[..path0_len].contains(root));
         if !application {
             registrations.python_providers.insert(id);
         }
