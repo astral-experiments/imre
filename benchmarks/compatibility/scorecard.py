@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import csv
 import hashlib
 import json
@@ -39,7 +41,72 @@ def families():
     return result
 
 
-def validate_record(r, kind, family_names):
+def raw_observation(obj, name, check, required=False):
+    keys = [key for key in (name, name + "_base64", name + "_path") if key in obj]
+    digest_key = "effects_sha256" if name == "effects_manifest" else name + "_sha256"
+    digest = obj.get(digest_key)
+    if not keys and digest is None and not required: return None
+    check(len(keys) == 1 and isinstance(digest, str) and bool(HEX64.fullmatch(digest)), f"{name}: need one raw representation and SHA-256")
+    key = keys[0]; value = obj[key]
+    check(isinstance(value, str), f"{key}: expected string")
+    if key == name: data = value.encode("utf-8")
+    elif key.endswith("_base64"):
+        try: data = base64.b64decode(value, validate=True)
+        except (ValueError, binascii.Error): check(False, f"{key}: invalid base64")
+    else:
+        path = (ROOT / value).resolve()
+        check(path.is_relative_to(ROOT.resolve()) and path.is_file(), f"{key}: missing repository-local raw file")
+        data = path.read_bytes()
+    check(hashlib.sha256(data).hexdigest() == digest, f"{name}: digest inconsistent with raw bytes")
+    if name == "effects_manifest":
+        try: manifest = json.loads(data)
+        except (ValueError, UnicodeError): check(False, "effects_manifest: expected raw JSON object")
+        check(isinstance(manifest, dict), "effects_manifest: expected raw JSON object")
+    return data
+
+
+def validate_observations(obj, check, required=False):
+    if required: check(type(obj.get("exit_code")) is int, "missing exit code")
+    for name in ("stdout", "stderr", "effects_manifest"):
+        raw_observation(obj, name, check, required)
+
+
+def valid_preimages(preimages, check):
+    check(isinstance(preimages, dict) and all(isinstance(k, str) and k and not k.startswith("/") and ".." not in Path(k).parts and (v is None or isinstance(v, str) and HEX64.fullmatch(v)) for k, v in preimages.items()), "invalid fixture preimages")
+
+
+def validate_frozen_anchor(anchor):
+    label = anchor.get("id", "<missing id>")
+    def check(c, msg): require(c, f"frozen {label}: {msg}")
+    check(anchor.get("schema") == "imre.compatibility.frozen-script.v1" and isinstance(label, str) and bool(label), "invalid schema or id")
+    source = anchor.get("source", {})
+    check(all(isinstance(source.get(k), str) and source[k] for k in ("repo", "commit", "path", "sha256")) and bool(HEX40.fullmatch(source["commit"])) and bool(HEX64.fullmatch(source["sha256"])), "invalid source")
+    evidence = anchor.get("evidence", {})
+    check(isinstance(evidence, dict) and isinstance(evidence.get("locator"), str) and bool(evidence["locator"]), "missing frozen evidence locator")
+    data = raw_observation(evidence, "raw", check, True)
+    try: frozen = json.loads(data)
+    except (ValueError, UnicodeError): check(False, "frozen evidence must be JSON")
+    check(isinstance(frozen, dict) and isinstance(frozen.get("fixture_scope"), str) and bool(frozen["fixture_scope"]), "missing frozen fixture scope")
+    check(frozen.get("id") == label and frozen.get("source") == source and frozen.get("normalized_invocation") == anchor.get("normalized_invocation") and isinstance(anchor.get("normalized_invocation"), dict), "frozen evidence does not bind the original command")
+    valid_preimages(frozen.get("preimages"), check)
+    reference = frozen.get("reference")
+    check(isinstance(reference, dict), "missing frozen reference")
+    validate_observations(reference, check, True)
+    return frozen
+
+
+def load_frozen_scripts():
+    path = HERE / "frozen" / "scripts.jsonl"
+    anchors = {}
+    if path.exists():
+        for line in path.read_text().splitlines():
+            anchor = json.loads(line); validate_frozen_anchor(anchor)
+            require(anchor["id"] not in anchors, f"duplicate frozen script anchor: {anchor['id']}")
+            anchors[anchor["id"]] = anchor
+    return anchors
+
+
+def validate_record(r, kind, family_names, frozen_scripts=None):
     label = r.get("id", "<missing id>")
     def check(c, msg): require(c, f"{label}: {msg}")
     check(r.get("schema") == SCHEMA and r.get("kind") == kind, "wrong schema or kind")
@@ -67,14 +134,28 @@ def validate_record(r, kind, family_names):
         check(bool(run.get("evidence")) if run["outcome"] not in {"not_run", "omitted"} else bool(run.get("reason")), f"missing {tier} evidence/reason")
         if tier == "stock" and run["outcome"] != "not_run":
             check(run.get("version") == COHORT["cpython_version"], "stock must be exact CPython 3.14.5")
-        if kind == "script" and run["outcome"] == "pass":
-            check(isinstance(run.get("exit_code"), int) and all(HEX64.fullmatch(run.get(k, "")) for k in ("stdout_sha256", "stderr_sha256", "effects_sha256")), f"missing {tier} exact observations")
-            check(bool(run.get("effects_manifest")), f"missing {tier} effects manifest")
+        if kind == "script":
+            validate_observations(run, lambda c, msg: check(c, f"{tier} {msg}"), run["outcome"] == "pass")
     omission = r.get("omission_reason")
     check("omission_reason" in r and (omission is None or isinstance(omission, str) and bool(omission)), "invalid omission reason")
     check(not any(x["outcome"] == "omitted" for x in runs.values()) or bool(omission), "omission requires reason")
     paired = not omission and all(runs[t]["outcome"] == "pass" for t in TIERS)
     if kind == "script":
+        provenance = r.get("fixture_provenance", {})
+        check(isinstance(provenance, dict) and provenance.get("status") in {"exact_frozen", "reconstructed", "unknown"}, "missing fixture provenance status")
+        observed = provenance.get("preimages", {})
+        check(isinstance(observed, dict) and set(observed) <= set(TIERS), "invalid observed preimage tiers")
+        for preimages in observed.values(): valid_preimages(preimages, check)
+        established = False
+        if provenance["status"] == "exact_frozen":
+            anchor = (frozen_scripts or {}).get(label)
+            check(anchor is not None and anchor.get("source") == source and anchor.get("normalized_invocation") == invocation, "exact frozen fixture requires an independent matching anchor")
+            frozen = validate_frozen_anchor(anchor)
+            check(set(observed) == set(TIERS), "exact frozen fixture needs preimages for all tiers")
+            established = all(observed[t] == frozen["preimages"] for t in TIERS)
+            reference = frozen["reference"]
+            established = established and all(runs["stock"].get(field) == reference.get(field) for field in ("exit_code", "stdout_sha256", "stderr_sha256", "effects_sha256"))
+        paired = paired and established
         comparisons = r.get("comparisons", {})
         check(set(comparisons) == {"O0", "O3"}, "missing comparisons")
         for tier in ("O0", "O3"):
@@ -129,14 +210,14 @@ def verify_stdlib_evidence(r):
         require(result == (r["id"], run["outcome"]) and occurrence == r["occurrence"], f"{r['id']}: {tier} evidence does not establish exact ID, occurrence and outcome")
 
 
-def load_records(kind, names):
+def load_records(kind, names, frozen_scripts=None):
     records = []
     seen = set()
     commands = set()
     for path in sorted((HERE / ("stdlib" if kind == "stdlib" else "scripts")).glob("*.jsonl")):
         if kind == "script": require(path.stem in COHORT["scripts"]["shards"], f"unrecognized script shard: {path}")
         for line_num, line in enumerate(path.read_text().splitlines(), 1):
-            try: r = validate_record(json.loads(line), kind, names)
+            try: r = validate_record(json.loads(line), kind, names, frozen_scripts)
             except (ValueError, TypeError, KeyError) as e: raise ValueError(f"{path.relative_to(ROOT)}:{line_num}: {e}") from e
             key = (r.get("family"), r["id"], r.get("occurrence")) if kind == "stdlib" else r["id"]
             require(key not in seen, f"duplicate {kind} receipt: {key}")
@@ -154,7 +235,7 @@ def load_records(kind, names):
 def summary():
     fs = families()
     stdlib = load_records("stdlib", fs)
-    scripts = load_records("script", fs)
+    scripts = load_records("script", fs, load_frozen_scripts())
     require(len(scripts) <= COHORT["scripts"]["expected_commands"], "more script receipts than original commands")
     for name, row in fs.items():
         rs = [r for r in stdlib if r["family"] == name]
@@ -193,7 +274,7 @@ def render(view):
     if supplemental: table("Supplemental pilots", supplemental)
     if view == "readme": lines += ["", "The [stdlib report](docs/stdlib.md) lists every frozen family, including those not run."]
     prefix = "../" if view == "stdlib" else ""
-    lines += ["", f"A paired pass requires the same original to pass stock, O0 and O3; script passes also require exact exit, stdout, stderr and effect comparisons. Skips, omissions, unsupported diagnostics, exclusions, timeouts and non-stock successes never count. Historical credits come from the [frozen mixed-revision ledger]({prefix}{COHORT['historical_families']}) and are separate from the pinned result. [Receipts and replay instructions]({prefix}benchmarks/compatibility/README.md).", END]
+    lines += ["", f"A paired pass requires the same original to pass stock, O0 and O3; script passes also require independently anchored frozen preimages and reference observations, plus exact exit, stdout, stderr and effect comparisons. Skips, omissions, unsupported diagnostics, exclusions, timeouts and non-stock successes never count. Historical credits come from the [frozen mixed-revision ledger]({prefix}{COHORT['historical_families']}) and are separate from the pinned result. [Receipts and replay instructions]({prefix}benchmarks/compatibility/README.md).", END]
     return "\n".join(lines)
 
 
