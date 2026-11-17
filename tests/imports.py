@@ -980,6 +980,20 @@ ACCEPTED = {
             "print(right(values, 2, hi=-1), right.__module__)\n"
         ),
     },
+    "bisect_native_integer_tuples": {
+        "main.py": (FIXTURES.parent / "bisect_int_tuple.py").read_text(),
+    },
+    "bisect_tuple_subclass_callbacks": {
+        "main.py": (
+            "from bisect import bisect_left\n"
+            "class Row(tuple):\n"
+            "    def __len__(self):\n        print('len')\n        return 1\n"
+            "    def __getitem__(self, index):\n        print('getitem', index)\n        return 99\n"
+            "def search(values: tuple[int, ...]) -> int:\n"
+            "    return bisect_left(values, 2)\n"
+            "print(search(Row((1, 3))))\n"
+        ),
+    },
     "bisect_generic_bound_index_errors": {
         "main.py": (
             "from bisect import bisect_left\n"
