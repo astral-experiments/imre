@@ -197,12 +197,13 @@ impl SourceContract {
             Self::Checked(result) => result,
             Self::Pending { native, result } => result.get_or_init(|| {
                 let (skipped, overloads) = graph.diagnostic_scopes();
-                graph.session.closed_program_errors(
+                graph.session.closed_program_errors_with_entry(
                     &graph.modules,
                     skipped.as_deref(),
                     &overloads,
                     Some(native),
                     Some(&graph.registered_source_errors.borrow()),
+                    Some((graph.entry, graph.module_filename(graph.entry))),
                 )
             }),
         }
@@ -3955,6 +3956,27 @@ impl Session {
         native: Option<&crate::frontend::phase::Diagnostic>,
         checked_bodies: Option<&crate::modules::RegisteredSourceErrors>,
     ) -> Result<(), String> {
+        self.closed_program_errors_with_entry(
+            modules,
+            skipped,
+            overloads,
+            native,
+            checked_bodies,
+            None,
+        )
+    }
+
+    /// Render source-contract errors with the invoked entry filename while retaining
+    /// each module's canonical path as its checked source identity.
+    pub(crate) fn closed_program_errors_with_entry(
+        &self,
+        modules: &[impl ClosedSource],
+        skipped: Option<&[Vec<TextRange>]>,
+        overloads: &[Vec<CheckedDiagnostic>],
+        native: Option<&crate::frontend::phase::Diagnostic>,
+        checked_bodies: Option<&crate::modules::RegisteredSourceErrors>,
+        entry_filename: Option<(usize, &Path)>,
+    ) -> Result<(), String> {
         use ty_python_core::definition::DefinitionKind;
 
         assert_eq!(modules.len(), self.files.len());
@@ -4076,6 +4098,11 @@ impl Session {
                     continue;
                 }
             }
+            // The graph keeps its canonical path for source identity and imports, but
+            // diagnostics for the entry belong to the spelling used to invoke it.
+            let path = entry_filename
+                .filter(|(entry, _)| *entry == index)
+                .map_or(path, |(_, filename)| filename);
             let mut dormant = Vec::new();
             self.exact_scalar_stores(
                 index,
