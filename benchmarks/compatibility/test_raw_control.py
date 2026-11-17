@@ -83,4 +83,87 @@ class RawControlTests(unittest.TestCase):
             scorecard.validate_record(row,'stdlib',scorecard.families())
 
 
+    def bind_temp(self, entry, binding, tmp):
+        path = tmp/'binding.json'; path.write_text(json.dumps(binding)+'\n')
+        entry['sources']['binding'] = locator(path); entry['files'][locator(path)] = digest(path)
+
+    def artifact_temp(self, entry, cohort, role, path, data):
+        path.write_bytes(data); cohort['artifacts'][role] = locator(path)
+        entry['files'][locator(path)] = digest(path)
+
+    def test_rehashed_paired_row_cannot_move_to_full_stock_cohort(self):
+        import raw_control
+        entry = self.entries['base64']; binding = json.loads((scorecard.ROOT/entry['sources']['binding']).read_text())
+        rows = [json.loads(line) for line in (SNAPSHOT/'stdlib/base64.jsonl').read_text().splitlines()]
+        row = next(r for r in rows if r['paired']); key = (row['id'],row['occurrence'])
+        full = binding['cohorts']['stock-only']; run = json.loads((scorecard.ROOT/full['artifacts']['run']).read_text())
+        event = raw_control.event_index(scorecard.ROOT/full['artifacts']['stock_stderr'], scorecard.require)[key]
+        row['runs']['stock'].update(argv=run['runs']['stock']['argv'], evidence=full['artifacts']['stock_stderr']+'#L'+str(event['line']))
+        next(r for r in binding['originals'] if (r['id'],r['occurrence'])==key)['launcher_cohort']='stock-only'
+        with tempfile.TemporaryDirectory(dir=SNAPSHOT/'evidence/base64/raw-control') as folder:
+            tmp=Path(folder); receipt=tmp/'base64.jsonl';receipt.write_text(''.join(json.dumps(r)+'\n' for r in rows))
+            entry['receipt']=locator(receipt);entry['files'][locator(receipt)]=digest(receipt);self.bind_temp(entry,binding,tmp)
+            with self.assertRaisesRegex(ValueError,'credited original cannot use a stock-only cohort'):
+                scorecard.validate_record(row,'stdlib',scorecard.families())
+
+    def test_rehashed_different_stock_launcher_archive_cannot_receive_credit(self):
+        entry=self.entries['csv'];binding=json.loads((scorecard.ROOT/entry['sources']['binding']).read_text());cohort=binding['cohorts']['finite-native']
+        with tempfile.TemporaryDirectory(dir=SNAPSHOT/'evidence/csv/raw-control') as folder:
+            tmp=Path(folder); archive=tmp/'different.py'; original=(scorecard.ROOT/cohort['artifacts']['stock_launcher']).read_bytes()
+            self.artifact_temp(entry,cohort,'stock_launcher',archive,original+b'\n# Different stock source\n')
+            run=json.loads((scorecard.ROOT/cohort['artifacts']['run']).read_text());run['runs']['stock']['fresh_stock_launcher_sha256']=digest(archive)
+            self.artifact_temp(entry,cohort,'run',tmp/'run.json',(json.dumps(run)+'\n').encode());self.bind_temp(entry,binding,tmp)
+            with self.assertRaisesRegex(ValueError,'stock launcher bytes differ from native'):self.rows()
+
+    def test_rehashed_stock_capture_with_wrong_source_hash_is_rejected(self):
+        entry=self.entries['base64'];binding=json.loads((scorecard.ROOT/entry['sources']['binding']).read_text());cohort=binding['cohorts']['finite-native']
+        with tempfile.TemporaryDirectory(dir=SNAPSHOT/'evidence/base64/raw-control') as folder:
+            tmp=Path(folder);capture=json.loads((scorecard.ROOT/cohort['artifacts']['stock_capture']).read_text());capture['source_archive_sha256']='0'*64
+            self.artifact_temp(entry,cohort,'stock_capture',tmp/'capture.json',(json.dumps(capture)+'\n').encode());self.bind_temp(entry,binding,tmp)
+            with self.assertRaisesRegex(ValueError,'fresh stock capture metadata or raw stdout differs'):self.rows()
+
+    def test_rehashed_stock_inventory_order_must_match_native(self):
+        entry=self.entries['csv'];binding=json.loads((scorecard.ROOT/entry['sources']['binding']).read_text());cohort=binding['cohorts']['finite-native']
+        with tempfile.TemporaryDirectory(dir=SNAPSHOT/'evidence/csv/raw-control') as folder:
+            tmp=Path(folder);lines=(scorecard.ROOT/cohort['artifacts']['stock_stderr']).read_bytes().splitlines(keepends=True)
+            lines[1],lines[2]=lines[2],lines[1];lines[129:133]=lines[131:133]+lines[129:131]
+            raw=tmp/'stock.stderr';self.artifact_temp(entry,cohort,'stock_stderr',raw,b''.join(lines))
+            run=json.loads((scorecard.ROOT/cohort['artifacts']['run']).read_text());run['runs']['stock']['stderr_sha256']=digest(raw)
+            self.artifact_temp(entry,cohort,'run',tmp/'run.json',(json.dumps(run)+'\n').encode());self.bind_temp(entry,binding,tmp)
+            with self.assertRaisesRegex(ValueError,'ordered stock/native inventories differ'):self.rows()
+
+    def test_stock_only_cohort_can_have_independent_stock_configuration(self):
+        entry=self.entries['base64'];binding=json.loads((scorecard.ROOT/entry['sources']['binding']).read_text());cohort=binding['cohorts']['stock-only']
+        with tempfile.TemporaryDirectory(dir=SNAPSHOT/'evidence/base64/raw-control') as folder:
+            tmp=Path(folder);run=json.loads((scorecard.ROOT/cohort['artifacts']['run']).read_text());stock=run['runs']['stock']
+            stock['timeout_seconds']=180;stock['environment']={'PYTHONPATH':stock['environment']['PYTHONPATH']}
+            self.artifact_temp(entry,cohort,'run',tmp/'run.json',(json.dumps(run)+'\n').encode());self.bind_temp(entry,binding,tmp)
+            rows=self.rows();child=[r for r in rows if r['family']=='base64' and '.TestMain.' in r['id']]
+            self.assertEqual(len(child),5);self.assertTrue(all(not r['paired'] and r['runs']['O0']['outcome']==r['runs']['O3']['outcome']=='not_run' for r in child))
+
+    def test_rehashed_credited_finite_configuration_mismatch_is_rejected(self):
+        entry=self.entries['csv'];binding=json.loads((scorecard.ROOT/entry['sources']['binding']).read_text());cohort=binding['cohorts']['finite-native']
+        with tempfile.TemporaryDirectory(dir=SNAPSHOT/'evidence/csv/raw-control') as folder:
+            tmp=Path(folder);run=json.loads((scorecard.ROOT/cohort['artifacts']['run']).read_text());run['runs']['stock']['timeout_seconds']=180
+            self.artifact_temp(entry,cohort,'run',tmp/'run.json',(json.dumps(run)+'\n').encode());self.bind_temp(entry,binding,tmp)
+            with self.assertRaisesRegex(ValueError,'finite cohort common configuration differs'):self.rows()
+
+    def test_common_configuration_and_semantic_cwd(self):
+        import raw_control
+        entry=self.entries['csv'];binding=json.loads((scorecard.ROOT/entry['sources']['binding']).read_text());cohort=binding['cohorts']['finite-native']
+        run=json.loads((scorecard.ROOT/cohort['artifacts']['run']).read_text());gate=json.loads((scorecard.ROOT/cohort['artifacts']['gate']).read_text());extension=scorecard.option(gate['command'],'--extension-path')
+        run['runs']['stock']['cwd'] += '/.'
+        raw_control.comparable_run(run,extension,gate['command'][0],scorecard.require)
+        run['runs']['O0']['environment']['NO_COLOR']='0'
+        with self.assertRaisesRegex(ValueError,'common configuration differs'):raw_control.comparable_run(run,extension,gate['command'][0],scorecard.require)
+
+    def test_finite_and_stock_only_cohorts_preserve_base64_outcomes(self):
+        entry=self.entries['base64'];binding=json.loads((scorecard.ROOT/entry['sources']['binding']).read_text());assign=Counter(r['launcher_cohort'] for r in binding['originals'])
+        self.assertEqual(assign,{'finite-native':36,'stock-only':5})
+        rows=[json.loads(line) for line in (SNAPSHOT/'stdlib/base64.jsonl').read_text().splitlines()]
+        self.assertEqual(sum(r['paired'] for r in rows),35)
+        lazy=next(r for r in rows if r['id'].endswith('LazyImportTest.test_lazy_import'))
+        self.assertEqual([lazy['runs'][t]['outcome'] for t in scorecard.TIERS],['pass','skip','skip'])
+
+
 if __name__ == '__main__': unittest.main()
