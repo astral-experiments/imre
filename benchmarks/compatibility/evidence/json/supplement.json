@@ -1,0 +1,595 @@
+{
+  "O0": {
+    "artifact_sha256": "e5941266d17b25e7ea86e3727888f6e17ca449257e6ea67152ea0153e80cf54b",
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "TMPDIR": "/workspace/scratch/replay-tmp/json",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+      "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+    },
+    "modules": {
+      "test_scanstring": {
+        "argv": [
+          "/workspace/scratch/json-O0-saved.exe",
+          "test.test_json.test_scanstring"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 20,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "593ac7f6e5febc38c099b88108b61b189b3ab2e31cd0553a58cdd04daaf9c702",
+        "observations": {
+          "test.test_json.test_scanstring.TestCScanstring.test_bad_escapes": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 1
+          },
+          "test.test_json.test_scanstring.TestCScanstring.test_overflow": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 2
+          },
+          "test.test_json.test_scanstring.TestCScanstring.test_scanstring": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 3
+          },
+          "test.test_json.test_scanstring.TestCScanstring.test_surrogates": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 4
+          },
+          "test.test_json.test_scanstring.TestPyScanstring.test_bad_escapes": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 5
+          },
+          "test.test_json.test_scanstring.TestPyScanstring.test_overflow": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 6
+          },
+          "test.test_json.test_scanstring.TestPyScanstring.test_scanstring": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 7
+          },
+          "test.test_json.test_scanstring.TestPyScanstring.test_surrogates": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 8
+          }
+        }
+      },
+      "test_separators": {
+        "argv": [
+          "/workspace/scratch/json-O0-saved.exe",
+          "test.test_json.test_separators"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 20,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "17bb69696086d6595814f27f84dfc32c00d2f6517c80cd75e8b10a510354d735",
+        "observations": {
+          "test.test_json.test_separators.TestCSeparators.test_illegal_separators": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 1
+          },
+          "test.test_json.test_separators.TestCSeparators.test_separators": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 2
+          },
+          "test.test_json.test_separators.TestPySeparators.test_illegal_separators": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 3
+          },
+          "test.test_json.test_separators.TestPySeparators.test_separators": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 4
+          }
+        }
+      },
+      "test_speedups": {
+        "argv": [
+          "/workspace/scratch/json-O0-saved.exe",
+          "test.test_json.test_speedups"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 20,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "4d5987d1094eedf105b48355f9a16287eea591408455219589859d8739d8d2c9",
+        "observations": {
+          "test.test_json.test_speedups.TestDecode.test_bad_bool_args": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 1
+          },
+          "test.test_json.test_speedups.TestDecode.test_make_scanner": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 2
+          },
+          "test.test_json.test_speedups.TestEncode.test_bad_bool_args": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 3
+          },
+          "test.test_json.test_speedups.TestEncode.test_bad_markers_argument_to_encoder": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 4
+          },
+          "test.test_json.test_speedups.TestEncode.test_bad_str_encoder": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 5
+          },
+          "test.test_json.test_speedups.TestEncode.test_current_indent_level": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 6
+          },
+          "test.test_json.test_speedups.TestEncode.test_make_encoder": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 7
+          },
+          "test.test_json.test_speedups.TestEncode.test_unsortable_keys": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 8
+          },
+          "test.test_json.test_speedups.TestSpeedups.test_encode_basestring_ascii": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 9
+          },
+          "test.test_json.test_speedups.TestSpeedups.test_scanstring": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 10
+          }
+        }
+      },
+      "test_unicode": {
+        "argv": [
+          "/workspace/scratch/json-O0-saved.exe",
+          "test.test_json.test_unicode"
+        ],
+        "exit_code": null,
+        "timed_out": true,
+        "timeout_seconds": 20,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "df189731508bfdd304b6492801023a4932892e722bf69f7c4cfb6bc2b274070a",
+        "observations": {
+          "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_decode": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 1
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_encode": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 2
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_big_unicode_decode": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 3
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_big_unicode_encode": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 4
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_bytes_decode": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 5
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_bytes_encode": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 6
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_encoding3": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 7
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_encoding4": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 8
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_encoding5": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 9
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_encoding6": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 10
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_encoding7": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 11
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_escaped_decode": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 12
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_object_pairs_hook_with_unicode": {
+            "outcome": "error",
+            "occurrence": 1,
+            "line": 13
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_decode": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 14
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_encode": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 15
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_unicode_decode": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 16
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_unicode_preservation": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 17
+          },
+          "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_decode": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 18
+          },
+          "test.test_json.test_unicode.TestPyUnicode.test_ascii_non_printable_encode": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 19
+          },
+          "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_decode": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 20
+          },
+          "test.test_json.test_unicode.TestPyUnicode.test_big_unicode_encode": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 21
+          },
+          "test.test_json.test_unicode.TestPyUnicode.test_bytes_decode": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 22
+          },
+          "test.test_json.test_unicode.TestPyUnicode.test_bytes_encode": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 23
+          },
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding3": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 24
+          },
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding4": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 25
+          },
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding5": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 26
+          },
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding6": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 27
+          },
+          "test.test_json.test_unicode.TestPyUnicode.test_encoding7": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 28
+          }
+        }
+      },
+      "test_tool": {
+        "argv": [
+          "/workspace/scratch/json-O0-saved.exe",
+          "test.test_json.test_tool"
+        ],
+        "exit_code": null,
+        "timed_out": true,
+        "timeout_seconds": 45,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "5bd38744a197bd6ea1eda4f1c28fba00ed97c536a26459d16ebf251a65b095f9",
+        "observations": {}
+      }
+    }
+  },
+  "O3": {
+    "artifact_sha256": "c7e12ae9dc3dcbd532a06d62eb1dbd7d7711efb647b6f550d7426921e4764b09",
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "TMPDIR": "/workspace/scratch/replay-tmp/json",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "IMREFLAGS": "--opt-level 3",
+      "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+      "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+    },
+    "modules": {
+      "test_scanstring": {
+        "argv": [
+          "/workspace/scratch/json-O3-saved.exe",
+          "test.test_json.test_scanstring"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 20,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "1c58a39ffa31542fac38af75674d19ea46ca4c757a109d4a01107ef917e481d1",
+        "observations": {
+          "test.test_json.test_scanstring.TestCScanstring.test_bad_escapes": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 1
+          },
+          "test.test_json.test_scanstring.TestCScanstring.test_overflow": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 2
+          },
+          "test.test_json.test_scanstring.TestCScanstring.test_scanstring": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 3
+          },
+          "test.test_json.test_scanstring.TestCScanstring.test_surrogates": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 4
+          },
+          "test.test_json.test_scanstring.TestPyScanstring.test_bad_escapes": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 5
+          },
+          "test.test_json.test_scanstring.TestPyScanstring.test_overflow": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 6
+          },
+          "test.test_json.test_scanstring.TestPyScanstring.test_scanstring": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 7
+          },
+          "test.test_json.test_scanstring.TestPyScanstring.test_surrogates": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 8
+          }
+        }
+      },
+      "test_separators": {
+        "argv": [
+          "/workspace/scratch/json-O3-saved.exe",
+          "test.test_json.test_separators"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 20,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "7cb966bcef94e1b91bfd362d1e14b95a166ab6360b58187c886157d773e86a4b",
+        "observations": {
+          "test.test_json.test_separators.TestCSeparators.test_illegal_separators": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 1
+          },
+          "test.test_json.test_separators.TestCSeparators.test_separators": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 2
+          },
+          "test.test_json.test_separators.TestPySeparators.test_illegal_separators": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 3
+          },
+          "test.test_json.test_separators.TestPySeparators.test_separators": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 4
+          }
+        }
+      },
+      "test_speedups": {
+        "argv": [
+          "/workspace/scratch/json-O3-saved.exe",
+          "test.test_json.test_speedups"
+        ],
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 20,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "886ce2f62e6b5b3e1899f1435b0747cebb9c3a39f343060344f7f4f322c2d24d",
+        "observations": {
+          "test.test_json.test_speedups.TestDecode.test_bad_bool_args": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 1
+          },
+          "test.test_json.test_speedups.TestDecode.test_make_scanner": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 2
+          },
+          "test.test_json.test_speedups.TestEncode.test_bad_bool_args": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 3
+          },
+          "test.test_json.test_speedups.TestEncode.test_bad_markers_argument_to_encoder": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 4
+          },
+          "test.test_json.test_speedups.TestEncode.test_bad_str_encoder": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 5
+          },
+          "test.test_json.test_speedups.TestEncode.test_current_indent_level": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 6
+          },
+          "test.test_json.test_speedups.TestEncode.test_make_encoder": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 7
+          },
+          "test.test_json.test_speedups.TestEncode.test_unsortable_keys": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 8
+          },
+          "test.test_json.test_speedups.TestSpeedups.test_encode_basestring_ascii": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 9
+          },
+          "test.test_json.test_speedups.TestSpeedups.test_scanstring": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 10
+          }
+        }
+      },
+      "test_unicode": {
+        "argv": [
+          "/workspace/scratch/json-O3-saved.exe",
+          "test.test_json.test_unicode"
+        ],
+        "exit_code": null,
+        "timed_out": true,
+        "timeout_seconds": 20,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "37c4e243543de8a481ff667cfc1ddb5d4a9756abeb455301272bd8ce5fd0cec4",
+        "observations": {
+          "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_decode": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 1
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_encode": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 2
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_big_unicode_decode": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 3
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_big_unicode_encode": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 4
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_bytes_decode": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 5
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_bytes_encode": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 6
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_encoding3": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 7
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_encoding4": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 8
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_encoding5": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 9
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_encoding6": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 10
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_encoding7": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 11
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_escaped_decode": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 12
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_object_pairs_hook_with_unicode": {
+            "outcome": "error",
+            "occurrence": 1,
+            "line": 13
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_decode": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 14
+          },
+          "test.test_json.test_unicode.TestCUnicode.test_single_surrogate_encode": {
+            "outcome": "pass",
+            "occurrence": 1,
+            "line": 15
+          }
+        }
+      },
+      "test_tool": {
+        "argv": [
+          "/workspace/scratch/json-O3-saved.exe",
+          "test.test_json.test_tool"
+        ],
+        "exit_code": null,
+        "timed_out": true,
+        "timeout_seconds": 45,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "5bd38744a197bd6ea1eda4f1c28fba00ed97c536a26459d16ebf251a65b095f9",
+        "observations": {}
+      }
+    }
+  }
+}
