@@ -114,13 +114,17 @@ impl Checker<'_> {
             return None;
         }
         (!assigned.contains(name)
+            && !["len", "sorted", "list", "tuple"]
+                .iter()
+                .any(|builtin| assigned.contains(*builtin))
             && self.local_set_storage(name, element, for_loop, item.id.as_str(), later))
         .then_some(element)
     }
 
     /// Select iteration-derived native storage only when the fresh set cannot escape
-    /// or receive an incompatible value. Unrecognized calls can capture the local,
-    /// so they require ordinary storage even when the set is not a direct argument.
+    /// or receive an incompatible value. This runs before resolved IR exists, so it
+    /// accepts only source operations whose exact receiver and operands prove that
+    /// they cannot call Python code. Unknown operations require ordinary storage.
     ///
     /// ```python
     /// values = set()
@@ -172,16 +176,52 @@ impl Checker<'_> {
                 if !self.safe {
                     return;
                 }
-                if let ast::Stmt::For(loop_) = stmt
-                    && std::ptr::eq(loop_, self.insertion_loop)
-                {
-                    self.visit_expr(&loop_.iter);
-                    self.in_insertion_loop = true;
-                    self.visit_body(&loop_.body);
-                    self.in_insertion_loop = false;
-                    self.visit_body(&loop_.orelse);
-                } else {
-                    walk_stmt(self, stmt);
+                match stmt {
+                    ast::Stmt::For(loop_) if std::ptr::eq(loop_, self.insertion_loop) => {
+                        self.visit_expr(&loop_.iter);
+                        self.in_insertion_loop = true;
+                        self.visit_body(&loop_.body);
+                        self.in_insertion_loop = false;
+                        self.visit_body(&loop_.orelse);
+                    }
+                    ast::Stmt::Expr(stmt) => self.visit_expr(&stmt.value),
+                    ast::Stmt::Return(stmt) => {
+                        if let Some(value) = &stmt.value {
+                            self.visit_expr(value);
+                        }
+                    }
+                    ast::Stmt::Assign(stmt) if stmt.targets.iter().all(ast::Expr::is_name_expr) => {
+                        for target in &stmt.targets {
+                            self.visit_expr(target);
+                        }
+                        self.visit_expr(&stmt.value);
+                    }
+                    ast::Stmt::If(branch) => {
+                        for test in std::iter::once(&*branch.test).chain(
+                            branch
+                                .elif_else_clauses
+                                .iter()
+                                .filter_map(|clause| clause.test.as_ref()),
+                        ) {
+                            if self
+                                .checker
+                                .graph
+                                .session
+                                .scalar_type(self.checker.module, test)
+                                .is_none()
+                            {
+                                self.safe = false;
+                                return;
+                            }
+                            self.visit_expr(test);
+                        }
+                        self.visit_body(&branch.body);
+                        for clause in &branch.elif_else_clauses {
+                            self.visit_body(&clause.body);
+                        }
+                    }
+                    ast::Stmt::Pass(_) | ast::Stmt::Break(_) | ast::Stmt::Continue(_) => {}
+                    _ => self.safe = false,
                 }
             }
 
@@ -219,8 +259,16 @@ impl Checker<'_> {
                     {
                         self.visit_expr(&compare.operands[0]);
                     }
-                    ast::Expr::Name(name) if name.id == self.name => self.safe = false,
-                    _ => ruff_python_ast::visitor::walk_expr(self, expr),
+                    ast::Expr::Name(name) => self.safe &= name.id != self.name,
+                    ast::Expr::NumberLiteral(_)
+                    | ast::Expr::BooleanLiteral(_)
+                    | ast::Expr::StringLiteral(_)
+                    | ast::Expr::BytesLiteral(_)
+                    | ast::Expr::NoneLiteral(_) => {}
+                    ast::Expr::List(_) | ast::Expr::Tuple(_) => {
+                        ruff_python_ast::visitor::walk_expr(self, expr);
+                    }
+                    _ => self.safe = false,
                 }
             }
         }

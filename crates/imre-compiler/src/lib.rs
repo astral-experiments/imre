@@ -2323,6 +2323,33 @@ print("result", call(b=2, a=1))
     }
 
     #[test]
+    fn a_deferred_iterator_can_mutate_a_captured_fresh_set_without_retry() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("main.py");
+        std::fs::write(
+            &path,
+            "def collect(text):\n    def deferred():\n        values.add(1)\n        yield None\n    iterator = deferred()\n    values = set()\n    for char in text:\n        values.add(char)\n    for _ in iterator:\n        pass\n    return len(values)\nprint(collect('a'))\n",
+        )
+        .unwrap();
+        let mut passes = 0;
+        super::object_fallback(
+            None,
+            super::ProgramEntry::File(&path, None),
+            &CompileOptions::default(),
+            Default::default(),
+            None,
+            |graph, _, call_error| {
+                passes += 1;
+                let checked = super::checked_lower_with(graph, None, call_error)?;
+                assert!(graph.layout_hint.get() != super::modules::LayoutHint::Applied);
+                Ok(checked)
+            },
+        )
+        .unwrap();
+        assert_eq!(passes, 1);
+    }
+
+    #[test]
     fn inferred_consumer_constrains_fresh_producer_storage_in_one_graph() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("main.py");
