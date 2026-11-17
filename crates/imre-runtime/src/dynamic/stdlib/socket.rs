@@ -188,10 +188,10 @@ pub(in crate::dynamic) fn prepare_descriptor(
     }
     if matches!(name, "connect" | "connect_ex") {
         let peer = super::super::builtins::one_positional_arg(name, args, kwargs)?;
-        let addr = address(ctx, native::family(socket), peer, name)?;
-        super::audit::event(ctx, "socket.connect", &[receiver, peer])?;
+        let addr = prepare_address(ctx, native::family(socket), peer, name)?;
         return Ok(RegisteredCall::Connect(Connect {
             receiver,
+            peer,
             addr,
             errno_result: name == "connect_ex",
         }));
@@ -258,7 +258,8 @@ unsafe fn registered_read<T: Send>(
 /// The registered caller roots the socket; the address contains only owned native data.
 pub(in crate::dynamic) struct Connect {
     receiver: Id,
-    addr: native::SocketAddress,
+    peer: Id,
+    addr: native::AddressPlan,
     errno_result: bool,
 }
 
@@ -268,10 +269,30 @@ impl Connect {
     pub(in crate::dynamic) unsafe fn run(self, context: *mut Context) -> Result<Id> {
         use crate::dynamic::value::ParkedExecution;
 
+        let name = if self.errno_result {
+            "connect_ex"
+        } else {
+            "connect"
+        };
+        let addr = match self.addr {
+            native::AddressPlan::Ready(addr) => addr,
+            native::AddressPlan::Resolve(query) => {
+                // SAFETY: query owns only native host/address operands; its result is plain native data.
+                let resolved = unsafe { ParkedExecution::wait(context, || query.resolve()) }?
+                    .map_err(native::ResolverFailure::into_error)?;
+                query.finish(resolved, name)?
+            }
+        };
+        // SAFETY: resolution has returned and this execution owns the context again.
+        super::audit::event(
+            unsafe { &mut *context },
+            "socket.connect",
+            &[self.receiver, self.peer],
+        )?;
         let result = native::connect_with(
             // SAFETY: resolve the rooted receiver only while this execution is active.
             || native::connect_state(registered_socket(unsafe { &*context }, self.receiver)),
-            &self.addr,
+            &addr,
             // SAFETY: each native step has returned before signal delivery.
             || unsafe { Context::dispatch_pending_signals(context) },
             // SAFETY: only the fd, owned native address/deadline, and native result cross the wait.
@@ -672,6 +693,15 @@ fn pack_socket_name(ctx: &mut Context, name: native::SocketName) -> Result<Id> {
 }
 
 fn address(ctx: &mut Context, family: i32, arg: Id, name: &str) -> Result<native::SocketAddress> {
+    Ok(prepare_address(ctx, family, arg, name)?.resolve(name)?)
+}
+
+fn prepare_address(
+    ctx: &mut Context,
+    family: i32,
+    arg: Id,
+    name: &str,
+) -> Result<native::AddressPlan> {
     if family == libc::AF_UNIX {
         let encoded;
         let path = match ctx.heap.get(ctx.scalar_value(arg)) {
@@ -684,9 +714,11 @@ fn address(ctx: &mut Context, family: i32, arg: Id, name: &str) -> Result<native
                 ctx.native_buffer_bytes(arg)?
             }
         };
-        return Ok(native::SocketAddress::unix(path)?);
+        return Ok(native::AddressPlan::Ready(native::SocketAddress::unix(
+            path,
+        )?));
     }
-    internet_address(ctx, family, arg, name).map(native::SocketAddress::Internet)
+    internet_address(ctx, family, arg, name)
 }
 
 fn internet_address(
@@ -694,7 +726,7 @@ fn internet_address(
     family: i32,
     pair: Id,
     name: &str,
-) -> Result<native::InternetAddress> {
+) -> Result<native::AddressPlan> {
     let ipv6 = family == libc::AF_INET6;
     let family_name = if ipv6 { "AF_INET6" } else { "AF_INET" };
     let fields = ctx.tuple_items(pair)?.ok_or_else(|| {
@@ -757,9 +789,7 @@ fn internet_address(
         .and_then(|n| i32::try_from(n).ok())
         .ok_or_else(|| Error::new("OverflowError", format!("{name}(): port must be 0-65535.")))?;
     if !ipv6 {
-        return Ok(native::InternetAddress::V4(native::address(
-            &host, port, name,
-        )?));
+        return Ok(native::internet_plan(host, port, false, 0, 0, name)?);
     }
     let mut unsigned = |id| index(id).map(unsigned_mask);
     let flow = fields
@@ -774,7 +804,7 @@ fn internet_address(
         .map(unsigned)
         .transpose()?
         .unwrap_or(0);
-    Ok(native::ipv6_address(&host, port, flow, scope, name)?)
+    Ok(native::internet_plan(host, port, true, flow, scope, name)?)
 }
 
 fn unsigned_mask(value: crate::Int) -> u32 {

@@ -812,22 +812,26 @@ pub extern "C" fn imre_socket_new(family: usize, ty: usize, proto: usize) -> *co
     )
 }
 
-/// Resolve one Internet address with CPython's wildcard and broadcast rules.
-fn lookup_ip(host: &[u8], family: i32) -> Result<IpAddr> {
+/// Classify lookup_ip's nonblocking IPv4/numeric cases once for all callers.
+fn immediate_ip(host: &[u8], family: i32) -> Option<IpAddr> {
     if host.is_empty() && family == libc::AF_INET {
-        return Ok(Ipv4Addr::UNSPECIFIED.into());
+        return Some(Ipv4Addr::UNSPECIFIED.into());
     }
     if host == b"<broadcast>" {
-        return Ok(Ipv4Addr::BROADCAST.into());
+        return Some(Ipv4Addr::BROADCAST.into());
     }
     if let Ok(text) = std::str::from_utf8(host)
         && let Ok(ip) = text.parse::<IpAddr>()
         && (family == libc::AF_UNSPEC || ip.is_ipv4())
     {
-        return Ok(ip);
+        return Some(ip);
     }
+    None
+}
+
+fn resolve_ip(host: &[u8], family: i32) -> std::result::Result<IpAddr, ResolverFailure> {
     let list = if host.is_empty() {
-        address_list(
+        address_list_raw(
             None,
             Some(b"0"),
             family,
@@ -836,23 +840,28 @@ fn lookup_ip(host: &[u8], family: i32) -> Result<IpAddr> {
             libc::AI_PASSIVE,
         )?
     } else {
-        address_list(Some(host), None, family, 0, 0, 0)?
+        address_list_raw(Some(host), None, family, 0, 0, 0)?
     };
-    // SAFETY: address_list returns a non-null owned list with initialized address lengths.
+    // SAFETY: the owned, non-null list remains live until the address has been copied.
     let addr = unsafe {
         let first = &*list.0;
         if host.is_empty() && !first.ai_next.is_null() {
-            return Err(Error::new(
-                Kind::OSError,
-                "wildcard resolved to multiple address",
-            ));
+            return Err(ResolverFailure::WildcardMultiple);
         }
-        InternetAddress::read(first.ai_addr, first.ai_addrlen)?
+        InternetAddress::read_raw(first.ai_addr, first.ai_addrlen)?
     };
     Ok(match addr {
         InternetAddress::V4(v4) => endpoint(&v4).0.into(),
         InternetAddress::V6(v6) => Ipv6Addr::from(v6.sin6_addr.s6_addr).into(),
     })
+}
+
+/// Resolve one Internet address with CPython's wildcard and broadcast rules.
+fn lookup_ip(host: &[u8], family: i32) -> Result<IpAddr> {
+    match immediate_ip(host, family) {
+        Some(ip) => Ok(ip),
+        None => resolve_ip(host, family).map_err(ResolverFailure::into_error),
+    }
 }
 
 pub(crate) fn hostbyname(host: &[u8]) -> Result<Ipv4Addr> {
@@ -878,22 +887,95 @@ impl Drop for AddrInfoList {
     }
 }
 
+/// Plain resolver failures; no Python or runtime-owned value may leave a parked lookup.
+pub(crate) enum ResolverFailure {
+    Gai(i32),
+    System(i32),
+    Nul,
+    Empty,
+    UnsupportedAddress,
+    WildcardMultiple,
+    NonIpv6,
+    FamilyMismatch,
+}
+
+impl ResolverFailure {
+    fn gai(code: i32) -> std::result::Result<(), Self> {
+        if code == libc::EAI_SYSTEM {
+            // Capture errno before any allocation, cleanup, or subsequent libc call.
+            return Err(Self::System(
+                io::Error::last_os_error()
+                    .raw_os_error()
+                    .unwrap_or(libc::EIO),
+            ));
+        }
+        if code != 0 {
+            return Err(Self::Gai(code));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn into_error(self) -> Error {
+        match self {
+            Self::System(errno) => errno_error(io::Error::from_raw_os_error(errno)),
+            Self::Gai(code) => {
+                // SAFETY: gai_strerror returns a static terminated message for this code.
+                let message = unsafe { CStr::from_ptr(libc::gai_strerror(code)) }.to_string_lossy();
+                Error::from_errno(Kind::GaiError, code, &message, None, None)
+            }
+            Self::Nul => Error::new(
+                Kind::TypeError,
+                "host or service must not contain null character",
+            ),
+            Self::Empty => Error::new(Kind::OSError, "getaddrinfo returned an empty list"),
+            Self::UnsupportedAddress => {
+                Error::new(Kind::NotImplementedError, "unsupported socket address")
+            }
+            Self::WildcardMultiple => {
+                Error::new(Kind::OSError, "wildcard resolved to multiple address")
+            }
+            Self::NonIpv6 => Error::new(Kind::OSError, "resolver returned a non-IPv6 address"),
+            Self::FamilyMismatch => Error::new(Kind::OSError, "address family mismatched"),
+        }
+    }
+}
+
 fn check_gai(code: i32) -> Result<()> {
-    if code == libc::EAI_SYSTEM {
-        return Err(errno_error(io::Error::last_os_error()));
+    ResolverFailure::gai(code).map_err(ResolverFailure::into_error)
+}
+
+fn address_list_raw(
+    host: Option<&[u8]>,
+    service: Option<&[u8]>,
+    family: i32,
+    ty: i32,
+    protocol: i32,
+    flags: i32,
+) -> std::result::Result<AddrInfoList, ResolverFailure> {
+    let text = |value: &[u8]| CString::new(value).map_err(|_| ResolverFailure::Nul);
+    let host = host.map(text).transpose()?;
+    let service = service.map(text).transpose()?;
+    // SAFETY: zeros initialize optional pointers and flags in the hints.
+    let mut hints: libc::addrinfo = unsafe { std::mem::zeroed() };
+    hints.ai_family = family;
+    hints.ai_socktype = ty;
+    hints.ai_protocol = protocol;
+    hints.ai_flags = flags;
+    let mut res = ptr::null_mut();
+    // SAFETY: the strings and hints remain live; res is an out pointer.
+    let code = unsafe {
+        libc::getaddrinfo(
+            host.as_ref().map_or(ptr::null(), |v| v.as_ptr()),
+            service.as_ref().map_or(ptr::null(), |v| v.as_ptr()),
+            &raw const hints,
+            &raw mut res,
+        )
+    };
+    ResolverFailure::gai(code)?;
+    if res.is_null() {
+        return Err(ResolverFailure::Empty);
     }
-    if code != 0 {
-        // SAFETY: gai_strerror returns a static terminated message for a resolver error code.
-        let message = unsafe { CStr::from_ptr(libc::gai_strerror(code)) }.to_string_lossy();
-        return Err(Error::from_errno(
-            Kind::GaiError,
-            code,
-            &message,
-            None,
-            None,
-        ));
-    }
-    Ok(())
+    Ok(AddrInfoList(res))
 }
 
 fn address_list(
@@ -904,40 +986,8 @@ fn address_list(
     protocol: i32,
     flags: i32,
 ) -> Result<AddrInfoList> {
-    let text = |value: &[u8]| {
-        CString::new(value).map_err(|_| {
-            Error::new(
-                Kind::TypeError,
-                "host or service must not contain null character",
-            )
-        })
-    };
-    let host = host.map(text).transpose()?;
-    let service = service.map(text).transpose()?;
-    // SAFETY: zeros initialize the optional pointers and flags in the hints.
-    let mut hints: libc::addrinfo = unsafe { std::mem::zeroed() };
-    hints.ai_family = family;
-    hints.ai_socktype = ty;
-    hints.ai_protocol = protocol;
-    hints.ai_flags = flags;
-    let mut res = ptr::null_mut();
-    // SAFETY: host is terminated, hints is initialized, and res is an out pointer.
-    let code = unsafe {
-        libc::getaddrinfo(
-            host.as_ref().map_or(ptr::null(), |v| v.as_ptr()),
-            service.as_ref().map_or(ptr::null(), |v| v.as_ptr()),
-            &raw const hints,
-            &raw mut res,
-        )
-    };
-    check_gai(code)?;
-    if res.is_null() {
-        return Err(Error::new(
-            Kind::OSError,
-            "getaddrinfo returned an empty list",
-        ));
-    }
-    Ok(AddrInfoList(res))
+    address_list_raw(host, service, family, ty, protocol, flags)
+        .map_err(ResolverFailure::into_error)
 }
 
 pub(crate) fn getaddrinfo(
@@ -1553,6 +1603,14 @@ impl InternetAddress {
 
     /// Copy a kernel or resolver address. The caller guarantees `len` readable bytes.
     unsafe fn read(addr: *const libc::sockaddr, len: libc::socklen_t) -> Result<Self> {
+        // SAFETY: the caller provides the readable address described by len.
+        unsafe { Self::read_raw(addr, len) }.map_err(ResolverFailure::into_error)
+    }
+
+    unsafe fn read_raw(
+        addr: *const libc::sockaddr,
+        len: libc::socklen_t,
+    ) -> std::result::Result<Self, ResolverFailure> {
         let len = len as usize;
         if !addr.is_null() && len >= std::mem::offset_of!(libc::sockaddr, sa_data) {
             // SAFETY: the family is in the common header. Check its size before reading its payload.
@@ -1568,10 +1626,7 @@ impl InternetAddress {
                 }
             }
         }
-        Err(Error::new(
-            Kind::NotImplementedError,
-            "unsupported socket address",
-        ))
+        Err(ResolverFailure::UnsupportedAddress)
     }
 }
 
@@ -1604,46 +1659,129 @@ pub(crate) fn ipv6_text(ip: &libc::in6_addr) -> Result<String> {
         .into_owned())
 }
 
-pub(crate) fn ipv6_address(
-    host: &[u8],
+/// A shared address plan distinguishes immediate operands from libc resolver work.
+pub(crate) enum AddressPlan {
+    Ready(SocketAddress),
+    Resolve(AddressQuery),
+}
+
+pub(crate) struct AddressQuery {
+    host: Vec<u8>,
+    ipv6: bool,
     port: i32,
     flowinfo: u32,
     scope_id: u32,
-    name: &str,
-) -> Result<InternetAddress> {
-    if matches!(host, b"<broadcast>" | b"255.255.255.255") {
-        return Err(Error::new(Kind::OSError, "address family mismatched"));
-    }
-    let host = if host.is_empty() { b"::" } else { host };
-    let resolved = address_list(Some(host), None, libc::AF_INET6, libc::SOCK_DGRAM, 0, 0)?;
-    // SAFETY: address_list returned a non-null owned list; read checks the node's family and size.
-    let address = unsafe {
-        let first = &*resolved.0;
-        InternetAddress::read(first.ai_addr, first.ai_addrlen)?
-    };
-    let InternetAddress::V6(mut addr) = address else {
-        return Err(Error::new(
-            Kind::OSError,
-            "resolver returned a non-IPv6 address",
-        ));
-    };
-    let port = u16::try_from(port).map_err(|_| port_error(name))?;
-    if flowinfo > 0xfffff {
-        return Err(Error::new(
-            Kind::OverflowError,
-            format!("{name}(): flowinfo must be 0-1048575."),
-        ));
-    }
-    addr.sin6_port = port.to_be();
-    addr.sin6_flowinfo = flowinfo.to_be();
-    addr.sin6_scope_id = scope_id;
-    Ok(InternetAddress::V6(addr))
 }
 
-pub(crate) fn address(host: &[u8], port: i32, name: &str) -> Result<libc::sockaddr_in> {
-    let ip = hostbyname(host)?;
+/// Only copied native values leave a query; its addrinfo list is freed before return.
+pub(crate) enum ResolvedHost {
+    V4(Ipv4Addr),
+    V6(libc::sockaddr_in6),
+}
+
+impl AddressQuery {
+    pub(crate) fn resolve(&self) -> std::result::Result<ResolvedHost, ResolverFailure> {
+        if self.ipv6 {
+            let list = address_list_raw(
+                Some(&self.host),
+                None,
+                libc::AF_INET6,
+                libc::SOCK_DGRAM,
+                0,
+                0,
+            )?;
+            // SAFETY: the list owns a non-null initialized first address through this copy.
+            let addr =
+                unsafe { InternetAddress::read_raw((*list.0).ai_addr, (*list.0).ai_addrlen)? };
+            return match addr {
+                InternetAddress::V6(addr) => Ok(ResolvedHost::V6(addr)),
+                _ => Err(ResolverFailure::NonIpv6),
+            };
+        }
+        match resolve_ip(&self.host, libc::AF_INET)? {
+            IpAddr::V4(ip) => Ok(ResolvedHost::V4(ip)),
+            _ => Err(ResolverFailure::FamilyMismatch),
+        }
+    }
+
+    pub(crate) fn finish(self, resolved: ResolvedHost, name: &str) -> Result<SocketAddress> {
+        let addr = match resolved {
+            ResolvedHost::V4(ip) => InternetAddress::V4(ipv4_address(ip, self.port, name)?),
+            ResolvedHost::V6(mut addr) => {
+                let port = u16::try_from(self.port).map_err(|_| port_error(name))?;
+                if self.flowinfo > 0xfffff {
+                    return Err(Error::new(
+                        Kind::OverflowError,
+                        format!("{name}(): flowinfo must be 0-1048575."),
+                    ));
+                }
+                addr.sin6_port = port.to_be();
+                addr.sin6_flowinfo = self.flowinfo.to_be();
+                addr.sin6_scope_id = self.scope_id;
+                InternetAddress::V6(addr)
+            }
+        };
+        Ok(SocketAddress::Internet(addr))
+    }
+}
+
+impl AddressPlan {
+    pub(crate) fn resolve(self, name: &str) -> Result<SocketAddress> {
+        match self {
+            Self::Ready(addr) => Ok(addr),
+            Self::Resolve(query) => {
+                let resolved = query.resolve().map_err(ResolverFailure::into_error)?;
+                query.finish(resolved, name)
+            }
+        }
+    }
+}
+
+pub(crate) fn internet_plan(
+    host: Vec<u8>,
+    port: i32,
+    ipv6: bool,
+    flowinfo: u32,
+    scope_id: u32,
+    name: &str,
+) -> Result<AddressPlan> {
+    if ipv6 {
+        if matches!(host.as_slice(), b"<broadcast>" | b"255.255.255.255") {
+            return Err(ResolverFailure::FamilyMismatch.into_error());
+        }
+        let host = if host.is_empty() {
+            b"::".to_vec()
+        } else {
+            host
+        };
+        return Ok(AddressPlan::Resolve(AddressQuery {
+            host,
+            ipv6,
+            port,
+            flowinfo,
+            scope_id,
+        }));
+    }
+    if let Some(ip) = immediate_ip(&host, libc::AF_INET) {
+        let IpAddr::V4(ip) = ip else {
+            return Err(ResolverFailure::FamilyMismatch.into_error());
+        };
+        return Ok(AddressPlan::Ready(SocketAddress::Internet(
+            InternetAddress::V4(ipv4_address(ip, port, name)?),
+        )));
+    }
+    Ok(AddressPlan::Resolve(AddressQuery {
+        host,
+        ipv6,
+        port,
+        flowinfo,
+        scope_id,
+    }))
+}
+
+fn ipv4_address(ip: Ipv4Addr, port: i32, name: &str) -> Result<libc::sockaddr_in> {
     let port = u16::try_from(port).map_err(|_| port_error(name))?;
-    // SAFETY: zero is a valid initial sockaddr_in, including target-specific padding.
+    // SAFETY: zero is a valid sockaddr_in, including target-specific padding.
     let mut addr: libc::sockaddr_in = unsafe { std::mem::zeroed() };
     #[cfg(target_vendor = "apple")]
     {
@@ -1653,6 +1791,10 @@ pub(crate) fn address(host: &[u8], port: i32, name: &str) -> Result<libc::sockad
     addr.sin_port = port.to_be();
     addr.sin_addr.s_addr = u32::from_ne_bytes(ip.octets());
     Ok(addr)
+}
+
+pub(crate) fn address(host: &[u8], port: i32, name: &str) -> Result<libc::sockaddr_in> {
+    ipv4_address(hostbyname(host)?, port, name)
 }
 
 /// # Safety
