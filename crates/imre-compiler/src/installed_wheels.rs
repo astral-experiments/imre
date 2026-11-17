@@ -17,6 +17,84 @@ pub(crate) fn records(root: &Path) -> Vec<PathBuf> {
     paths
 }
 
+/// Explicit ownership of selected physical source providers, independent of search-path spelling.
+pub(crate) struct DeclaredApplicationSources {
+    declared: HashSet<PathBuf>,
+    resolved: HashMap<PathBuf, PathBuf>,
+}
+
+impl DeclaredApplicationSources {
+    pub(crate) fn new(
+        roots: &[PathBuf],
+        inputs: &mut SourceInputs,
+        fs: &mut FileSystem<'_>,
+    ) -> Result<Self, String> {
+        let mut result = Self {
+            declared: HashSet::new(),
+            resolved: HashMap::new(),
+        };
+        for root in roots {
+            let identity = result.resolve_root(root, inputs, fs)?;
+            result.declared.insert(identity);
+        }
+        Ok(result)
+    }
+
+    fn resolve_root(
+        &mut self,
+        root: &Path,
+        inputs: &mut SourceInputs,
+        fs: &mut FileSystem<'_>,
+    ) -> Result<PathBuf, String> {
+        if let Some(identity) = self.resolved.get(root) {
+            return Ok(identity.clone());
+        }
+        let identity = fs
+            .canonicalize(root)
+            .map_err(|e| format!("cannot resolve source root {}: {e}", root.display()))?;
+        if !fs.is_dir(&identity) {
+            return Err(format!(
+                "source root is not a directory: {}",
+                root.display()
+            ));
+        }
+        inputs.directories.push((root.to_owned(), identity.clone()));
+        self.resolved.insert(root.to_owned(), identity.clone());
+        Ok(identity)
+    }
+
+    /// A selected source is owned only through a directory physically equal to a declared root.
+    pub(crate) fn selected(
+        &mut self,
+        root: &Path,
+        source: &Path,
+        inputs: &mut SourceInputs,
+        fs: &mut FileSystem<'_>,
+    ) -> Result<Option<PathBuf>, String> {
+        if self.declared.is_empty() {
+            return Ok(None);
+        }
+        let root_identity = self.resolve_root(root, inputs, fs)?;
+        if !self.declared.contains(&root_identity) {
+            return Ok(None);
+        }
+        let identity = fs
+            .canonicalize(source)
+            .map_err(|e| format!("cannot resolve selected source {}: {e}", source.display()))?;
+        if !identity.starts_with(&root_identity) {
+            return Err(format!(
+                "selected source {} resolves outside its declared source root {}",
+                source.display(),
+                root_identity.display()
+            ));
+        }
+        inputs
+            .declared_file_resolutions
+            .push((source.to_owned(), Some(identity.clone())));
+        Ok(Some(identity))
+    }
+}
+
 /// Application and installed sources on the search entry selected by the module launcher.
 pub(crate) struct ModuleEntryRoot<'a> {
     root: PathBuf,

@@ -2620,11 +2620,7 @@ pub(crate) fn compile(
                         file_origins.push((sources.len(), origin == ImportOrigin::Startup, index));
                         let registration = (prefix.clone(), path, src.into());
                         if winner && !loader_error {
-                            // Path zero and explicitly declared finite application roots
-                            // retain source contracts; other installations do not become
-                            // first party merely because they are searched.
-                            let program = initial[..path0_len].contains(root)
-                                || options.application_roots.contains(root);
+                            let program = initial[..path0_len].contains(root);
                             if let Some(parsed) = parsed {
                                 registrations
                                     .checked_units
@@ -2814,6 +2810,12 @@ pub(crate) fn compile(
     // file's own search root and wheel membership, including for shadowed sources.
     let mut semantic_roots = HashMap::new();
     let mut semantic_files = HashMap::new();
+    let mut declared_sources = crate::installed_wheels::DeclaredApplicationSources::new(
+        &options.application_roots,
+        &mut inputs,
+        &mut filesystem,
+    )?;
+    let mut owned_sources = HashSet::new();
     for (id, startup, index) in file_origins {
         let root = if startup {
             &site_roots[index]
@@ -2835,7 +2837,12 @@ pub(crate) fn compile(
             });
             semantic_files.insert(path.as_path(), physical.join(relative));
         }
-        let application = options.application_roots.contains(root)
+        let owned = declared_sources.selected(root, path, &mut inputs, &mut filesystem)?;
+        if let Some(identity) = owned.as_ref() {
+            semantic_files.insert(path.as_path(), identity.clone());
+            owned_sources.insert(id);
+        }
+        let application = owned.is_some()
             || entry_owner
                 .as_ref()
                 .and_then(|owner| owner.is_program(root, path))
@@ -2907,8 +2914,11 @@ pub(crate) fn compile(
             let application = !registrations.python_providers.contains(&id);
             // Emit the selected application's signature. Preserve the existing checker
             // scope: owning a declaration does not prove that a call will reach it.
-            let mut registration =
-                RegisteredSource::new(&sources[id], program && application, module);
+            let mut registration = RegisteredSource::new(
+                &sources[id],
+                (program || owned_sources.contains(&id)) && application,
+                module,
+            );
             let checked = registrations.checked_units.get(&id);
             if !module_errors.contains_key(registration.path)
                 && let Some(open) = checked.and_then(|unit| unit.run_path.as_deref())

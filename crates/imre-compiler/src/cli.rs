@@ -579,4 +579,77 @@ mod tests {
         assert!(error.contains("greeting.py:1:15"), "{error}");
         assert!(error.contains("expected int, got bool"), "{error}");
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn selected_site_source_ownership_survives_alias_ordering() {
+        use std::os::unix::fs::symlink;
+        let temp = tempfile::tempdir_in(".").unwrap();
+        let site = temp.path().join("site");
+        let alias = temp.path().join("alias");
+        let third = temp.path().join("third");
+        for root in [&site, &third] {
+            std::fs::create_dir_all(root.join("sample")).unwrap();
+        }
+        symlink("site", &alias).unwrap();
+        let poison = "status: int = True\ndef main():\n    print(status)\n";
+        for root in [&site, &third] {
+            std::fs::write(root.join("sample/__init__.py"), poison).unwrap();
+        }
+        let entry = temp.path().join("launch");
+        std::fs::write(&entry, "#!/usr/bin/env python3\nimport sys\nfrom sample import main\nif __name__ == '__main__':\n    sys.exit(main())\n").unwrap();
+        let physical = site.canonicalize().unwrap();
+        let absolute_alias = std::path::absolute(&alias).unwrap();
+        let check = |flags: Vec<OsString>| {
+            let mut options = BuildOptions::default();
+            let mut args = std::iter::once(entry.as_os_str().to_owned()).chain(flags);
+            options.read(OsStr::new("check"), &mut args, true).unwrap();
+            imre_compiler::check_file_with_options(&entry, None, &options.compile)
+        };
+        for flags in [
+            vec![
+                "--extension-path".into(),
+                absolute_alias.clone().into_os_string(),
+                "--site-packages".into(),
+                physical.clone().into_os_string(),
+            ],
+            vec![
+                "--site-packages".into(),
+                physical.clone().into_os_string(),
+                "--extension-path".into(),
+                absolute_alias.into_os_string(),
+            ],
+            vec![
+                "--extension-path".into(),
+                physical.clone().into_os_string(),
+                "--site-packages".into(),
+                alias.as_os_str().to_owned(),
+            ],
+            vec![
+                "--extension-path".into(),
+                alias.as_os_str().to_owned(),
+                "--site-packages".into(),
+                site.as_os_str().to_owned(),
+            ],
+        ] {
+            let error = check(flags).unwrap_err();
+            assert!(
+                error.contains(&format!(
+                    "{}:1:15",
+                    physical.join("sample/__init__.py").display()
+                )),
+                "{error}"
+            );
+            assert!(error.contains("expected int, got bool"), "{error}");
+        }
+        // An earlier, physically different third-party provider is not promoted merely
+        // because a later marked site happens to contain a module with the same name.
+        check(vec![
+            "--extension-path".into(),
+            third.into_os_string(),
+            "--site-packages".into(),
+            physical.into_os_string(),
+        ])
+        .unwrap();
+    }
 }
