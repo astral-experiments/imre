@@ -29,15 +29,9 @@ number = float(sys.argv[1])
 shape = int(sys.argv[2])
 prefix = int(sys.argv[3])
 try:
-    if prefix:
-        result = prefixed(number, shape)
-    else:
-        result = render(number, shape)
+    result = prefixed(number, shape) if prefix else render(number, shape)
     print(result)
 except MemoryError:
     print('MemoryError')
-if prefix:
-    retry = prefixed(number, shape)
-else:
-    retry = render(number, shape)
+retry = prefixed(number, shape) if prefix else render(number, shape)
 print(retry)

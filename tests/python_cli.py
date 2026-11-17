@@ -1142,10 +1142,13 @@ def check_context_protocol_allocation(imre, root, run):
         "-C", f"link-arg={wrapper}",
         "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=malloc,--wrap=realloc,--wrap=calloc",
     ])
+    executable = root / "context-protocol"
+    built = run(imre, "build", fixtures / "boxed_context_protocol_allocation.py", "--no-cache", "-o", executable,
+                extra={"IMRE_ENCODED_FLAGS": flags})
+    assert built.returncode == 0, built
     for opcode in ("lookup_enter", "lookup_exit"):
         for target in [0, 1]:
-            result = run(imre, "-B", fixtures / "boxed_context_protocol_allocation.py", opcode, extra={
-                "IMRE_ENCODED_FLAGS": flags,
+            result = run(executable, opcode, extra={
                 "CONTEXT_REFUSE_NTH": str(target),
                 "CONTEXT_REFUSE_OPCODE": opcode,
             })
@@ -1156,7 +1159,7 @@ def check_context_protocol_allocation(imre, root, run):
             else:
                 assert result.stdout.startswith(b"kind TypeError\ndetail "), result
     for mode in ("wb", "w"):
-        result = run(imre, "-B", fixtures / "boxed_context_protocol_allocation.py", mode, root / "context-output", extra={"IMRE_ENCODED_FLAGS": flags})
+        result = run(executable, mode, str(root / "context-output"))
         assert (result.returncode, result.stdout) == (0, b"written 4\nclosed True\ncontent True\n"), result
 
 
