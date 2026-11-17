@@ -176,6 +176,8 @@ pub(crate) struct Session {
     pub(crate) root: PathBuf,
     extension_roots: Vec<PathBuf>,
     hint_reads: Cell<usize>,
+    /// First fallback diagnostic: outer None is unseen, inner None is a different rule.
+    first_fallback_argument: Cell<Option<Option<CheckedArgument>>>,
     /// Explicit checks can report conversions that executables perform at runtime.
     pub(crate) explicit_check: bool,
 }
@@ -187,25 +189,61 @@ pub(crate) enum SourceContract {
     Checked(Result<(), String>),
     Pending {
         native: Box<crate::frontend::phase::Diagnostic>,
-        result: std::cell::OnceCell<Result<(), String>>,
+        result: std::cell::OnceCell<SourceContractResult>,
     },
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct CheckedArgument {
+    module: usize,
+    range: TextRange,
+}
+
+pub(crate) struct SourceContractResult {
+    original: Result<(), String>,
+    fallback_argument: Option<CheckedArgument>,
+}
+
 impl SourceContract {
+    fn pending<'a>(
+        &'a self,
+        graph: &crate::modules::SourceGraph,
+    ) -> Option<&'a SourceContractResult> {
+        let Self::Pending { native, result } = self else {
+            return None;
+        };
+        Some(result.get_or_init(|| {
+            let (skipped, overloads) = graph.diagnostic_scopes();
+            let mut fallback_argument = None;
+            let original = graph.session.closed_program_errors_with_fallback(
+                &graph.modules,
+                skipped.as_deref(),
+                &overloads,
+                Some(native),
+                Some(&graph.registered_source_errors.borrow()),
+                &mut fallback_argument,
+            );
+            SourceContractResult {
+                original,
+                fallback_argument,
+            }
+        }))
+    }
+
     pub(crate) fn original(&self, graph: &crate::modules::SourceGraph) -> &Result<(), String> {
         match self {
             Self::Checked(result) => result,
-            Self::Pending { native, result } => result.get_or_init(|| {
-                let (skipped, overloads) = graph.diagnostic_scopes();
-                graph.session.closed_program_errors(
-                    &graph.modules,
-                    skipped.as_deref(),
-                    &overloads,
-                    Some(native),
-                    Some(&graph.registered_source_errors.borrow()),
-                )
-            }),
+            Self::Pending { .. } => &self.pending(graph).expect("pending contract").original,
         }
+    }
+
+    /// Return an operand only when fixed lowering replaced the sole closed-source
+    /// argument diagnostic and matched its parameter declaration.
+    pub(crate) fn fallback_argument(
+        &self,
+        graph: &crate::modules::SourceGraph,
+    ) -> Option<CheckedArgument> {
+        self.pending(graph)?.fallback_argument
     }
 }
 
@@ -2001,6 +2039,7 @@ impl Session {
             root: PathBuf::from(root),
             extension_roots: extension_roots.to_vec(),
             hint_reads: Cell::new(0),
+            first_fallback_argument: Cell::new(None),
             explicit_check: false,
         })
     }
@@ -3601,6 +3640,20 @@ impl Session {
         )
     }
 
+    /// Return the first fallback error's checked operand when it is an argument error.
+    pub(crate) fn first_fallback_argument(&self) -> Option<CheckedArgument> {
+        self.first_fallback_argument.get().flatten()
+    }
+
+    fn record_fallback_error(&self, module: usize, error: &CheckedError) {
+        if self.first_fallback_argument.get().is_none() {
+            let argument = (error.rule.as_str() == "invalid-argument-type")
+                .then(|| error.range.map(|range| CheckedArgument { module, range }))
+                .flatten();
+            self.first_fallback_argument.set(Some(argument));
+        }
+    }
+
     /// Preserve first-party contracts when lowering a checked file to object operations.
     pub(crate) fn check_fallback_contracts(
         &mut self,
@@ -3611,6 +3664,7 @@ impl Session {
         checked_modules: Option<&[crate::modules::SourceModule]>,
         native: Option<&crate::frontend::phase::Diagnostic>,
     ) -> Result<(), String> {
+        self.first_fallback_argument.set(None);
         let checks = match calls {
             FallbackCalls::All | FallbackCalls::DecoratorFactories => FileChecks::FallbackCalls,
             FallbackCalls::FunctionBodies => FileChecks::FunctionBodyCalls,
@@ -3624,11 +3678,11 @@ impl Session {
             matches!(calls, FallbackCalls::DecoratorFactories),
             checked_modules.is_some(),
         );
-        self.errors(
+        self.errors_recording(
             roots.clone(),
             skipped,
             overloads,
-            checks,
+            (checks, true),
             checked_modules,
             native,
         )?;
@@ -3665,6 +3719,7 @@ impl Session {
                             guards.keys().any(|guard| guard.contains_range(range))
                         })
                 }) {
+                    self.record_fallback_error(id, error);
                     errors.push(error.rendered.as_str());
                 }
             }
@@ -3963,6 +4018,25 @@ impl Session {
         native: Option<&crate::frontend::phase::Diagnostic>,
         checked_bodies: Option<&crate::modules::RegisteredSourceErrors>,
     ) -> Result<(), String> {
+        self.closed_program_errors_with_fallback(
+            modules,
+            skipped,
+            overloads,
+            native,
+            checked_bodies,
+            &mut None,
+        )
+    }
+
+    fn closed_program_errors_with_fallback(
+        &self,
+        modules: &[impl ClosedSource],
+        skipped: Option<&[Vec<TextRange>]>,
+        overloads: &[Vec<CheckedDiagnostic>],
+        native: Option<&crate::frontend::phase::Diagnostic>,
+        checked_bodies: Option<&crate::modules::RegisteredSourceErrors>,
+        fallback_argument: &mut Option<CheckedArgument>,
+    ) -> Result<(), String> {
         use ty_python_core::definition::DefinitionKind;
 
         assert_eq!(modules.len(), self.files.len());
@@ -4070,6 +4144,7 @@ impl Session {
                         .then_some((id, file, path))
                 });
         let mut errors = Vec::new();
+        let mut first_argument = None;
         for (index, file, path) in project_files.clone() {
             if !has_signatures {
                 let index = ty_python_core::semantic_index(&self.db, self.db.program_file(file));
@@ -4151,11 +4226,23 @@ impl Session {
                 }
                 let original =
                     native.and_then(|report| self.original_operand(error, modules, index, report));
+                if errors.is_empty()
+                    && error.rule.as_str() == "invalid-argument-type"
+                    && original.is_some()
+                {
+                    first_argument = error.range.map(|range| CheckedArgument {
+                        module: index,
+                        range,
+                    });
+                }
                 errors.push(original.map_or_else(|| error.rendered.clone(), ToString::to_string));
             }
             errors.extend(dormant.map(|(_, message, _)| message));
         }
         if !errors.is_empty() {
+            if errors.len() == 1 {
+                *fallback_argument = first_argument;
+            }
             return Err(errors.join("\n"));
         }
         for report in native.into_iter().flat_map(|native| native.reports()) {
@@ -4207,6 +4294,25 @@ impl Session {
         checked_modules: Option<&[crate::modules::SourceModule]>,
         native: Option<&crate::frontend::phase::Diagnostic>,
     ) -> Result<(), String> {
+        self.errors_recording(
+            roots,
+            skipped,
+            overloads,
+            (checks, false),
+            checked_modules,
+            native,
+        )
+    }
+
+    fn errors_recording(
+        &self,
+        roots: impl Iterator<Item = usize>,
+        skipped: Option<&[Vec<TextRange>]>,
+        overloads: &[Vec<CheckedDiagnostic>],
+        (checks, record_fallback): (FileChecks, bool),
+        checked_modules: Option<&[crate::modules::SourceModule]>,
+        native: Option<&crate::frontend::phase::Diagnostic>,
+    ) -> Result<(), String> {
         let errors: Vec<_> = roots
             .flat_map(|index| {
                 let file = self.files[index];
@@ -4222,6 +4328,9 @@ impl Session {
                     &[][..],
                 );
                 file_errors(&self.db, checked).iter().map(move |error| {
+                    if record_fallback {
+                        self.record_fallback_error(index, error);
+                    }
                     let original = native.and_then(|report| {
                         self.original_operand(error, checked_modules?, index, report)
                     });
