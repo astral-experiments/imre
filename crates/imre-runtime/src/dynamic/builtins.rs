@@ -2788,7 +2788,7 @@ pub(super) fn call(
                 return Err(type_error("object() takes no arguments"));
             }
             let class = ctx.builtin("object");
-            Ok(ctx.instance(class, None))
+            ctx.try_plain_instance(class)
         }
         "mappingproxy" => {
             let [mapping] = bind_builtin_arguments(name, args, kwargs, ["mapping"], 1)?;
