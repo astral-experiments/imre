@@ -2099,6 +2099,19 @@ print("result", call(b=2, a=1))
         assert!(error.contains("expected int, got str"), "{error}");
     }
 
+    #[test]
+    fn object_fallback_preserves_exact_scalar_annotation_stores() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("main.py");
+        std::fs::write(
+            &path,
+            "buffer = bytearray()\nbuffer.append(97)\nprint(buffer)\nstatus: int = True\n",
+        )
+        .unwrap();
+        let error = super::check_file(&path, None).unwrap_err();
+        assert!(error.contains("expected int, got bool"), "{error}");
+    }
+
     const INFERRED_SET_GATHER: &str = "def gather(text):\n    values = set()\n    for char in text:\n        values.add(char)\n    return sorted(values)\n";
 
     #[test]
