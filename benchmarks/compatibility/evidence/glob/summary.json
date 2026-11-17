@@ -19,10 +19,12 @@
       "not_run": 1
     }
   },
-  "paired": 21,
+  "paired": 0,
   "blockers": [
-    "Intact O0 suite timed out at test_glob_many_open_files after nine passes and two skips. Intact O3 build timed out at 30 seconds; a concurrent direct O3 attempt timed out at 120 seconds. Individual named originals were then attempted at both tiers with bounded timeouts. Individual stderr is a concatenation of raw per-command streams with explicit ID markers; run.json records raw hashes and exact argv."
+    "Intact O0 suite timed out at test_glob_many_open_files after nine passes and two skips. Intact O3 build timed out at 30 seconds; a concurrent direct O3 attempt timed out at 120 seconds. Individual named originals were then attempted at both tiers with bounded timeouts. Individual stderr is a concatenation of raw per-command streams with explicit ID markers; run.json records raw hashes and exact argv.",
+    "The glob FILE launcher graph linked despite an imported status: int = True control; all 21 candidate pairs are withheld, with raw native outcomes preserved."
   ],
   "provenance": "provenance.json",
-  "inventory": "inventory.jsonl"
+  "inventory": "inventory.jsonl",
+  "architecture_control": "architecture/poison_control.json"
 }

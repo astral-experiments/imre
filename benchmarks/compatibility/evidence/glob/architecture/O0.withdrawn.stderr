@@ -1,0 +1,168 @@
+=== command 1 ===
+[guard: execve/execveat denied; no libpython mapped]
+test_escape (__main__.GlobTests.test_escape) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.013s
+
+OK
+=== command 2 ===
+[guard: execve/execveat denied; no libpython mapped]
+test_glob0 (__main__.GlobTests.test_glob0) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.017s
+
+OK
+=== command 3 ===
+[guard: execve/execveat denied; no libpython mapped]
+test_glob1 (__main__.GlobTests.test_glob1) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.017s
+
+OK
+=== command 4 ===
+[guard: execve/execveat denied; no libpython mapped]
+test_glob_broken_symlinks (__main__.GlobTests.test_glob_broken_symlinks) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.032s
+
+OK
+=== command 5 ===
+[guard: execve/execveat denied; no libpython mapped]
+test_glob_bytes_directory_with_trailing_slash (__main__.GlobTests.test_glob_bytes_directory_with_trailing_slash) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.014s
+
+OK
+=== command 6 ===
+[guard: execve/execveat denied; no libpython mapped]
+test_glob_directory_names (__main__.GlobTests.test_glob_directory_names) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.146s
+
+OK
+=== command 7 ===
+[guard: execve/execveat denied; no libpython mapped]
+test_glob_directory_with_trailing_slash (__main__.GlobTests.test_glob_directory_with_trailing_slash) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.014s
+
+OK
+=== command 8 ===
+[guard: execve/execveat denied; no libpython mapped]
+test_glob_empty_pattern (__main__.GlobTests.test_glob_empty_pattern) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.012s
+
+OK
+=== command 9 ===
+[guard: execve/execveat denied; no libpython mapped]
+test_glob_literal (__main__.GlobTests.test_glob_literal) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.035s
+
+OK
+=== command 10 ===
+[guard: execve/execveat denied; no libpython mapped]
+test_glob_named_pipe (__main__.GlobTests.test_glob_named_pipe) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.045s
+
+OK
+=== command 11 ===
+[guard: execve/execveat denied; no libpython mapped]
+test_glob_nested_directory (__main__.GlobTests.test_glob_nested_directory) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.028s
+
+OK
+=== command 12 ===
+[guard: execve/execveat denied; no libpython mapped]
+test_glob_non_directory (__main__.GlobTests.test_glob_non_directory) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.062s
+
+OK
+=== command 13 ===
+[guard: execve/execveat denied; no libpython mapped]
+test_glob_one_directory (__main__.GlobTests.test_glob_one_directory) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.075s
+
+OK
+=== command 14 ===
+[guard: execve/execveat denied; no libpython mapped]
+test_glob_symlinks (__main__.GlobTests.test_glob_symlinks) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.051s
+
+OK
+=== command 15 ===
+[guard: execve/execveat denied; no libpython mapped]
+test_hidden_glob (__main__.GlobTests.test_hidden_glob) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.043s
+
+OK
+=== command 16 ===
+[guard: execve/execveat denied; no libpython mapped]
+test_recursive_glob (__main__.GlobTests.test_recursive_glob) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 1.235s
+
+OK
+=== command 17 ===
+[guard: execve/execveat denied; no libpython mapped]
+test_translate (__main__.GlobTests.test_translate) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.013s
+
+OK
+=== command 18 ===
+[guard: execve/execveat denied; no libpython mapped]
+test_translate_include_hidden (__main__.GlobTests.test_translate_include_hidden) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.013s
+
+OK
+=== command 19 ===
+[guard: execve/execveat denied; no libpython mapped]
+test_translate_matching (__main__.GlobTests.test_translate_matching) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.014s
+
+OK
+=== command 20 ===
+[guard: execve/execveat denied; no libpython mapped]
+test_translate_recursive (__main__.GlobTests.test_translate_recursive) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.012s
+
+OK
+=== command 21 ===
+[guard: execve/execveat denied; no libpython mapped]
+test_translate_seps (__main__.GlobTests.test_translate_seps) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.012s
+
+OK
