@@ -13906,6 +13906,13 @@ impl<'a> Checker<'a> {
                             .as_ref()
                             .is_some_and(|name| matches!(name.as_str(), "lo" | "hi"))
                     });
+                let key_none = call.arguments.keywords.iter().any(|keyword| {
+                    keyword
+                        .arg
+                        .as_ref()
+                        .is_some_and(|name| name.as_str() == "key")
+                        && matches!(&keyword.value, ast::Expr::NoneLiteral(_))
+                });
                 let mut params = vec![
                     parameter("a", Type::ListInt, None),
                     parameter("x", Type::Int, None),
@@ -13914,10 +13921,20 @@ impl<'a> Checker<'a> {
                     params.push(parameter("lo", Type::Int, Some(Expr::integer(0))));
                     params.push(parameter("hi", Type::Int, Some(Expr::integer(-1))));
                 }
-                let args = self
+                if key_none {
+                    params.push(ParameterKind::KeywordOnly.parameter("key", Type::None, None));
+                }
+                let mut args = self
                     .arguments_with(call, &params, None, |checker, index, source| {
                         if index == 3 && matches!(source, ast::Expr::NoneLiteral(_)) {
                             return Ok(Expr::integer(-1));
+                        }
+                        if key_none && index == params.len() - 1 {
+                            return if matches!(source, ast::Expr::NoneLiteral(_)) {
+                                Ok(Expr::none())
+                            } else {
+                                Err(checker.object_runtime_export(name, source))
+                            };
                         }
                         let value = checker.expr(source)?;
                         if value.ty != params[index].ty {
@@ -13926,6 +13943,13 @@ impl<'a> Checker<'a> {
                         Ok(value)
                     })
                     .map_err(|_| self.object_runtime_export(name, call))?;
+                if key_none {
+                    let immediate = args.order.pop().unwrap();
+                    args.values.remove(immediate);
+                    for index in &mut args.order {
+                        *index -= usize::from(*index > immediate);
+                    }
+                }
                 let left = name.ends_with("_left");
                 let builtin = if bounded {
                     Builtin::BisectIntListBounds { left }

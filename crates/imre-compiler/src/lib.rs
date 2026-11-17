@@ -1721,12 +1721,13 @@ print("result", call(b=2, a=1))
     fn bounded_integer_bisect_uses_checked_list_search() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("app.py");
-        std::fs::write(&path, "from bisect import bisect_left, bisect_right\ndef search(a: list[int], x: int) -> int:\n    return bisect_left(a, x, 1, 3) + bisect_right(a, x, hi=None)\nprint(search([1, 2, 2], 2))\n").unwrap();
+        std::fs::write(&path, "from bisect import bisect_left, bisect_right\ndef search(a: list[int], x: int) -> int:\n    return bisect_left(a, x, 1, 3, key=None) + bisect_right(a, x, hi=None, key=None) + bisect_left(key=None, x=x, a=a)\nprint(search([1, 2, 2], 2))\n").unwrap();
         let ir = super::compile_file(&path, None, &CompileOptions::default())
             .unwrap()
             .llvm_ir;
         assert!(ir.contains("call i64 @imre_list_bisect_left_bounds("));
         assert!(ir.contains("call i64 @imre_list_bisect_right_bounds("));
+        assert!(ir.contains("call i64 @imre_list_bisect_left("));
     }
 
     #[test]
