@@ -1,0 +1,233 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Prospective supplemental stock reference v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "case",
+    "scope",
+    "source",
+    "invocation",
+    "tool",
+    "fixture",
+    "observation",
+    "evidence"
+  ],
+  "properties": {
+    "schema": {
+      "const": "prospective-stock-reference-v1"
+    },
+    "case": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]+$"
+    },
+    "scope": {
+      "const": "supplemental-stock-only"
+    },
+    "source": {
+      "$ref": "#/$defs/source"
+    },
+    "invocation": {
+      "$ref": "#/$defs/invocation"
+    },
+    "tool": {
+      "$ref": "#/$defs/tool"
+    },
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "before",
+        "external_inputs"
+      ],
+      "properties": {
+        "before": {
+          "const": "raw/before.json"
+        },
+        "external_inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/fact"
+          }
+        }
+      }
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "exit_code",
+        "stdout",
+        "stderr",
+        "effects"
+      ],
+      "properties": {
+        "exit_code": {
+          "type": "integer"
+        },
+        "stdout": {
+          "const": "raw/stdout"
+        },
+        "stderr": {
+          "const": "raw/stderr"
+        },
+        "effects": {
+          "const": "effects.normalized.json"
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/fact"
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "sha1": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "bytes",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repo",
+        "commit",
+        "path",
+        "git_blob",
+        "sha256",
+        "bytes",
+        "vendored"
+      ],
+      "properties": {
+        "repo": {
+          "type": "string",
+          "pattern": "^https://github.com/"
+        },
+        "commit": {
+          "$ref": "#/$defs/sha1"
+        },
+        "path": {
+          "type": "string"
+        },
+        "git_blob": {
+          "$ref": "#/$defs/sha1"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "vendored": {
+          "type": "string"
+        }
+      }
+    },
+    "invocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "argv",
+        "cwd",
+        "env"
+      ],
+      "properties": {
+        "argv": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "string"
+          }
+        },
+        "cwd": {
+          "const": "$WORK"
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "implementation",
+        "version",
+        "version_verbose",
+        "executable_sha256",
+        "soabi",
+        "system",
+        "machine",
+        "kernel",
+        "libc"
+      ],
+      "properties": {
+        "implementation": {
+          "const": "CPython"
+        },
+        "version": {
+          "const": "3.14.5"
+        },
+        "version_verbose": {
+          "type": "string"
+        },
+        "executable_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "soabi": {
+          "type": "string"
+        },
+        "system": {
+          "const": "Linux"
+        },
+        "machine": {
+          "type": "string"
+        },
+        "kernel": {
+          "type": "string"
+        },
+        "libc": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "ruff-publisher": {
+    "repo": "https://github.com/astral-sh/ruff",
+    "commit": "65aee8892ce379af4ae9c8b5f6e0ab37b25d5ec9",
+    "path": "scripts/publish-crates.py",
+    "git_blob": "0ad38297e973be20e7b22a6c70332047ae522629",
+    "sha256": "c6f13456d53d1dd1cc155d72d9e63cd999e361e1c983d366e477c8432693a021",
+    "bytes": 6891,
+    "vendored": "sources/ruff/scripts/publish-crates.py"
+  },
+  "uv-publisher": {
+    "repo": "https://github.com/astral-sh/uv",
+    "commit": "24688aaca1e7fd104437a0909d5db3afdc7dcdb0",
+    "path": "scripts/publish-crates.py",
+    "git_blob": "474dcdbb534b65cd3ab9dce1101a98f618389b4e",
+    "sha256": "bc45ffb7097a253601a62a46ac7b356d3005a5b12d5be346eacc5a5df412bddb",
+    "bytes": 6118,
+    "vendored": "sources/uv/scripts/publish-crates.py"
+  },
+  "uv-rich": {
+    "repo": "https://github.com/astral-sh/uv",
+    "commit": "24688aaca1e7fd104437a0909d5db3afdc7dcdb0",
+    "path": "scripts/uv-run-remote-script-test.py",
+    "git_blob": "e21e3413afc5fc41942e29ccf7f717af3614ac12",
+    "sha256": "a479935e4c75c1b31dcd4805b50464ffa8a37e7240acb7c6457a2e4033ae21b0",
+    "bytes": 297,
+    "vendored": "sources/uv/scripts/uv-run-remote-script-test.py"
+  }
+}

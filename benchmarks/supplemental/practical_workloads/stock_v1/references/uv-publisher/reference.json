@@ -1,0 +1,127 @@
+{
+  "case": "uv-publisher",
+  "evidence": {
+    "effects.normalized.json": {
+      "bytes": 3232,
+      "path": "effects.normalized.json",
+      "sha256": "13a6263c2b5c226f00f9203e03e7cebbd0eb4bcfd3aac3500688460ca7f4ce67"
+    },
+    "raw/after.json": {
+      "bytes": 697,
+      "path": "raw/after.json",
+      "sha256": "716f97731bd82e05431162467b028766e7e22f964b349108516f1c5b77684d2d"
+    },
+    "raw/before.json": {
+      "bytes": 345,
+      "path": "raw/before.json",
+      "sha256": "893826edfd812e8a709a9bac544639dee2f5723c9743c7a667c28a0408ed373b"
+    },
+    "raw/invocation.json": {
+      "bytes": 1318,
+      "path": "raw/invocation.json",
+      "sha256": "0d6509cd545a9279d5a91e004c72b0986db5f5c6ec0df61486d6ad9f93855bc3"
+    },
+    "raw/processes.jsonl": {
+      "bytes": 1206,
+      "path": "raw/processes.jsonl",
+      "sha256": "dc49a3b0f0173a0fe29dd6f3ac80f19a90e884c3ef7a17257986aa327067361e"
+    },
+    "raw/published.txt": {
+      "bytes": 66,
+      "path": "raw/published.txt",
+      "sha256": "e2f90dec20c234af40fdb892d39f1c50ebe0499da17c5217bf98d50393fba564"
+    },
+    "raw/registry.jsonl": {
+      "bytes": 768,
+      "path": "raw/registry.jsonl",
+      "sha256": "4100e0fdc78badbafa973b9e484a8bb56ccdc77df26d2dd904e9c75edcb6a871"
+    },
+    "raw/stderr": {
+      "bytes": 0,
+      "path": "raw/stderr",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "raw/stdout": {
+      "bytes": 130,
+      "path": "raw/stdout",
+      "sha256": "8ae5ee580a8a028cc7cc202708581c3817ae97ec7852fd563e4a03ce9d37bde9"
+    },
+    "raw/wait.json": {
+      "bytes": 43,
+      "path": "raw/wait.json",
+      "sha256": "ac3e0602f1590968085f79df3e078d9f081c074cdbf1d48826ebaf2bf641419b"
+    }
+  },
+  "fixture": {
+    "before": "raw/before.json",
+    "external_inputs": [
+      {
+        "bytes": 32359056,
+        "path": "$PYTHON",
+        "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+      },
+      {
+        "bytes": 1115,
+        "path": "$CORPUS/fixtures/cargo_stub.py",
+        "sha256": "4a57e30e3cfc44ad1836a66760a844ceb628c68bf52031c2fac6f89e9356e85e"
+      }
+    ]
+  },
+  "invocation": {
+    "argv": [
+      "$PYTHON",
+      "-B",
+      "scripts/publish-crates.py",
+      "--api-url",
+      "$REGISTRY_ORIGIN/api/v1",
+      "--cargo",
+      "$PYTHON",
+      "$CORPUS/fixtures/cargo_stub.py",
+      "--no-verify"
+    ],
+    "cwd": "$WORK",
+    "env": {
+      "CARGO_LOG": "$WORK/cargo.log",
+      "HOME": "$WORK/home",
+      "LANG": "C.UTF-8",
+      "LC_ALL": "C.UTF-8",
+      "NO_PROXY": "127.0.0.1",
+      "PATH": "/usr/bin",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONHASHSEED": "0",
+      "PYTHONNOUSERSITE": "1",
+      "TZ": "UTC"
+    }
+  },
+  "observation": {
+    "effects": "effects.normalized.json",
+    "exit_code": 0,
+    "stderr": "raw/stderr",
+    "stdout": "raw/stdout"
+  },
+  "schema": "prospective-stock-reference-v1",
+  "scope": "supplemental-stock-only",
+  "source": {
+    "bytes": 6118,
+    "commit": "24688aaca1e7fd104437a0909d5db3afdc7dcdb0",
+    "git_blob": "474dcdbb534b65cd3ab9dce1101a98f618389b4e",
+    "path": "scripts/publish-crates.py",
+    "repo": "https://github.com/astral-sh/uv",
+    "sha256": "bc45ffb7097a253601a62a46ac7b356d3005a5b12d5be346eacc5a5df412bddb",
+    "vendored": "sources/uv/scripts/publish-crates.py"
+  },
+  "tool": {
+    "executable_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+    "implementation": "CPython",
+    "kernel": "6.18.57",
+    "libc": [
+      "glibc",
+      "2.41"
+    ],
+    "machine": "x86_64",
+    "soabi": "cpython-314-x86_64-linux-gnu",
+    "system": "Linux",
+    "version": "3.14.5",
+    "version_verbose": "3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]"
+  }
+}

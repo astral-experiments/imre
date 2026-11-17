@@ -1,0 +1,62 @@
+{
+  "actual_stock_input": "fixtures/rich-imports.zip",
+  "wheel_bytes_downloaded": false,
+  "packages": [
+    {
+      "name": "rich",
+      "version": "13.7.1",
+      "wheel": "rich-13.7.1-py3-none-any.whl",
+      "wheel_sha256": "4edbae314f59eb482f54e9e30bf00d33350aaa94f4bfcd4e9e3110e64d0d7222",
+      "wheel_bytes": 240681,
+      "lock_provenance": {
+        "repo": "https://github.com/astral-sh/uv",
+        "commit": "24688aaca1e7fd104437a0909d5db3afdc7dcdb0",
+        "path": "scripts/uv-run-remote-script-test.py.lock",
+        "git_blob": "84e0bc38c68788b31707a96948f342db1c398f18"
+      },
+      "imported_by_greeting": true
+    },
+    {
+      "name": "markdown-it-py",
+      "version": "4.3.0",
+      "wheel": "markdown_it_py-4.3.0-py3-none-any.whl",
+      "wheel_sha256": "7aa1511a46c39138de78d9eba92ce47e63124d8003fc98b3a351909e04239efa",
+      "wheel_bytes": 96951,
+      "lock_provenance": {
+        "repo": "https://github.com/astral-sh/arcane-typing",
+        "commit": "69025139584c6ade4fe392a9c3e83e25eca81679",
+        "path": "mdtest.py.lock",
+        "git_blob": "2dc1c029b0da3e9f30454973cc5318f96fed1b48"
+      },
+      "imported_by_greeting": false
+    },
+    {
+      "name": "mdurl",
+      "version": "0.1.2",
+      "wheel": "mdurl-0.1.2-py3-none-any.whl",
+      "wheel_sha256": "84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8",
+      "wheel_bytes": 9979,
+      "lock_provenance": {
+        "repo": "https://github.com/astral-sh/uv",
+        "commit": "24688aaca1e7fd104437a0909d5db3afdc7dcdb0",
+        "path": "scripts/uv-run-remote-script-test.py.lock",
+        "git_blob": "84e0bc38c68788b31707a96948f342db1c398f18"
+      },
+      "imported_by_greeting": false
+    },
+    {
+      "name": "Pygments",
+      "version": "2.21.0",
+      "wheel": "pygments-2.21.0-py3-none-any.whl",
+      "wheel_sha256": "2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9",
+      "wheel_bytes": 1250147,
+      "lock_provenance": {
+        "repo": "https://github.com/astral-sh/ruff",
+        "commit": "1e0a2ce2e3877f9953d3132c800f2628c49f9a1b",
+        "path": "scripts/ty_benchmark/uv.lock",
+        "git_blob": "188f9f14d4d22092b8bb81046e221c5c51ac8cb4"
+      },
+      "imported_by_greeting": false
+    }
+  ]
+}
