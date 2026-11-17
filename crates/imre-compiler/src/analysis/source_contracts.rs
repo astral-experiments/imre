@@ -222,16 +222,22 @@ impl Session {
         let widened_float = ty_python_semantic::types::UnionType::from_two_elements(
             db,
             &env,
-            float,
             KnownClass::Int.to_instance(db, &env),
+            float,
         );
-        let exact_expected = if expected == widened_float {
-            float
-        } else {
-            expected
-        };
-        // Non-assignable types already have a ty declaration diagnostic.
-        if actual.is_assignable_to(db, &env, expected)
+        let float_definition = float.definition(db, &env);
+        let float_contract = expected == widened_float
+            || float_definition.is_some() && expected.definition(db, &env) == float_definition;
+        let exact_expected = if float_contract { float } else { expected };
+        // ty permits numeric promotion at a float declaration even when its raw
+        // inferred operand is not assignable to the nominal float instance.
+        let promoted_float = float_contract
+            && matches!(
+                Self::scalar_layout(db, &env, actual, ScalarMatch::Assignable),
+                Some(crate::ir::Type::Int | crate::ir::Type::Bool)
+            );
+        // Other non-assignable types already have a ty declaration diagnostic.
+        if (actual.is_assignable_to(db, &env, expected) || promoted_float)
             && !Self::written_scalar_union_accepts(owner, annotation, actual)
             && let Some(error) =
                 Self::scalar_contract_error(model, exact_expected, value, actual, || true)

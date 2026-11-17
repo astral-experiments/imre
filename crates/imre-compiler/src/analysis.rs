@@ -5237,7 +5237,7 @@ fn concrete_scalar<'db>(
     [KnownClass::Int, KnownClass::Bool, KnownClass::Float, KnownClass::Str, KnownClass::Bytes]
         .into_iter().any(|class| declared == scalar(class))
         // ty widens a float annotation to float | int.
-        || declared == UnionType::from_two_elements(db, env, scalar(KnownClass::Float), scalar(KnownClass::Int))
+        || declared == UnionType::from_two_elements(db, env, scalar(KnownClass::Int), scalar(KnownClass::Float))
 }
 
 fn primary_range(diagnostic: &Diagnostic, file: File) -> Option<TextRange> {
