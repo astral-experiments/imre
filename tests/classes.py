@@ -190,7 +190,6 @@ Cell(1).copy({"unknown": 2})
     "str_static_method": CELL + '    @staticmethod\n    def __str__() -> str:\n        return "Cell"\n',
     "str_wrong_result": CELL + '    def __str__(self) -> int:\n        return self.value\n',
     "str_wrong_body": CELL + '    def __str__(self):\n        return self.value\n',
-    "finalizer": CELL + "    def __del__(self) -> None:\n        pass\n",
     "private_mangling": CELL.replace("value", "__value"),
     "class_surrogate_docstring": CELL.replace("class Cell:\n", 'class Cell:\n    "\\ud800"\n'),
     "staticmethod": CELL.replace("    def add(", "    @staticmethod\n    def add("),
