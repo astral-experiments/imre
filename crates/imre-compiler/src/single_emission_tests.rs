@@ -534,6 +534,7 @@ fn an_unused_aggregate_return_does_not_change_a_bound_callback() {
     let source = include_str!("../../../tests/fixtures/callables/escaping_bound_method.py");
     let unused = "\ndef unused() -> tuple[Callable[[], int], Callable[[], int]]:\n    raise ValueError('unused')\n";
     let mut bodies = Vec::new();
+    let function_name = regex::Regex::new(r"@fn_[0-9]+").unwrap();
     for source in [source.to_owned(), format!("{source}{unused}")] {
         std::fs::write(&path, source).unwrap();
         let mut output = ProgramOutput::new(CodegenLayout::Whole);
@@ -558,12 +559,7 @@ fn an_unused_aggregate_return_does_not_change_a_bound_callback() {
             .split_once("\n}")
             .unwrap()
             .0;
-        bodies.push(
-            regex::Regex::new(r"@fn_[0-9]+")
-                .unwrap()
-                .replace_all(body, "@fn_ID")
-                .into_owned(),
-        );
+        bodies.push(function_name.replace_all(body, "@fn_ID").into_owned());
     }
     assert_eq!(bodies[0], bodies[1]);
 }
