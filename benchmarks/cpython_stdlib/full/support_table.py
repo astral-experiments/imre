@@ -86,6 +86,10 @@ def render(compiler):
         "",
         render_scorecard("stdlib"),
         "",
+        "The six accepted [argparse bytecode omissions](stdlib-omissions.md#argparse) remain in the 1,893-original denominator. "
+        "Their revision-independent [policy ledger](../benchmarks/cpython_stdlib/full/argparse/accepted-omissions-linux.tsv) "
+        "does not alter the pinned receipts or earn passes.",
+        "",
         "## Historical API and ledger inventory",
         "",
         "The following import probes and native/host classifications are an archived ledger view from earlier revisions. They are not paired stock/O0/O3 results at the scorecard pin. In particular, the historical `argparse` zero is a different classification from the historical cumulative 1,887 credits; neither is a current result.",
