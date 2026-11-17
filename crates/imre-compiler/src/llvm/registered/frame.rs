@@ -1978,18 +1978,28 @@ impl RegisteredFrame<'_, '_> {
                     continue;
                 }
                 let source = &mut values[0];
-                let name = if child.expression {
-                    self.output.declare(
-                        |d| &mut d.eval_operand,
-                        "declare i64 @imre_dyn_eval_operand(ptr, i64, i64, ptr, i32, ptr)\n",
-                    );
-                    "imre_dyn_eval_operand"
-                } else {
-                    self.output.declare(
-                        |d| &mut d.exec_operand,
-                        "declare i64 @imre_dyn_exec_operand(ptr, i64, i64, ptr, i32, ptr)\n",
-                    );
-                    "imre_dyn_exec_operand"
+                let name = match child.mode {
+                    super::sites::CompiledSourceMode::Eval => {
+                        self.output.declare(
+                            |d| &mut d.eval_operand,
+                            "declare i64 @imre_dyn_eval_operand(ptr, i64, i64, ptr, i32, ptr)\n",
+                        );
+                        "imre_dyn_eval_operand"
+                    }
+                    super::sites::CompiledSourceMode::Exec => {
+                        self.output.declare(
+                            |d| &mut d.exec_operand,
+                            "declare i64 @imre_dyn_exec_operand(ptr, i64, i64, ptr, i32, ptr)\n",
+                        );
+                        "imre_dyn_exec_operand"
+                    }
+                    super::sites::CompiledSourceMode::Single => {
+                        self.output.declare(
+                            |d| &mut d.single_operand,
+                            "declare i64 @imre_dyn_single_operand(ptr, i64, i64, ptr, i32, ptr)\n",
+                        );
+                        "imre_dyn_single_operand"
+                    }
                 };
                 *source = self.checked(&format!(
                     "call i64 @{name}(ptr %ctx, i64 {callable}, i64 {source}, ptr {}, i32 {}, ptr {})",

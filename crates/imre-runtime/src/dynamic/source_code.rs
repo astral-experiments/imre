@@ -2252,13 +2252,32 @@ impl Context {
         mode: &str,
         inherited: u32,
     ) -> Result<Id> {
-        let program = self.prepare_source_program(source, filename, mode, false, inherited)?;
-        let source = if mode == "exec" && matches!(self.heap.get(source), Value::Str(_)) {
+        // A compiled buffer must retain the text decoded at compile time: the
+        // original bytearray may change before its code object is executed.
+        // Parse that same snapshot so source decoding allocates only once.
+        let retain = matches!(mode, "exec" | "eval" | "single");
+        let source = if retain && self.string_storage(source).is_none() {
+            let decoded = self.decode_compile_buffer(source, Some(filename))?;
+            self.text(decoded)
+        } else if retain {
+            self.string_storage(source).unwrap_or(source)
+        } else {
+            source
+        };
+        let program =
+            self.prepare_source_program(source, filename, mode, false, inherited, true)?;
+        let retained = if retain && matches!(self.heap.get(source), Value::Str(_)) {
             source
         } else {
             NONE
         };
-        Ok(self.box_source_code(program, filename, source))
+        let mode = match mode {
+            "exec" => value::ParsedMode::Exec,
+            "eval" => value::ParsedMode::Eval,
+            "single" => value::ParsedMode::Single,
+            _ => unreachable!("validated compile mode"),
+        };
+        Ok(self.box_source_code(program, filename, retained, mode))
     }
 
     fn prepare_source_program(
@@ -2268,6 +2287,7 @@ impl Context {
         mode: &str,
         strip_indent: bool,
         inherited: u32,
+        limit_complexity: bool,
     ) -> Result<ParsedModule> {
         use ruff_python_parser::Mode;
         let interactive = mode == "single";
@@ -2300,6 +2320,14 @@ impl Context {
         } else {
             imre_ast::indentation::Source::original(source)
         };
+        if limit_complexity
+            && imre_ast::source_complexity::check_runtime_compile(&input.text).is_err()
+        {
+            return Err(Error::new(
+                "RecursionError",
+                "maximum recursion depth exceeded during compilation",
+            ));
+        }
         let parsed = ruff_python_parser::parse_unchecked(&input.text, parser_mode.into());
         // In single mode, a second statement is an error before its suite is read.
         let first_statement_end = match (interactive, parsed.syntax()) {
@@ -2560,13 +2588,22 @@ impl Context {
         }
     }
 
-    fn box_source_code(&mut self, module: ParsedModule, filename: Id, source: Id) -> Id {
+    fn box_source_code(
+        &mut self,
+        module: ParsedModule,
+        filename: Id,
+        source: Id,
+        mode: value::ParsedMode,
+    ) -> Id {
         let name = self.heap.code_name("<module>");
+        let constants = module.constants;
+        let body = match mode {
+            value::ParsedMode::Exec => Body::ParsedExec { constants, source },
+            value::ParsedMode::Eval => Body::ParsedEval { constants, source },
+            value::ParsedMode::Single => Body::ParsedSingle { constants, source },
+        };
         self.realize_code(
-            Body::Parsed {
-                constants: module.constants,
-                source,
-            },
+            body,
             value::CodeDefinition {
                 module_definition: true,
                 // The supported module compile modes admit only future flags.
@@ -3140,7 +3177,12 @@ impl Context {
                     "cannot use a closure with this code object",
                 ));
             }
-            Value::Code(code) if matches!(code.body, Body::Parsed { .. }) => {
+            Value::Code(code)
+                if matches!(
+                    code.body,
+                    Body::ParsedExec { .. } | Body::ParsedEval { .. } | Body::ParsedSingle { .. }
+                ) =>
+            {
                 return self.missing_compiled_body(source);
             }
             Value::Code(_) => source,
@@ -3170,6 +3212,7 @@ impl Context {
                         mode,
                         mode == "eval",
                         inherited,
+                        false,
                     )?)
                 } else {
                     None

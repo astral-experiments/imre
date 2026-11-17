@@ -146,12 +146,20 @@ pub(crate) struct CompiledExec {
     pub(crate) alternatives: Vec<CompiledExecAlternative>,
 }
 
+/// Python's compile mode determines which runtime identity guard may link a body.
+#[derive(Clone, Copy)]
+pub(crate) enum CompiledSourceMode {
+    Exec,
+    Eval,
+    Single,
+}
+
 #[derive(Clone)]
 pub(crate) struct CompiledExecAlternative {
     pub(crate) entry: String,
     pub(crate) flags: u32,
     pub(crate) source: String,
-    pub(crate) expression: bool,
+    pub(crate) mode: CompiledSourceMode,
     pub(crate) file: Option<String>,
 }
 

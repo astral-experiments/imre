@@ -3769,7 +3769,9 @@ impl Context {
                     result
                 }))
             }
-            value::Body::Parsed { .. } => self.missing_compiled_body(code),
+            value::Body::ParsedExec { .. }
+            | value::Body::ParsedEval { .. }
+            | value::Body::ParsedSingle { .. } => self.missing_compiled_body(code),
         }
     }
 

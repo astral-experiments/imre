@@ -11,6 +11,7 @@ use super::Imports;
 use super::emit::{ModuleOrigin, PreparedBody};
 use crate::analysis::Session;
 use crate::frontend::module_source::ParsedModule;
+use crate::llvm::registered::sites::CompiledSourceMode;
 
 /// The existing IR call range identifies the operation. Python reports its source
 /// argument's position when a selected child cannot be compiled.
@@ -31,6 +32,7 @@ pub(super) struct PreparedLiteral {
     pub(super) body: PreparedBody<'static>,
     /// Original operand bytes when source decoding or normalization changed the checked text.
     pub(super) original_text: Option<Box<str>>,
+    pub(super) mode: CompiledSourceMode,
     pub(super) file: Option<PathBuf>,
 }
 
@@ -110,6 +112,7 @@ pub(crate) struct ParsedLiteral {
     original_text: Option<Box<str>>,
     pub(crate) parsed: ParsedModuleRef,
     pub(crate) flags: u32,
+    mode: CompiledSourceMode,
     imports: Vec<String>,
     candidates: Vec<LiteralCandidate>,
 }
@@ -121,6 +124,7 @@ impl ParsedLiteral {
         original: &str,
         parsed: ParsedModuleRef,
         inherited_flags: u32,
+        mode: CompiledSourceMode,
     ) -> Self {
         let body = &parsed.syntax().body;
         let flags = inherited_flags | imre_ast::future_flags(body);
@@ -134,6 +138,7 @@ impl ParsedLiteral {
             text: text.into_owned(),
             parsed,
             flags,
+            mode,
             candidates: imports.literal_calls,
             imports: imports
                 .names
@@ -167,6 +172,7 @@ impl ParsedLiteral {
         Ok(PreparedLiteral {
             body,
             original_text: self.original_text,
+            mode: self.mode,
             file: None,
         })
     }

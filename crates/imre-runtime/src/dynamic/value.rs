@@ -104,11 +104,27 @@ pub(super) enum Body {
     /// The immutable operand tuple is owned by this interpreter's code object.
     Native(Code, Id),
     Suspended(ResumeCode),
-    /// Constants retained by a parsed code object with no executable entry.
-    Parsed {
+    /// Constants and immutable source retained in the code object's compilation mode.
+    ParsedExec {
         constants: Id,
         source: Id,
     },
+    ParsedEval {
+        constants: Id,
+        source: Id,
+    },
+    ParsedSingle {
+        constants: Id,
+        source: Id,
+    },
+}
+
+/// The compilation mode that must agree with a prelinked executable body.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ParsedMode {
+    Exec,
+    Eval,
+    Single,
 }
 
 #[derive(Clone, Copy)]
@@ -2642,7 +2658,9 @@ impl Value {
                 visit.extend(code.nested.iter().map(|&(_, id)| id));
                 match code.body {
                     Body::Native(_, operands) if operands != NONE => visit.push(operands),
-                    Body::Parsed { constants, source } => {
+                    Body::ParsedExec { constants, source }
+                    | Body::ParsedEval { constants, source }
+                    | Body::ParsedSingle { constants, source } => {
                         visit.push(constants);
                         visit.push(source);
                     }
@@ -8002,6 +8020,126 @@ mod tests {
     use super::*;
 
     #[test]
+    fn parsed_code_links_only_its_compile_mode_and_immutable_buffer_snapshot() {
+        unsafe extern "C" fn entry(_ctx: *mut Context, _scope: Id) -> Id {
+            NONE
+        }
+
+        let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let source = ctx.alloc(Value::ByteArray(b"7\n".to_vec()));
+        let filename = ctx.text("snapshot.py");
+        let code = ctx
+            .compile_source_with_flags(source, filename, "exec", 0)
+            .unwrap();
+        let Value::ByteArray(bytes) = ctx.heap.get_mut(source) else {
+            unreachable!()
+        };
+        bytes[0] = b'8';
+        let eval = ctx.builtin("eval");
+        let exec = ctx.builtin("exec");
+        // SAFETY: the context, function pointer, and static C string are valid throughout the call.
+        unsafe {
+            assert_eq!(
+                super::super::ffi::imre_dyn_eval_operand(
+                    &mut ctx,
+                    eval,
+                    code,
+                    entry,
+                    0,
+                    c"7\n".as_ptr()
+                ),
+                code
+            );
+        }
+        assert!(
+            matches!(ctx.heap.get(code), Value::Code(object) if matches!(object.body, Body::ParsedExec { .. }))
+        );
+        // SAFETY: the context, function pointer, and static C string are valid throughout the call.
+        unsafe {
+            assert_eq!(
+                super::super::ffi::imre_dyn_exec_operand(
+                    &mut ctx,
+                    exec,
+                    code,
+                    entry,
+                    0,
+                    c"7\n".as_ptr()
+                ),
+                code
+            );
+        }
+        assert!(
+            matches!(ctx.heap.get(code), Value::Code(object) if matches!(object.body, Body::Native(_, _)))
+        );
+
+        let source = ctx.text("x=1");
+        let single = ctx
+            .compile_source_with_flags(source, filename, "single", 0)
+            .unwrap();
+        // SAFETY: the live context and static source have the declared FFI lifetimes.
+        unsafe {
+            super::super::ffi::imre_dyn_exec_operand(
+                &mut ctx,
+                exec,
+                single,
+                entry,
+                0,
+                c"x=1".as_ptr(),
+            );
+        }
+        assert!(
+            matches!(ctx.heap.get(single), Value::Code(object) if matches!(object.body, Body::ParsedSingle { .. }))
+        );
+        // SAFETY: the live context and static source have the declared FFI lifetimes.
+        unsafe {
+            super::super::ffi::imre_dyn_single_operand(
+                &mut ctx,
+                exec,
+                single,
+                entry,
+                0,
+                c"x=1".as_ptr(),
+            );
+        }
+        assert!(
+            matches!(ctx.heap.get(single), Value::Code(object) if matches!(object.body, Body::Native(_, _)))
+        );
+    }
+
+    #[test]
+    fn builtin_compile_guarantees_the_shared_complexity_refusal() {
+        let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let filename = ctx.text("depth.py");
+        let deep = ctx.text(format!("value = 1{}", "+1".repeat(256)));
+        let error = ctx
+            .compile_source_with_flags(deep, filename, "exec", 0)
+            .unwrap_err();
+        assert_eq!(error.kind, "RecursionError");
+        assert_eq!(
+            error.message,
+            "maximum recursion depth exceeded during compilation"
+        );
+        let shallow = ctx.text("value = 1+1");
+        let code = ctx
+            .compile_source_with_flags(shallow, filename, "exec", 0)
+            .unwrap();
+        assert!(
+            matches!(ctx.heap.get(code), Value::Code(object) if matches!(object.body, Body::ParsedExec { .. }))
+        );
+        let mut suites = (0..96)
+            .map(|depth| format!("{}if True:\n", " ".repeat(depth)))
+            .collect::<String>();
+        suites.push_str(&format!("{}result = 7\n", " ".repeat(96)));
+        let suites = ctx.text(suites);
+        let code = ctx
+            .compile_source_with_flags(suites, filename, "exec", 0)
+            .unwrap();
+        assert!(
+            matches!(ctx.heap.get(code), Value::Code(object) if matches!(object.body, Body::ParsedExec { .. }))
+        );
+    }
+
+    #[test]
     fn pending_syntax_error_traces_the_same_members_as_its_raised_instance() {
         fn assert_send<T: Send>() {}
         assert_send::<ExecutionState>();
@@ -8160,7 +8298,7 @@ mod tests {
             let name = ctx.text(name);
             let file = ctx.text("parked.py");
             let code = ctx.prelinked_code(
-                Body::Parsed {
+                Body::ParsedExec {
                     constants: NONE,
                     source: NONE,
                 },

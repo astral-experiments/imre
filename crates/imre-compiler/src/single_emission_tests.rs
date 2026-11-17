@@ -408,6 +408,323 @@ fn imported_checked_function_retains_its_literal_call_site() {
 }
 
 #[test]
+fn compiled_bytearray_source_links_only_a_bounded_reaching_value() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("entry.py");
+    let rules = project.path().join("rules.py");
+    std::fs::write(&entry, "import rules\nrules.invoke()\n").unwrap();
+    let source = concat!(
+        "def invoke():\n",
+        "    padding = 113 * 8 - len(b'#\\nVALUE = 7\\n')\n",
+        "    source = bytearray(b'#' + b'x' * padding + b'\\nVALUE = 7\\n')\n",
+        "    exec(compile(source, 'settings.py', 'exec'), {})\n",
+    );
+    std::fs::write(&rules, source).unwrap();
+    let compilation = compile_file(&entry, None, &CompileOptions::default()).unwrap();
+    assert!(
+        compilation
+            .llvm_ir
+            .contains("call i64 @imre_dyn_exec_operand(")
+    );
+
+    std::fs::write(
+        &rules,
+        source.replace("113 * 8 - len(b'#\\nVALUE = 7\\n')", "int(input())"),
+    )
+    .unwrap();
+    let diagnostic = compile_file(&entry, None, &CompileOptions::default())
+        .err()
+        .unwrap();
+    assert!(
+        diagnostic.contains("without a linked body for its source"),
+        "{diagnostic}"
+    );
+}
+
+#[test]
+fn finite_exec_syntax_errors_do_not_require_an_executable_body() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("entry.py");
+    let rules = project.path().join("rules.py");
+    std::fs::write(&entry, "import rules\nrules.invoke()\n").unwrap();
+    let source = concat!(
+        "def invoke():\n",
+        "    for source in ('f(a=1, a=2)', 'f(**{}, a=1, a=2)'):\n",
+        "        try:\n",
+        "            exec('mark()\\n' + source, {})\n",
+        "        except SyntaxError:\n",
+        "            pass\n",
+    );
+    std::fs::write(&rules, source).unwrap();
+    compile_file(&entry, None, &CompileOptions::default()).unwrap();
+
+    std::fs::write(&rules, source.replace("f(a=1, a=2)", "f(a=1)")).unwrap();
+    let diagnostic = compile_file(&entry, None, &CompileOptions::default())
+        .err()
+        .unwrap();
+    assert!(
+        diagnostic.contains("without a linked body for its source"),
+        "{diagnostic}"
+    );
+}
+
+#[test]
+fn finite_loop_exec_links_every_literal_alternative() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("entry.py");
+    let rules = project.path().join("rules.py");
+    std::fs::write(&entry, "import rules\nrules.invoke()\n").unwrap();
+    let source = concat!(
+        "def invoke():\n",
+        "    for source, expected in (('answer = 1', 1), ('answer = 2', 2)):\n",
+        "        scope = {'answer': 0}\n",
+        "        exec(source, scope)\n",
+        "        assert scope['answer'] == expected\n",
+    );
+    std::fs::write(&rules, source).unwrap();
+    compile_file(&entry, None, &CompileOptions::default()).unwrap();
+
+    std::fs::write(&rules, source.replace("'answer = 2'", "input()")).unwrap();
+    let diagnostic = compile_file(&entry, None, &CompileOptions::default())
+        .err()
+        .unwrap();
+    assert!(
+        diagnostic.contains("without a linked body for its source"),
+        "{diagnostic}"
+    );
+}
+
+#[test]
+fn finite_exec_concatenation_links_each_loop_alternative() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("entry.py");
+    let rules = project.path().join("rules.py");
+    std::fs::write(&entry, "import rules\nrules.invoke()\n").unwrap();
+    let source = concat!(
+        "def invoke():\n",
+        "    for future in ('', 'from __future__ import annotations\\n'):\n",
+        "        scope = {'result': 0}\n",
+        "        exec(future + 'result = 7\\n', scope)\n",
+        "    for suffix in ('1\\n', '2\\n'):\n",
+        "        exec('result = ' + suffix, scope)\n",
+    );
+    std::fs::write(&rules, source).unwrap();
+    compile_file(&entry, None, &CompileOptions::default()).unwrap();
+
+    std::fs::write(&rules, source.replace("'2\\n'", "input()")).unwrap();
+    assert!(compile_file(&entry, None, &CompileOptions::default()).is_err());
+}
+
+#[test]
+fn finite_exec_string_patterns_retain_exact_bounded_choices() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("entry.py");
+    let rules = project.path().join("rules.py");
+    std::fs::write(&entry, "import rules\nrules.invoke()\n").unwrap();
+    let source = concat!(
+        "def invoke():\n",
+        "    scope = {'answer': 0}\n",
+        "    for target, expected in (('1', 1), ('2', 2)):\n",
+        "        exec('answer = ' + target + '\\n', scope)\n",
+        "    for target, expected in [('1', 1), ('2', 2)]:\n",
+        "        exec(f'answer = {target}', scope)\n",
+    );
+    std::fs::write(&rules, source).unwrap();
+    let program = compile_file(&entry, None, &CompileOptions::default()).unwrap();
+    assert_eq!(
+        program
+            .llvm_ir
+            .matches("call i64 @imre_dyn_exec_operand(")
+            .count(),
+        4
+    );
+    for refused in [
+        source.replace("('2', 2)", "(input(), 2)"),
+        source.replace("{target}", "{target!r}"),
+        source.replace("{target}", "{target}{target}"),
+    ] {
+        std::fs::write(&rules, refused).unwrap();
+        assert!(compile_file(&entry, None, &CompileOptions::default()).is_err());
+    }
+}
+
+#[test]
+fn annotation_lambda_body_owns_its_named_expression_scope() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("entry.py");
+    let rules = project.path().join("rules.py");
+    std::fs::write(&entry, "import rules\nrules.invoke()\n").unwrap();
+    let source = "def invoke():\n    exec('def f(arg: (lambda: (saved := 4))): pass', {})\n";
+    std::fs::write(&rules, source).unwrap();
+    compile_file(&entry, None, &CompileOptions::default()).unwrap();
+    for refused in [
+        source.replace("(lambda: (saved := 4))", "(saved := 4)"),
+        source.replace("(lambda: (saved := 4))", "(lambda arg=(saved := 4): arg)"),
+    ] {
+        std::fs::write(&rules, refused).unwrap();
+        let error = compile_file(&entry, None, &CompileOptions::default())
+            .err()
+            .unwrap();
+        assert!(
+            error.contains("named expression cannot be used within"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn compiled_exec_skips_only_a_guaranteed_complexity_refusal() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("entry.py");
+    let rules = project.path().join("rules.py");
+    std::fs::write(&entry, "import rules\nrules.invoke()\n").unwrap();
+    let source = concat!(
+        "def invoke():\n",
+        "    try:\n",
+        "        exec(compile('x=1' + '+1' * 256, 'deep.py', 'exec'), {})\n",
+        "    except RecursionError:\n",
+        "        pass\n",
+        "    exec(compile('x=1+1', 'shallow.py', 'exec'), {})\n",
+    );
+    std::fs::write(&rules, source).unwrap();
+    let program = compile_file(&entry, None, &CompileOptions::default()).unwrap();
+    assert_eq!(
+        program
+            .llvm_ir
+            .matches("call i64 @imre_dyn_exec_operand(")
+            .count(),
+        1
+    );
+    std::fs::write(&rules, source.replace("'+1' * 256", "input()")).unwrap();
+    assert!(compile_file(&entry, None, &CompileOptions::default()).is_err());
+}
+
+#[test]
+fn finite_compiled_exec_decodes_only_bounded_loop_choices() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("entry.py");
+    let rules = project.path().join("rules.py");
+    std::fs::write(&entry, "import rules\nrules.invoke()\n").unwrap();
+    let source = concat!(
+        "def invoke():\n",
+        "    for data in (b'\\xef\\xbb\\xbfVALUE = 61', bytearray(b'#!python\\r# coding: latin-1\\rVALUE = \"\\xe9\"')):\n",
+        "        exec(compile(data, 'settings.py', 'exec'), {})\n",
+    );
+    std::fs::write(&rules, source).unwrap();
+    let program = compile_file(&entry, None, &CompileOptions::default()).unwrap();
+    assert_eq!(
+        program
+            .llvm_ir
+            .matches("call i64 @imre_dyn_exec_operand(")
+            .count(),
+        2
+    );
+    for refused in [
+        source.replace("b'\\xef\\xbb\\xbfVALUE = 61'", "input()"),
+        source.replace("'settings.py'", "input()"),
+        source.replace("'exec'", "'eval'"),
+    ] {
+        std::fs::write(&rules, refused).unwrap();
+        assert!(compile_file(&entry, None, &CompileOptions::default()).is_err());
+    }
+}
+
+#[test]
+fn compiled_single_assignment_uses_its_own_mode_guard() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("entry.py");
+    let rules = project.path().join("rules.py");
+    std::fs::write(&entry, "import rules\nrules.invoke()\n").unwrap();
+    let source = "def invoke():\n    exec(compile('value: int = 7', '<single>', 'single'), {})\n";
+    std::fs::write(&rules, source).unwrap();
+    let program = compile_file(&entry, None, &CompileOptions::default()).unwrap();
+    assert!(
+        program
+            .llvm_ir
+            .contains("call i64 @imre_dyn_single_operand(")
+    );
+    for refused in [
+        source.replace("value: int = 7", "7"),
+        source.replace("value: int = 7", "value: int = 7\\nother: int = 8"),
+        source.replace("'value: int = 7'", "input()"),
+    ] {
+        std::fs::write(&rules, refused).unwrap();
+        assert!(compile_file(&entry, None, &CompileOptions::default()).is_err());
+    }
+}
+
+#[test]
+fn finite_eval_repeat_sources_follow_the_loop_count() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("entry.py");
+    let rules = project.path().join("rules.py");
+    std::fs::write(&entry, "import rules\nrules.invoke()\n").unwrap();
+    let source = concat!(
+        "def invoke():\n",
+        "    for count, expected in ((1, 2), (2, 3)):\n",
+        "        assert eval('1+' + '1+' * count + '0') == expected\n",
+    );
+    std::fs::write(&rules, source).unwrap();
+    compile_file(&entry, None, &CompileOptions::default()).unwrap();
+
+    std::fs::write(&rules, source.replace("(2, 3)", "(int(input()), 3)")).unwrap();
+    let diagnostic = compile_file(&entry, None, &CompileOptions::default())
+        .err()
+        .unwrap();
+    assert!(
+        diagnostic.contains("unsupported builtin arguments"),
+        "{diagnostic}"
+    );
+}
+
+#[test]
+fn compiled_eval_links_a_fixed_code_source() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("entry.py");
+    let rules = project.path().join("rules.py");
+    std::fs::write(&entry, "import rules\nrules.invoke()\n").unwrap();
+    let source = concat!(
+        "def invoke():\n",
+        "    code = compile('a * 2', '<expr>', 'eval')\n",
+        "    assert eval(code, {'a': 9}) == 18\n",
+        "    assert eval(compile('4 + 2', '<expr>', 'eval')) == 6\n",
+    );
+    std::fs::write(&rules, source).unwrap();
+    compile_file(&entry, None, &CompileOptions::default()).unwrap();
+
+    std::fs::write(&rules, source.replace("'a * 2'", "input()")).unwrap();
+    assert!(compile_file(&entry, None, &CompileOptions::default()).is_err());
+
+    std::fs::write(
+        &rules,
+        "def invoke():\n    compile(input(), '<expr>', 'eval')\n",
+    )
+    .unwrap();
+    assert!(compile_file(&entry, None, &CompileOptions::default()).is_err());
+
+    std::fs::write(
+        &rules,
+        "def invoke():\n    alias = compile\n    eval(alias('1 + 1', '<expr>', 'eval'))\n",
+    )
+    .unwrap();
+    assert!(compile_file(&entry, None, &CompileOptions::default()).is_err());
+
+    std::fs::write(
+        &rules,
+        "def invoke():\n    eval(code)\ncode = compile('1 + 1', '<expr>', 'eval')\n",
+    )
+    .unwrap();
+    assert!(compile_file(&entry, None, &CompileOptions::default()).is_err());
+
+    std::fs::write(
+        &rules,
+        "def invoke():\n    code = compile('1 + 1', '<expr>', 'eval')\n    eval(code, {}, {}, {})\n",
+    )
+    .unwrap();
+    assert!(compile_file(&entry, None, &CompileOptions::default()).is_err());
+}
+
+#[test]
 fn imported_function_captures_its_defining_builtins() {
     let project = tempfile::tempdir().unwrap();
     let entry = project.path().join("main.py");
