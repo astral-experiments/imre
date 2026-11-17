@@ -112,8 +112,7 @@ fn complex_glob_matches(
     Ok(glob_regex(pattern, sensitive, recursive, sep)?.is_match(path))
 }
 
-/// Match recursive components directly. Character classes that can consume a separator
-/// and Unicode case folding retain the regex implementation's full semantics.
+/// Match recursive components directly, using flat states when a character class can cross separators.
 fn match_components(
     path: &str,
     pattern: &str,
@@ -121,15 +120,12 @@ fn match_components(
     recursive: bool,
     sep: char,
 ) -> Option<bool> {
-    if !sensitive && !(path.is_ascii() && pattern.is_ascii()) {
-        return None;
-    }
     if pattern.contains('[') && pattern.split(sep).any(|part| {
         matches!(Pattern::component(part), Pattern::Wildcard(tokens) if tokens.iter().any(|token| {
             matches!(token, Token::Class { .. }) && token.matches(sep)
         }))
     }) {
-        return None;
+        return match_crossing(path, pattern, sensitive, recursive, sep);
     }
 
     let (mut at, mut token) = (0, 0);
@@ -190,19 +186,82 @@ fn match_component(path: &str, pattern: &str, sensitive: bool) -> bool {
         return parsed.matches(path);
     }
     match parsed {
-        Pattern::Literal(text) => path.eq_ignore_ascii_case(&text),
+        Pattern::Literal(text) => folded_equal(path.chars(), text.chars()),
         Pattern::Affixes { text, stars } => {
-            let prefix = &text[..stars.start];
-            let suffix = &text[stars.end..];
-            path.len() >= prefix.len() + suffix.len()
-                && path[..prefix.len()].eq_ignore_ascii_case(prefix)
-                && path[path.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
+            let mut chars = path.chars();
+            text[..stars.start]
+                .chars()
+                .all(|expected| chars.next().is_some_and(|actual| folded(actual, expected)))
+                && text[stars.end..].chars().rev().all(|expected| {
+                    chars
+                        .next_back()
+                        .is_some_and(|actual| folded(actual, expected))
+                })
         }
-        Pattern::Wildcard(tokens) => match_ascii_tokens(path.as_bytes(), &tokens),
+        Pattern::Wildcard(tokens) => match_folded_tokens(path, &tokens),
     }
 }
 
-fn match_ascii_tokens(path: &[u8], tokens: &[Token]) -> bool {
+fn folded(actual: char, expected: char) -> bool {
+    actual == expected
+        || super::super::warnings::literal_fold(actual)
+            == super::super::warnings::literal_fold(expected)
+}
+
+fn folded_equal(
+    mut actual: impl Iterator<Item = char>,
+    mut expected: impl Iterator<Item = char>,
+) -> bool {
+    loop {
+        match (actual.next(), expected.next()) {
+            (Some(actual), Some(expected)) if folded(actual, expected) => {}
+            (None, None) => return true,
+            _ => return false,
+        }
+    }
+}
+
+fn folded_class(character: char, negated: bool, ranges: &[(char, char)]) -> bool {
+    let contains = |c| ranges.iter().any(|&(start, end)| start <= c && c <= end);
+    let matched = if contains(character) {
+        true
+    } else if ranges
+        .iter()
+        .all(|&(start, end)| start.is_ascii() && end.is_ascii())
+    {
+        let folding = super::super::warnings::literal_fold(character);
+        char::from_u32(folding)
+            .is_some_and(|c| c.is_ascii() && (contains(c) || contains(c.to_ascii_uppercase())))
+    } else {
+        let mut equivalents = ClassUnicode::new([ClassUnicodeRange::new(character, character)]);
+        if matches!(character, 'i' | 'I' | 'İ' | 'ı') {
+            for c in ['i', 'I', 'İ', 'ı'] {
+                equivalents.push(ClassUnicodeRange::new(c, c));
+            }
+        }
+        equivalents.case_fold_simple();
+        equivalents.ranges().iter().any(|equivalent| {
+            ranges
+                .iter()
+                .any(|&(start, end)| equivalent.start() <= end && start <= equivalent.end())
+        })
+    };
+    matched != negated
+}
+
+fn token_matches(token: &Token, character: char, sensitive: bool) -> bool {
+    if sensitive {
+        return token.matches(character);
+    }
+    match token {
+        Token::Literal(expected) => folded(character, *expected),
+        Token::Any => true,
+        Token::Star => false,
+        Token::Class { negated, ranges } => folded_class(character, *negated, ranges),
+    }
+}
+
+fn match_folded_tokens(path: &str, tokens: &[Token]) -> bool {
     let (mut at, mut token) = (0, 0);
     let mut star = None;
     while at < path.len() {
@@ -211,27 +270,15 @@ fn match_ascii_tokens(path: &[u8], tokens: &[Token]) -> bool {
             token += 1;
             continue;
         }
-        let character = char::from(path[at]);
-        let matches = tokens.get(token).is_some_and(|token| match token {
-            Token::Literal(expected) => expected.eq_ignore_ascii_case(&character),
-            Token::Any => true,
-            Token::Star => false,
-            Token::Class { negated, ranges } => {
-                let lower = character.to_ascii_lowercase();
-                let upper = character.to_ascii_uppercase();
-                ranges.iter().any(|&(start, end)| {
-                    (start <= lower && lower <= end) || (start <= upper && upper <= end)
-                }) != *negated
-            }
-        });
-        if matches {
+        let character = path[at..].chars().next().unwrap();
+        if tokens
+            .get(token)
+            .is_some_and(|t| token_matches(t, character, false))
+        {
             token += 1;
-            at += 1;
+            at += character.len_utf8();
         } else if let Some((previous, consumed)) = star {
-            let next = consumed + 1;
-            if next > path.len() {
-                return false;
-            }
+            let next = consumed + path[consumed..].chars().next().unwrap().len_utf8();
             star = Some((previous, next));
             token = previous + 1;
             at = next;
@@ -243,6 +290,122 @@ fn match_ascii_tokens(path: &[u8], tokens: &[Token]) -> bool {
         token += 1;
     }
     token == tokens.len()
+}
+
+/// A recursive wildcard followed by a separator has an empty branch and a branch
+/// that consumes at least one character before the separator. Keep those two states
+/// beside ordinary shell tokens so a class can match a path separator.
+enum GlobToken {
+    Shell(Token),
+    RecursiveStart,
+    RecursiveBody,
+    RecursiveTail,
+}
+
+fn append_component(tokens: &mut Vec<GlobToken>, part: &str) {
+    match Pattern::component(part) {
+        Pattern::Literal(text) => {
+            tokens.extend(text.chars().map(|c| GlobToken::Shell(Token::Literal(c))))
+        }
+        Pattern::Affixes { text, stars } => {
+            tokens.extend(
+                text[..stars.start]
+                    .chars()
+                    .map(|c| GlobToken::Shell(Token::Literal(c))),
+            );
+            if part == "*" {
+                tokens.push(GlobToken::Shell(Token::Any));
+            }
+            tokens.push(GlobToken::Shell(Token::Star));
+            tokens.extend(
+                text[stars.end..]
+                    .chars()
+                    .map(|c| GlobToken::Shell(Token::Literal(c))),
+            );
+        }
+        Pattern::Wildcard(shell) => tokens.extend(shell.into_iter().map(GlobToken::Shell)),
+    }
+}
+
+fn epsilon(mut active: u128, one: u128, two: u128) -> u128 {
+    loop {
+        let extended = active | ((active & one) << 1) | ((active & two) << 2);
+        if extended == active {
+            return active;
+        }
+        active = extended;
+    }
+}
+
+/// Match at most 127 flat states. Larger patterns retain the general regex path.
+fn match_crossing(
+    path: &str,
+    pattern: &str,
+    sensitive: bool,
+    recursive: bool,
+    sep: char,
+) -> Option<bool> {
+    let mut tokens = Vec::new();
+    let mut parts = pattern.split(sep).peekable();
+    while let Some(part) = parts.next() {
+        if recursive && part == "**" {
+            if parts.peek().is_some() {
+                tokens.extend([GlobToken::RecursiveStart, GlobToken::RecursiveBody]);
+            } else {
+                tokens.push(GlobToken::RecursiveTail);
+            }
+        } else {
+            append_component(&mut tokens, part);
+            if parts.peek().is_some() {
+                tokens.push(GlobToken::Shell(Token::Literal(sep)));
+            }
+        }
+        if tokens.len() > 127 {
+            return None;
+        }
+    }
+    let (mut one, mut two) = (0, 0);
+    for (index, token) in tokens.iter().enumerate() {
+        match token {
+            GlobToken::Shell(Token::Star) | GlobToken::RecursiveTail => one |= 1u128 << index,
+            GlobToken::RecursiveStart => two |= 1u128 << index,
+            _ => {}
+        }
+    }
+    let mut active = epsilon(1, one, two);
+    for character in path.chars() {
+        let mut next = 0;
+        let mut states = active;
+        while states != 0 {
+            let index = states.trailing_zeros() as usize;
+            states &= states - 1;
+            let Some(token) = tokens.get(index) else {
+                continue;
+            };
+            match token {
+                GlobToken::Shell(Token::Star) if character != sep => next |= 1u128 << index,
+                GlobToken::Shell(Token::Any) if character != sep => next |= 1u128 << (index + 1),
+                GlobToken::Shell(Token::Star | Token::Any) => {}
+                GlobToken::Shell(token) if token_matches(token, character, sensitive) => {
+                    next |= 1u128 << (index + 1)
+                }
+                GlobToken::Shell(_) => {}
+                GlobToken::RecursiveStart => next |= 1u128 << (index + 1),
+                GlobToken::RecursiveBody => {
+                    next |= 1u128 << index;
+                    if character == sep {
+                        next |= 1u128 << (index + 1);
+                    }
+                }
+                GlobToken::RecursiveTail => next |= 1u128 << index,
+            }
+        }
+        active = epsilon(next, one, two);
+        if active == 0 {
+            return Some(false);
+        }
+    }
+    Some(active & (1u128 << tokens.len()) != 0)
 }
 
 /// Question marks, literals, and character classes each consume one character.
@@ -499,6 +662,13 @@ mod tests {
             "abc.bin",
             "a/b/c.bin",
             "é/雪.txt",
+            "src/a/b",
+            "a/b",
+            "//a",
+            "/a",
+            "docs/RÉSUMÉ_2026.TXT",
+            "src/Kelvin.txt",
+            "src/İstanbul.txt",
         ];
         let patterns = [
             "**",
@@ -514,6 +684,15 @@ mod tests {
             "**/*.bin",
             "a*b*c.bin",
             "é/**/[雪].txt",
+            "**/a[!x]b",
+            "**/**/a[!x]b",
+            "**/a",
+            "docs/résumé*.txt",
+            "src/[A-Z]*.TXT",
+            "src/[K]*.TXT",
+            "src/[İ]*.TXT",
+            "a[.-0]b",
+            "*[!x]*b",
         ];
         for path in paths {
             for pattern in patterns {
