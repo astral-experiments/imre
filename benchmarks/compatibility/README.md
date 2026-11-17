@@ -13,7 +13,9 @@ python3 benchmarks/compatibility/scorecard.py --check
 
 The [argparse accepted-omission ledger](../cpython_stdlib/full/argparse/accepted-omissions-linux.tsv) uses the existing [per-original omission review TSV schema](../cpython_stdlib/full/re/pending-omissions-linux.tsv): ordinal, full ID and occurrence, pinned source identity and lines, decision, requirement, AOT commitment, retained public behavior, and witness keys. Its six accepted decisions cover bytecode creation, source removal, and execution of CPython `.pyc` programs. They retain all **1,893** raw originals and earn **zero** passes or pairs. The ledger is policy, not an execution receipt, and has no Imre revision.
 
-`scorecard.py --check` and `--validate` check the policy against the pinned inventory, source, historical gap, and canonical receipts. It can also be checked alone:
+The [base64 accepted-omission ledger](revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/omissions/base64/accepted-omissions-linux.tsv) uses the same schema and applies only to the five interpreter-module-launch originals in the staged Imre revision `8571ca2dbecabf8d7863c369dc776611fd57d8ad`. The validator joins its exact staged base64 receipts, which retain the 41-case denominator and native `not_run` outcomes; the historical canonical receipts are outside this policy. Stream API witnesses are staged stock/O0/O3 pass observations whose receipt flags are checked; strict credit awaits independent snapshot activation. No child CLI, real file path, process stdin, help, or invalid-flag witness is claimed.
+
+`scorecard.py --check` and `--validate` check the policies against the pinned inventory, source, historical gap, and canonical receipts. It can also be checked alone:
 
 ```sh
 python3 benchmarks/compatibility/check_omissions.py
