@@ -527,6 +527,11 @@ impl Checker<'_> {
             };
             return Ok(vec![ty]);
         }
+        if let Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name))) =
+            self.resolve(expression)
+        {
+            return Err(self.scoped_builtin_error(name, expression));
+        }
         Err(error(
             self.source,
             expression,
