@@ -24,12 +24,30 @@ fn sparse_publication_does_not_resurrect_returned_frames() {
     truncate(0);
     frame(2, "server.py", "new_leaf", 29);
 
-    let output = trace_file();
-    dump_traceback(output.as_raw_fd(), false);
-    assert_eq!(
-        trace(output),
-        "Stack (most recent call first):\n  File \"server.py\", line 29 in new_leaf\n  ...\n"
-    );
+    let expected =
+        "Stack (most recent call first):\n  File \"server.py\", line 29 in new_leaf\n  ...\n";
+    let mut actual = String::new();
+    for _ in 0..100 {
+        let output = trace_file();
+        dump_traceback(output.as_raw_fd(), false);
+        actual = trace(output);
+        if actual == expected {
+            break;
+        }
+        // Signal-safe reporters never wait on another reporter's slot gate.
+        // Retry only their documented incomplete snapshots; stale frames must fail.
+        assert!(
+            matches!(
+                actual.as_str(),
+                "Stack (most recent call first):\n  ...\n"
+                    | "Stack (most recent call first):\n  <no Python frame>\n"
+                    | "  <traceback unavailable>\n"
+            ),
+            "{actual}"
+        );
+        thread::yield_now();
+    }
+    assert_eq!(actual, expected);
     truncate(0);
 }
 
