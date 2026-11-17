@@ -1,0 +1,129 @@
+{
+  "suite": "test.test_glob",
+  "baseline_entry": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_glob.py",
+  "original_entry_sha256": "b4adbfa93158f2949957bc6b9c7f16aca58e3fa9b35c863a6caf36f4114a279a",
+  "control_entry_sha256": "548d02e0b6d0f8e1dbd1a426bdf249766eec1c2b553609baa10cd33323e81521",
+  "entry_change": "insert one import of glob_poison after the module docstring, if any; all other original bytes unchanged",
+  "poison_source": "status: int = True\n",
+  "poison_sha256": "14841721c7b84f57d26a6a38a53827c683daf10930b9f297cfc15335bd1257b5",
+  "full_fixture_tree_copied": true,
+  "runs": {
+    "bare": {
+      "argv": [
+        "/workspace/imre/target/release/imre",
+        "build",
+        "/workspace/scratch/stdlib-architecture/glob/Lib/glob_poison.py",
+        "--module-root",
+        "/workspace/scratch/stdlib-architecture/glob/Lib",
+        "--no-cache",
+        "--opt-level",
+        "0",
+        "--runtime",
+        "/workspace/imre/target/release/libimre_runtime.a",
+        "--clang",
+        "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+        "-o",
+        "/workspace/scratch/stdlib-architecture/glob/bare.exe"
+      ],
+      "cwd": "/workspace/scratch/stdlib-work/glob",
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/stdlib-architecture/glob/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+        "IMREFLAGS": "--opt-level 0",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+      },
+      "timeout_seconds": 120,
+      "exit_code": 1,
+      "executable_exists": false,
+      "executable_sha256": null,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "c99200d2314572b72c319a8b7b710250dce2bf0fc4baea8dc243b7ed3d2b3387",
+      "elapsed_seconds": 0.013,
+      "expected_diagnostic": true,
+      "control_passed": true
+    },
+    "minimal_import": {
+      "argv": [
+        "/workspace/imre/target/release/imre",
+        "build",
+        "/workspace/scratch/stdlib-architecture/glob/Lib/minimal_import.py",
+        "--module-root",
+        "/workspace/scratch/stdlib-architecture/glob/Lib",
+        "--no-cache",
+        "--opt-level",
+        "0",
+        "--runtime",
+        "/workspace/imre/target/release/libimre_runtime.a",
+        "--clang",
+        "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+        "-o",
+        "/workspace/scratch/stdlib-architecture/glob/minimal_import.exe"
+      ],
+      "cwd": "/workspace/scratch/stdlib-work/glob",
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/stdlib-architecture/glob/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+        "IMREFLAGS": "--opt-level 0",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+      },
+      "timeout_seconds": 120,
+      "exit_code": 1,
+      "executable_exists": false,
+      "executable_sha256": null,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e2d7f623957d5c2a51f356d1ea4e71e0f1a32309dc0ce2d25f4f1888620714af",
+      "elapsed_seconds": 0.012,
+      "expected_diagnostic": true,
+      "control_passed": true
+    },
+    "graph": {
+      "argv": [
+        "/workspace/imre/target/release/imre",
+        "build",
+        "/workspace/scratch/stdlib-architecture/glob/Lib/test/test_glob.py",
+        "--module-root",
+        "/workspace/scratch/stdlib-architecture/glob/Lib",
+        "--no-cache",
+        "--opt-level",
+        "0",
+        "--runtime",
+        "/workspace/imre/target/release/libimre_runtime.a",
+        "--clang",
+        "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+        "-o",
+        "/workspace/scratch/stdlib-architecture/glob/graph.exe"
+      ],
+      "cwd": "/workspace/scratch/stdlib-work/glob",
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/stdlib-architecture/glob/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+        "IMREFLAGS": "--opt-level 0",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+      },
+      "timeout_seconds": 120,
+      "exit_code": 0,
+      "executable_exists": true,
+      "executable_sha256": "4683f95fe65f2a27e9350b1e0f6b4293d3f505e4a18d31e25b0f1abf64f29924",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "3b80c10e2bd47bea169a01647d51ecf7e0d33505e8abb8b80890c2889bac6943",
+      "elapsed_seconds": 27.031,
+      "expected_diagnostic": false,
+      "control_passed": false
+    }
+  },
+  "other_fixture_files": {
+    "files": 1638,
+    "sha256": "da345aa775a4e4d0c72eb49519e248320825b32022e6a47569a33923bf4c26aa",
+    "algorithm": "SHA-256 of sorted relative path + NUL + file SHA-256 + newline; entry excluded"
+  },
+  "other_fixture_files_identical_to_baseline": true
+}

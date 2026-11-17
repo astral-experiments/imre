@@ -1,0 +1,2 @@
+[guard: execve/execveat denied; no libpython mapped]
+[guard: libpython dlopen denied]
