@@ -749,8 +749,10 @@ pub(crate) fn check_registered_project<'a>(
             if file_entry {
                 // Registration can select a different semantic file or check different parser text.
                 let module = &graph.modules[id];
-                if winner.semantic_path.unwrap_or(winner.path) != module.path
-                    || winner.source != module.original_source()
+                if !crate::modules::same_source_path(
+                    winner.semantic_path.unwrap_or(winner.path),
+                    &module.path,
+                ) || winner.source != module.original_source()
                     || !session.file_matches_parser_input(
                         file,
                         &imre_ast::indentation::prepare(&module.source).text,
@@ -800,7 +802,7 @@ pub(crate) fn check_registered_project<'a>(
                 || graph.session.clone(),
                 winners.filter(|(id, winner)| {
                     let physical = &graph.modules[*id];
-                    physical.path == winner.path
+                    crate::modules::same_source_path(&physical.path, winner.path)
                         && (file_entry || physical.original_source() == winner.source)
                 }),
             ));
@@ -1432,7 +1434,7 @@ impl Session {
                 let module = &graph.modules[graph.entry];
                 (entry == graph.entry
                     && start.checked_module == Some(entry)
-                    && start.path == module.path
+                    && crate::modules::same_source_path(start.path, &module.path)
                     && start.source == module.source
                     && start.source == module.original_source())
                 .then_some(closed)
@@ -1453,7 +1455,7 @@ impl Session {
                                 native: native.and_then(|(graph, report)| {
                                     let id = source.checked_module?;
                                     let module = &graph.modules[id];
-                                    (source.path == module.path
+                                    (crate::modules::same_source_path(source.path, &module.path)
                                         && source.source == module.original_source())
                                     .then_some((id, report))
                                 }),
@@ -1485,7 +1487,7 @@ impl Session {
                 && let Some((_, report)) = native.function_reports().find(|((module, range), _)| {
                     let source = &graph.modules[*module];
                     function == *range
-                        && winner.path == source.path
+                        && crate::modules::same_source_path(winner.path, &source.path)
                         && winner.source == source.original_source()
                 })
             {
@@ -3017,7 +3019,8 @@ impl Session {
     ) -> Option<Result<(), String>> {
         let physical = |path: &Path, source: &str| {
             winners.clone().find_map(|(id, winner)| {
-                (winner.path == path && winner.source == source).then_some(id)
+                (crate::modules::same_source_path(winner.path, path) && winner.source == source)
+                    .then_some(id)
             })
         };
         let module = &graph.modules[owner.module];

@@ -268,7 +268,10 @@ impl<M> Diagnostic<M> {
     ) -> Option<&Self> {
         self.reports().find(|report| {
             report.kind == Kind::ExactType
-                && report.path.as_deref() == Some(path)
+                && report
+                    .path
+                    .as_deref()
+                    .is_some_and(|reported| crate::modules::same_source_path(reported, path))
                 && report.position.as_ref().is_some_and(|position| {
                     position.range == operand
                         && position.expected_from.is_some_and(|declaration| {
@@ -288,7 +291,10 @@ impl<M> Diagnostic<M> {
         self.reports().find_map(|report| {
             let position = report.position.as_ref()?;
             (report.kind == Kind::ReturnType
-                && report.path.as_deref() == Some(path)
+                && report
+                    .path
+                    .as_deref()
+                    .is_some_and(|reported| crate::modules::same_source_path(reported, path))
                 && position.expected_from == Some(TypeDeclaration { module, annotation }))
             .then_some((position.range, report))
         })
