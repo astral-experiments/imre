@@ -169,6 +169,55 @@ impl Checker<'_> {
                         .scalar_type(self.checker.module, value)
                         == Some(self.element)
             }
+
+            /// A native scalar or intrinsic result cannot dispatch an overloaded
+            /// Python operator. ty assignability alone does not establish that fact.
+            fn exact_scalar(&self, value: &ast::Expr) -> Option<Type> {
+                let scalar = |ty| {
+                    matches!(
+                        ty,
+                        Type::Bool | Type::Int | Type::Float | Type::Str | Type::Bytes
+                    )
+                    .then_some(ty)
+                };
+                match value {
+                    ast::Expr::Name(name) if self.in_insertion_loop && name.id == self.item => {
+                        scalar(self.element)
+                    }
+                    ast::Expr::Name(name) => self
+                        .checker
+                        .names
+                        .get(name.id.as_str())
+                        .and_then(|&slot| scalar(self.checker.locals[slot])),
+                    ast::Expr::NumberLiteral(_)
+                    | ast::Expr::BooleanLiteral(_)
+                    | ast::Expr::StringLiteral(_)
+                    | ast::Expr::BytesLiteral(_) => self
+                        .checker
+                        .graph
+                        .session
+                        .scalar_type(self.checker.module, value)
+                        .and_then(scalar),
+                    ast::Expr::Call(call)
+                        if self.checker.unshadowed_builtin(&call.func, "len")
+                            && matches!(call.arguments.args.as_slice(), [arg] if self.owner(arg))
+                            && call.arguments.keywords.is_empty() =>
+                    {
+                        Some(Type::Int)
+                    }
+                    ast::Expr::BinOp(binary)
+                        if self.exact_scalar(&binary.left).is_some()
+                            && self.exact_scalar(&binary.right).is_some() =>
+                    {
+                        self.checker
+                            .graph
+                            .session
+                            .scalar_type(self.checker.module, value)
+                            .and_then(scalar)
+                    }
+                    _ => None,
+                }
+            }
         }
 
         impl<'ast> Visitor<'ast> for Uses<'_, '_, 'ast> {
@@ -258,6 +307,10 @@ impl Checker<'_> {
                             && self.fits(&compare.operands[0]) =>
                     {
                         self.visit_expr(&compare.operands[0]);
+                    }
+                    ast::Expr::BinOp(binary) if self.exact_scalar(expr).is_some() => {
+                        self.visit_expr(&binary.left);
+                        self.visit_expr(&binary.right);
                     }
                     ast::Expr::Name(name) => self.safe &= name.id != self.name,
                     ast::Expr::NumberLiteral(_)

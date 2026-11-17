@@ -2265,6 +2265,7 @@ print("result", call(b=2, a=1))
         for (tail, native) in [
             ("    values.add(1)\n    return len(values)", false),
             ("    values.add('z')\n    return len(values)", true),
+            ("    return len(values) + 1", true),
             (
                 "    else:\n        return len(values)\n    values.add(1)",
                 false,
@@ -2323,7 +2324,7 @@ print("result", call(b=2, a=1))
     }
 
     #[test]
-    fn a_deferred_iterator_can_mutate_a_captured_fresh_set_without_retry() {
+    fn a_deferred_iterator_capture_cannot_admit_native_set_storage() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("main.py");
         std::fs::write(
@@ -2332,7 +2333,7 @@ print("result", call(b=2, a=1))
         )
         .unwrap();
         let mut passes = 0;
-        super::object_fallback(
+        let result = super::object_fallback(
             None,
             super::ProgramEntry::File(&path, None),
             &CompileOptions::default(),
@@ -2344,8 +2345,10 @@ print("result", call(b=2, a=1))
                 assert!(graph.layout_hint.get() != super::modules::LayoutHint::Applied);
                 Ok(checked)
             },
-        )
-        .unwrap();
+        );
+        // Capturing a later local in a nested generator is unsupported independently
+        // of set storage. A set layout proof must not accidentally admit that program.
+        assert!(result.is_err());
         assert_eq!(passes, 1);
     }
 
