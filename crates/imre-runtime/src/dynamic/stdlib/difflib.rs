@@ -788,7 +788,7 @@ fn get_blocks(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     let Some(index) = ascii_positions(ctx, b2j, bjunk, &active, 0, b_len)? else {
         return Ok(None);
     };
-    blocks::build(ctx, receiver, a, b, &index, constructor).map(Some)
+    blocks::build(ctx, receiver, a, b, &index, constructor)
 }
 
 fn find_longest(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {

@@ -60,6 +60,7 @@ fn search(left: &[u8], right: &[u8], index: &AsciiPositions) -> Result<Vec<[usiz
 }
 
 /// Build the source-visible list and its fresh Match values after complete callback preflight.
+/// Return no admission if a signal arrived before publishing the list to the receiver.
 pub(super) fn build(
     ctx: &mut Context,
     receiver: Id,
@@ -67,7 +68,7 @@ pub(super) fn build(
     b: Id,
     index: &AsciiPositions,
     match_class: Id,
-) -> Result<Id> {
+) -> Result<Option<Id>> {
     let blocks = {
         let (Value::Str(a), Value::Str(b)) = (ctx.heap.get(a), ctx.heap.get(b)) else {
             unreachable!()
@@ -103,9 +104,14 @@ pub(super) fn build(
     }
     let list = ctx.alloc(Value::List(values));
     ctx.heap.keep(list);
+    #[cfg(unix)]
+    if crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Acquire) {
+        ctx.heap.release_temporaries_since(mark);
+        return Ok(None);
+    }
     ctx.default_set_attr(receiver, "matching_blocks", list)?;
     ctx.heap.release_temporaries_since(mark);
-    Ok(list)
+    Ok(Some(list))
 }
 
 #[cfg(test)]
