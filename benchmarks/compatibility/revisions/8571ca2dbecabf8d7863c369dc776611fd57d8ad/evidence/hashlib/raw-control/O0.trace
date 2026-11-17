@@ -1,0 +1,724 @@
+32171 execve("/workspace/scratch/hashlib-strict/raw-control-probe", ["/workspace/scratch/hashlib-strict/raw-control-probe", "withdraw", "/workspace/scratch/hashlib-strict/fixtures/Lib/test", "/workspace/scratch/hashlib-strict/fixtures/Lib/test.raw-control-stash", "/workspace/scratch/hashlib-strict/fixtures/Lib/test/test_hashlib.py", "/workspace/scratch/hashlib-strict/O0.exe"], 0x7ffc21b46a08 /* 79 vars */) = 0
+32171 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+32171 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+32171 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib/test/test_hashlib.py", {st_mode=S_IFREG|0600, st_size=53079, ...}, 0) = 0
+32171 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib/test.raw-control-stash", 0x7ffc354d95f0, 0) = -1 ENOENT (No such file or directory)
+32171 rename("/workspace/scratch/hashlib-strict/fixtures/Lib/test", "/workspace/scratch/hashlib-strict/fixtures/Lib/test.raw-control-stash") = 0
+32171 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib/test", 0x7ffc354d95f0, 0) = -1 ENOENT (No such file or directory)
+32171 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib/test/test_hashlib.py", 0x7ffc354d95f0, 0) = -1 ENOENT (No such file or directory)
+32171 wait4(32172,  <unfinished ...>
+32172 execve("/workspace/scratch/hashlib-strict/O0.exe", ["/workspace/scratch/hashlib-strict/O0.exe"], 0x7ffc354d98d0 /* 79 vars */) = 0
+32172 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+32172 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3
+32172 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3
+32172 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+32172 openat(AT_FDCWD, "/usr/lib/locale/locale-archive", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+32172 openat(AT_FDCWD, "/usr/share/locale/locale.alias", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+32172 openat(AT_FDCWD, "/usr/lib/locale/C.UTF-8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+32172 openat(AT_FDCWD, "/usr/lib/locale/C.utf8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = 3
+32172 openat(AT_FDCWD, "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache", O_RDONLY|O_CLOEXEC) = 3
+32172 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 open("/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 open("/workspace/scratch/hashlib-strict/fixtures/Lib", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/O0.exe", O_RDONLY|O_CLOEXEC) = 3
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3
+32172 openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 openat(AT_FDCWD, "/etc/localtime", O_RDONLY|O_CLOEXEC) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/O0.exe", O_RDONLY|O_CLOEXEC) = 3
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/O0.exe", O_RDONLY|O_CLOEXEC) = 3
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/hashlib_default_policy.py", {st_mode=S_IFREG|0600, st_size=52, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre/target/release/Modules/Setup", 0x7ffce41c6b08, 0) = -1 ENOENT (No such file or directory)
+32172 newfstatat(AT_FDCWD, "/workspace/imre/target/release/Modules/Setup.local", 0x7ffce41c6b08, 0) = -1 ENOENT (No such file or directory)
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib/test", 0x7ffce41d4e18, 0) = -1 ENOENT (No such file or directory)
+32172 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+32172 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libcrypto.so.3", O_RDONLY|O_CLOEXEC) = 3
+32172 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libz.so.1", O_RDONLY|O_CLOEXEC) = 3
+32172 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libzstd.so.1", O_RDONLY|O_CLOEXEC) = 3
+32172 openat(AT_FDCWD, "/usr/lib/ssl/openssl.cnf", O_RDONLY) = 3
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/O0.exe", O_RDONLY|O_CLOEXEC) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/O0.exe", O_RDONLY|O_CLOEXEC) = 3
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/O0.exe", O_RDONLY|O_CLOEXEC) = 3
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib/test/support", 0x7ffce41cde78, 0) = -1 ENOENT (No such file or directory)
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib/test/support", 0x7ffce41c9ec8, 0) = -1 ENOENT (No such file or directory)
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/O0.exe", O_RDONLY|O_CLOEXEC) = 3
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib/test/support", 0x7ffce41c5d18, 0) = -1 ENOENT (No such file or directory)
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib/test/support", 0x7ffce41cde78, 0) = -1 ENOENT (No such file or directory)
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/O0.exe", O_RDONLY|O_CLOEXEC) = 3
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/O0.exe", O_RDONLY|O_CLOEXEC) = 3
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+32172 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libssl.so.3", O_RDONLY|O_CLOEXEC) = 3
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/O0.exe", O_RDONLY|O_CLOEXEC) = 3
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib/test/data/blake2b.txt", 0x7ffce41d3ea8, 0) = -1 ENOENT (No such file or directory)
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib/test/data/blake2s.txt", 0x7ffce41d3ea8, 0) = -1 ENOENT (No such file or directory)
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp/iutmhf0o", O_RDWR|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib/test/data/sha3_224.txt", 0x7ffce41d3f58, 0) = -1 ENOENT (No such file or directory)
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib/test/data/sha3_256.txt", 0x7ffce41d3f58, 0) = -1 ENOENT (No such file or directory)
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib/test/data/sha3_384.txt", 0x7ffce41d3f58, 0) = -1 ENOENT (No such file or directory)
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib/test/data/sha3_512.txt", 0x7ffce41d3f58, 0) = -1 ENOENT (No such file or directory)
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp", O_RDWR|O_EXCL|O_NOFOLLOW|O_CLOEXEC|O_TMPFILE, 0600) = 3
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib/test/data/shake_128.txt", 0x7ffce41d3f48, 0) = -1 ENOENT (No such file or directory)
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib/test/data/shake_256.txt", 0x7ffce41d3f48, 0) = -1 ENOENT (No such file or directory)
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib/test/support/threading_helper.py", 0x7ffce41ce4a8, 0) = -1 ENOENT (No such file or directory)
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib/test/support/threading_helper.py", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+32172 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib/test/test_hashlib.py", 0x7ffce41ce4a8, 0) = -1 ENOENT (No such file or directory)
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib/test/test_hashlib.py", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+32172 newfstatat(AT_FDCWD, "<imre stdlib>/threading.py", 0x7ffce41ce4a8, 0) = -1 ENOENT (No such file or directory)
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp/tmpuivo5ed3", O_RDWR|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC, 0600) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp/tmpuivo5ed3", O_RDONLY|O_CLOEXEC) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp/tmpuivo5ed3", O_RDONLY|O_CLOEXEC) = 3
+32172 openat(AT_FDCWD, "/workspace/scratch/hashlib-strict/tmp/tmpuivo5ed3", O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC, 0666) = 3
+32172 exit_group(0)                     = ?
+32171 <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 32172
+32171 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=32172, si_uid=1000, si_status=0, si_utime=2783 /* 27.83 s */, si_stime=26 /* 0.26 s */} ---
+32171 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib/test", 0x7ffc354d95f0, 0) = -1 ENOENT (No such file or directory)
+32171 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib/test/test_hashlib.py", 0x7ffc354d95f0, 0) = -1 ENOENT (No such file or directory)
+32171 rename("/workspace/scratch/hashlib-strict/fixtures/Lib/test.raw-control-stash", "/workspace/scratch/hashlib-strict/fixtures/Lib/test") = 0
+32171 newfstatat(AT_FDCWD, "/workspace/scratch/hashlib-strict/fixtures/Lib/test/test_hashlib.py", {st_mode=S_IFREG|0600, st_size=53079, ...}, 0) = 0
+32171 exit_group(0)                     = ?
