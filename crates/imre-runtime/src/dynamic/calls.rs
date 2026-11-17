@@ -8196,7 +8196,29 @@ impl Context {
 
     pub(super) fn instance(&mut self, class: Id, dictionary: Option<Id>) -> Id {
         let property = self.has_base(class, "property").then(Box::default);
-        self.alloc(Value::Instance {
+        self.alloc(Self::instance_value(
+            class,
+            dictionary,
+            property,
+            Default::default(),
+        ))
+    }
+
+    /// Allocate a plain object with catchable field-map and heap-slot failures.
+    pub(super) fn try_plain_instance(&mut self, class: Id) -> Result<Id> {
+        let fields = allocator_api2::boxed::Box::try_new(indexmap::IndexMap::new())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        self.heap
+            .try_alloc_slot(Self::instance_value(class, None, None, fields), true)
+    }
+
+    fn instance_value(
+        class: Id,
+        dictionary: Option<Id>,
+        property: Option<Box<super::property::Property>>,
+        fields: allocator_api2::boxed::Box<indexmap::IndexMap<String, Id>>,
+    ) -> Value {
+        Value::Instance {
             namespace: None,
             class,
             dictionary,
@@ -8206,9 +8228,9 @@ impl Context {
             member_values: None,
             socket: None,
             memory_stream: None,
-            fields: Default::default(),
+            fields,
             scalar: None,
-        })
+        }
     }
 
     /// The first non-Python base owns the instance layout. Native classes

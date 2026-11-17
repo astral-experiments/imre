@@ -2664,6 +2664,7 @@ pub(super) fn call(
             ("loader_fields", [object], []) => {
                 if let Value::Instance { fields, .. } = ctx.heap.get(*object) {
                     let fields = fields
+                        .as_ref()
                         .clone()
                         .into_iter()
                         .map(|(key, value)| (ctx.text(key), value))

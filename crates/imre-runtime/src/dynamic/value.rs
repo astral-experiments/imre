@@ -1716,7 +1716,7 @@ pub(super) enum Value {
     Union(super::union::Union),
     Instance {
         class: Id,
-        fields: Box<indexmap::IndexMap<String, Id>>,
+        fields: allocator_api2::boxed::Box<indexmap::IndexMap<String, Id>>,
         /// Storage addressed by the declaring member, independent of the instance dictionary.
         member_values: Option<Box<MemberValues>>,
         /// Exact ordinary instance dictionary once exposed or replaced.

@@ -1416,7 +1416,7 @@ def check_callable_label_allocation(imre, run, flags):
             activated = any(line.startswith(b"call_allocation ") and line.endswith(b" 1") for line in result.stderr.splitlines())
             expected = reference.stdout.replace(b"kind ok\n", b"kind MemoryError\n", 1) if activated else reference.stdout
             assert result.stdout == expected, (result, reference)
-            expected_denial = target in (1, "all") or (shape >= 8 and target == 2)
+            expected_denial = target in (1, "all") or (shape in (6, 8, 9) and target == 2)
             assert activated == expected_denial, (shape, target, result)
             if activated:
                 assert result.stdout.startswith(b"kind MemoryError\n"), result
