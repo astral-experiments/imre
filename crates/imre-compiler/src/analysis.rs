@@ -5347,7 +5347,11 @@ fn buffered_random_index_argument(
     use ty_python_semantic::types::KnownClass;
 
     let size = parameter_labels(diagnostic).any(|(owner, parameter)| {
-        if owner.path(db).as_vendored_path().map(|path| path.as_str()) != Some("stdlib/_io.pyi") {
+        if !owner.path(db).as_vendored_path().is_some_and(|path| {
+            path.components()
+                .map(|component| component.as_str())
+                .eq(["stdlib", "_io.pyi"])
+        }) {
             return false;
         }
         let parsed =
