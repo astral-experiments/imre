@@ -519,10 +519,13 @@ mod tests {
             for pattern in patterns {
                 for sensitive in [true, false] {
                     let expected = glob_regex(pattern, sensitive, true, '/')
-                        .ok().unwrap()
+                        .ok()
+                        .unwrap()
                         .is_match(path);
                     assert_eq!(
-                        glob_matches(path, pattern, sensitive, true, '/').ok().unwrap(),
+                        glob_matches(path, pattern, sensitive, true, '/')
+                            .ok()
+                            .unwrap(),
                         expected,
                         "{path:?}, {pattern:?}, sensitive={sensitive}"
                     );
@@ -533,8 +536,20 @@ mod tests {
 
     #[test]
     fn multi_star_component_and_windows_case() {
-        assert!(glob_matches("test_config.py", "t*[a-z]*f*.py", true, false, '/').ok().unwrap());
-        assert!(glob_matches("TEST_CONFIG.PY", "t*[a-z]*f*.py", false, false, '\\').ok().unwrap());
-        assert!(!glob_matches("testconfig.py", "t*[!a-z]*f*.py", true, false, '/').ok().unwrap());
+        assert!(
+            glob_matches("test_config.py", "t*[a-z]*f*.py", true, false, '/')
+                .ok()
+                .unwrap()
+        );
+        assert!(
+            glob_matches("TEST_CONFIG.PY", "t*[a-z]*f*.py", false, false, '\\')
+                .ok()
+                .unwrap()
+        );
+        assert!(
+            !glob_matches("testconfig.py", "t*[!a-z]*f*.py", true, false, '/')
+                .ok()
+                .unwrap()
+        );
     }
 }
