@@ -1,0 +1,175 @@
+ Compiling /workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_argparse.py (-O3)
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_argparse.py:6054:29
+     |
+6053 |         self.assertEqual(ns1, ns2)
+6054 |         self.assertNotEqual(ns1, ns3)
+     |                             ^^^ Expected `int`, found `Namespace`
+6055 |         self.assertNotEqual(ns1, ns4)
+6056 |         self.assertNotEqual(ns2, ns3)
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^       ---------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_argparse.py:6054:34
+     |
+6053 |         self.assertEqual(ns1, ns2)
+6054 |         self.assertNotEqual(ns1, ns3)
+     |                                  ^^^ Expected `int`, found `Namespace`
+6055 |         self.assertNotEqual(ns1, ns4)
+6056 |         self.assertNotEqual(ns2, ns3)
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_argparse.py:6055:29
+     |
+6053 |         self.assertEqual(ns1, ns2)
+6054 |         self.assertNotEqual(ns1, ns3)
+6055 |         self.assertNotEqual(ns1, ns4)
+     |                             ^^^ Expected `int`, found `Namespace`
+6056 |         self.assertNotEqual(ns2, ns3)
+6057 |         self.assertNotEqual(ns2, ns4)
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^       ---------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_argparse.py:6055:34
+     |
+6053 |         self.assertEqual(ns1, ns2)
+6054 |         self.assertNotEqual(ns1, ns3)
+6055 |         self.assertNotEqual(ns1, ns4)
+     |                                  ^^^ Expected `int`, found `Namespace`
+6056 |         self.assertNotEqual(ns2, ns3)
+6057 |         self.assertNotEqual(ns2, ns4)
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_argparse.py:6056:29
+     |
+6054 |         self.assertNotEqual(ns1, ns3)
+6055 |         self.assertNotEqual(ns1, ns4)
+6056 |         self.assertNotEqual(ns2, ns3)
+     |                             ^^^ Expected `int`, found `Namespace`
+6057 |         self.assertNotEqual(ns2, ns4)
+6058 |         self.assertTrue(ns1 != ns3)
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^       ---------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_argparse.py:6056:34
+     |
+6054 |         self.assertNotEqual(ns1, ns3)
+6055 |         self.assertNotEqual(ns1, ns4)
+6056 |         self.assertNotEqual(ns2, ns3)
+     |                                  ^^^ Expected `int`, found `Namespace`
+6057 |         self.assertNotEqual(ns2, ns4)
+6058 |         self.assertTrue(ns1 != ns3)
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_argparse.py:6057:29
+     |
+6055 |         self.assertNotEqual(ns1, ns4)
+6056 |         self.assertNotEqual(ns2, ns3)
+6057 |         self.assertNotEqual(ns2, ns4)
+     |                             ^^^ Expected `int`, found `Namespace`
+6058 |         self.assertTrue(ns1 != ns3)
+6059 |         self.assertTrue(ns1 != ns4)
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^       ---------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_argparse.py:6057:34
+     |
+6055 |         self.assertNotEqual(ns1, ns4)
+6056 |         self.assertNotEqual(ns2, ns3)
+6057 |         self.assertNotEqual(ns2, ns4)
+     |                                  ^^^ Expected `int`, found `Namespace`
+6058 |         self.assertTrue(ns1 != ns3)
+6059 |         self.assertTrue(ns1 != ns4)
+     |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+

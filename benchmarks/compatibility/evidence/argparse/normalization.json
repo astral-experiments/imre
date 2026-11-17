@@ -1,0 +1,20 @@
+{
+  "method": "For a unittest verbose description split across two lines, join the raw ID header with the outcome suffix from the next line. Preserve line numbering; retain raw stderr unchanged. Only derived result evidence links use the sidecar.",
+  "files": {
+    "stock.stderr": {
+      "raw": "stock.stderr",
+      "raw_sha256": "b6c37851b5ae9d6415a52ac7551391425dc8ab00ae312c4aca673bd8db66e779",
+      "derived": "stock.results.stderr",
+      "derived_sha256": "04141afe21e89a5c03a79e1e4d8dfe8199406a8d5a5810c85af664b6e1780859",
+      "changes": [
+        {
+          "raw_id_line": 395,
+          "raw_outcome_line": 396,
+          "result_line": 395,
+          "id": "test.test_argparse.TestHelpCustomHelpFormatter.test_usage_long_subparser_command",
+          "outcome": "pass"
+        }
+      ]
+    }
+  }
+}

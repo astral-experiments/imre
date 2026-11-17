@@ -1,0 +1,84 @@
+{
+  "cpython_repository": "https://github.com/python/cpython",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "cpython_archive_sha256": "0d838be32b52da92a4293ecd99bc91f7be8b4acc573423665bd1a1428be46e47",
+  "source_root": "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115",
+  "native_fixture_root": "/workspace/scratch/imre-cpython-test-fixtures",
+  "trees": {
+    "Lib/test": {
+      "source": {
+        "files": 1639,
+        "sha256_paths_and_file_sha256": "9c864f6d5a44646c568904738812bac8bf74e19886a92404ae69a1c41be5ff90"
+      },
+      "staged": {
+        "files": 1639,
+        "sha256_paths_and_file_sha256": "9c864f6d5a44646c568904738812bac8bf74e19886a92404ae69a1c41be5ff90"
+      }
+    },
+    "Tools/i18n": {
+      "source": {
+        "files": 4,
+        "sha256_paths_and_file_sha256": "2303773be40d88834d8f816ac12bc81c17a3c29358d5fcb6b2f244438154e915"
+      },
+      "staged": {
+        "files": 4,
+        "sha256_paths_and_file_sha256": "2303773be40d88834d8f816ac12bc81c17a3c29358d5fcb6b2f244438154e915"
+      }
+    }
+  },
+  "manifest_files": {
+    "LICENSE": {
+      "expected_git_blob": "20cf39097c68baa17cc566b64e76d34ebf034044",
+      "actual_git_blob": "20cf39097c68baa17cc566b64e76d34ebf034044",
+      "sha256": "b0e25a78cffb43f4d92de8b61ccfa1f1f98ecbc22330b54b5251e7b6ba010231"
+    },
+    "Lib/test/test_argparse.py": {
+      "expected_git_blob": "627e395c49b194f67566bbaa7bba9a567b71edd9",
+      "actual_git_blob": "627e395c49b194f67566bbaa7bba9a567b71edd9",
+      "sha256": "bd3892b42c83f276327c141a7d6b38ed08c07a56c6076e4d3aefeddf90515499"
+    },
+    "Lib/test/translationdata/argparse/msgids.txt": {
+      "expected_git_blob": "ae89ac74726ecfc702d0d24f23e96901f1ea2158",
+      "actual_git_blob": "ae89ac74726ecfc702d0d24f23e96901f1ea2158",
+      "sha256": "a8b02c9c5a23d19fc39409e85c4592dc742464e16604c1f526e279822d6ae9f2"
+    },
+    "Lib/_colorize.py": {
+      "expected_git_blob": "d6673f6692f76151b3b226ebe4d7976456a257e5",
+      "actual_git_blob": "d6673f6692f76151b3b226ebe4d7976456a257e5",
+      "sha256": "15db41bec8e25fd1ba81cf234df2cc7446d0fbc10285fda73186176365efd730"
+    },
+    "Lib/argparse.py": {
+      "expected_git_blob": "24f4740562d015927fe41430a17b18646a3fee65",
+      "actual_git_blob": "24f4740562d015927fe41430a17b18646a3fee65",
+      "sha256": "052271a2a1eb1b6b60116acb8f3505c98edd52dba062b0309926e63ac4544743"
+    },
+    "Lib/dataclasses.py": {
+      "expected_git_blob": "f9c1113b1e367f47cd710367c1a2ec3619a94df3",
+      "actual_git_blob": "f9c1113b1e367f47cd710367c1a2ec3619a94df3",
+      "sha256": "2dedf70270f45c6a909ae1eac734fcf3ae3f2764bb71a330f4825aca3a79784b"
+    },
+    "Lib/test/support/i18n_helper.py": {
+      "expected_git_blob": "2e304f29e8ba7fdf07c0725ce762ae3118685fe3",
+      "actual_git_blob": "2e304f29e8ba7fdf07c0725ce762ae3118685fe3",
+      "sha256": "5fccf59bc41fedb87440402332bce7ff64a6d2d13a6918216103ea91b4712679"
+    },
+    "Lib/test/test_tools/__init__.py": {
+      "expected_git_blob": "c4395c7c0ad0c986d9af82143207f94a35d636a6",
+      "actual_git_blob": "c4395c7c0ad0c986d9af82143207f94a35d636a6",
+      "sha256": "ea513d31effdda62ddfbb79487a6bb734ae61d2f840f97c0e4c68c7d30314693"
+    },
+    "Tools/i18n/pygettext.py": {
+      "expected_git_blob": "ddf4474d2bce55f7edd0ddd5db132ddea86ba88c",
+      "actual_git_blob": "ddf4474d2bce55f7edd0ddd5db132ddea86ba88c",
+      "sha256": "e58768ca921f1dd3510a6ba10695057f0c3755e8f99bcde0df1480bf60f65123"
+    }
+  },
+  "declared_extra_modules": [],
+  "stock_inventory": {
+    "occurrences": 1893,
+    "unique_ids": 1893,
+    "repeated_occurrences": 0,
+    "historical_missing_ids": 0,
+    "historical_extra_ids": 0
+  }
+}

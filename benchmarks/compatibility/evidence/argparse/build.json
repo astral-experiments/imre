@@ -1,0 +1,21 @@
+{
+  "source_repository": "https://github.com/astral-experiments/imre.git",
+  "source_revision": "49f0dc2ef78b82692e333252faf71b4fc7730949",
+  "worktree": "/workspace/scratch/imre-49f0dc2",
+  "source_worktree_clean": true,
+  "tool_revision": "80bce5b7d77c79e5478ec7f38e923d533b966e88",
+  "command": "CARGO_HOME=/workspace/.toolchains/cargo RUSTUP_HOME=/workspace/.toolchains/rustup PATH=/workspace/.toolchains/cargo/bin:$PATH cargo build --offline --release --locked -p imre-compiler -p imre-runtime --target-dir /workspace/imre/target",
+  "build_log": "cargo-build.log",
+  "build_log_sha256": "e724dd58d5f0a8d07024e42198dd18d117ff704ac55cd138ddbea048434e4b5b",
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: x86_64-unknown-linux-gnu\nrelease: 1.98.1\nLLVM version: 22.1.8",
+  "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin",
+  "imre_version": "imre 0.1.5",
+  "stock_python_version": "Python 3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+  "artifacts": {
+    "/workspace/imre/target/release/imre": "820a17c5da4c87f8bdfee61e512fcd5f04d9be6fa473e47a450d8d7c7dcb8f07",
+    "/workspace/imre/target/release/libimre_runtime.a": "1c9cacac8e5199c0b5ee3bbdaa7f4cab2c3ce8e1123d2b0f8d60e6cedf464e1c",
+    "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+    "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+  },
+  "cpython_source_archive_sha256": "0d838be32b52da92a4293ecd99bc91f7be8b4acc573423665bd1a1428be46e47"
+}
