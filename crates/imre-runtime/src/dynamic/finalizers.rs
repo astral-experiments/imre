@@ -117,7 +117,11 @@ impl Context {
             let streams = super::stdlib::io::rooted_standard_streams(self);
             let globals = self.finalizer_path_roots();
             let (heap, roots) = self.heap_and_roots();
-            if let Some(owner) = heap.next_acyclic_finalizer(globals, roots, streams.as_ref())? {
+            let mut retired = false;
+            let owner =
+                heap.next_acyclic_finalizer(globals, roots, streams.as_ref(), &mut retired)?;
+            released |= retired;
+            if let Some(owner) = owner {
                 released = true;
                 if !super::stdlib::io::deallocate_exact_pair(self, owner)? {
                     self.dispatch_finalizer(owner);
