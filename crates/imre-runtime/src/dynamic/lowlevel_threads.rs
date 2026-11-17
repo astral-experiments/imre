@@ -179,11 +179,11 @@ impl Start {
         let pos = ctx
             .tuple_elements(positional)
             .expect("validated thread arguments");
-        let Some((callback, roots)) =
-            Callback::capture(ctx, ctx.heap.get(function), args, pos, keyword, false)?
-        else {
-            return Err(super::thread_callback::unsupported());
-        };
+        let capture = Callback::capture(ctx, ctx.heap.get(function), args, pos, keyword, false)?
+            .ok_or_else(super::thread_callback::unsupported)?;
+        let (callback, roots) = capture
+            .resolve(ctx)?
+            .ok_or_else(super::thread_callback::unsupported)?;
         if let Some(sys) = ctx.threads.system_module
         && let Value::Module { scope, .. } = ctx.heap.get(sys)
         // Once exposed, the live dict can be changed through an arbitrary alias.

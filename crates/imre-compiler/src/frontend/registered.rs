@@ -2501,7 +2501,15 @@ impl<'a> SuitePreparation<'a> {
             }
             _ => None,
         };
-        header.prepare_signature(def, site.thread_entry, fixed_parameters);
+        let bound_candidate = if refusal.is_none() && child_refusal.is_none() {
+            match body.as_ref() {
+                RegisteredBody::Function(frame) => Some(frame),
+                RegisteredBody::Suite(_) => None,
+            }
+        } else {
+            None
+        };
+        header.prepare_signature(def, site.thread_entry, fixed_parameters, bound_candidate);
         header.body = Some(body);
         // A residual suite may stop at a return before reaching a refused lexical child.
         if let Some(refusal) = refusal.or(child_refusal) {
