@@ -202,6 +202,10 @@ Revision `8571ca2dbecabf8d7863c369dc776611fd57d8ad` · **3,141 validated receipt
 [Full revision table](benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/docs/stdlib.md)
 <!-- current-compatibility-snapshot:end -->
 
+### Prospective practical scripts
+
+Revision `d26f19448c70c00039c305f105a85c215f820577`: [4 of 4 verified stock/O0/O3 pairs](benchmarks/supplemental/practical_workloads/scores/d26f19448c70c00039c305f105a85c215f820577.strict.json). This separate cohort is not included in the 84-script score or the revision `8571ca2` stdlib snapshot.
+
 ### Historical whole-suite runs (mixed revisions)
 
 These historical Linux runs span earlier revisions and are not results for the pinned scorecard. They started with the unchanged CPython 3.14.5 test files. Each paired pass identifies the same original test passing on CPython and at both Imre optimization levels. [Individual results](benchmarks/cpython_stdlib/paired-recheck-8074-and-8092.tsv)
