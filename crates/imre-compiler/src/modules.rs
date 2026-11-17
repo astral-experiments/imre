@@ -3274,23 +3274,6 @@ impl SourceModule {
     }
 }
 
-/// Whether native lowering may try an inferred layout and recover the ordinary checked path.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LayoutHint {
-    Available,
-    Applied,
-    Disabled,
-}
-
-/// Resolver facts which native lowering can extend or consume while trying an inferred layout.
-pub(crate) struct LoweringBaseline {
-    explicit_check: bool,
-    needs_object_runtime: bool,
-    deferred_object_error: Option<Diagnostic>,
-    reachable: Option<Arc<reachability::Reachable>>,
-    traceback_objects: bool,
-}
-
 pub(crate) type CheckedInitializers = HashMap<ModuleId, Box<crate::frontend::RegisteredFunction>>;
 
 #[derive(Default)]
@@ -3314,13 +3297,12 @@ pub(crate) struct SourceGraph {
     /// Operands available to place after the selected source passes its own checks.
     pub(crate) registered_call_operands:
         std::cell::RefCell<HashMap<ModuleId, crate::dynamic::FunctionCallOperands>>,
-    /// Default-rule error ranges for the physical sources shared by every layout attempt.
+    /// Default-rule error ranges for the physical sources in this graph.
     pub(crate) registered_source_errors: std::cell::RefCell<RegisteredSourceErrors>,
     /// Contract of the original graph, valid only while its declarations still win.
     pub(crate) source_contract: Option<crate::analysis::SourceContract>,
     /// The original entry's reached call check when it consulted no import bindings.
     pub(crate) closed_initializer: Option<crate::analysis::InitializerCheck>,
-    pub(crate) layout_hint: std::cell::Cell<LayoutHint>,
     pub(crate) command_startup: Option<(crate::CommandFlags, String)>,
     pub(crate) virtual_command: bool,
     pub(crate) handled_tracebacks: bool,
@@ -3365,37 +3347,6 @@ pub(crate) struct SourceGraph {
 pub(crate) const MEMORY_SOURCE_PATH: &str = "/input.py";
 
 impl SourceGraph {
-    pub(crate) fn lowering_baseline(&self) -> LoweringBaseline {
-        LoweringBaseline {
-            explicit_check: self.session.explicit_check,
-            needs_object_runtime: self.needs_object_runtime.get(),
-            deferred_object_error: self.deferred_object_error.borrow().clone(),
-            reachable: self.reachable.clone(),
-            traceback_objects: self.traceback_objects,
-        }
-    }
-
-    /// Start ordinary lowering with the original import decisions and proof scopes.
-    pub(crate) fn retry_without_layout_hints(&mut self, baseline: &LoweringBaseline) {
-        self.source_contract = None;
-        self.session.resume_layout_queries();
-        self.session.explicit_check = baseline.explicit_check;
-        self.layout_hint.set(LayoutHint::Disabled);
-        *self.class_layout_error.get_mut() = None;
-        self.has_object_constructor_fallback.set(false);
-        self.check_fallback_calls.set(FallbackCalls::None);
-        self.check_method_factories.set(false);
-        self.needs_object_runtime.set(baseline.needs_object_runtime);
-        self.deferred_object_error
-            .get_mut()
-            .clone_from(&baseline.deferred_object_error);
-        self.reachable.clone_from(&baseline.reachable);
-        self.traceback_objects = baseline.traceback_objects;
-        for proofs in self.checked_diagnostics.get_mut() {
-            proofs.clear();
-        }
-    }
-
     /// A representation trial must neither discard a Python operation nor change the
     /// admission or diagnostics of the enclosing registered program.
     pub(crate) fn try_registered_body<T>(
@@ -3408,14 +3359,12 @@ impl SourceGraph {
         let needs_object = self.needs_object_runtime.replace(false);
         let calls = self.check_fallback_calls.get();
         let constructor = self.has_object_constructor_fallback.replace(false);
-        let set = self.layout_hint.get();
         let result = lower();
         let deferred_here = self.deferred_object_error.replace(deferred).is_some();
         let needed_here = self.needs_object_runtime.replace(needs_object);
         let used_constructor = self.has_object_constructor_fallback.replace(constructor);
         let result = result.filter(|_| !deferred_here && !needed_here && !used_constructor);
         self.check_fallback_calls.set(calls);
-        self.layout_hint.set(set);
         self.checked_diagnostics.borrow_mut()[module].truncate(diagnostics);
         result
     }
@@ -5281,7 +5230,6 @@ impl<'a> Loader<'a> {
             registered_startup: false,
             source_contract: None,
             closed_initializer: None,
-            layout_hint: std::cell::Cell::new(LayoutHint::Available),
             check_fallback_calls: Default::default(),
             imports_runtime_class: self.imports_runtime_class,
             check_method_factories: Default::default(),

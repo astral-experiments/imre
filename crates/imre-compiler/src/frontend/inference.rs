@@ -94,7 +94,7 @@ impl Checker<'_> {
         if let Some(ty) = self.graph.session.scalar_type(self.module, insertion.value) {
             return Some(ty);
         }
-        if !set {
+        if !set || self.returns == Type::PythonObject {
             return None;
         }
         let for_loop = insertion.for_loop?;
@@ -590,6 +590,8 @@ struct Pending {
     returns: Option<Type>,
     /// Storage requested by a checked consumer of this unannotated return.
     return_context: Option<Type>,
+    return_context_consumers: Vec<(usize, usize)>,
+    return_context_refused: bool,
     discovery: ReturnDiscovery,
 }
 
@@ -692,6 +694,8 @@ impl Inference {
             document_return: None,
             returns,
             return_context: None,
+            return_context_consumers: Vec::new(),
+            return_context_refused: false,
             discovery: if returns.is_some() {
                 ReturnDiscovery::Declared
             } else {
@@ -1015,18 +1019,66 @@ impl Inference {
         }
     }
 
+    pub(super) fn inferred_return(&self, id: usize) -> bool {
+        self.pending
+            .borrow()
+            .get(id)
+            .is_some_and(|p| !matches!(p.discovery, ReturnDiscovery::Declared))
+    }
+
     /// A checked call argument can request storage from an unannotated producer.
     /// Publishing the request once makes unsuccessful or recursive demands converge.
-    fn demand_list_return(&self, id: usize, actual: Type, expected: Type) {
+    pub(super) fn demand_list_return(
+        &self,
+        id: usize,
+        actual: Type,
+        expected: Type,
+        consumer: Option<(usize, usize)>,
+    ) {
         let mut pending = self.pending.borrow_mut();
         let producer = &mut pending[id];
-        if matches!(producer.discovery, ReturnDiscovery::Declared)
-            || producer.returns != Some(actual)
-            || producer.return_context == Some(expected)
+        if matches!(producer.discovery, ReturnDiscovery::Declared) {
+            return;
+        }
+        if producer.return_context_refused {
+            if consumer.is_none() && producer.returns != Some(Type::PythonObject) {
+                producer.returns = Some(Type::PythonObject);
+                producer.discovery = ReturnDiscovery::Independent;
+                drop(pending);
+                self.layout_changed();
+            }
+            return;
+        }
+        if let Some(consumer) = consumer
+            && !producer.return_context_consumers.contains(&consumer)
         {
+            producer.return_context_consumers.push(consumer);
+        }
+        if producer.returns != Some(actual) || producer.return_context == Some(expected) {
             return;
         }
         producer.return_context = Some(expected);
+        drop(pending);
+        self.layout_changed();
+    }
+
+    /// A shared native return ABI cannot satisfy incompatible checked consumers.
+    /// Release its context and place the inferred consumers requesting it. If
+    /// the write is through an alias, the producer itself needs ordinary storage.
+    fn refuse_list_return(&self, id: usize) {
+        let mut pending = self.pending.borrow_mut();
+        if pending[id].return_context_refused {
+            return;
+        }
+        pending[id].return_context_refused = true;
+        pending[id].return_context = None;
+        if pending[id].return_context_consumers.is_empty() {
+            pending[id].returns = Some(Type::PythonObject);
+            pending[id].discovery = ReturnDiscovery::Independent;
+        }
+        for (consumer, index) in std::mem::take(&mut pending[id].return_context_consumers) {
+            pending[consumer].params[index] = Some(Type::PythonObject);
+        }
         drop(pending);
         self.layout_changed();
     }
@@ -1411,7 +1463,6 @@ impl Inference {
             let globals = ModuleValues::for_initializers(!registered.is_empty());
             let mut available = HashSet::new();
             let mut errors = Vec::new();
-            let mut layout_refusal = None;
             let mut checked_callers = Vec::new();
             let mut completed_calls = classes.nonreturning_functions.clone();
             let initial_nonreturning = completed_calls.len();
@@ -1916,15 +1967,6 @@ impl Inference {
                             ReturnDiscovery::Waiting(callee);
                     }
                     let owner = signature.method.is_none().then(|| owners[signature.id]);
-                    if physical
-                        && owner.is_some()
-                        && !signature.registered_frame()
-                        && checker.calls.is_empty()
-                        && matches!(&diagnostic, Failure::Diagnostic(report)
-                            if report.kind == Kind::ReturnType && report.operand_declaration().is_some())
-                    {
-                        layout_refusal = Some(body_revision);
-                    }
                     errors.push((*module, owner, diagnostic));
                 } else {
                     if (checked_return || implicit_none)
@@ -2072,10 +2114,6 @@ impl Inference {
                         ..
                     }) => Some(signature),
                     Err(diagnostic) => {
-                        if matches!(&diagnostic, Failure::Diagnostic(report) if report.entry_operand().is_some())
-                        {
-                            layout_refusal = Some(entry_revision);
-                        }
                         errors.push((graph.entry, None, diagnostic));
                         None
                     }
@@ -2149,9 +2187,7 @@ impl Inference {
                     } else {
                         Vec::new()
                     };
-                    if (!checked_bodies.is_empty() || !staged_returns.is_empty())
-                        && !retries_failed_layout(graph)
-                    {
+                    if !checked_bodies.is_empty() || !staged_returns.is_empty() {
                         registered::capture(
                             graph,
                             signatures,
@@ -2220,7 +2256,7 @@ impl Inference {
                 }
                 let mut reports = reports.into_iter();
                 if let Some(primary) = reports.next() {
-                    if primary.kind.is_object() && !retries_failed_layout(graph) {
+                    if primary.kind.is_object() {
                         registered::capture(
                             graph,
                             signatures,
@@ -2249,9 +2285,8 @@ impl Inference {
                     else {
                         continue;
                     };
-                    if !retries_failed_layout(graph)
-                        && (unresolved.kind.is_object()
-                            || matches!(unresolved.kind, Kind::UnresolvedLayout(..)))
+                    if unresolved.kind.is_object()
+                        || matches!(unresolved.kind, Kind::UnresolvedLayout(..))
                     {
                         registered::capture(
                             graph,
@@ -2277,17 +2312,6 @@ impl Inference {
             {
                 method_returns.clear();
                 checked_bodies.clear();
-            } else if let Some(revision) = layout_refusal
-                && retries_failed_layout(graph)
-                && !graph.needs_object_runtime.get()
-                && !skipped
-                && !self.widened.get()
-                && revision == self.revision.get()
-            {
-                // Reconsider inferred returns in this graph before placing functions.
-                // Declarations and checked parameters keep their existing contracts.
-                graph.layout_hint.set(crate::modules::LayoutHint::Disabled);
-                self.layout_changed();
             }
         };
         for (_, _, signature) in definitions.iter_mut() {
@@ -2430,7 +2454,11 @@ impl Checker<'_> {
             && let Some(Binding::Definition(definition)) = self.resolve(&call.func)
             && let Some(producer) = self.functions.get(&definition)
         {
-            inference.demand_list_return(producer.id, actual, expected);
+            if inference.pending.borrow()[producer.id].return_context_refused {
+                inference.widen_parameter(consumer, index, Type::PythonObject);
+                return Type::PythonObject;
+            }
+            inference.demand_list_return(producer.id, actual, expected, Some((consumer, index)));
         }
         expected
     }
@@ -2452,6 +2480,7 @@ impl Checker<'_> {
             && let Some(producer) = self.functions.get(&definition)
             && inference.pending.borrow()[producer.id].return_context == Some(actual)
         {
+            inference.refuse_list_return(producer.id);
             true
         } else {
             false
