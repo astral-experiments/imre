@@ -1,0 +1,82 @@
+{
+  "scope": "supplemental; excluded from frozen 45-family totals",
+  "imre_revision": "95908fb0acadc2a67304a8080e584deaef395746",
+  "cli_sha256": "e2d0886948f766332df6370a2e3140a5be5c8b0fc108224ef7242fc38fc58bd4",
+  "runtime_sha256": "33ae5dfef5eff3c1fac5e0a5e19263daa980d7d80a5917979b426e85fa128c5c",
+  "python": "CPython 3.14.5",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "test_enum_sha256": "19b6bf1eb6c46023ba6d8575480728a36c0e719d6df312725d8abacef42b17d5",
+  "runner_entry_sha256": "6e1be6bbfae6aefea011520b32672ac83f731d89d56852019b8a328a7ef047f0",
+  "argv": [
+    "-B",
+    "-m",
+    "test",
+    "--list-cases",
+    "test_enum"
+  ],
+  "native_build_flags": [
+    "--opt-level",
+    "0",
+    "--no-cache",
+    "--runtime",
+    "<matching runtime>",
+    "--clang",
+    "<clang>"
+  ],
+  "runs": {
+    "stock": {
+      "exit": 0,
+      "elapsed": 0.458,
+      "timeout_limit_seconds": 60,
+      "timeout": false,
+      "stdout_sha256": "f1fe3941db55012e197bec5e8f882a49b2039aff819c8af422b490ce81b335fd",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "collected_unique_ids": 1081,
+      "unittest_methods": 1077,
+      "doctests": [
+        "enum.Enum",
+        "enum._simple_enum",
+        "enum._test_simple_enum",
+        "enum.bin"
+      ]
+    },
+    "native_O0": {
+      "exit": 1,
+      "elapsed": 14.911,
+      "timeout_limit_seconds": 150,
+      "timeout": false,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "ef9c1b6f88a8772962c556792f06c8829f0a8bae68792899677771cd4140b50e",
+      "collected_ids": 0,
+      "first_error": "dynamic test.test_enum import has no compiled body"
+    },
+    "native_O0_linked": {
+      "exit": 0,
+      "elapsed": 17.104,
+      "timeout_limit_seconds": 150,
+      "timeout": false,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "additional_build_flags": [
+        "--include-module",
+        "test.test_enum"
+      ],
+      "collected_ids": 0
+    },
+    "native_O0_loader": {
+      "exit": 0,
+      "elapsed": 16.042,
+      "timeout_limit_seconds": 120,
+      "timeout": false,
+      "stdout_sha256": "71d378f356bb5cb9c5c0fe747ba4ad7cf5b1c5f93d36eb0ee2cf6744f4bb572f",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "additional_build_flags": [
+        "--include-module",
+        "test.test_enum"
+      ],
+      "placeholder_cases": 1,
+      "loader_errors": 1,
+      "first_error": "ImportError: cannot import name 'EnumMeta' from 'enum'"
+    }
+  }
+}
