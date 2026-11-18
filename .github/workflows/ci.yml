@@ -778,5 +778,18 @@ jobs:
             )
           fi
           python3 tests/run_suites_children.py
+          differential_status=0
+          if [[ "$FULL_THINLTO" == true ]]; then
+            python3 tests/run_suites.py --workers 1 --kill-failed-children --log-dir /tmp/imre-suites-thinlto-differential --suites "${suites[0]}" \
+              -- --compiler target/release/imre --runtime target/lto/release/libimre_runtime.a --clang clang-18 --target "$imre_target" --lto-linker "$ci_lld" --opt-levels 3 || differential_status=$?
+            suites=("${suites[@]:1}")
+          fi
+          remaining_status=0
           python3 tests/run_suites.py --workers 2 --kill-failed-children --log-dir /tmp/imre-suites-thinlto --suites "${suites[@]}" \
-            -- --compiler target/release/imre --runtime target/lto/release/libimre_runtime.a --clang clang-18 --target "$imre_target" --lto-linker "$ci_lld" --opt-levels 3
+            -- --compiler target/release/imre --runtime target/lto/release/libimre_runtime.a --clang clang-18 --target "$imre_target" --lto-linker "$ci_lld" --opt-levels 3 || remaining_status=$?
+          if [[ "$FULL_THINLTO" != true ]]; then
+            exit "$remaining_status"
+          fi
+          if (( differential_status != 0 || remaining_status != 0 )); then
+            exit 1
+          fi
