@@ -1,0 +1,51 @@
+{
+  "schema": "imre.compatibility.ruff06-run-binding.v1",
+  "policy_sha256": {
+    "original": "4326bd79af09318b76675c8a76cd43f3a84c96bf609b874fb1b8fdc8b7150547",
+    "invalid-control": "8079614fddc9867ef10921ead22bdd4ee54493f8ca8589367f52b68c696f5d1c"
+  },
+  "runs": {
+    "O0-original": {
+      "run": "evidence/O0-original.json",
+      "run_sha256": "ff28b1ad0be318d61a813e90cf93ee974876f2ad1c9e721d8ab22ce360e73838",
+      "trace": "evidence/O0-original.trace",
+      "trace_sha256": "bb0871b0d465496fd0be8ec2faf81b09668f39338c7bfb51fd1134471185924f",
+      "policy_variant": "original"
+    },
+    "O0-invalid": {
+      "run": "evidence/O0-invalid.json",
+      "run_sha256": "b6856d62cf15fb0402685d5f6ac455f0ce69a4f1f305b264d1f639577e0f9ef3",
+      "trace": "evidence/O0-invalid.trace",
+      "trace_sha256": "f1ac65bd9e22f50e93325331bf0d7a3bc8a71ecbdfd06c54dcd9cef8338f9844",
+      "policy_variant": "invalid-control"
+    },
+    "O0-withdrawn": {
+      "run": "evidence/O0-withdrawn.json",
+      "run_sha256": "f6b335792974ef8f6a67bb39bac9985a9d1124b735ba550c04d2ecbb0bbcb9a9",
+      "trace": "evidence/O0-withdrawn.trace",
+      "trace_sha256": "120ad4b58366a6bf93406db9dad9aa485d1771954ea638e13bb56fdb826abea6",
+      "policy_variant": "original"
+    },
+    "O3-original": {
+      "run": "evidence/O3-original.json",
+      "run_sha256": "8c84e6cbc60f46d00e9e9e618e762c226f920d0af368348fdb81796c2ea7e3ca",
+      "trace": "evidence/O3-original.trace",
+      "trace_sha256": "a684d00f57c2ccbbc1866526b7b576a37d242dc9ec1e354fc6320af094e1ba7a",
+      "policy_variant": "original"
+    },
+    "O3-invalid": {
+      "run": "evidence/O3-invalid.json",
+      "run_sha256": "b3d39471ddda3cddecb2766194253350569b8c8af607caf413b4e2e6a1310fb0",
+      "trace": "evidence/O3-invalid.trace",
+      "trace_sha256": "fd5920a9db3e7caf45c08c4acf8c7e81796c81fdf7f1f2bb0818c78c9b50c8a9",
+      "policy_variant": "invalid-control"
+    },
+    "O3-withdrawn": {
+      "run": "evidence/O3-withdrawn.json",
+      "run_sha256": "6414a53fd61a9ebafc5702b34c080a0462a1dc859861fad8c8736e80cc8b1551",
+      "trace": "evidence/O3-withdrawn.trace",
+      "trace_sha256": "492d39e31458848437a43e7b16e3ff01abc9267a17ff41957f63b56d44e6ac72",
+      "policy_variant": "original"
+    }
+  }
+}

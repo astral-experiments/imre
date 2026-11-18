@@ -1,0 +1,4 @@
+  File "/dev/shm/ruff06-selective-959-work/scripts/check-scripts.py", line 4
+    this is invalid Python !!!
+                    ^^^^^^
+SyntaxError: invalid syntax

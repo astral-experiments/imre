@@ -1,0 +1,1366 @@
+26551 execve("/workspace/scratch/ruff06-controls-959/build/ruff06-O0", ["/workspace/scratch/ruff06-controls-959/build/ruff06-O0", "--write-ty-args-file", "scripts.txt"], 0x7ffed9d987f8 /* 22 vars */) = 0
+26551 brk(NULL)                         = 0x55bf27d8c000
+26551 mmap(NULL, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7fe4b8890000
+26551 access("/etc/ld.so.preload", R_OK) = -1 ENOENT (No such file or directory)
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache>
+26551 fstat(3</etc/ld.so.cache>, {st_mode=S_IFREG|0644, st_size=141191, ...}) = 0
+26551 mmap(NULL, 141191, PROT_READ, MAP_PRIVATE, 3</etc/ld.so.cache>, 0) = 0x7fe4b886d000
+26551 close(3</etc/ld.so.cache>)        = 0
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libm.so.6>
+26551 read(3</usr/lib/x86_64-linux-gnu/libm.so.6>, "\177ELF\2\1\1\3\0\0\0\0\0\0\0\0\3\0>\0\1\0\0\0\0\0\0\0\0\0\0\0@\0\0\0\0\0\0\0X\341\16\0\0\0\0\0\0\0\0\0@\08\0\f\0@\0\36\0\35\0\1\0\0\0\4\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\240\7\1\0\0\0\0\0\240\7\1\0\0\0\0\0\0\20\0\0\0\0\0\0\1\0\0\0\5\0\0\0\0\20\1\0\0\0\0\0\0\20\1\0\0\0\0\0\0\20\1\0\0\0\0\0\321\315\7\0\0\0\0\0\321\315\7\0\0\0\0\0\0\20\0\0\0\0\0\0\1\0\0\0\4\0\0\0\0\340\10\0\0\0\0\0\0\340\10\0\0\0\0\0\0\340\10\0\0\0\0\0\\\366\5\0\0\0\0\0\\\366\5\0\0\0\0\0\0\20\0\0\0\0\0\0\1\0\0\0\6\0\0\0\320\333\16\0\0\0\0\0\320\353\16\0\0\0\0\0\320\353\16\0\0\0\0\0<\4\0\0\0\0\0\0H\4\0\0\0\0\0\0\0\20\0\0\0\0\0\0\2\0\0\0\6\0\0\0\340\333\16\0\0\0\0\0\340\353\16\0\0\0\0\0\340\353\16\0\0\0\0\0\220\2\0\0\0\0\0\0\220\2\0\0\0\0\0\0\10\0\0\0\0\0\0\0\4\0\0\0\4\0\0\0\340\2\0\0\0\0\0\0\340\2\0\0\0\0\0\0\340\2\0\0\0\0\0\0 \0\0\0\0\0\0\0 \0\0\0\0\0\0\0\10\0\0\0\0\0\0\0\4\0\0\0\4\0\0\0\0\3\0\0\0\0\0\0\0\3\0\0\0\0\0\0\0\3\0\0\0\0\0\0$\0\0\0\0\0\0\0$\0\0\0\0\0\0\0\4\0\0\0\0\0\0\0\4\0\0\0\4\0\0\0<\326\16\0\0\0\0\0<\326\16\0\0\0\0\0<\326\16\0\0\0\0\0 \0\0\0\0\0\0\0 \0\0\0\0\0\0\0\4\0\0\0\0\0\0\0S\345td\4\0\0\0\340\2\0\0\0\0\0\0\340\2\0\0\0\0\0\0\340\2\0\0\0\0\0\0 \0\0\0\0\0\0\0 \0\0\0\0\0\0\0\10\0\0\0\0\0\0\0P\345td\4\0\0\0 (\16\0\0\0\0\0 (\16\0\0\0\0\0 (\16\0\0\0\0\0T\35\0\0\0\0\0\0T\35\0\0\0\0\0\0\4\0\0\0\0\0\0\0Q\345td\6\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\20\0\0\0\0\0\0\0R\345td\4\0\0\0\320\333\16\0\0\0\0\0\320\353\16\0\0\0\0\0\320\353\16\0\0\0\0\0000\4\0\0\0\0\0\0000\4\0\0\0\0\0\0\1\0\0\0\0\0\0\0\4\0\0\0\20\0\0\0\5\0\0\0GNU\0\2\200\0\300\4\0\0\0\1\0\0\0\0\0\0\0\4\0\0\0\24\0\0\0\3\0\0\0GNU\0\276\374\3\10\370\231\367\233\220\35Ns\211\222xsh\317p\367\0\0\0\0\347\3\0\0#\5\0\0\20\5\0\0\343\2\0\0\203\1\0\0\351\4\0\0", 832) = 832
+26551 fstat(3</usr/lib/x86_64-linux-gnu/libm.so.6>, {st_mode=S_IFREG|0644, st_size=977112, ...}) = 0
+26551 mmap(NULL, 978968, PROT_READ, MAP_PRIVATE|MAP_DENYWRITE, 3</usr/lib/x86_64-linux-gnu/libm.so.6>, 0) = 0x7fe4b877d000
+26551 mmap(0x7fe4b878e000, 512000, PROT_READ|PROT_EXEC, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3</usr/lib/x86_64-linux-gnu/libm.so.6>, 0x11000) = 0x7fe4b878e000
+26551 mmap(0x7fe4b880b000, 393216, PROT_READ, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3</usr/lib/x86_64-linux-gnu/libm.so.6>, 0x8e000) = 0x7fe4b880b000
+26551 mmap(0x7fe4b886b000, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3</usr/lib/x86_64-linux-gnu/libm.so.6>, 0xed000) = 0x7fe4b886b000
+26551 close(3</usr/lib/x86_64-linux-gnu/libm.so.6>) = 0
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libgcc_s.so.1>
+26551 read(3</usr/lib/x86_64-linux-gnu/libgcc_s.so.1>, "\177ELF\2\1\1\0\0\0\0\0\0\0\0\0\3\0>\0\1\0\0\0\0\0\0\0\0\0\0\0@\0\0\0\0\0\0\0\10\303\2\0\0\0\0\0\0\0\0\0@\08\0\v\0@\0\35\0\34\0\1\0\0\0\4\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\2705\0\0\0\0\0\0\2705\0\0\0\0\0\0\0\20\0\0\0\0\0\0\1\0\0\0\5\0\0\0\0@\0\0\0\0\0\0\0@\0\0\0\0\0\0\0@\0\0\0\0\0\0\241/\2\0\0\0\0\0\241/\2\0\0\0\0\0\0\20\0\0\0\0\0\0\1\0\0\0\4\0\0\0\0p\2\0\0\0\0\0\0p\2\0\0\0\0\0\0p\2\0\0\0\0\0\314>\0\0\0\0\0\0\314>\0\0\0\0\0\0\0\20\0\0\0\0\0\0\1\0\0\0\6\0\0\0\220\275\2\0\0\0\0\0\220\275\2\0\0\0\0\0\220\275\2\0\0\0\0\08\4\0\0\0\0\0\0\30\6\0\0\0\0\0\0\0\20\0\0\0\0\0\0\2\0\0\0\6\0\0\0\260\275\2\0\0\0\0\0\260\275\2\0\0\0\0\0\260\275\2\0\0\0\0\0\0\2\0\0\0\0\0\0\0\2\0\0\0\0\0\0\10\0\0\0\0\0\0\0\4\0\0\0\4\0\0\0\250\2\0\0\0\0\0\0\250\2\0\0\0\0\0\0\250\2\0\0\0\0\0\0$\0\0\0\0\0\0\0$\0\0\0\0\0\0\0\4\0\0\0\0\0\0\0\4\0\0\0\4\0\0\0`\256\2\0\0\0\0\0`\256\2\0\0\0\0\0`\256\2\0\0\0\0\0l\0\0\0\0\0\0\0l\0\0\0\0\0\0\0\4\0\0\0\0\0\0\0\7\0\0\0\4\0\0\0\220\275\2\0\0\0\0\0\220\275\2\0\0\0\0\0\220\275\2\0\0\0\0\0\0\0\0\0\0\0\0\0\10\0\0\0\0\0\0\0\10\0\0\0\0\0\0\0P\345td\4\0\0\0D{\2\0\0\0\0\0D{\2\0\0\0\0\0D{\2\0\0\0\0\0\34\10\0\0\0\0\0\0\34\10\0\0\0\0\0\0\4\0\0\0\0\0\0\0Q\345td\6\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\20\0\0\0\0\0\0\0R\345td\4\0\0\0\220\275\2\0\0\0\0\0\220\275\2\0\0\0\0\0\220\275\2\0\0\0\0\0p\2\0\0\0\0\0\0p\2\0\0\0\0\0\0\1\0\0\0\0\0\0\0\4\0\0\0\24\0\0\0\3\0\0\0GNU\0\22\355\333vJ\234N<\232\331\233>d\\\275 e!\257\7\0\0\0\0\305\0\0\0\33\0\0\0 \0\0\0\v\0\0\0\0D\3\0D\4\0\0\1\301\"D\0A\210@\200D \6 \10\0(\"@N\2\0\2A\260\2\0\21\0\0\0\10\0004@\240\10\210\10\202\210X\1\0\0\0\1\26 6\0\204%l\200$\260\3\350\f\0R\0\4`\0\0\t\300\0\0\20@0\10\0\200\1B\f\20\4 \4\0\0p\0 ", 832) = 832
+26551 fstat(3</usr/lib/x86_64-linux-gnu/libgcc_s.so.1>, {st_mode=S_IFREG|0644, st_size=182856, ...}) = 0
+26551 mmap(NULL, 181160, PROT_READ, MAP_PRIVATE|MAP_DENYWRITE, 3</usr/lib/x86_64-linux-gnu/libgcc_s.so.1>, 0) = 0x7fe4b8750000
+26551 mmap(0x7fe4b8754000, 143360, PROT_READ|PROT_EXEC, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3</usr/lib/x86_64-linux-gnu/libgcc_s.so.1>, 0x4000) = 0x7fe4b8754000
+26551 mmap(0x7fe4b8777000, 16384, PROT_READ, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3</usr/lib/x86_64-linux-gnu/libgcc_s.so.1>, 0x27000) = 0x7fe4b8777000
+26551 mmap(0x7fe4b877b000, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3</usr/lib/x86_64-linux-gnu/libgcc_s.so.1>, 0x2b000) = 0x7fe4b877b000
+26551 close(3</usr/lib/x86_64-linux-gnu/libgcc_s.so.1>) = 0
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libc.so.6>
+26551 read(3</usr/lib/x86_64-linux-gnu/libc.so.6>, "\177ELF\2\1\1\3\0\0\0\0\0\0\0\0\3\0>\0\1\0\0\0p\236\2\0\0\0\0\0@\0\0\0\0\0\0\0\220b\36\0\0\0\0\0\0\0\0\0@\08\0\17\0@\0=\0<\0\6\0\0\0\4\0\0\0@\0\0\0\0\0\0\0@\0\0\0\0\0\0\0@\0\0\0\0\0\0\0H\3\0\0\0\0\0\0H\3\0\0\0\0\0\0\10\0\0\0\0\0\0\0\3\0\0\0\4\0\0\0\240\1\36\0\0\0\0\0\240\1\36\0\0\0\0\0\240\1\36\0\0\0\0\0\34\0\0\0\0\0\0\0\34\0\0\0\0\0\0\0\20\0\0\0\0\0\0\0\1\0\0\0\4\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0Hu\2\0\0\0\0\0Hu\2\0\0\0\0\0\0\20\0\0\0\0\0\0\1\0\0\0\5\0\0\0\0\200\2\0\0\0\0\0\0\200\2\0\0\0\0\0\0\200\2\0\0\0\0\0=&\26\0\0\0\0\0=&\26\0\0\0\0\0\0\20\0\0\0\0\0\0\1\0\0\0\4\0\0\0\0\260\30\0\0\0\0\0\0\260\30\0\0\0\0\0\0\260\30\0\0\0\0\0\274Q\5\0\0\0\0\0\274Q\5\0\0\0\0\0\0\20\0\0\0\0\0\0\1\0\0\0\6\0\0\0\240\v\36\0\0\0\0\0\240\33\36\0\0\0\0\0\240\33\36\0\0\0\0\0(K\0\0\0\0\0\0\260\"\1\0\0\0\0\0\0\20\0\0\0\0\0\0\2\0\0\0\6\0\0\0@9\36\0\0\0\0\0@I\36\0\0\0\0\0@I\36\0\0\0\0\0@\2\0\0\0\0\0\0@\2\0\0\0\0\0\0\10\0\0\0\0\0\0\0\4\0\0\0\4\0\0\0\210\3\0\0\0\0\0\0\210\3\0\0\0\0\0\0\210\3\0\0\0\0\0\0 \0\0\0\0\0\0\0 \0\0\0\0\0\0\0\10\0\0\0\0\0\0\0\4\0\0\0\4\0\0\0\250\3\0\0\0\0\0\0\250\3\0\0\0\0\0\0\250\3\0\0\0\0\0\0$\0\0\0\0\0\0\0$\0\0\0\0\0\0\0\4\0\0\0\0\0\0\0\4\0\0\0\4\0\0\0\34\1\36\0\0\0\0\0\34\1\36\0\0\0\0\0\34\1\36\0\0\0\0\0 \0\0\0\0\0\0\0 \0\0\0\0\0\0\0\4\0\0\0\0\0\0\0\7\0\0\0\4\0\0\0\240\v\36\0\0\0\0\0\240\33\36\0\0\0\0\0\240\33\36\0\0\0\0\0(\0\0\0\0\0\0\0\210\0\0\0\0\0\0\0\10\0\0\0\0\0\0\0S\345td\4\0\0\0\210\3\0\0\0\0\0\0\210\3\0\0\0\0\0\0\210\3\0\0\0\0\0\0 \0\0\0\0\0\0\0 \0\0\0\0\0\0\0\10\0\0\0\0\0\0\0P\345td\4\0\0\0\300\17\33\0\0\0\0\0\300\17\33\0\0\0\0\0\300\17\33\0\0\0\0\0\334y\0\0\0\0\0\0\334y\0\0\0\0\0\0\4\0\0\0\0\0\0\0Q\345td\6\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 832) = 832
+26551 pread64(3</usr/lib/x86_64-linux-gnu/libc.so.6>, "\6\0\0\0\4\0\0\0@\0\0\0\0\0\0\0@\0\0\0\0\0\0\0@\0\0\0\0\0\0\0H\3\0\0\0\0\0\0H\3\0\0\0\0\0\0\10\0\0\0\0\0\0\0\3\0\0\0\4\0\0\0\240\1\36\0\0\0\0\0\240\1\36\0\0\0\0\0\240\1\36\0\0\0\0\0\34\0\0\0\0\0\0\0\34\0\0\0\0\0\0\0\20\0\0\0\0\0\0\0\1\0\0\0\4\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0Hu\2\0\0\0\0\0Hu\2\0\0\0\0\0\0\20\0\0\0\0\0\0\1\0\0\0\5\0\0\0\0\200\2\0\0\0\0\0\0\200\2\0\0\0\0\0\0\200\2\0\0\0\0\0=&\26\0\0\0\0\0=&\26\0\0\0\0\0\0\20\0\0\0\0\0\0\1\0\0\0\4\0\0\0\0\260\30\0\0\0\0\0\0\260\30\0\0\0\0\0\0\260\30\0\0\0\0\0\274Q\5\0\0\0\0\0\274Q\5\0\0\0\0\0\0\20\0\0\0\0\0\0\1\0\0\0\6\0\0\0\240\v\36\0\0\0\0\0\240\33\36\0\0\0\0\0\240\33\36\0\0\0\0\0(K\0\0\0\0\0\0\260\"\1\0\0\0\0\0\0\20\0\0\0\0\0\0\2\0\0\0\6\0\0\0@9\36\0\0\0\0\0@I\36\0\0\0\0\0@I\36\0\0\0\0\0@\2\0\0\0\0\0\0@\2\0\0\0\0\0\0\10\0\0\0\0\0\0\0\4\0\0\0\4\0\0\0\210\3\0\0\0\0\0\0\210\3\0\0\0\0\0\0\210\3\0\0\0\0\0\0 \0\0\0\0\0\0\0 \0\0\0\0\0\0\0\10\0\0\0\0\0\0\0\4\0\0\0\4\0\0\0\250\3\0\0\0\0\0\0\250\3\0\0\0\0\0\0\250\3\0\0\0\0\0\0$\0\0\0\0\0\0\0$\0\0\0\0\0\0\0\4\0\0\0\0\0\0\0\4\0\0\0\4\0\0\0\34\1\36\0\0\0\0\0\34\1\36\0\0\0\0\0\34\1\36\0\0\0\0\0 \0\0\0\0\0\0\0 \0\0\0\0\0\0\0\4\0\0\0\0\0\0\0\7\0\0\0\4\0\0\0\240\v\36\0\0\0\0\0\240\33\36\0\0\0\0\0\240\33\36\0\0\0\0\0(\0\0\0\0\0\0\0\210\0\0\0\0\0\0\0\10\0\0\0\0\0\0\0S\345td\4\0\0\0\210\3\0\0\0\0\0\0\210\3\0\0\0\0\0\0\210\3\0\0\0\0\0\0 \0\0\0\0\0\0\0 \0\0\0\0\0\0\0\10\0\0\0\0\0\0\0P\345td\4\0\0\0\300\17\33\0\0\0\0\0\300\17\33\0\0\0\0\0\300\17\33\0\0\0\0\0\334y\0\0\0\0\0\0\334y\0\0\0\0\0\0\4\0\0\0\0\0\0\0Q\345td\6\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\20\0\0\0\0\0\0\0R\345td\4\0\0\0\240\v\36\0\0\0\0\0\240\33\36\0\0\0\0\0\240\33\36\0\0\0\0\0`4\0\0\0\0\0\0`4\0\0\0\0\0\0\1\0\0\0\0\0\0\0", 840, 64) = 840
+26551 fstat(3</usr/lib/x86_64-linux-gnu/libc.so.6>, {st_mode=S_IFREG|0755, st_size=1995216, ...}) = 0
+26551 pread64(3</usr/lib/x86_64-linux-gnu/libc.so.6>, "\6\0\0\0\4\0\0\0@\0\0\0\0\0\0\0@\0\0\0\0\0\0\0@\0\0\0\0\0\0\0H\3\0\0\0\0\0\0H\3\0\0\0\0\0\0\10\0\0\0\0\0\0\0\3\0\0\0\4\0\0\0\240\1\36\0\0\0\0\0\240\1\36\0\0\0\0\0\240\1\36\0\0\0\0\0\34\0\0\0\0\0\0\0\34\0\0\0\0\0\0\0\20\0\0\0\0\0\0\0\1\0\0\0\4\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0Hu\2\0\0\0\0\0Hu\2\0\0\0\0\0\0\20\0\0\0\0\0\0\1\0\0\0\5\0\0\0\0\200\2\0\0\0\0\0\0\200\2\0\0\0\0\0\0\200\2\0\0\0\0\0=&\26\0\0\0\0\0=&\26\0\0\0\0\0\0\20\0\0\0\0\0\0\1\0\0\0\4\0\0\0\0\260\30\0\0\0\0\0\0\260\30\0\0\0\0\0\0\260\30\0\0\0\0\0\274Q\5\0\0\0\0\0\274Q\5\0\0\0\0\0\0\20\0\0\0\0\0\0\1\0\0\0\6\0\0\0\240\v\36\0\0\0\0\0\240\33\36\0\0\0\0\0\240\33\36\0\0\0\0\0(K\0\0\0\0\0\0\260\"\1\0\0\0\0\0\0\20\0\0\0\0\0\0\2\0\0\0\6\0\0\0@9\36\0\0\0\0\0@I\36\0\0\0\0\0@I\36\0\0\0\0\0@\2\0\0\0\0\0\0@\2\0\0\0\0\0\0\10\0\0\0\0\0\0\0\4\0\0\0\4\0\0\0\210\3\0\0\0\0\0\0\210\3\0\0\0\0\0\0\210\3\0\0\0\0\0\0 \0\0\0\0\0\0\0 \0\0\0\0\0\0\0\10\0\0\0\0\0\0\0\4\0\0\0\4\0\0\0\250\3\0\0\0\0\0\0\250\3\0\0\0\0\0\0\250\3\0\0\0\0\0\0$\0\0\0\0\0\0\0$\0\0\0\0\0\0\0\4\0\0\0\0\0\0\0\4\0\0\0\4\0\0\0\34\1\36\0\0\0\0\0\34\1\36\0\0\0\0\0\34\1\36\0\0\0\0\0 \0\0\0\0\0\0\0 \0\0\0\0\0\0\0\4\0\0\0\0\0\0\0\7\0\0\0\4\0\0\0\240\v\36\0\0\0\0\0\240\33\36\0\0\0\0\0\240\33\36\0\0\0\0\0(\0\0\0\0\0\0\0\210\0\0\0\0\0\0\0\10\0\0\0\0\0\0\0S\345td\4\0\0\0\210\3\0\0\0\0\0\0\210\3\0\0\0\0\0\0\210\3\0\0\0\0\0\0 \0\0\0\0\0\0\0 \0\0\0\0\0\0\0\10\0\0\0\0\0\0\0P\345td\4\0\0\0\300\17\33\0\0\0\0\0\300\17\33\0\0\0\0\0\300\17\33\0\0\0\0\0\334y\0\0\0\0\0\0\334y\0\0\0\0\0\0\4\0\0\0\0\0\0\0Q\345td\6\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\20\0\0\0\0\0\0\0R\345td\4\0\0\0\240\v\36\0\0\0\0\0\240\33\36\0\0\0\0\0\240\33\36\0\0\0\0\0`4\0\0\0\0\0\0`4\0\0\0\0\0\0\1\0\0\0\0\0\0\0", 840, 64) = 840
+26551 mmap(NULL, 2047568, PROT_READ, MAP_PRIVATE|MAP_DENYWRITE, 3</usr/lib/x86_64-linux-gnu/libc.so.6>, 0) = 0x7fe4b855c000
+26551 mmap(0x7fe4b8584000, 1454080, PROT_READ|PROT_EXEC, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3</usr/lib/x86_64-linux-gnu/libc.so.6>, 0x28000) = 0x7fe4b8584000
+26551 mmap(0x7fe4b86e7000, 352256, PROT_READ, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3</usr/lib/x86_64-linux-gnu/libc.so.6>, 0x18b000) = 0x7fe4b86e7000
+26551 mmap(0x7fe4b873d000, 24576, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3</usr/lib/x86_64-linux-gnu/libc.so.6>, 0x1e0000) = 0x7fe4b873d000
+26551 mmap(0x7fe4b8743000, 52816, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_ANONYMOUS, -1, 0) = 0x7fe4b8743000
+26551 close(3</usr/lib/x86_64-linux-gnu/libc.so.6>) = 0
+26551 mmap(NULL, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7fe4b855a000
+26551 mmap(NULL, 12288, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7fe4b8557000
+26551 arch_prctl(ARCH_SET_FS, 0x7fe4b8558540) = 0
+26551 set_tid_address(0x7fe4b8558810)   = 26551
+26551 set_robust_list(0x7fe4b8558820, 24) = 0
+26551 rseq(0x7fe4b8557680, 0x20, 0, 0x53053053) = 0
+26551 mprotect(0x7fe4b873d000, 16384, PROT_READ) = 0
+26551 mprotect(0x7fe4b877b000, 4096, PROT_READ) = 0
+26551 mprotect(0x7fe4b886b000, 4096, PROT_READ) = 0
+26551 mprotect(0x55bf0d63c000, 892928, PROT_READ) = 0
+26551 mprotect(0x7fe4b88ce000, 8192, PROT_READ) = 0
+26551 prlimit64(0, RLIMIT_STACK, NULL, {rlim_cur=8192*1024, rlim_max=RLIM64_INFINITY}) = 0
+26551 munmap(0x7fe4b886d000, 141191)    = 0
+26551 rt_sigaction(SIGPIPE, {sa_handler=SIG_IGN, sa_mask=[PIPE], sa_flags=SA_RESTORER|SA_RESTART, sa_restorer=0x7fe4b859bd70}, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGXFSZ, {sa_handler=SIG_IGN, sa_mask=[XFSZ], sa_flags=SA_RESTORER|SA_RESTART, sa_restorer=0x7fe4b859bd70}, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGINT, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGINT, {sa_handler=0x55bf0bd6dc60, sa_mask=[], sa_flags=SA_RESTORER|SA_ONSTACK, sa_restorer=0x7fe4b859bd70}, NULL, 8) = 0
+26551 getrandom("\x39\xf4\x34\x3c\x30\x8d\x16\xdb", 8, GRND_NONBLOCK) = 8
+26551 brk(NULL)                         = 0x55bf27d8c000
+26551 brk(0x55bf27dad000)               = 0x55bf27dad000
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/usr/lib/locale/locale-archive", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/usr/share/locale/locale.alias", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/usr/lib/locale/C.UTF-8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/usr/lib/locale/C.utf8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_CTYPE>
+26551 fstat(3</usr/lib/locale/C.utf8/LC_CTYPE>, {st_mode=S_IFREG|0644, st_size=367708, ...}) = 0
+26551 mmap(NULL, 367708, PROT_READ, MAP_PRIVATE, 3</usr/lib/locale/C.utf8/LC_CTYPE>, 0) = 0x7fe4b84fd000
+26551 close(3</usr/lib/locale/C.utf8/LC_CTYPE>) = 0
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache>
+26551 fstat(3</usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache>, {st_mode=S_IFREG|0644, st_size=27028, ...}) = 0
+26551 mmap(NULL, 27028, PROT_READ, MAP_SHARED, 3</usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache>, 0) = 0x7fe4b8889000
+26551 close(3</usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache>) = 0
+26551 futex(0x7fe4b874272c, FUTEX_WAKE_PRIVATE, 2147483647) = 0
+26551 rt_sigprocmask(SIG_BLOCK, ~[], [], 8) = 0
+26551 mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_DROPPABLE|MAP_ANONYMOUS, -1, 0) = 0x7fe4b8888000
+26551 mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7fe4b8887000
+26551 rt_sigprocmask(SIG_SETMASK, [], NULL, 8) = 0
+26551 getrandom("\xa2\x13\xeb\x34\x04\x3f\xb1\x78\x2e\x45\xa0\x1f\xf0\xfa\xed\x37\x7f\x43\x82\x65\x46\x99\x04\x97\x4d\xc5\x0e\xa0\x89\x19\x8b\x33", 32, 0) = 32
+26551 readlink("/proc/self/exe", "/workspace/scratch/ruff06-controls-959/build/ruff06-O0", 256) = 54
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/pyvenv.cfg", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffeafad59b0) = -1 ENOENT (No such file or directory)
+26551 statx(0</dev/null<char 1:3>>, NULL, AT_STATX_SYNC_AS_STAT, STATX_ALL, NULL) = -1 EFAULT (Bad address)
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/pyvenv.cfg", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffeafad59b0) = -1 ENOENT (No such file or directory)
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/tools/bin/python3", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffeafad5bb0) = -1 ENOENT (No such file or directory)
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3</proc/26551/maps>
+26551 prlimit64(0, RLIMIT_STACK, NULL, {rlim_cur=8192*1024, rlim_max=RLIM64_INFINITY}) = 0
+26551 fstat(3</proc/26551/maps>, {st_mode=S_IFREG|0444, st_size=0, ...}) = 0
+26551 read(3</proc/26551/maps>, "55bf087f9000-55bf088d9000 r--p 00000000 00:1b 668895                     /workspace/scratch/ruff06-controls-959/build/ruff06-O0\n55bf088d9000-55bf0c6a0000 r-xp 000e0000 00:1b 668895                     /workspace/scratch/ruff06-controls-959/build/ruff06-O0\n55bf0c6a0000-55bf0d63c000 r--p 03ea7000 00:1b 668895                     /workspace/scratch/ruff06-controls-959/build/ruff06-O0\n55bf0d63c000-55bf0d716000 r--p 04e42000 00:1b 668895                     /workspace/scratch/ruff06-controls-959/build/ruff06-O0\n55bf0d716000-55bf0d71a000 rw-p 04f1c000 00:1b 668895                     /workspace/scratch/ruff06-controls-959/build/ruff06-O0\n55bf0d71a000-55bf0d780000 rw-p 00000000 00:00 0 \n55bf27d8c000-55bf27dad000 rw-p 00000000 00:00 0                          [heap]\n7fe4b84fd000-7fe4b8557000 r--p 00000000 00:1b 9223372036855104632        /usr/lib/locale/C.utf8/LC_CTYPE\n7fe4b8557000-7fe4b855c000 rw-p 00000000 00:00 0 \n7fe4b855c000-7fe4b8584000 r--p 00000000 00:1b 9223372036855308267        /usr/lib/x86_64-linux-gnu/li", 1024) = 1024
+26551 read(3</proc/26551/maps>, "bc.so.6\n7fe4b8584000-7fe4b86e7000 r-xp 00028000 00:1b 9223372036855308267        /usr/lib/x86_64-linux-gnu/libc.so.6\n7fe4b86e7000-7fe4b873d000 r--p 0018b000 00:1b 9223372036855308267        /usr/lib/x86_64-linux-gnu/libc.so.6\n7fe4b873d000-7fe4b8741000 r--p 001e0000 00:1b 9223372036855308267        /usr/lib/x86_64-linux-gnu/libc.so.6\n7fe4b8741000-7fe4b8743000 rw-p 001e4000 00:1b 9223372036855308267        /usr/lib/x86_64-linux-gnu/libc.so.6\n7fe4b8743000-7fe4b8750000 rw-p 00000000 00:00 0 \n7fe4b8750000-7fe4b8754000 r--p 00000000 00:1b 9223372036855315278        /usr/lib/x86_64-linux-gnu/libgcc_s.so.1\n7fe4b8754000-7fe4b8777000 r-xp 00004000 00:1b 9223372036855315278        /usr/lib/x86_64-linux-gnu/libgcc_s.so.1\n7fe4b8777000-7fe4b877b000 r--p 00027000 00:1b 9223372036855315278        /usr/lib/x86_64-linux-gnu/libgcc_s.so.1\n7fe4b877b000-7fe4b877c000 r--p 0002b000 00:1b 9223372036855315278        /usr/lib/x86_64-linux-gnu/libgcc_s.so.1\n7fe4b877c000-7fe4b877d000 rw-p 0002c000 00:1b 9223372036855315278        /usr/l", 1024) = 1024
+26551 read(3</proc/26551/maps>, "ib/x86_64-linux-gnu/libgcc_s.so.1\n7fe4b877d000-7fe4b878e000 r--p 00000000 00:1b 9223372036855316405        /usr/lib/x86_64-linux-gnu/libm.so.6\n7fe4b878e000-7fe4b880b000 r-xp 00011000 00:1b 9223372036855316405        /usr/lib/x86_64-linux-gnu/libm.so.6\n7fe4b880b000-7fe4b886b000 r--p 0008e000 00:1b 9223372036855316405        /usr/lib/x86_64-linux-gnu/libm.so.6\n7fe4b886b000-7fe4b886c000 r--p 000ed000 00:1b 9223372036855316405        /usr/lib/x86_64-linux-gnu/libm.so.6\n7fe4b886c000-7fe4b886d000 rw-p 000ee000 00:1b 9223372036855316405        /usr/lib/x86_64-linux-gnu/libm.so.6\n7fe4b8887000-7fe4b8888000 rw-p 00000000 00:00 0 \n7fe4b8888000-7fe4b8889000 rw-p 00000000 00:00 0 \n7fe4b8889000-7fe4b8890000 r--s 00000000 00:1b 9223372036855326122        /usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache\n7fe4b8890000-7fe4b8892000 rw-p 00000000 00:00 0 \n7fe4b8892000-7fe4b8896000 r--p 00000000 00:00 0                          [vvar]\n7fe4b8896000-7fe4b8898000 r--p 00000000 00:00 0                          [vvar_vclock]\n7fe4b8", 1024) = 1024
+26551 read(3</proc/26551/maps>, "898000-7fe4b889a000 r-xp 00000000 00:00 0                          [vdso]\n7fe4b889a000-7fe4b889b000 r--p 00000000 00:1b 9223372036855313004        /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2\n7fe4b889b000-7fe4b88c3000 r-xp 00001000 00:1b 9223372036855313004        /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2\n7fe4b88c3000-7fe4b88ce000 r--p 00029000 00:1b 9223372036855313004        /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2\n7fe4b88ce000-7fe4b88d0000 r--p 00034000 00:1b 9223372036855313004        /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2\n7fe4b88d0000-7fe4b88d1000 rw-p 00036000 00:1b 9223372036855313004        /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2\n7fe4b88d1000-7fe4b88d2000 rw-p 00000000 00:00 0 \n7ffeafabd000-7ffeafade000 rw-p 00000000 00:00 0                          [stack]\n", 1024) = 804
+26551 close(3</proc/26551/maps>)        = 0
+26551 sched_getaffinity(26551, 32, [0 1 2 3 4]) = 32
+26551 mmap(NULL, 143360, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7fe4b84da000
+26551 mremap(0x7fe4b84da000, 143360, 286720, MREMAP_MAYMOVE) = 0x7fe4b8494000
+26551 brk(0x55bf27dd3000)               = 0x55bf27dd3000
+26551 brk(0x55bf27dfe000)               = 0x55bf27dfe000
+26551 mremap(0x7fe4b8494000, 286720, 569344, MREMAP_MAYMOVE) = 0x7fe4b8409000
+26551 fcntl(1</workspace/scratch/ruff06-controls-959/recapture/O0-invalid.stdout>, F_GETFD) = 0
+26551 fstat(1</workspace/scratch/ruff06-controls-959/recapture/O0-invalid.stdout>, {st_mode=S_IFREG|0600, st_size=0, ...}) = 0
+26551 fstat(2</workspace/scratch/ruff06-controls-959/recapture/O0-invalid.stderr>, {st_mode=S_IFREG|0600, st_size=0, ...}) = 0
+26551 ioctl(1</workspace/scratch/ruff06-controls-959/recapture/O0-invalid.stdout>, TCGETS, 0x7ffeafad9c60) = -1 ENOTTY (Inappropriate ioctl for device)
+26551 mmap(NULL, 135168, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7fe4b84dc000
+26551 lseek(1</workspace/scratch/ruff06-controls-959/recapture/O0-invalid.stdout>, 0, SEEK_CUR) = 0
+26551 lseek(1</workspace/scratch/ruff06-controls-959/recapture/O0-invalid.stdout>, 0, SEEK_CUR) = 0
+26551 fcntl(2</workspace/scratch/ruff06-controls-959/recapture/O0-invalid.stderr>, F_GETFD) = 0
+26551 mmap(NULL, 135168, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7fe4b84bb000
+26551 lseek(2</workspace/scratch/ruff06-controls-959/recapture/O0-invalid.stderr>, 0, SEEK_CUR) = 0
+26551 lseek(2</workspace/scratch/ruff06-controls-959/recapture/O0-invalid.stderr>, 0, SEEK_CUR) = 0
+26551 fstat(0</dev/null<char 1:3>>, {st_mode=S_IFCHR|0666, st_rdev=makedev(0x1, 0x3), ...}) = 0
+26551 ioctl(0</dev/null<char 1:3>>, TCGETS, 0x7ffeafad9860) = -1 ENOTTY (Inappropriate ioctl for device)
+26551 mmap(NULL, 135168, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7fe4b849a000
+26551 lseek(0</dev/null<char 1:3>>, 0, SEEK_CUR) = 0
+26551 lseek(0</dev/null<char 1:3>>, 0, SEEK_CUR) = 0
+26551 rt_sigaction(SIGHUP, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGINT, NULL, {sa_handler=0x55bf0bd6dc60, sa_mask=[], sa_flags=SA_RESTORER|SA_ONSTACK, sa_restorer=0x7fe4b859bd70}, 8) = 0
+26551 rt_sigaction(SIGQUIT, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGILL, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGTRAP, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigprocmask(SIG_BLOCK, ~[], [], 8) = 0
+26551 rt_sigaction(SIGABRT, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigprocmask(SIG_SETMASK, [], NULL, 8) = 0
+26551 rt_sigaction(SIGBUS, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGFPE, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGKILL, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGUSR1, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGSEGV, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGUSR2, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGPIPE, NULL, {sa_handler=SIG_IGN, sa_mask=[PIPE], sa_flags=SA_RESTORER|SA_RESTART, sa_restorer=0x7fe4b859bd70}, 8) = 0
+26551 rt_sigaction(SIGALRM, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGTERM, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGSTKFLT, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGCHLD, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGCONT, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGSTOP, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGTSTP, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGTTIN, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGTTOU, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGURG, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGXCPU, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGXFSZ, NULL, {sa_handler=SIG_IGN, sa_mask=[XFSZ], sa_flags=SA_RESTORER|SA_RESTART, sa_restorer=0x7fe4b859bd70}, 8) = 0
+26551 rt_sigaction(SIGVTALRM, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGPROF, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGWINCH, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGIO, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGPWR, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGSYS, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_2, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_3, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_4, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_5, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_6, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_7, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_8, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_9, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_10, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_11, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_12, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_13, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_14, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_15, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_16, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_17, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_18, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_19, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_20, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_21, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_22, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_23, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_24, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_25, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_26, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_27, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_28, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_29, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_30, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_31, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 rt_sigaction(SIGRT_32, NULL, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=0}, 8) = 0
+26551 getpid()                          = 26551
+26551 brk(0x55bf27e21000)               = 0x55bf27e21000
+26551 gettid()                          = 26551
+26551 getpid()                          = 26551
+26551 mremap(0x7fe4b8409000, 569344, 1134592, MREMAP_MAYMOVE) = 0x7fe4b82f4000
+26551 brk(0x55bf27e42000)               = 0x55bf27e42000
+26551 brk(0x55bf27e68000)               = 0x55bf27e68000
+26551 brk(0x55bf27e64000)               = 0x55bf27e64000
+26551 brk(0x55bf27e85000)               = 0x55bf27e85000
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFDIR|0700, stx_size=60, ...}) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFDIR|0700, stx_size=60, ...}) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 open("/dev/shm/ruff06-selective-959-work/scripts", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3</dev/shm/ruff06-selective-959-work/scripts>
+26551 getdents64(3</dev/shm/ruff06-selective-959-work/scripts>, 0x55bf27db1c10 /* 3 entries */, 768) = 88
+26551 getdents64(3</dev/shm/ruff06-selective-959-work/scripts>, 0x55bf27e731c0 /* 0 entries */, 1536) = 0
+26551 close(3</dev/shm/ruff06-selective-959-work/scripts>) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFDIR|0700, stx_size=4096, ...}) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFDIR|0700, stx_size=4096, ...}) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 open("/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages>
+26551 getdents64(3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages>, 0x55bf27db1c10 /* 4 entries */, 768) = 128
+26551 getdents64(3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages>, 0x55bf27e79d90 /* 0 entries */, 1536) = 0
+26551 close(3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages>) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 brk(0x55bf27eab000)               = 0x55bf27eab000
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 brk(0x55bf27ecc000)               = 0x55bf27ecc000
+26551 mremap(0x7fe4b82f4000, 1134592, 2265088, MREMAP_MAYMOVE) = 0x7fe4b80cb000
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27ead01c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 brk(0x55bf27eed000)               = 0x55bf27eed000
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27e5c48c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27df828c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27e68a9c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27e79c6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 brk(0x55bf27f13000)               = 0x55bf27f13000
+26551 brk(0x55bf27f3d000)               = 0x55bf27f3d000
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 mmap(NULL, 139264, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7fe4b8478000
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27e299ec, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27ebf12c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 brk(0x55bf27f5f000)               = 0x55bf27f5f000
+26551 brk(0x55bf27f4e000)               = 0x55bf27f4e000
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0/<imre stdlib>/encodings", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffeafac1a20) = -1 ENOTDIR (Not a directory)
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0/<imre stdlib>", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffeafac1a20) = -1 ENOTDIR (Not a directory)
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0700, stx_size=179083104, ...}) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0700, stx_size=179083104, ...}) = 0
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0", O_RDONLY|O_CLOEXEC) = 3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>
+26551 statx(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, "", AT_STATX_SYNC_AS_STAT|AT_EMPTY_PATH, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0700, stx_size=179083104, ...}) = 0
+26551 lseek(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, 0, SEEK_END) = 179083104
+26551 lseek(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, 179083082, SEEK_SET) = 179083082
+26551 read(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, "\0\0\0\0\0\0\1\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 131072) = 22
+26551 brk(0x55bf27f7e000)               = 0x55bf27f7e000
+26551 lseek(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, 179017547, SEEK_SET) = 179017547
+26551 read(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, "69952313284\0renameat@GLIBC_2.4\0anon.796c3940b72e81cdc1ac829a4e2f31f6.2525.llvm.16016827632121481873\0_RNvXNtNtCs9k3SxhrAWiO_3std6thread9spawnhookNtB2_10SpawnHooksNtNtNtCsgxBkk5gSRhY_4core3ops4drop4Drop4drop\0anon.f0a443fe29c504176ce40eb184bfbdc9.491.llvm.18037591509071266527\0_RNvXs1i_NtCsgxBkk5gSRhY_4core3fmtReNtB6_7Display3fmtCsi9wrW4eh4th_18ruff_python_parser\0anon.f3c26555575d93af76bc6c04661ef75f.488.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.2540.llvm.15301920392740967874\0anon.fd0c6b5b25fc9a89a247212a3424acb4.2287.llvm.12133740947535200394\0_RNvNtCs8jn5LUtWOfk_11fancy_regex8optimize8optimize\0anon.68de02c135683f62fdd093375d341427.1138.llvm.17513284703405043441\0_RINvMs6_NtCsfBDUjroi3FF_9hashbrown3rawINtB6_8RawTableTReINtCs8Rp3VC93YWm_8smallvec8SmallVecANtNtCs7Lg7Lz3BclQ_12imre_runtime7dynamic12SourceModulej1_EEE14reserve_rehashNCINvNtB8_3map11make_hasherBQ_BS_NtNtNtCs9k3SxhrAWiO_3std4hash6random11RandomStateE0EB1w_\0_RINvMs4_NtNtCs7Lg7Lz3BclQ_12imre_runtime7objects10exceptionsNtB6_5Error9returningPINtNtCs6i54tJFfzR_5alloc3vec3VechEEBa_\0_RNvXsC_NtNtCsgxBkk5gSRhY_4core3fmt3numyNtB7_8LowerHex3fmt\0anon.f3c26555575d93af76bc6c04661ef75f.2007.llvm.15301920392740967874\0_RINvNtNtNtNtCs9k3SxhrAWiO_3std3sys12thread_local6native4lazy7destroyINtNtCsgxBkk5gSRhY_4core4cell4CellINtNtB19_6option6OptionNtNtNtNtBa_4sync4mpmc7context7ContextEEECs7Lg7Lz3BclQ_12imre_runtime.llvm.5095218771516660167\0anon.395597854e3fb088bfbc5976a079dc42.611.llvm.9298986710489202831\0_RNvXs1g_NtCsgxBkk5gSRhY_4core3fmtRNtNtNtB8_3str5error9Utf8ErrorNtB6_5Debug3fmtCs2JLEhpG1SSx_12regex_syntax\0anon.f0a443fe29c504176ce40eb184bfbdc9.142.llvm.18037591509071266527\0anon.11a415ed82a484889781dd14c3c2dbfa.517.llvm.10979525377491740450\0_RINvNtNtNtNtCs9k3SxhrAWiO_3std3sys12thread_local6native5eager7destroyINtNtCsgxBkk5gSRhY_4core4cell7RefCellINtNtB1a_6option6OptionNtCs7EDWlxvTbzJ_11compact_str13CompactStringEEECs7Lg7Lz3BclQ_12imre_runtime.llvm.8275279562883879647\0anon.aaf6fe3b0896617c6d5f031751b59d88.14.llvm.17647512369952313284\0lzma_block_header_encode\0_RNvMsC_NtNtCs7Lg7Lz3BclQ_12imre_runtime7dynamic5valueNtB5_4Heap14string_literal\0anon.fd0c6b5b25fc9a89a247212a3424acb4.2290.llvm.12133740947535200394\0anon.f3c26555575d93af76bc6c04661ef75f.1250.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.1066.llvm.15301920392740967874\0anon.632c4ae355ba5f986667965fbe4908fa.1265.llvm.3549551529596501623\0anon.68de02c135683f62fdd093375d341427.617.llvm.17513284703405043441\0anon.f3c26555575d93af76bc6c04661ef75f.260.llvm.15301920392740967874\0_RNvNtCsjxL817pu4LV_7zlib_rs7inflate3end\0anon.632c4ae355ba5f986667965fbe4908fa.150.llvm.3549551529596501623\0anon.f3c26555575d93af76bc6c04661ef75f.1933.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.177.llvm.15301920392740967874\0anon.2ce8ae8f0c641710f2bc85535565c3b5.615.llvm.6319453254338536280\0_RNvMs5_Csavl3rjvtPfD_9zstd_safeNtB5_4DCtx10try_create\0anon.6e3124d61d595021f8f42f54d25e4719.16.llvm.3470938742781324233\0anon.f3c26555575d93af76bc6c04661ef75f.1433.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.1753.llvm.15301920392740967874\0_RINvMs3_NtNtNtCsgxBkk5gSRhY_4core4iter8adapters8peekableINtB6_8PeekableINtNtB8_9enumerate9EnumerateNtNtNtBc_3str4iter5CharsEE7next_ifNCINvMs3_NtNtCs7Lg7Lz3BclQ_12imre_runtime7objects6codecsNtB2g_5Codec6encodeNCINvMNtNtB2i_5files8bufferedNtB3q_6Output10write_textNCNvB2k_11output_text0Es0_0Es1_0EB2k_\0anon.f0a443fe29c504176ce40eb184bfbdc9.3805.llvm.18037591509071266527\0anon.f3c26555575d93af76bc6c04661ef75f.1457.llvm.15301920392740967874\0_RNvXsX_NtNtCsgxBkk5gSRhY_4core3fmt3numyNtB7_5Debug3fmt.llvm.6801077712591931481\0_RNvXs1g_NtCsgxBkk5gSRhY_4core3fmtRINtNtCs6i54tJFfzR_5alloc4sync3ArceENtB6_5Debug3fmtCsg53N6LnFLqw_14regex_automata\0anon.f3c26555575d93af76bc6c04661ef75f.2042.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.2924.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.1716.llvm.15301920392740967874\0_RNvMs6_NtNtCsgxBkk5gSRhY_4core3fmt8buildersNtB5_8DebugMap6finish\0_RNvNtCsjxL817pu4LV_7zlib_rs7deflate4init\0anon.aaf6fe3b0896617c6d5f03175"..., 131072) = 65557
+26551 brk(0x55bf27f6e000)               = 0x55bf27f6e000
+26551 brk(0x55bf27f4e000)               = 0x55bf27f4e000
+26551 close(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0/<imre stdlib>/encodings", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffeafac2e60) = -1 ENOTDIR (Not a directory)
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 brk(0x55bf27f6f000)               = 0x55bf27f6f000
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/usr/share/zoneinfo/UTC", O_RDONLY|O_CLOEXEC) = 3</usr/share/zoneinfo/Etc/UTC>
+26551 fstat(3</usr/share/zoneinfo/Etc/UTC>, {st_mode=S_IFREG|0644, st_size=114, ...}) = 0
+26551 fstat(3</usr/share/zoneinfo/Etc/UTC>, {st_mode=S_IFREG|0644, st_size=114, ...}) = 0
+26551 brk(0x55bf27f90000)               = 0x55bf27f90000
+26551 read(3</usr/share/zoneinfo/Etc/UTC>, "TZif2\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\1\0\0\0\4\0\0\0\0\0\0UTC\0TZif2\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\1\0\0\0\4\0\0\0\0\0\0UTC\0\nUTC0\n", 4096) = 114
+26551 lseek(3</usr/share/zoneinfo/Etc/UTC>, -60, SEEK_CUR) = 54
+26551 read(3</usr/share/zoneinfo/Etc/UTC>, "TZif2\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\1\0\0\0\4\0\0\0\0\0\0UTC\0\nUTC0\n", 4096) = 60
+26551 close(3</usr/share/zoneinfo/Etc/UTC>) = 0
+26551 brk(0x55bf27f8f000)               = 0x55bf27f8f000
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 mremap(0x7fe4b80cb000, 2265088, 4526080, MREMAP_MAYMOVE) = 0x7fe4b7c7a000
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 brk(0x55bf27fb0000)               = 0x55bf27fb0000
+26551 getpid()                          = 26551
+26551 brk(0x55bf27fe4000)               = 0x55bf27fe4000
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 brk(0x55bf28016000)               = 0x55bf28016000
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27f8aa4c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 brk(0x55bf28039000)               = 0x55bf28039000
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 mmap(NULL, 208896, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7fe4b8445000
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27fa305c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 mmap(NULL, 135168, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7fe4b8424000
+26551 mmap(NULL, 135168, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7fe4b8403000
+26551 munmap(0x7fe4b8424000, 135168)    = 0
+26551 munmap(0x7fe4b8403000, 135168)    = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3</proc/26551/cgroup>
+26551 statx(3</proc/26551/cgroup>, "", AT_STATX_SYNC_AS_STAT|AT_EMPTY_PATH, STATX_ALL, {stx_mask=STATX_BASIC_STATS|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0444, stx_size=0, ...}) = 0
+26551 lseek(3</proc/26551/cgroup>, 0, SEEK_CUR) = 0
+26551 read(3</proc/26551/cgroup>, "0::/\n", 128) = 5
+26551 read(3</proc/26551/cgroup>, "", 123) = 0
+26551 close(3</proc/26551/cgroup>)      = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/sys/fs/cgroup/cgroup.controllers", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_BASIC_STATS|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0444, stx_size=0, ...}) = 0
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3</sys/fs/cgroup/cpu.max>
+26551 statx(3</sys/fs/cgroup/cpu.max>, "", AT_STATX_SYNC_AS_STAT|AT_EMPTY_PATH, STATX_ALL, {stx_mask=STATX_BASIC_STATS|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0644, stx_size=0, ...}) = 0
+26551 lseek(3</sys/fs/cgroup/cpu.max>, 0, SEEK_CUR) = 0
+26551 read(3</sys/fs/cgroup/cpu.max>, "400000 100000\n", 32) = 14
+26551 read(3</sys/fs/cgroup/cpu.max>, "", 6) = 0
+26551 close(3</sys/fs/cgroup/cpu.max>)  = 0
+26551 sched_getaffinity(0, 128, [0 1 2 3 4]) = 32
+26551 mremap(0x7fe4b8478000, 139264, 278528, MREMAP_MAYMOVE) = 0x7fe4b8401000
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27fd99fc, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 mmap(NULL, 139264, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7fe4b8478000
+26551 mmap(NULL, 139264, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7fe4b83df000
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0/<imre stdlib>/pathlib", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffeafacd3b0) = -1 ENOTDIR (Not a directory)
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0/<imre stdlib>", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffeafacd3b0) = -1 ENOTDIR (Not a directory)
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0700, stx_size=179083104, ...}) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0700, stx_size=179083104, ...}) = 0
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0", O_RDONLY|O_CLOEXEC) = 3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>
+26551 statx(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, "", AT_STATX_SYNC_AS_STAT|AT_EMPTY_PATH, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0700, stx_size=179083104, ...}) = 0
+26551 lseek(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, 0, SEEK_END) = 179083104
+26551 lseek(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, 179083082, SEEK_SET) = 179083082
+26551 read(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, "\0\0\0\0\0\0\1\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 131072) = 22
+26551 lseek(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, 179017547, SEEK_SET) = 179017547
+26551 read(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, "69952313284\0renameat@GLIBC_2.4\0anon.796c3940b72e81cdc1ac829a4e2f31f6.2525.llvm.16016827632121481873\0_RNvXNtNtCs9k3SxhrAWiO_3std6thread9spawnhookNtB2_10SpawnHooksNtNtNtCsgxBkk5gSRhY_4core3ops4drop4Drop4drop\0anon.f0a443fe29c504176ce40eb184bfbdc9.491.llvm.18037591509071266527\0_RNvXs1i_NtCsgxBkk5gSRhY_4core3fmtReNtB6_7Display3fmtCsi9wrW4eh4th_18ruff_python_parser\0anon.f3c26555575d93af76bc6c04661ef75f.488.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.2540.llvm.15301920392740967874\0anon.fd0c6b5b25fc9a89a247212a3424acb4.2287.llvm.12133740947535200394\0_RNvNtCs8jn5LUtWOfk_11fancy_regex8optimize8optimize\0anon.68de02c135683f62fdd093375d341427.1138.llvm.17513284703405043441\0_RINvMs6_NtCsfBDUjroi3FF_9hashbrown3rawINtB6_8RawTableTReINtCs8Rp3VC93YWm_8smallvec8SmallVecANtNtCs7Lg7Lz3BclQ_12imre_runtime7dynamic12SourceModulej1_EEE14reserve_rehashNCINvNtB8_3map11make_hasherBQ_BS_NtNtNtCs9k3SxhrAWiO_3std4hash6random11RandomStateE0EB1w_\0_RINvMs4_NtNtCs7Lg7Lz3BclQ_12imre_runtime7objects10exceptionsNtB6_5Error9returningPINtNtCs6i54tJFfzR_5alloc3vec3VechEEBa_\0_RNvXsC_NtNtCsgxBkk5gSRhY_4core3fmt3numyNtB7_8LowerHex3fmt\0anon.f3c26555575d93af76bc6c04661ef75f.2007.llvm.15301920392740967874\0_RINvNtNtNtNtCs9k3SxhrAWiO_3std3sys12thread_local6native4lazy7destroyINtNtCsgxBkk5gSRhY_4core4cell4CellINtNtB19_6option6OptionNtNtNtNtBa_4sync4mpmc7context7ContextEEECs7Lg7Lz3BclQ_12imre_runtime.llvm.5095218771516660167\0anon.395597854e3fb088bfbc5976a079dc42.611.llvm.9298986710489202831\0_RNvXs1g_NtCsgxBkk5gSRhY_4core3fmtRNtNtNtB8_3str5error9Utf8ErrorNtB6_5Debug3fmtCs2JLEhpG1SSx_12regex_syntax\0anon.f0a443fe29c504176ce40eb184bfbdc9.142.llvm.18037591509071266527\0anon.11a415ed82a484889781dd14c3c2dbfa.517.llvm.10979525377491740450\0_RINvNtNtNtNtCs9k3SxhrAWiO_3std3sys12thread_local6native5eager7destroyINtNtCsgxBkk5gSRhY_4core4cell7RefCellINtNtB1a_6option6OptionNtCs7EDWlxvTbzJ_11compact_str13CompactStringEEECs7Lg7Lz3BclQ_12imre_runtime.llvm.8275279562883879647\0anon.aaf6fe3b0896617c6d5f031751b59d88.14.llvm.17647512369952313284\0lzma_block_header_encode\0_RNvMsC_NtNtCs7Lg7Lz3BclQ_12imre_runtime7dynamic5valueNtB5_4Heap14string_literal\0anon.fd0c6b5b25fc9a89a247212a3424acb4.2290.llvm.12133740947535200394\0anon.f3c26555575d93af76bc6c04661ef75f.1250.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.1066.llvm.15301920392740967874\0anon.632c4ae355ba5f986667965fbe4908fa.1265.llvm.3549551529596501623\0anon.68de02c135683f62fdd093375d341427.617.llvm.17513284703405043441\0anon.f3c26555575d93af76bc6c04661ef75f.260.llvm.15301920392740967874\0_RNvNtCsjxL817pu4LV_7zlib_rs7inflate3end\0anon.632c4ae355ba5f986667965fbe4908fa.150.llvm.3549551529596501623\0anon.f3c26555575d93af76bc6c04661ef75f.1933.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.177.llvm.15301920392740967874\0anon.2ce8ae8f0c641710f2bc85535565c3b5.615.llvm.6319453254338536280\0_RNvMs5_Csavl3rjvtPfD_9zstd_safeNtB5_4DCtx10try_create\0anon.6e3124d61d595021f8f42f54d25e4719.16.llvm.3470938742781324233\0anon.f3c26555575d93af76bc6c04661ef75f.1433.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.1753.llvm.15301920392740967874\0_RINvMs3_NtNtNtCsgxBkk5gSRhY_4core4iter8adapters8peekableINtB6_8PeekableINtNtB8_9enumerate9EnumerateNtNtNtBc_3str4iter5CharsEE7next_ifNCINvMs3_NtNtCs7Lg7Lz3BclQ_12imre_runtime7objects6codecsNtB2g_5Codec6encodeNCINvMNtNtB2i_5files8bufferedNtB3q_6Output10write_textNCNvB2k_11output_text0Es0_0Es1_0EB2k_\0anon.f0a443fe29c504176ce40eb184bfbdc9.3805.llvm.18037591509071266527\0anon.f3c26555575d93af76bc6c04661ef75f.1457.llvm.15301920392740967874\0_RNvXsX_NtNtCsgxBkk5gSRhY_4core3fmt3numyNtB7_5Debug3fmt.llvm.6801077712591931481\0_RNvXs1g_NtCsgxBkk5gSRhY_4core3fmtRINtNtCs6i54tJFfzR_5alloc4sync3ArceENtB6_5Debug3fmtCsg53N6LnFLqw_14regex_automata\0anon.f3c26555575d93af76bc6c04661ef75f.2042.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.2924.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.1716.llvm.15301920392740967874\0_RNvMs6_NtNtCsgxBkk5gSRhY_4core3fmt8buildersNtB5_8DebugMap6finish\0_RNvNtCsjxL817pu4LV_7zlib_rs7deflate4init\0anon.aaf6fe3b0896617c6d5f03175"..., 131072) = 65557
+26551 close(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0/<imre stdlib>/pathlib", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffeaface7f0) = -1 ENOTDIR (Not a directory)
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27f0e05c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 mremap(0x7fe4b8478000, 139264, 151552, MREMAP_MAYMOVE) = 0x7fe4b83ba000
+26551 mremap(0x7fe4b83df000, 139264, 151552, MREMAP_MAYMOVE) = 0x7fe4b8395000
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFDIR|0700, stx_size=4096, ...}) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFDIR|0700, stx_size=4096, ...}) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 open("/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec>
+26551 getdents64(3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec>, 0x55bf27f1c300 /* 14 entries */, 768) = 432
+26551 getdents64(3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec>, 0x55bf27fe09f0 /* 0 entries */, 1536) = 0
+26551 close(3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec>) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/gitignore.py", {st_mode=S_IFREG|0600, st_size=5698, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27fe5f9c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27e344bc, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27f0cddc, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27fecdcc, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27efa72c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27faa86c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27fdf6ac, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27e3432c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27f06b1c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27fe577c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27f07e4c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27ed654c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27f965ec, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27f965ec, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27f965ec, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 brk(0x55bf2805a000)               = 0x55bf2805a000
+26551 brk(0x55bf2807b000)               = 0x55bf2807b000
+26551 mremap(0x7fe4b83ba000, 151552, 172032, MREMAP_MAYMOVE) = 0x7fe4b83ba000
+26551 mremap(0x7fe4b8395000, 151552, 172032, MREMAP_MAYMOVE) = 0x7fe4b836b000
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf280565fc, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27fe92ac, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/backend.py", {st_mode=S_IFREG|0600, st_size=1470, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27fe870c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/pattern.py", {st_mode=S_IFREG|0600, st_size=7269, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf2805e9cc, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_typing.py", {st_mode=S_IFREG|0600, st_size=1756, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf28069d8c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 brk(0x55bf2809c000)               = 0x55bf2809c000
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 mmap(NULL, 180224, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7fe4b833f000
+26551 mmap(NULL, 180224, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7fe4b8313000
+26551 munmap(0x7fe4b833f000, 180224)    = 0
+26551 munmap(0x7fe4b8313000, 180224)    = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf2808d25c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 brk(0x55bf280bd000)               = 0x55bf280bd000
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 mremap(0x7fe4b7c7a000, 4526080, 9048064, MREMAP_MAYMOVE) = 0x7fe4b73d9000
+26551 brk(0x55bf280de000)               = 0x55bf280de000
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 brk(0x55bf280ff000)               = 0x55bf280ff000
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf280e7cbc, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 mremap(0x7fe4b83ba000, 172032, 208896, MREMAP_MAYMOVE) = 0x7fe4b83ba000
+26551 mremap(0x7fe4b836b000, 172032, 208896, MREMAP_MAYMOVE) = 0x7fe4b836b000
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 mmap(NULL, 323584, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7fe4b831c000
+26551 brk(0x55bf28120000)               = 0x55bf28120000
+26551 munmap(0x7fe4b831c000, 323584)    = 0
+26551 brk(0x55bf2814e000)               = 0x55bf2814e000
+26551 brk(0x55bf28171000)               = 0x55bf28171000
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf2807a4ac, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFDIR|0700, stx_size=4096, ...}) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFDIR|0700, stx_size=4096, ...}) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 open("/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends>
+26551 getdents64(3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends>, 0x55bf28109f50 /* 8 entries */, 768) = 232
+26551 getdents64(3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends>, 0x55bf280ae290 /* 0 entries */, 1536) = 0
+26551 close(3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends>) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/agg.py", {st_mode=S_IFREG|0600, st_size=2505, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/hyperscan", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFDIR|0700, stx_size=4096, ...}) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/hyperscan", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFDIR|0700, stx_size=4096, ...}) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/hyperscan", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 open("/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/hyperscan", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/hyperscan>
+26551 getdents64(3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/hyperscan>, 0x55bf28109f50 /* 7 entries */, 768) = 208
+26551 getdents64(3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/hyperscan>, 0x55bf2811e820 /* 0 entries */, 1536) = 0
+26551 close(3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/hyperscan>) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/hyperscan/base.py", {st_mode=S_IFREG|0600, st_size=673, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 mremap(0x7fe4b83ba000, 208896, 217088, MREMAP_MAYMOVE) = 0x7fe4b83ba000
+26551 mremap(0x7fe4b836b000, 208896, 217088, MREMAP_MAYMOVE) = 0x7fe4b836b000
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/hyperscan", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/hyperscan/gitignore.py", {st_mode=S_IFREG|0600, st_size=6963, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf280654dc, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf2812fd2c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf2812482c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/patterns", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFDIR|0700, stx_size=4096, ...}) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/patterns", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFDIR|0700, stx_size=4096, ...}) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf280df78c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf280c925c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/patterns/gitignore", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFDIR|0700, stx_size=4096, ...}) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/patterns/gitignore", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFDIR|0700, stx_size=4096, ...}) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/patterns/gitignore", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 open("/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/patterns/gitignore", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/patterns/gitignore>
+26551 getdents64(3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/patterns/gitignore>, 0x55bf28109f50 /* 6 entries */, 768) = 176
+26551 getdents64(3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/patterns/gitignore>, 0x55bf2811bfa0 /* 0 entries */, 1536) = 0
+26551 close(3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/patterns/gitignore>) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/patterns/gitignore/base.py", {st_mode=S_IFREG|0600, st_size=5639, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/patterns/gitignore", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/patterns/gitignore/basic.py", {st_mode=S_IFREG|0600, st_size=10131, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf2812080c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf280c925c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/util.py", {st_mode=S_IFREG|0600, st_size=25551, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf2807478c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf2812522c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/patterns/gitignore", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/patterns/gitignore/spec.py", {st_mode=S_IFREG|0600, st_size=10598, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf280efdec, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf2812771c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf280a5f0c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/patterns", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 open("/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/patterns", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/patterns>
+26551 getdents64(3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/patterns>, 0x55bf280f4d10 /* 5 entries */, 768) = 152
+26551 getdents64(3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/patterns>, 0x55bf2811ef70 /* 0 entries */, 1536) = 0
+26551 close(3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/patterns>) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/patterns/gitwildmatch.py", {st_mode=S_IFREG|0600, st_size=1463, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf28121d5c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/hyperscan", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/hyperscan/_base.py", {st_mode=S_IFREG|0600, st_size=1773, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 brk(0x55bf28192000)               = 0x55bf28192000
+26551 mremap(0x7fe4b83ba000, 217088, 225280, MREMAP_MAYMOVE) = 0x7fe4b83ba000
+26551 mremap(0x7fe4b836b000, 217088, 225280, MREMAP_MAYMOVE) = 0x7fe4b836b000
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/hyperscan", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/hyperscan/pathspec.py", {st_mode=S_IFREG|0600, st_size=6803, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/_utils.py", {st_mode=S_IFREG|0600, st_size=1066, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/re2", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFDIR|0700, stx_size=4096, ...}) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/re2", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFDIR|0700, stx_size=4096, ...}) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/re2", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 open("/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/re2", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/re2>
+26551 getdents64(3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/re2>, 0x55bf280f4d10 /* 7 entries */, 768) = 208
+26551 getdents64(3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/re2>, 0x55bf28175290 /* 0 entries */, 1536) = 0
+26551 close(3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/re2>) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/re2/base.py", {st_mode=S_IFREG|0600, st_size=488, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/re2", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/re2/_base.py", {st_mode=S_IFREG|0600, st_size=2299, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/re2", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/re2/gitignore.py", {st_mode=S_IFREG|0600, st_size=5237, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/re2", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/re2/pathspec.py", {st_mode=S_IFREG|0600, st_size=5063, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/simple", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFDIR|0700, stx_size=4096, ...}) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/simple", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFDIR|0700, stx_size=4096, ...}) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/simple", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 open("/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/simple", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/simple>
+26551 getdents64(3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/simple>, 0x55bf280f4d10 /* 5 entries */, 768) = 144
+26551 getdents64(3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/simple>, 0x55bf27ee1170 /* 0 entries */, 1536) = 0
+26551 close(3</workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/simple>) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/simple/gitignore.py", {st_mode=S_IFREG|0600, st_size=2893, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/simple", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_backends/simple/pathspec.py", {st_mode=S_IFREG|0600, st_size=2095, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf2816871c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/pathspec.py", {st_mode=S_IFREG|0600, st_size=16892, ...}, 0) = 0
+26551 brk(0x55bf281d2000)               = 0x55bf281d2000
+26551 brk(0x55bf28208000)               = 0x55bf28208000
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf28134d6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf281725ac, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_meta.py", {st_mode=S_IFREG|0600, st_size=3073, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf2818326c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages/pathspec/_version.py", {st_mode=S_IFREG|0600, st_size=64, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev", AT_STATX_SYNC_AS_STAT|AT_SYMLINK_NOFOLLOW, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=STATX_ATTR_MOUNT_ROOT, stx_mode=S_IFDIR|0755, stx_size=360, ...}) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm", AT_STATX_SYNC_AS_STAT|AT_SYMLINK_NOFOLLOW, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=STATX_ATTR_MOUNT_ROOT, stx_mode=S_IFDIR|S_ISVTX|0777, stx_size=100, ...}) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work", AT_STATX_SYNC_AS_STAT|AT_SYMLINK_NOFOLLOW, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFDIR|0700, stx_size=140, ...}) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", AT_STATX_SYNC_AS_STAT|AT_SYMLINK_NOFOLLOW, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFDIR|0700, stx_size=60, ...}) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts/check-scripts.py", AT_STATX_SYNC_AS_STAT|AT_SYMLINK_NOFOLLOW, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0444, stx_size=66, ...}) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "share/locale/C.UTF-8/LC_MESSAGES/messages.mo", 0x7ffeafad5828, 0) = -1 ENOENT (No such file or directory)
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "share/locale/C.UTF-8/LC_MESSAGES/messages.mo", 0x7ffeafad5828, 0) = -1 ENOENT (No such file or directory)
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "share/locale/C.UTF-8/LC_MESSAGES/messages.mo", 0x7ffeafad5828, 0) = -1 ENOENT (No such file or directory)
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 mremap(0x7fe4b83ba000, 225280, 241664, MREMAP_MAYMOVE) = 0x7fe4b83ba000
+26551 mremap(0x7fe4b836b000, 225280, 241664, MREMAP_MAYMOVE) = 0x7fe4b836b000
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0/<imre stdlib>/compression", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffeafac2610) = -1 ENOTDIR (Not a directory)
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0/<imre stdlib>", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffeafac2610) = -1 ENOTDIR (Not a directory)
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0700, stx_size=179083104, ...}) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0700, stx_size=179083104, ...}) = 0
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0", O_RDONLY|O_CLOEXEC) = 3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>
+26551 statx(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, "", AT_STATX_SYNC_AS_STAT|AT_EMPTY_PATH, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0700, stx_size=179083104, ...}) = 0
+26551 lseek(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, 0, SEEK_END) = 179083104
+26551 lseek(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, 179083082, SEEK_SET) = 179083082
+26551 read(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, "\0\0\0\0\0\0\1\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 131072) = 22
+26551 lseek(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, 179017547, SEEK_SET) = 179017547
+26551 read(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, "69952313284\0renameat@GLIBC_2.4\0anon.796c3940b72e81cdc1ac829a4e2f31f6.2525.llvm.16016827632121481873\0_RNvXNtNtCs9k3SxhrAWiO_3std6thread9spawnhookNtB2_10SpawnHooksNtNtNtCsgxBkk5gSRhY_4core3ops4drop4Drop4drop\0anon.f0a443fe29c504176ce40eb184bfbdc9.491.llvm.18037591509071266527\0_RNvXs1i_NtCsgxBkk5gSRhY_4core3fmtReNtB6_7Display3fmtCsi9wrW4eh4th_18ruff_python_parser\0anon.f3c26555575d93af76bc6c04661ef75f.488.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.2540.llvm.15301920392740967874\0anon.fd0c6b5b25fc9a89a247212a3424acb4.2287.llvm.12133740947535200394\0_RNvNtCs8jn5LUtWOfk_11fancy_regex8optimize8optimize\0anon.68de02c135683f62fdd093375d341427.1138.llvm.17513284703405043441\0_RINvMs6_NtCsfBDUjroi3FF_9hashbrown3rawINtB6_8RawTableTReINtCs8Rp3VC93YWm_8smallvec8SmallVecANtNtCs7Lg7Lz3BclQ_12imre_runtime7dynamic12SourceModulej1_EEE14reserve_rehashNCINvNtB8_3map11make_hasherBQ_BS_NtNtNtCs9k3SxhrAWiO_3std4hash6random11RandomStateE0EB1w_\0_RINvMs4_NtNtCs7Lg7Lz3BclQ_12imre_runtime7objects10exceptionsNtB6_5Error9returningPINtNtCs6i54tJFfzR_5alloc3vec3VechEEBa_\0_RNvXsC_NtNtCsgxBkk5gSRhY_4core3fmt3numyNtB7_8LowerHex3fmt\0anon.f3c26555575d93af76bc6c04661ef75f.2007.llvm.15301920392740967874\0_RINvNtNtNtNtCs9k3SxhrAWiO_3std3sys12thread_local6native4lazy7destroyINtNtCsgxBkk5gSRhY_4core4cell4CellINtNtB19_6option6OptionNtNtNtNtBa_4sync4mpmc7context7ContextEEECs7Lg7Lz3BclQ_12imre_runtime.llvm.5095218771516660167\0anon.395597854e3fb088bfbc5976a079dc42.611.llvm.9298986710489202831\0_RNvXs1g_NtCsgxBkk5gSRhY_4core3fmtRNtNtNtB8_3str5error9Utf8ErrorNtB6_5Debug3fmtCs2JLEhpG1SSx_12regex_syntax\0anon.f0a443fe29c504176ce40eb184bfbdc9.142.llvm.18037591509071266527\0anon.11a415ed82a484889781dd14c3c2dbfa.517.llvm.10979525377491740450\0_RINvNtNtNtNtCs9k3SxhrAWiO_3std3sys12thread_local6native5eager7destroyINtNtCsgxBkk5gSRhY_4core4cell7RefCellINtNtB1a_6option6OptionNtCs7EDWlxvTbzJ_11compact_str13CompactStringEEECs7Lg7Lz3BclQ_12imre_runtime.llvm.8275279562883879647\0anon.aaf6fe3b0896617c6d5f031751b59d88.14.llvm.17647512369952313284\0lzma_block_header_encode\0_RNvMsC_NtNtCs7Lg7Lz3BclQ_12imre_runtime7dynamic5valueNtB5_4Heap14string_literal\0anon.fd0c6b5b25fc9a89a247212a3424acb4.2290.llvm.12133740947535200394\0anon.f3c26555575d93af76bc6c04661ef75f.1250.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.1066.llvm.15301920392740967874\0anon.632c4ae355ba5f986667965fbe4908fa.1265.llvm.3549551529596501623\0anon.68de02c135683f62fdd093375d341427.617.llvm.17513284703405043441\0anon.f3c26555575d93af76bc6c04661ef75f.260.llvm.15301920392740967874\0_RNvNtCsjxL817pu4LV_7zlib_rs7inflate3end\0anon.632c4ae355ba5f986667965fbe4908fa.150.llvm.3549551529596501623\0anon.f3c26555575d93af76bc6c04661ef75f.1933.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.177.llvm.15301920392740967874\0anon.2ce8ae8f0c641710f2bc85535565c3b5.615.llvm.6319453254338536280\0_RNvMs5_Csavl3rjvtPfD_9zstd_safeNtB5_4DCtx10try_create\0anon.6e3124d61d595021f8f42f54d25e4719.16.llvm.3470938742781324233\0anon.f3c26555575d93af76bc6c04661ef75f.1433.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.1753.llvm.15301920392740967874\0_RINvMs3_NtNtNtCsgxBkk5gSRhY_4core4iter8adapters8peekableINtB6_8PeekableINtNtB8_9enumerate9EnumerateNtNtNtBc_3str4iter5CharsEE7next_ifNCINvMs3_NtNtCs7Lg7Lz3BclQ_12imre_runtime7objects6codecsNtB2g_5Codec6encodeNCINvMNtNtB2i_5files8bufferedNtB3q_6Output10write_textNCNvB2k_11output_text0Es0_0Es1_0EB2k_\0anon.f0a443fe29c504176ce40eb184bfbdc9.3805.llvm.18037591509071266527\0anon.f3c26555575d93af76bc6c04661ef75f.1457.llvm.15301920392740967874\0_RNvXsX_NtNtCsgxBkk5gSRhY_4core3fmt3numyNtB7_5Debug3fmt.llvm.6801077712591931481\0_RNvXs1g_NtCsgxBkk5gSRhY_4core3fmtRINtNtCs6i54tJFfzR_5alloc4sync3ArceENtB6_5Debug3fmtCsg53N6LnFLqw_14regex_automata\0anon.f3c26555575d93af76bc6c04661ef75f.2042.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.2924.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.1716.llvm.15301920392740967874\0_RNvMs6_NtNtCsgxBkk5gSRhY_4core3fmt8buildersNtB5_8DebugMap6finish\0_RNvNtCsjxL817pu4LV_7zlib_rs7deflate4init\0anon.aaf6fe3b0896617c6d5f03175"..., 131072) = 65557
+26551 close(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0/<imre stdlib>/compression", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffeafac3a50) = -1 ENOTDIR (Not a directory)
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0/<imre stdlib>/compression/_common", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffeafabf8d0) = -1 ENOTDIR (Not a directory)
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0/<imre stdlib>/compression", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffeafabf8d0) = -1 ENOTDIR (Not a directory)
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0/<imre stdlib>", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffeafabf8d0) = -1 ENOTDIR (Not a directory)
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0700, stx_size=179083104, ...}) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0700, stx_size=179083104, ...}) = 0
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0", O_RDONLY|O_CLOEXEC) = 3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>
+26551 statx(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, "", AT_STATX_SYNC_AS_STAT|AT_EMPTY_PATH, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0700, stx_size=179083104, ...}) = 0
+26551 lseek(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, 0, SEEK_END) = 179083104
+26551 lseek(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, 179083082, SEEK_SET) = 179083082
+26551 read(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, "\0\0\0\0\0\0\1\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 131072) = 22
+26551 lseek(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, 179017547, SEEK_SET) = 179017547
+26551 read(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, "69952313284\0renameat@GLIBC_2.4\0anon.796c3940b72e81cdc1ac829a4e2f31f6.2525.llvm.16016827632121481873\0_RNvXNtNtCs9k3SxhrAWiO_3std6thread9spawnhookNtB2_10SpawnHooksNtNtNtCsgxBkk5gSRhY_4core3ops4drop4Drop4drop\0anon.f0a443fe29c504176ce40eb184bfbdc9.491.llvm.18037591509071266527\0_RNvXs1i_NtCsgxBkk5gSRhY_4core3fmtReNtB6_7Display3fmtCsi9wrW4eh4th_18ruff_python_parser\0anon.f3c26555575d93af76bc6c04661ef75f.488.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.2540.llvm.15301920392740967874\0anon.fd0c6b5b25fc9a89a247212a3424acb4.2287.llvm.12133740947535200394\0_RNvNtCs8jn5LUtWOfk_11fancy_regex8optimize8optimize\0anon.68de02c135683f62fdd093375d341427.1138.llvm.17513284703405043441\0_RINvMs6_NtCsfBDUjroi3FF_9hashbrown3rawINtB6_8RawTableTReINtCs8Rp3VC93YWm_8smallvec8SmallVecANtNtCs7Lg7Lz3BclQ_12imre_runtime7dynamic12SourceModulej1_EEE14reserve_rehashNCINvNtB8_3map11make_hasherBQ_BS_NtNtNtCs9k3SxhrAWiO_3std4hash6random11RandomStateE0EB1w_\0_RINvMs4_NtNtCs7Lg7Lz3BclQ_12imre_runtime7objects10exceptionsNtB6_5Error9returningPINtNtCs6i54tJFfzR_5alloc3vec3VechEEBa_\0_RNvXsC_NtNtCsgxBkk5gSRhY_4core3fmt3numyNtB7_8LowerHex3fmt\0anon.f3c26555575d93af76bc6c04661ef75f.2007.llvm.15301920392740967874\0_RINvNtNtNtNtCs9k3SxhrAWiO_3std3sys12thread_local6native4lazy7destroyINtNtCsgxBkk5gSRhY_4core4cell4CellINtNtB19_6option6OptionNtNtNtNtBa_4sync4mpmc7context7ContextEEECs7Lg7Lz3BclQ_12imre_runtime.llvm.5095218771516660167\0anon.395597854e3fb088bfbc5976a079dc42.611.llvm.9298986710489202831\0_RNvXs1g_NtCsgxBkk5gSRhY_4core3fmtRNtNtNtB8_3str5error9Utf8ErrorNtB6_5Debug3fmtCs2JLEhpG1SSx_12regex_syntax\0anon.f0a443fe29c504176ce40eb184bfbdc9.142.llvm.18037591509071266527\0anon.11a415ed82a484889781dd14c3c2dbfa.517.llvm.10979525377491740450\0_RINvNtNtNtNtCs9k3SxhrAWiO_3std3sys12thread_local6native5eager7destroyINtNtCsgxBkk5gSRhY_4core4cell7RefCellINtNtB1a_6option6OptionNtCs7EDWlxvTbzJ_11compact_str13CompactStringEEECs7Lg7Lz3BclQ_12imre_runtime.llvm.8275279562883879647\0anon.aaf6fe3b0896617c6d5f031751b59d88.14.llvm.17647512369952313284\0lzma_block_header_encode\0_RNvMsC_NtNtCs7Lg7Lz3BclQ_12imre_runtime7dynamic5valueNtB5_4Heap14string_literal\0anon.fd0c6b5b25fc9a89a247212a3424acb4.2290.llvm.12133740947535200394\0anon.f3c26555575d93af76bc6c04661ef75f.1250.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.1066.llvm.15301920392740967874\0anon.632c4ae355ba5f986667965fbe4908fa.1265.llvm.3549551529596501623\0anon.68de02c135683f62fdd093375d341427.617.llvm.17513284703405043441\0anon.f3c26555575d93af76bc6c04661ef75f.260.llvm.15301920392740967874\0_RNvNtCsjxL817pu4LV_7zlib_rs7inflate3end\0anon.632c4ae355ba5f986667965fbe4908fa.150.llvm.3549551529596501623\0anon.f3c26555575d93af76bc6c04661ef75f.1933.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.177.llvm.15301920392740967874\0anon.2ce8ae8f0c641710f2bc85535565c3b5.615.llvm.6319453254338536280\0_RNvMs5_Csavl3rjvtPfD_9zstd_safeNtB5_4DCtx10try_create\0anon.6e3124d61d595021f8f42f54d25e4719.16.llvm.3470938742781324233\0anon.f3c26555575d93af76bc6c04661ef75f.1433.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.1753.llvm.15301920392740967874\0_RINvMs3_NtNtNtCsgxBkk5gSRhY_4core4iter8adapters8peekableINtB6_8PeekableINtNtB8_9enumerate9EnumerateNtNtNtBc_3str4iter5CharsEE7next_ifNCINvMs3_NtNtCs7Lg7Lz3BclQ_12imre_runtime7objects6codecsNtB2g_5Codec6encodeNCINvMNtNtB2i_5files8bufferedNtB3q_6Output10write_textNCNvB2k_11output_text0Es0_0Es1_0EB2k_\0anon.f0a443fe29c504176ce40eb184bfbdc9.3805.llvm.18037591509071266527\0anon.f3c26555575d93af76bc6c04661ef75f.1457.llvm.15301920392740967874\0_RNvXsX_NtNtCsgxBkk5gSRhY_4core3fmt3numyNtB7_5Debug3fmt.llvm.6801077712591931481\0_RNvXs1g_NtCsgxBkk5gSRhY_4core3fmtRINtNtCs6i54tJFfzR_5alloc4sync3ArceENtB6_5Debug3fmtCsg53N6LnFLqw_14regex_automata\0anon.f3c26555575d93af76bc6c04661ef75f.2042.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.2924.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.1716.llvm.15301920392740967874\0_RNvMs6_NtNtCsgxBkk5gSRhY_4core3fmt8buildersNtB5_8DebugMap6finish\0_RNvNtCsjxL817pu4LV_7zlib_rs7deflate4init\0anon.aaf6fe3b0896617c6d5f03175"..., 131072) = 65557
+26551 close(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0/<imre stdlib>/compression/_common", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffeafac0d10) = -1 ENOTDIR (Not a directory)
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 mremap(0x7fe4b83ba000, 241664, 245760, MREMAP_MAYMOVE) = 0x7fe4b83ba000
+26551 mremap(0x7fe4b836b000, 241664, 245760, MREMAP_MAYMOVE) = 0x7fe4b836b000
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 getpid()                          = 26551
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf281c35fc, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0/<imre stdlib>/compression/zstd", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffeafac12b0) = -1 ENOTDIR (Not a directory)
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0/<imre stdlib>/compression", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffeafac12b0) = -1 ENOTDIR (Not a directory)
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0/<imre stdlib>", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffeafac12b0) = -1 ENOTDIR (Not a directory)
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0700, stx_size=179083104, ...}) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0700, stx_size=179083104, ...}) = 0
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0", O_RDONLY|O_CLOEXEC) = 3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>
+26551 statx(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, "", AT_STATX_SYNC_AS_STAT|AT_EMPTY_PATH, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0700, stx_size=179083104, ...}) = 0
+26551 lseek(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, 0, SEEK_END) = 179083104
+26551 lseek(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, 179083082, SEEK_SET) = 179083082
+26551 read(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, "\0\0\0\0\0\0\1\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 131072) = 22
+26551 brk(0x55bf2822d000)               = 0x55bf2822d000
+26551 lseek(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, 179017547, SEEK_SET) = 179017547
+26551 read(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, "69952313284\0renameat@GLIBC_2.4\0anon.796c3940b72e81cdc1ac829a4e2f31f6.2525.llvm.16016827632121481873\0_RNvXNtNtCs9k3SxhrAWiO_3std6thread9spawnhookNtB2_10SpawnHooksNtNtNtCsgxBkk5gSRhY_4core3ops4drop4Drop4drop\0anon.f0a443fe29c504176ce40eb184bfbdc9.491.llvm.18037591509071266527\0_RNvXs1i_NtCsgxBkk5gSRhY_4core3fmtReNtB6_7Display3fmtCsi9wrW4eh4th_18ruff_python_parser\0anon.f3c26555575d93af76bc6c04661ef75f.488.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.2540.llvm.15301920392740967874\0anon.fd0c6b5b25fc9a89a247212a3424acb4.2287.llvm.12133740947535200394\0_RNvNtCs8jn5LUtWOfk_11fancy_regex8optimize8optimize\0anon.68de02c135683f62fdd093375d341427.1138.llvm.17513284703405043441\0_RINvMs6_NtCsfBDUjroi3FF_9hashbrown3rawINtB6_8RawTableTReINtCs8Rp3VC93YWm_8smallvec8SmallVecANtNtCs7Lg7Lz3BclQ_12imre_runtime7dynamic12SourceModulej1_EEE14reserve_rehashNCINvNtB8_3map11make_hasherBQ_BS_NtNtNtCs9k3SxhrAWiO_3std4hash6random11RandomStateE0EB1w_\0_RINvMs4_NtNtCs7Lg7Lz3BclQ_12imre_runtime7objects10exceptionsNtB6_5Error9returningPINtNtCs6i54tJFfzR_5alloc3vec3VechEEBa_\0_RNvXsC_NtNtCsgxBkk5gSRhY_4core3fmt3numyNtB7_8LowerHex3fmt\0anon.f3c26555575d93af76bc6c04661ef75f.2007.llvm.15301920392740967874\0_RINvNtNtNtNtCs9k3SxhrAWiO_3std3sys12thread_local6native4lazy7destroyINtNtCsgxBkk5gSRhY_4core4cell4CellINtNtB19_6option6OptionNtNtNtNtBa_4sync4mpmc7context7ContextEEECs7Lg7Lz3BclQ_12imre_runtime.llvm.5095218771516660167\0anon.395597854e3fb088bfbc5976a079dc42.611.llvm.9298986710489202831\0_RNvXs1g_NtCsgxBkk5gSRhY_4core3fmtRNtNtNtB8_3str5error9Utf8ErrorNtB6_5Debug3fmtCs2JLEhpG1SSx_12regex_syntax\0anon.f0a443fe29c504176ce40eb184bfbdc9.142.llvm.18037591509071266527\0anon.11a415ed82a484889781dd14c3c2dbfa.517.llvm.10979525377491740450\0_RINvNtNtNtNtCs9k3SxhrAWiO_3std3sys12thread_local6native5eager7destroyINtNtCsgxBkk5gSRhY_4core4cell7RefCellINtNtB1a_6option6OptionNtCs7EDWlxvTbzJ_11compact_str13CompactStringEEECs7Lg7Lz3BclQ_12imre_runtime.llvm.8275279562883879647\0anon.aaf6fe3b0896617c6d5f031751b59d88.14.llvm.17647512369952313284\0lzma_block_header_encode\0_RNvMsC_NtNtCs7Lg7Lz3BclQ_12imre_runtime7dynamic5valueNtB5_4Heap14string_literal\0anon.fd0c6b5b25fc9a89a247212a3424acb4.2290.llvm.12133740947535200394\0anon.f3c26555575d93af76bc6c04661ef75f.1250.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.1066.llvm.15301920392740967874\0anon.632c4ae355ba5f986667965fbe4908fa.1265.llvm.3549551529596501623\0anon.68de02c135683f62fdd093375d341427.617.llvm.17513284703405043441\0anon.f3c26555575d93af76bc6c04661ef75f.260.llvm.15301920392740967874\0_RNvNtCsjxL817pu4LV_7zlib_rs7inflate3end\0anon.632c4ae355ba5f986667965fbe4908fa.150.llvm.3549551529596501623\0anon.f3c26555575d93af76bc6c04661ef75f.1933.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.177.llvm.15301920392740967874\0anon.2ce8ae8f0c641710f2bc85535565c3b5.615.llvm.6319453254338536280\0_RNvMs5_Csavl3rjvtPfD_9zstd_safeNtB5_4DCtx10try_create\0anon.6e3124d61d595021f8f42f54d25e4719.16.llvm.3470938742781324233\0anon.f3c26555575d93af76bc6c04661ef75f.1433.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.1753.llvm.15301920392740967874\0_RINvMs3_NtNtNtCsgxBkk5gSRhY_4core4iter8adapters8peekableINtB6_8PeekableINtNtB8_9enumerate9EnumerateNtNtNtBc_3str4iter5CharsEE7next_ifNCINvMs3_NtNtCs7Lg7Lz3BclQ_12imre_runtime7objects6codecsNtB2g_5Codec6encodeNCINvMNtNtB2i_5files8bufferedNtB3q_6Output10write_textNCNvB2k_11output_text0Es0_0Es1_0EB2k_\0anon.f0a443fe29c504176ce40eb184bfbdc9.3805.llvm.18037591509071266527\0anon.f3c26555575d93af76bc6c04661ef75f.1457.llvm.15301920392740967874\0_RNvXsX_NtNtCsgxBkk5gSRhY_4core3fmt3numyNtB7_5Debug3fmt.llvm.6801077712591931481\0_RNvXs1g_NtCsgxBkk5gSRhY_4core3fmtRINtNtCs6i54tJFfzR_5alloc4sync3ArceENtB6_5Debug3fmtCsg53N6LnFLqw_14regex_automata\0anon.f3c26555575d93af76bc6c04661ef75f.2042.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.2924.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.1716.llvm.15301920392740967874\0_RNvMs6_NtNtCsgxBkk5gSRhY_4core3fmt8buildersNtB5_8DebugMap6finish\0_RNvNtCsjxL817pu4LV_7zlib_rs7deflate4init\0anon.aaf6fe3b0896617c6d5f03175"..., 131072) = 65557
+26551 close(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0/<imre stdlib>/compression/zstd", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffeafac26f0) = -1 ENOTDIR (Not a directory)
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 ioctl(1</workspace/scratch/ruff06-controls-959/recapture/O0-invalid.stdout>, TIOCGWINSZ, 0x7ffeafad4b40) = -1 ENOTTY (Inappropriate ioctl for device)
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 mremap(0x7fe4b83ba000, 245760, 253952, MREMAP_MAYMOVE) = 0x7fe4b83ba000
+26551 mremap(0x7fe4b836b000, 245760, 253952, MREMAP_MAYMOVE) = 0x7fe4b836b000
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", {st_mode=S_IFDIR|0700, st_size=60, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0/<imre stdlib>/string", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffeafab84e0) = -1 ENOTDIR (Not a directory)
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0/<imre stdlib>", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffeafab84e0) = -1 ENOTDIR (Not a directory)
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0700, stx_size=179083104, ...}) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0700, stx_size=179083104, ...}) = 0
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0", O_RDONLY|O_CLOEXEC) = 3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>
+26551 statx(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, "", AT_STATX_SYNC_AS_STAT|AT_EMPTY_PATH, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0700, stx_size=179083104, ...}) = 0
+26551 lseek(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, 0, SEEK_END) = 179083104
+26551 lseek(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, 179083082, SEEK_SET) = 179083082
+26551 read(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, "\0\0\0\0\0\0\1\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 131072) = 22
+26551 brk(0x55bf2825b000)               = 0x55bf2825b000
+26551 lseek(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, 179017547, SEEK_SET) = 179017547
+26551 read(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>, "69952313284\0renameat@GLIBC_2.4\0anon.796c3940b72e81cdc1ac829a4e2f31f6.2525.llvm.16016827632121481873\0_RNvXNtNtCs9k3SxhrAWiO_3std6thread9spawnhookNtB2_10SpawnHooksNtNtNtCsgxBkk5gSRhY_4core3ops4drop4Drop4drop\0anon.f0a443fe29c504176ce40eb184bfbdc9.491.llvm.18037591509071266527\0_RNvXs1i_NtCsgxBkk5gSRhY_4core3fmtReNtB6_7Display3fmtCsi9wrW4eh4th_18ruff_python_parser\0anon.f3c26555575d93af76bc6c04661ef75f.488.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.2540.llvm.15301920392740967874\0anon.fd0c6b5b25fc9a89a247212a3424acb4.2287.llvm.12133740947535200394\0_RNvNtCs8jn5LUtWOfk_11fancy_regex8optimize8optimize\0anon.68de02c135683f62fdd093375d341427.1138.llvm.17513284703405043441\0_RINvMs6_NtCsfBDUjroi3FF_9hashbrown3rawINtB6_8RawTableTReINtCs8Rp3VC93YWm_8smallvec8SmallVecANtNtCs7Lg7Lz3BclQ_12imre_runtime7dynamic12SourceModulej1_EEE14reserve_rehashNCINvNtB8_3map11make_hasherBQ_BS_NtNtNtCs9k3SxhrAWiO_3std4hash6random11RandomStateE0EB1w_\0_RINvMs4_NtNtCs7Lg7Lz3BclQ_12imre_runtime7objects10exceptionsNtB6_5Error9returningPINtNtCs6i54tJFfzR_5alloc3vec3VechEEBa_\0_RNvXsC_NtNtCsgxBkk5gSRhY_4core3fmt3numyNtB7_8LowerHex3fmt\0anon.f3c26555575d93af76bc6c04661ef75f.2007.llvm.15301920392740967874\0_RINvNtNtNtNtCs9k3SxhrAWiO_3std3sys12thread_local6native4lazy7destroyINtNtCsgxBkk5gSRhY_4core4cell4CellINtNtB19_6option6OptionNtNtNtNtBa_4sync4mpmc7context7ContextEEECs7Lg7Lz3BclQ_12imre_runtime.llvm.5095218771516660167\0anon.395597854e3fb088bfbc5976a079dc42.611.llvm.9298986710489202831\0_RNvXs1g_NtCsgxBkk5gSRhY_4core3fmtRNtNtNtB8_3str5error9Utf8ErrorNtB6_5Debug3fmtCs2JLEhpG1SSx_12regex_syntax\0anon.f0a443fe29c504176ce40eb184bfbdc9.142.llvm.18037591509071266527\0anon.11a415ed82a484889781dd14c3c2dbfa.517.llvm.10979525377491740450\0_RINvNtNtNtNtCs9k3SxhrAWiO_3std3sys12thread_local6native5eager7destroyINtNtCsgxBkk5gSRhY_4core4cell7RefCellINtNtB1a_6option6OptionNtCs7EDWlxvTbzJ_11compact_str13CompactStringEEECs7Lg7Lz3BclQ_12imre_runtime.llvm.8275279562883879647\0anon.aaf6fe3b0896617c6d5f031751b59d88.14.llvm.17647512369952313284\0lzma_block_header_encode\0_RNvMsC_NtNtCs7Lg7Lz3BclQ_12imre_runtime7dynamic5valueNtB5_4Heap14string_literal\0anon.fd0c6b5b25fc9a89a247212a3424acb4.2290.llvm.12133740947535200394\0anon.f3c26555575d93af76bc6c04661ef75f.1250.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.1066.llvm.15301920392740967874\0anon.632c4ae355ba5f986667965fbe4908fa.1265.llvm.3549551529596501623\0anon.68de02c135683f62fdd093375d341427.617.llvm.17513284703405043441\0anon.f3c26555575d93af76bc6c04661ef75f.260.llvm.15301920392740967874\0_RNvNtCsjxL817pu4LV_7zlib_rs7inflate3end\0anon.632c4ae355ba5f986667965fbe4908fa.150.llvm.3549551529596501623\0anon.f3c26555575d93af76bc6c04661ef75f.1933.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.177.llvm.15301920392740967874\0anon.2ce8ae8f0c641710f2bc85535565c3b5.615.llvm.6319453254338536280\0_RNvMs5_Csavl3rjvtPfD_9zstd_safeNtB5_4DCtx10try_create\0anon.6e3124d61d595021f8f42f54d25e4719.16.llvm.3470938742781324233\0anon.f3c26555575d93af76bc6c04661ef75f.1433.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.1753.llvm.15301920392740967874\0_RINvMs3_NtNtNtCsgxBkk5gSRhY_4core4iter8adapters8peekableINtB6_8PeekableINtNtB8_9enumerate9EnumerateNtNtNtBc_3str4iter5CharsEE7next_ifNCINvMs3_NtNtCs7Lg7Lz3BclQ_12imre_runtime7objects6codecsNtB2g_5Codec6encodeNCINvMNtNtB2i_5files8bufferedNtB3q_6Output10write_textNCNvB2k_11output_text0Es0_0Es1_0EB2k_\0anon.f0a443fe29c504176ce40eb184bfbdc9.3805.llvm.18037591509071266527\0anon.f3c26555575d93af76bc6c04661ef75f.1457.llvm.15301920392740967874\0_RNvXsX_NtNtCsgxBkk5gSRhY_4core3fmt3numyNtB7_5Debug3fmt.llvm.6801077712591931481\0_RNvXs1g_NtCsgxBkk5gSRhY_4core3fmtRINtNtCs6i54tJFfzR_5alloc4sync3ArceENtB6_5Debug3fmtCsg53N6LnFLqw_14regex_automata\0anon.f3c26555575d93af76bc6c04661ef75f.2042.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.2924.llvm.15301920392740967874\0anon.f3c26555575d93af76bc6c04661ef75f.1716.llvm.15301920392740967874\0_RNvMs6_NtNtCsgxBkk5gSRhY_4core3fmt8buildersNtB5_8DebugMap6finish\0_RNvNtCsjxL817pu4LV_7zlib_rs7deflate4init\0anon.aaf6fe3b0896617c6d5f03175"..., 131072) = 65557
+26551 close(3</workspace/scratch/ruff06-controls-959/build/ruff06-O0>) = 0
+26551 statx(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/workspace/scratch/ruff06-controls-959/build/ruff06-O0/<imre stdlib>/string", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffeafab9920) = -1 ENOTDIR (Not a directory)
+26551 futex(0x55bf27db8f6c, FUTEX_WAKE_PRIVATE, 1) = 0
+26551 mremap(0x7fe4b83ba000, 253952, 258048, MREMAP_MAYMOVE) = 0x7fe4b83ba000
+26551 mremap(0x7fe4b836b000, 253952, 258048, MREMAP_MAYMOVE) = 0x7fe4b836b000
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/.gitignore", O_RDONLY|O_CLOEXEC) = 3</dev/shm/ruff06-selective-959-work/.gitignore>
+26551 fstat(3</dev/shm/ruff06-selective-959-work/.gitignore>, {st_mode=S_IFREG|0444, st_size=9, ...}) = 0
+26551 ioctl(3</dev/shm/ruff06-selective-959-work/.gitignore>, TCGETS, 0x7ffeafad2a50) = -1 ENOTTY (Inappropriate ioctl for device)
+26551 brk(0x55bf2827c000)               = 0x55bf2827c000
+26551 lseek(3</dev/shm/ruff06-selective-959-work/.gitignore>, 0, SEEK_CUR) = 0
+26551 lseek(3</dev/shm/ruff06-selective-959-work/.gitignore>, 0, SEEK_CUR) = 0
+26551 read(3</dev/shm/ruff06-selective-959-work/.gitignore>, "ignored/\n", 8192) = 9
+26551 read(3</dev/shm/ruff06-selective-959-work/.gitignore>, "", 8192) = 0
+26551 close(3</dev/shm/ruff06-selective-959-work/.gitignore>) = 0
+26551 brk(0x55bf2829e000)               = 0x55bf2829e000
+26551 brk(0x55bf282c6000)               = 0x55bf282c6000
+26551 mmap(NULL, 331776, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7fe4b831a000
+26551 mremap(0x7fe4b831a000, 331776, 659456, MREMAP_MAYMOVE) = 0x7fe4b8279000
+26551 munmap(0x7fe4b8279000, 659456)    = 0
+26551 mremap(0x7fe4b83ba000, 258048, 262144, MREMAP_MAYMOVE) = 0x7fe4b83ba000
+26551 mremap(0x7fe4b836b000, 258048, 262144, MREMAP_MAYMOVE) = 0x7fe4b836b000
+26551 brk(0x55bf282ec000)               = 0x55bf282ec000
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3</dev/shm/ruff06-selective-959-work>
+26551 fstat(3</dev/shm/ruff06-selective-959-work>, {st_mode=S_IFDIR|0700, st_size=140, ...}) = 0
+26551 getdents64(3</dev/shm/ruff06-selective-959-work>, 0x55bf28260450 /* 7 entries */, 32768) = 208
+26551 getdents64(3</dev/shm/ruff06-selective-959-work>, 0x55bf28260450 /* 0 entries */, 32768) = 0
+26551 close(3</dev/shm/ruff06-selective-959-work>) = 0
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/tools", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3</dev/shm/ruff06-selective-959-work/tools>
+26551 fstat(3</dev/shm/ruff06-selective-959-work/tools>, {st_mode=S_IFDIR|0700, st_size=60, ...}) = 0
+26551 getdents64(3</dev/shm/ruff06-selective-959-work/tools>, 0x55bf28260450 /* 3 entries */, 32768) = 80
+26551 getdents64(3</dev/shm/ruff06-selective-959-work/tools>, 0x55bf28260450 /* 0 entries */, 32768) = 0
+26551 close(3</dev/shm/ruff06-selective-959-work/tools>) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/tools/rotate.py", {st_mode=S_IFREG|0444, st_size=51, ...}, AT_SYMLINK_NOFOLLOW) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/tools/rotate.py", {st_mode=S_IFREG|0444, st_size=51, ...}, 0) = 0
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/tools/rotate.py", O_RDONLY|O_CLOEXEC) = 3</dev/shm/ruff06-selective-959-work/tools/rotate.py>
+26551 fstat(3</dev/shm/ruff06-selective-959-work/tools/rotate.py>, {st_mode=S_IFREG|0444, st_size=51, ...}) = 0
+26551 read(3</dev/shm/ruff06-selective-959-work/tools/rotate.py>, "# /// script\n# dependencies = []\n# ///\nprint(\"hi\")\n", 8192) = 51
+26551 read(3</dev/shm/ruff06-selective-959-work/tools/rotate.py>, "", 8192) = 0
+26551 close(3</dev/shm/ruff06-selective-959-work/tools/rotate.py>) = 0
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/crates", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3</dev/shm/ruff06-selective-959-work/crates>
+26551 fstat(3</dev/shm/ruff06-selective-959-work/crates>, {st_mode=S_IFDIR|0700, st_size=60, ...}) = 0
+26551 getdents64(3</dev/shm/ruff06-selective-959-work/crates>, 0x55bf28260d20 /* 3 entries */, 32768) = 80
+26551 getdents64(3</dev/shm/ruff06-selective-959-work/crates>, 0x55bf28260d20 /* 0 entries */, 32768) = 0
+26551 close(3</dev/shm/ruff06-selective-959-work/crates>) = 0
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/crates/example", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3</dev/shm/ruff06-selective-959-work/crates/example>
+26551 fstat(3</dev/shm/ruff06-selective-959-work/crates/example>, {st_mode=S_IFDIR|0700, st_size=60, ...}) = 0
+26551 getdents64(3</dev/shm/ruff06-selective-959-work/crates/example>, 0x55bf28260d20 /* 3 entries */, 32768) = 80
+26551 getdents64(3</dev/shm/ruff06-selective-959-work/crates/example>, 0x55bf28260d20 /* 0 entries */, 32768) = 0
+26551 close(3</dev/shm/ruff06-selective-959-work/crates/example>) = 0
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/crates/example/resources", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3</dev/shm/ruff06-selective-959-work/crates/example/resources>
+26551 fstat(3</dev/shm/ruff06-selective-959-work/crates/example/resources>, {st_mode=S_IFDIR|0700, st_size=60, ...}) = 0
+26551 getdents64(3</dev/shm/ruff06-selective-959-work/crates/example/resources>, 0x55bf28264620 /* 3 entries */, 32768) = 88
+26551 getdents64(3</dev/shm/ruff06-selective-959-work/crates/example/resources>, 0x55bf28264620 /* 0 entries */, 32768) = 0
+26551 close(3</dev/shm/ruff06-selective-959-work/crates/example/resources>) = 0
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3</dev/shm/ruff06-selective-959-work/scripts>
+26551 fstat(3</dev/shm/ruff06-selective-959-work/scripts>, {st_mode=S_IFDIR|0700, st_size=60, ...}) = 0
+26551 getdents64(3</dev/shm/ruff06-selective-959-work/scripts>, 0x55bf2826ac80 /* 3 entries */, 32768) = 88
+26551 getdents64(3</dev/shm/ruff06-selective-959-work/scripts>, 0x55bf2826ac80 /* 0 entries */, 32768) = 0
+26551 close(3</dev/shm/ruff06-selective-959-work/scripts>) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts/check-scripts.py", {st_mode=S_IFREG|0444, st_size=66, ...}, AT_SYMLINK_NOFOLLOW) = 0
+26551 newfstatat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts/check-scripts.py", {st_mode=S_IFREG|0444, st_size=66, ...}, 0) = 0
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "/dev/shm/ruff06-selective-959-work/scripts/check-scripts.py", O_RDONLY|O_CLOEXEC) = 3</dev/shm/ruff06-selective-959-work/scripts/check-scripts.py>
+26551 fstat(3</dev/shm/ruff06-selective-959-work/scripts/check-scripts.py>, {st_mode=S_IFREG|0444, st_size=66, ...}) = 0
+26551 read(3</dev/shm/ruff06-selective-959-work/scripts/check-scripts.py>, "# /// script\n# dependencies = []\n# ///\nthis is invalid Python !!!\n", 8192) = 66
+26551 read(3</dev/shm/ruff06-selective-959-work/scripts/check-scripts.py>, "", 8192) = 0
+26551 close(3</dev/shm/ruff06-selective-959-work/scripts/check-scripts.py>) = 0
+26551 openat(AT_FDCWD</dev/shm/ruff06-selective-959-work>, "scripts.txt", O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC, 0666) = 3</dev/shm/ruff06-selective-959-work/scripts.txt>
+26551 fstat(3</dev/shm/ruff06-selective-959-work/scripts.txt>, {st_mode=S_IFREG|0600, st_size=0, ...}) = 0
+26551 ioctl(3</dev/shm/ruff06-selective-959-work/scripts.txt>, TCGETS, 0x7ffeafad7f70) = -1 ENOTTY (Inappropriate ioctl for device)
+26551 lseek(3</dev/shm/ruff06-selective-959-work/scripts.txt>, 0, SEEK_CUR) = 0
+26551 lseek(3</dev/shm/ruff06-selective-959-work/scripts.txt>, 0, SEEK_CUR) = 0
+26551 write(3</dev/shm/ruff06-selective-959-work/scripts.txt>, "tools/rotate.py\nscripts/check-scripts.py\n", 41) = 41
+26551 close(3</dev/shm/ruff06-selective-959-work/scripts.txt>) = 0
+26551 brk(0x55bf2831c000)               = 0x55bf2831c000
+26551 futex(0x55bf0d71a7cc, FUTEX_WAKE_PRIVATE, 2147483647) = 0
+26551 rt_sigaction(SIGINT, {sa_handler=SIG_DFL, sa_mask=[], sa_flags=SA_RESTORER|SA_ONSTACK, sa_restorer=0x7fe4b859bd70}, NULL, 8) = 0
+26551 munmap(0x7fe4b849a000, 135168)    = 0
+26551 munmap(0x7fe4b73d9000, 9048064)   = 0
+26551 munmap(0x7fe4b8401000, 278528)    = 0
+26551 munmap(0x7fe4b83ba000, 262144)    = 0
+26551 munmap(0x7fe4b836b000, 262144)    = 0
+26551 munmap(0x7fe4b8445000, 208896)    = 0
+26551 exit_group(0)                     = ?
+26551 +++ exited with 0 +++

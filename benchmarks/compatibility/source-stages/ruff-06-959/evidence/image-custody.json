@@ -1,0 +1,7 @@
+{
+  "saved_image_sha256": {
+    "O0": "1b8ec16205338c31872b823cbe92eb5aae13d5899df43040ccefd99bc2a871ce",
+    "O3": "5c14c23642d9a778ec83e2cea9daa59b48b873f9909b5ba440655dc52e7f6a16"
+  },
+  "scope": "Run-only recapture reused the unchanged cc2 saved images; no build was invoked."
+}

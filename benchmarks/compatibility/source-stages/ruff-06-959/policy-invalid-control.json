@@ -1,0 +1,320 @@
+{
+  "schema": "imre.compatibility.ruff06-source-as-data.v1",
+  "variant": "invalid-control",
+  "id": "ruff-06",
+  "authority": "880648b620f57905a495eb51fbb4600755ee0c54",
+  "source_commit": "65aee8892ce379af4ae9c8b5f6e0ab37b25d5ec9",
+  "source_sha256": "5d609801947008d4a72122570952f54ef7aedc46cdab4cf55f409e64adbda713",
+  "witnesses": [
+    {
+      "first": 63,
+      "last": 63,
+      "sha256": "cc05e73553467d771311cb4b597b88f7f1171ba1e8d73effda02dec76da51691"
+    },
+    {
+      "first": 71,
+      "last": 76,
+      "sha256": "2eb4ed1df46db44ad03579232cbc8c0d0762277e0da47c522f66c819042d7f2b"
+    },
+    {
+      "first": 94,
+      "last": 102,
+      "sha256": "8e7977626f32084eed040a5bd90dfd9f3fbb468e72e16f294db65b0a782be59a"
+    },
+    {
+      "first": 114,
+      "last": 117,
+      "sha256": "6f9447a3cd93ecec35a4d96cbc764e8802552327870746dc0db55717ed977eed"
+    }
+  ],
+  "fixture_reads": {
+    ".gitignore": "d7d71a7189cf7613e575fb302af37136a07230acd26f439cf191251c0f0def0b",
+    "tools/rotate.py": "f6fdf16c20fe287d3ddd37d53a38cf30bbb3b9706381e2af40efd46c0cdf828e",
+    "scripts/check-scripts.py": "d7e4401b8105a29da59434ccef9fc1cab1497ac1d99eee4afadcc1f8367f2967"
+  },
+  "fixture_read_flags": "O_RDONLY|O_CLOEXEC",
+  "output": {
+    "path": "scripts.txt",
+    "flags": "O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC",
+    "mode": "0666",
+    "sha256": "a952e456eb11d368f8f3030625fbab8e5bc7b5bfe790aec17cbb11aacbc2db2b"
+  },
+  "image_sha256": {
+    "O0": "1b8ec16205338c31872b823cbe92eb5aae13d5899df43040ccefd99bc2a871ce",
+    "O3": "5c14c23642d9a778ec83e2cea9daa59b48b873f9909b5ba440655dc52e7f6a16"
+  },
+  "native_open_census": [
+    {
+      "operation": "openat",
+      "lexical": "/etc/ld.so.cache",
+      "kernel": "/etc/ld.so.cache",
+      "flags": "O_RDONLY|O_CLOEXEC",
+      "mode": null,
+      "directory_witness": null,
+      "count": 1
+    },
+    {
+      "operation": "openat",
+      "lexical": "/lib/x86_64-linux-gnu/libm.so.6",
+      "kernel": "/usr/lib/x86_64-linux-gnu/libm.so.6",
+      "flags": "O_RDONLY|O_CLOEXEC",
+      "mode": null,
+      "directory_witness": null,
+      "count": 1
+    },
+    {
+      "operation": "openat",
+      "lexical": "/lib/x86_64-linux-gnu/libgcc_s.so.1",
+      "kernel": "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
+      "flags": "O_RDONLY|O_CLOEXEC",
+      "mode": null,
+      "directory_witness": null,
+      "count": 1
+    },
+    {
+      "operation": "openat",
+      "lexical": "/lib/x86_64-linux-gnu/libc.so.6",
+      "kernel": "/usr/lib/x86_64-linux-gnu/libc.so.6",
+      "flags": "O_RDONLY|O_CLOEXEC",
+      "mode": null,
+      "directory_witness": null,
+      "count": 1
+    },
+    {
+      "operation": "openat",
+      "lexical": "/usr/lib/locale/C.utf8/LC_CTYPE",
+      "kernel": "/usr/lib/locale/C.utf8/LC_CTYPE",
+      "flags": "O_RDONLY|O_CLOEXEC",
+      "mode": null,
+      "directory_witness": null,
+      "count": 1
+    },
+    {
+      "operation": "openat",
+      "lexical": "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache",
+      "kernel": "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache",
+      "flags": "O_RDONLY|O_CLOEXEC",
+      "mode": null,
+      "directory_witness": null,
+      "count": 1
+    },
+    {
+      "operation": "openat",
+      "lexical": "/proc/self/maps",
+      "kernel": "/proc/{pid}/maps",
+      "flags": "O_RDONLY|O_CLOEXEC",
+      "mode": null,
+      "directory_witness": null,
+      "count": 1
+    },
+    {
+      "operation": "open",
+      "lexical": "{cwd}/scripts",
+      "kernel": "{cwd}/scripts",
+      "flags": "O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY",
+      "mode": null,
+      "directory_witness": "{cwd}/scripts",
+      "count": 1
+    },
+    {
+      "operation": "open",
+      "lexical": "{site}",
+      "kernel": "{site}",
+      "flags": "O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY",
+      "mode": null,
+      "directory_witness": "{site}",
+      "count": 1
+    },
+    {
+      "operation": "openat",
+      "lexical": "{image}",
+      "kernel": "{image}",
+      "flags": "O_RDONLY|O_CLOEXEC",
+      "mode": null,
+      "directory_witness": null,
+      "count": 6
+    },
+    {
+      "operation": "openat",
+      "lexical": "/usr/share/zoneinfo/UTC",
+      "kernel": "/usr/share/zoneinfo/Etc/UTC",
+      "flags": "O_RDONLY|O_CLOEXEC",
+      "mode": null,
+      "directory_witness": null,
+      "count": 1
+    },
+    {
+      "operation": "openat",
+      "lexical": "/proc/self/cgroup",
+      "kernel": "/proc/{pid}/cgroup",
+      "flags": "O_RDONLY|O_CLOEXEC",
+      "mode": null,
+      "directory_witness": null,
+      "count": 1
+    },
+    {
+      "operation": "openat",
+      "lexical": "/sys/fs/cgroup/cpu.max",
+      "kernel": "/sys/fs/cgroup/cpu.max",
+      "flags": "O_RDONLY|O_CLOEXEC",
+      "mode": null,
+      "directory_witness": null,
+      "count": 1
+    },
+    {
+      "operation": "open",
+      "lexical": "{site}/pathspec",
+      "kernel": "{site}/pathspec",
+      "flags": "O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY",
+      "mode": null,
+      "directory_witness": "{site}/pathspec",
+      "count": 1
+    },
+    {
+      "operation": "open",
+      "lexical": "{site}/pathspec/_backends",
+      "kernel": "{site}/pathspec/_backends",
+      "flags": "O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY",
+      "mode": null,
+      "directory_witness": "{site}/pathspec/_backends",
+      "count": 1
+    },
+    {
+      "operation": "open",
+      "lexical": "{site}/pathspec/_backends/hyperscan",
+      "kernel": "{site}/pathspec/_backends/hyperscan",
+      "flags": "O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY",
+      "mode": null,
+      "directory_witness": "{site}/pathspec/_backends/hyperscan",
+      "count": 1
+    },
+    {
+      "operation": "open",
+      "lexical": "{site}/pathspec/patterns/gitignore",
+      "kernel": "{site}/pathspec/patterns/gitignore",
+      "flags": "O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY",
+      "mode": null,
+      "directory_witness": "{site}/pathspec/patterns/gitignore",
+      "count": 1
+    },
+    {
+      "operation": "open",
+      "lexical": "{site}/pathspec/patterns",
+      "kernel": "{site}/pathspec/patterns",
+      "flags": "O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY",
+      "mode": null,
+      "directory_witness": "{site}/pathspec/patterns",
+      "count": 1
+    },
+    {
+      "operation": "open",
+      "lexical": "{site}/pathspec/_backends/re2",
+      "kernel": "{site}/pathspec/_backends/re2",
+      "flags": "O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY",
+      "mode": null,
+      "directory_witness": "{site}/pathspec/_backends/re2",
+      "count": 1
+    },
+    {
+      "operation": "open",
+      "lexical": "{site}/pathspec/_backends/simple",
+      "kernel": "{site}/pathspec/_backends/simple",
+      "flags": "O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY",
+      "mode": null,
+      "directory_witness": "{site}/pathspec/_backends/simple",
+      "count": 1
+    },
+    {
+      "operation": "openat",
+      "lexical": "{cwd}/.gitignore",
+      "kernel": "{cwd}/.gitignore",
+      "flags": "O_RDONLY|O_CLOEXEC",
+      "mode": null,
+      "directory_witness": null,
+      "count": 1
+    },
+    {
+      "operation": "openat",
+      "lexical": "{cwd}",
+      "kernel": "{cwd}",
+      "flags": "O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY",
+      "mode": null,
+      "directory_witness": null,
+      "count": 1
+    },
+    {
+      "operation": "openat",
+      "lexical": "{cwd}/tools",
+      "kernel": "{cwd}/tools",
+      "flags": "O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY",
+      "mode": null,
+      "directory_witness": null,
+      "count": 1
+    },
+    {
+      "operation": "openat",
+      "lexical": "{cwd}/tools/rotate.py",
+      "kernel": "{cwd}/tools/rotate.py",
+      "flags": "O_RDONLY|O_CLOEXEC",
+      "mode": null,
+      "directory_witness": null,
+      "count": 1
+    },
+    {
+      "operation": "openat",
+      "lexical": "{cwd}/crates",
+      "kernel": "{cwd}/crates",
+      "flags": "O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY",
+      "mode": null,
+      "directory_witness": null,
+      "count": 1
+    },
+    {
+      "operation": "openat",
+      "lexical": "{cwd}/crates/example",
+      "kernel": "{cwd}/crates/example",
+      "flags": "O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY",
+      "mode": null,
+      "directory_witness": null,
+      "count": 1
+    },
+    {
+      "operation": "openat",
+      "lexical": "{cwd}/crates/example/resources",
+      "kernel": "{cwd}/crates/example/resources",
+      "flags": "O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY",
+      "mode": null,
+      "directory_witness": null,
+      "count": 1
+    },
+    {
+      "operation": "openat",
+      "lexical": "{cwd}/scripts",
+      "kernel": "{cwd}/scripts",
+      "flags": "O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY",
+      "mode": null,
+      "directory_witness": null,
+      "count": 1
+    },
+    {
+      "operation": "openat",
+      "lexical": "{cwd}/scripts/check-scripts.py",
+      "kernel": "{cwd}/scripts/check-scripts.py",
+      "flags": "O_RDONLY|O_CLOEXEC",
+      "mode": null,
+      "directory_witness": null,
+      "count": 1
+    },
+    {
+      "operation": "openat",
+      "lexical": "{cwd}/scripts.txt",
+      "kernel": "{cwd}/scripts.txt",
+      "flags": "O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC",
+      "mode": "0666",
+      "directory_witness": null,
+      "count": 1
+    }
+  ],
+  "scope": "Decisive invalid-entry control only; never valid as original-stage policy.",
+  "original_policy_sha256": "4326bd79af09318b76675c8a76cd43f3a84c96bf609b874fb1b8fdc8b7150547"
+}
