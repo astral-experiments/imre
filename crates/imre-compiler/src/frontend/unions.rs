@@ -495,7 +495,7 @@ impl Checker<'_> {
                 .definitions
                 .iter()
                 .enumerate()
-                .filter(|(id, _)| records.subclass(self.graph, *id, class))
+                .filter(|(id, _)| records.subclass(*id, class))
                 .map(|(id, _)| InstanceType::Exact(records.instance(id)))
                 .collect());
         }

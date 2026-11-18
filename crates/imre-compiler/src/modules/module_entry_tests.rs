@@ -184,10 +184,10 @@ fn demanded_shipped_classes_use_the_defining_source() {
     let entry = root.path().join("main.py");
     fs::write(
         root.path().join("helper.py"),
-        "from asyncio import Future as F\nfrom traceback import FrameSummary as S\n",
+        "from asyncio import Future as F\nfrom traceback import FrameSummary as S\nfrom contextlib import ExitStack as E, AbstractContextManager as A\n",
     )
     .unwrap();
-    fs::write(&entry,"import asyncio as tasks\nimport traceback as tb\nfrom helper import F, S\ntasks.Future\ntb.FrameSummary\n").unwrap();
+    fs::write(&entry,"import asyncio as tasks\nimport traceback as tb\nimport contextlib as ctx\nfrom helper import F, S, E, A\ntasks.Future\ntb.FrameSummary\nctx.ExitStack\nctx.AbstractContextManager\n").unwrap();
     let graph = SourceGraph::load(&entry, Some(root.path()), &[]).unwrap();
     let module = &graph.modules[graph.entry];
     assert!(matches!(
@@ -208,8 +208,10 @@ fn demanded_shipped_classes_use_the_defining_source() {
             .is_none()
     );
     for (pos, alias, class, filename) in [
-        (3, "F", "Future", "asyncio/futures.py"),
-        (4, "S", "FrameSummary", "traceback.py"),
+        (4, "F", "Future", "asyncio/futures.py"),
+        (5, "S", "FrameSummary", "traceback.py"),
+        (6, "E", "ExitStack", "contextlib.py"),
+        (7, "A", "AbstractContextManager", "contextlib.py"),
     ] {
         let (file, parsed, _) = graph
             .session
@@ -228,6 +230,7 @@ fn demanded_shipped_classes_use_the_defining_source() {
         assert_eq!(module.export(alias), expected);
         let qualified = &module.parsed.suite()[pos].as_expr_stmt().unwrap().value;
         assert_eq!(graph.resolve(graph.entry, qualified), expected);
+        assert_eq!(graph.resolve_type(graph.entry, qualified), expected);
     }
 }
 
