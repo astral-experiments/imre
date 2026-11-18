@@ -2351,7 +2351,9 @@ pub(crate) fn compile(
             let name = if frozen && !file_alternatives {
                 // A switchable name can still need its physical file if a real file imports
                 // _imp later. Ordinary SDK implementation imports do not select file loaders.
-                if file_graph || (!bundled_only && imre_ast::providers::is_optional_frozen(top)) {
+                if (file_graph && origin == ImportOrigin::File && literal)
+                    || (!bundled_only && imre_ast::providers::is_optional_frozen(top))
+                {
                     frozen_files.push(name.clone());
                 }
                 top
@@ -2381,7 +2383,7 @@ pub(crate) fn compile(
                     && (startup.is_none() || named_path || checking_provider)
                     && !frozen
                     && literal;
-                if prefix == "_imp" && file_graph {
+                if prefix == "_imp" && file_graph && origin == ImportOrigin::File && literal {
                     imp_in_file_graph = true;
                 }
                 let new_module = seen.insert(prefix.clone());
