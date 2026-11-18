@@ -1,0 +1,53 @@
+18610 execve("/workspace/scratch/fnmatch-95908-replay-v1/raw-control-probe", ["/workspace/scratch/fnmatch-95908-replay-v1/raw-control-probe", "gate", "/workspace/scratch/fnmatch-95908-replay-v1/imported.gate.exe", "/workspace/scratch/imre-95908-transferred-stdlib-v1/product/imre", "build", "/workspace/scratch/fnmatch-95908-replay-v1/launch/launcher.py", "--module-root", "/workspace/scratch/fnmatch-95908-replay-v1/launch", "--extension-path", "/workspace/scratch/fnmatch-95908-replay-v1/fixtures/Lib", "--no-cache", "--quiet", "--opt-level", "0", "--runtime", "/workspace/scratch/imre-95908-transferred-stdlib-v1/product/libimre_runtime.a", "--clang", "/workspace/scratch/imre-95908-transferred-stdlib-v1/product/imre-toolchain/bin/clang", "--include-module", "test.test_fnmatch", "-o", "/workspace/scratch/fnmatch-95908-replay-v1/imported.gate.exe"], 0x7ffef9500a30 /* 78 vars */) = 0
+18610 openat(AT_FDCWD</workspace/scratch/fnmatch-95908-replay-v1/empty>, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache>
+18610 close(3</etc/ld.so.cache>)        = 0
+18610 openat(AT_FDCWD</workspace/scratch/fnmatch-95908-replay-v1/empty>, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libc.so.6>
+18610 close(3</usr/lib/x86_64-linux-gnu/libc.so.6>) = 0
+18610 newfstatat(AT_FDCWD</workspace/scratch/fnmatch-95908-replay-v1/empty>, "/workspace/scratch/fnmatch-95908-replay-v1/imported.gate.exe", 0x7ffd67dcd040, 0) = -1 ENOENT (No such file or directory)
+18610 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7f6a76312a10) = 18611
+18610 wait4(18611,  <unfinished ...>
+18611 execve("/workspace/scratch/imre-95908-transferred-stdlib-v1/product/imre", ["/workspace/scratch/imre-95908-transferred-stdlib-v1/product/imre", "build", "/workspace/scratch/fnmatch-95908-replay-v1/launch/launcher.py", "--module-root", "/workspace/scratch/fnmatch-95908-replay-v1/launch", "--extension-path", "/workspace/scratch/fnmatch-95908-replay-v1/fixtures/Lib", "--no-cache", "--quiet", "--opt-level", "0", "--runtime", "/workspace/scratch/imre-95908-transferred-stdlib-v1/product/libimre_runtime.a", "--clang", "/workspace/scratch/imre-95908-transferred-stdlib-v1/product/imre-toolchain/bin/clang", "--include-module", "test.test_fnmatch", "-o", "/workspace/scratch/fnmatch-95908-replay-v1/imported.gate.exe"], 0x7ffd67dcf3c0 /* 78 vars */) = 0
+18611 openat(AT_FDCWD</workspace/scratch/fnmatch-95908-replay-v1/empty>, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache>
+18611 close(3</etc/ld.so.cache>)        = 0
+18611 openat(AT_FDCWD</workspace/scratch/fnmatch-95908-replay-v1/empty>, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libgcc_s.so.1>
+18611 close(3</usr/lib/x86_64-linux-gnu/libgcc_s.so.1>) = 0
+18611 openat(AT_FDCWD</workspace/scratch/fnmatch-95908-replay-v1/empty>, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libm.so.6>
+18611 close(3</usr/lib/x86_64-linux-gnu/libm.so.6>) = 0
+18611 openat(AT_FDCWD</workspace/scratch/fnmatch-95908-replay-v1/empty>, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libc.so.6>
+18611 close(3</usr/lib/x86_64-linux-gnu/libc.so.6>) = 0
+18611 fcntl(0</dev/null>, F_GETFD)      = 0
+18611 fcntl(1<pipe:[90965]>, F_GETFD)   = 0
+18611 fcntl(2<pipe:[90966]>, F_GETFD)   = 0
+18611 openat(AT_FDCWD</workspace/scratch/fnmatch-95908-replay-v1/empty>, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3</proc/18611/maps>
+18611 close(3</proc/18611/maps>)        = 0
+18611 openat2(AT_FDCWD</workspace/scratch/fnmatch-95908-replay-v1/empty>, "/workspace/scratch/fnmatch-95908-replay-v1/launch/launcher.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3</workspace/scratch/fnmatch-95908-replay-v1/launch/launcher.py>
+18611 close(3</workspace/scratch/fnmatch-95908-replay-v1/launch/launcher.py>) = 0
+18611 openat(AT_FDCWD</workspace/scratch/fnmatch-95908-replay-v1/empty>, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3</proc/18611/cgroup>
+18611 close(3</proc/18611/cgroup>)      = 0
+18611 openat(AT_FDCWD</workspace/scratch/fnmatch-95908-replay-v1/empty>, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3</sys/fs/cgroup/cpu.max>
+18611 close(3</sys/fs/cgroup/cpu.max>)  = 0
+18611 openat(AT_FDCWD</workspace/scratch/fnmatch-95908-replay-v1/empty>, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3</proc/18611/cgroup>
+18611 close(3</proc/18611/cgroup>)      = 0
+18611 openat(AT_FDCWD</workspace/scratch/fnmatch-95908-replay-v1/empty>, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3</sys/fs/cgroup/cpu.max>
+18611 close(3</sys/fs/cgroup/cpu.max>)  = 0
+18611 openat(AT_FDCWD</workspace/scratch/fnmatch-95908-replay-v1/empty>, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3</proc/18611/cgroup>
+18611 close(3</proc/18611/cgroup>)      = 0
+18611 openat(AT_FDCWD</workspace/scratch/fnmatch-95908-replay-v1/empty>, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3</sys/fs/cgroup/cpu.max>
+18611 close(3</sys/fs/cgroup/cpu.max>)  = 0
+18611 openat(AT_FDCWD</workspace/scratch/fnmatch-95908-replay-v1/empty>, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3</proc/18611/maps>
+18611 close(3</proc/18611/maps>)        = 0
+18611 openat2(AT_FDCWD</workspace/scratch/fnmatch-95908-replay-v1/empty>, "/workspace/scratch/fnmatch-95908-replay-v1/launch/fnmatch_control_poison.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3</workspace/scratch/fnmatch-95908-replay-v1/launch/fnmatch_control_poison.py>
+18611 close(3</workspace/scratch/fnmatch-95908-replay-v1/launch/fnmatch_control_poison.py>) = 0
+18611 openat2(AT_FDCWD</workspace/scratch/fnmatch-95908-replay-v1/empty>, "/workspace/scratch/fnmatch-95908-replay-v1/fixtures/Lib/test/__init__.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3</workspace/scratch/fnmatch-95908-replay-v1/fixtures/Lib/test/__init__.py>
+18611 close(3</workspace/scratch/fnmatch-95908-replay-v1/fixtures/Lib/test/__init__.py>) = 0
+18611 openat2(AT_FDCWD</workspace/scratch/fnmatch-95908-replay-v1/empty>, "/workspace/scratch/fnmatch-95908-replay-v1/fixtures/Lib/test/test_fnmatch.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3</workspace/scratch/fnmatch-95908-replay-v1/fixtures/Lib/test/test_fnmatch.py>
+18611 close(3</workspace/scratch/fnmatch-95908-replay-v1/fixtures/Lib/test/test_fnmatch.py>) = 0
+18611 openat(AT_FDCWD</workspace/scratch/fnmatch-95908-replay-v1/empty>, "/workspace/scratch/fnmatch-95908-replay-v1/launch", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3</workspace/scratch/fnmatch-95908-replay-v1/launch>
+18611 close(3</workspace/scratch/fnmatch-95908-replay-v1/launch>) = 0
+18611 openat(AT_FDCWD</workspace/scratch/fnmatch-95908-replay-v1/empty>, "/workspace/scratch/fnmatch-95908-replay-v1/fixtures/Lib", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3</workspace/scratch/fnmatch-95908-replay-v1/fixtures/Lib>
+18611 close(3</workspace/scratch/fnmatch-95908-replay-v1/fixtures/Lib>) = 0
+18611 exit_group(1)                     = ?
+18610 <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 1}], 0, NULL) = 18611
+18610 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=18611, si_uid=1000, si_status=1, si_utime=16 /* 0.16 s */, si_stime=13 /* 0.13 s */} ---
+18610 newfstatat(AT_FDCWD</workspace/scratch/fnmatch-95908-replay-v1/empty>, "/workspace/scratch/fnmatch-95908-replay-v1/imported.gate.exe", 0x7ffd67dcd040, 0) = -1 ENOENT (No such file or directory)
+18610 exit_group(0)                     = ?

@@ -1,0 +1,18 @@
+{
+  "archive": "/workspace/scratch/imre-95908-private-transfer-v1/product.tar.zst",
+  "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+  "cli_sha256": "e2d0886948f766332df6370a2e3140a5be5c8b0fc108224ef7242fc38fc58bd4",
+  "files": [
+    "product/imre",
+    "product/libimre_runtime.a",
+    "product/imre.d",
+    "product/libimre_runtime.d",
+    "setup.json",
+    "build.log"
+  ],
+  "runtime_sha256": "33ae5dfef5eff3c1fac5e0a5e19263daa980d7d80a5917979b426e85fa128c5c",
+  "sha256": "c9cfcd02e0cc62dc7928119d68a4c4da5125f8030657c1c52b2cd3d49cb554b0",
+  "size": 112378294,
+  "source_revision": "95908fb0acadc2a67304a8080e584deaef395746",
+  "source_tree": "e6405a3243de706adcab772bf16942808d6ca6fb"
+}

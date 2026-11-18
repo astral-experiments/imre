@@ -1,0 +1,285 @@
+41150 execve("/workspace/scratch/ty05-959-raw-review-v1/supervisor", ["/workspace/scratch/ty05-959-raw-review-v1/supervisor", "/workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture/scripts/transform_readme.py", "/workspace/scratch/ty05-959-env-parity-v1/mask-O0/withdrawn.source", "-", "-", "/usr/bin/bwrap", "/usr/bin/bwrap", "--ro-bind", "/", "/", "--tmpfs", "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts", "--bind", "/workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture", "/workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture", "--chdir", "/workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture", "--die-with-parent", "--", "/usr/bin/env", "-u", "PWD", "/workspace/scratch/ty05-959-raw-review-v1/O0/saved.exe"], ["LC_ALL=C.UTF-8", "TZ=UTC", "PYTHONHASHSEED=0", "PYTHONNOUSERSITE=1", "PYTHONDONTWRITEBYTECODE=1", "NO_COLOR=1", "PATH=/usr/local/bin:/usr/bin:/bin", "HOME=/workspace/scratch/ty05-959-env-parity-v1/mask-O0/launch", "RAYON_NUM_THREADS=2"]) = 0
+41150 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache>
+41150 close(3</etc/ld.so.cache>)        = 0
+41150 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libc.so.6>
+41150 close(3</usr/lib/x86_64-linux-gnu/libc.so.6>) = 0
+41150 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture/scripts/transform_readme.py", {st_dev=makedev(0, 0x1b), st_ino=1048708, st_mode=S_IFREG|0600, st_nlink=1, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=8, st_size=2641, st_atime=1794963529 /* 2026-11-18T00:58:49.822541415+0000 */, st_atime_nsec=822541415, st_mtime=1794963529 /* 2026-11-18T00:58:49.822257490+0000 */, st_mtime_nsec=822257490, st_ctime=1794963529 /* 2026-11-18T00:58:49.822257490+0000 */, st_ctime_nsec=822257490}, AT_SYMLINK_NOFOLLOW) = 0
+41150 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/scratch/ty05-959-env-parity-v1/mask-O0/withdrawn.source", 0x7ffc6226bd70, AT_SYMLINK_NOFOLLOW) = -1 ENOENT (No such file or directory)
+41150 rename("/workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture/scripts/transform_readme.py", "/workspace/scratch/ty05-959-env-parity-v1/mask-O0/withdrawn.source") = 0
+41150 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture/scripts/transform_readme.py", 0x7ffc6226bd70, AT_SYMLINK_NOFOLLOW) = -1 ENOENT (No such file or directory)
+41150 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7f87ef900a10) = 41151
+41150 wait4(41151,  <unfinished ...>
+41151 execve("/usr/bin/bwrap", ["/usr/bin/bwrap", "--ro-bind", "/", "/", "--tmpfs", "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts", "--bind", "/workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture", "/workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture", "--chdir", "/workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture", "--die-with-parent", "--", "/usr/bin/env", "-u", "PWD", "/workspace/scratch/ty05-959-raw-review-v1/O0/saved.exe"], ["LC_ALL=C.UTF-8", "TZ=UTC", "PYTHONHASHSEED=0", "PYTHONNOUSERSITE=1", "PYTHONDONTWRITEBYTECODE=1", "NO_COLOR=1", "PATH=/usr/local/bin:/usr/bin:/bin", "HOME=/workspace/scratch/ty05-959-env-parity-v1/mask-O0/launch", "RAYON_NUM_THREADS=2"]) = 0
+41151 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache>
+41151 close(3</etc/ld.so.cache>)        = 0
+41151 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/lib/x86_64-linux-gnu/libselinux.so.1", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libselinux.so.1>
+41151 close(3</usr/lib/x86_64-linux-gnu/libselinux.so.1>) = 0
+41151 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/lib/x86_64-linux-gnu/libcap.so.2", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libcap.so.2.75>
+41151 close(3</usr/lib/x86_64-linux-gnu/libcap.so.2.75>) = 0
+41151 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libc.so.6>
+41151 close(3</usr/lib/x86_64-linux-gnu/libc.so.6>) = 0
+41151 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/lib/x86_64-linux-gnu/libpcre2-8.so.0", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libpcre2-8.so.0.14.0>
+41151 close(3</usr/lib/x86_64-linux-gnu/libpcre2-8.so.0.14.0>) = 0
+41151 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/proc/filesystems", O_RDONLY|O_CLOEXEC) = 3</proc/filesystems>
+41151 close(3</proc/filesystems>)       = 0
+41151 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/proc/mounts", O_RDONLY|O_CLOEXEC) = 3</proc/41151/mounts>
+41151 close(3</proc/41151/mounts>)      = 0
+41151 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/proc/sys/kernel/overflowuid", O_RDONLY|O_CLOEXEC) = 3</proc/sys/kernel/overflowuid>
+41151 close(3</proc/sys/kernel/overflowuid>) = 0
+41151 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/proc/sys/kernel/overflowgid", O_RDONLY|O_CLOEXEC) = 3</proc/sys/kernel/overflowgid>
+41151 close(3</proc/sys/kernel/overflowgid>) = 0
+41151 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/proc", O_RDONLY|O_PATH) = 3</proc>
+41151 wait4(-1, 0x7fff6dda03f0, WNOHANG, NULL) = -1 ECHILD (No child processes)
+41151 clone(child_stack=NULL, flags=CLONE_NEWNS|CLONE_NEWUSER|SIGCHLD) = 41152
+41151 openat(3</proc>, "41152/ns", O_RDONLY|O_PATH) = 5</proc/41152/ns>
+41151 newfstatat(5</proc/41152/ns>, "mnt", {st_dev=makedev(0, 0x4), st_ino=4026532305, st_mode=S_IFREG|0444, st_nlink=1, st_uid=0, st_gid=0, st_blksize=4096, st_blocks=0, st_size=0, st_atime=1794963529 /* 2026-11-18T00:58:49.832531222+0000 */, st_atime_nsec=832531222, st_mtime=1794963529 /* 2026-11-18T00:58:49.832531222+0000 */, st_mtime_nsec=832531222, st_ctime=1794963529 /* 2026-11-18T00:58:49.832531222+0000 */, st_ctime_nsec=832531222}, 0) = 0
+41151 close(5</proc/41152/ns>)          = 0
+41151 close(4<{eventfd-count=0, eventfd-id=14, eventfd-semaphore=0}> <unfinished ...>
+41152 close(4<{eventfd-count=0, eventfd-id=14, eventfd-semaphore=0}> <unfinished ...>
+41151 <... close resumed>)              = 0
+41152 <... close resumed>)              = 0
+41151 openat(3</proc>, "self/fd", O_RDONLY|O_NOCTTY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 4</proc/41151/fd>
+41151 fcntl(4</proc/41151/fd>, F_GETFL) = 0x18800 (flags O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_DIRECTORY)
+41151 fcntl(4</proc/41151/fd>, F_SETFD, FD_CLOEXEC) = 0
+41151 close(3</proc>)                   = 0
+41151 close(4</proc/41151/fd>)          = 0
+41152 openat(3</proc>, "self", O_RDONLY|O_PATH) = 4</proc/41152>
+41152 openat(4</proc/41152>, "uid_map", O_RDWR|O_CLOEXEC) = 5</proc/41152/uid_map>
+41152 close(5</proc/41152/uid_map>)     = 0
+41152 openat(4</proc/41152>, "setgroups", O_RDWR|O_CLOEXEC) = 5</proc/41152/setgroups>
+41152 close(5</proc/41152/setgroups>)   = 0
+41152 openat(4</proc/41152>, "gid_map", O_RDWR|O_CLOEXEC) = 5</proc/41152/gid_map>
+41152 close(5</proc/41152/gid_map>)     = 0
+41152 close(4</proc/41152>)             = 0
+41152 mount(NULL, "/", NULL, MS_REC|MS_SILENT|MS_SLAVE, NULL) = 0
+41152 mount("tmpfs", "/tmp", "tmpfs", MS_NOSUID|MS_NODEV, NULL) = 0
+41152 chdir("/tmp")                     = 0
+41152 mount("newroot", "newroot", NULL, MS_MGC_VAL|MS_BIND|MS_REC|MS_SILENT, NULL) = 0
+41152 pivot_root("/tmp", "oldroot")     = 0
+41152 chdir("/")                        = 0
+41152 mount("oldroot/proc", "proc", NULL, MS_BIND|MS_REC|MS_SILENT, NULL) = 0
+41152 openat(AT_FDCWD</>, "/oldroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</oldroot>
+41152 openat2(4</oldroot>, "/", {flags=O_RDONLY|O_PATH, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 5</oldroot>
+41152 close(4</oldroot>)                = 0
+41152 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+41152 openat2(4</newroot>, "/", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 6</newroot>
+41152 close(4</newroot>)                = 0
+41152 openat(6</newroot>, ".", O_RDONLY|O_NOFOLLOW|O_CLOEXEC|O_PATH) = 4</newroot>
+41152 mount("/proc/self/fd/5", "/proc/self/fd/4", NULL, MS_BIND|MS_REC|MS_SILENT, NULL) = 0
+41152 openat(3</proc>, "self/mountinfo", O_RDONLY|O_CLOEXEC) = 7</proc/41152/mountinfo>
+41152 close(7</proc/41152/mountinfo>)   = 0
+41152 mount("none", "/newroot", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+41152 mount("none", "/newroot/proc", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+41152 mount("none", "/newroot/dev", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_REMOUNT|MS_BIND|MS_SILENT, NULL) = 0
+41152 mount("none", "/newroot/dev/pts", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+41152 mount("none", "/newroot/dev/shm", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+41152 mount("none", "/newroot/dev/mqueue", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+41152 mount("none", "/newroot/sys", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+41152 mount("none", "/newroot/sys/fs/cgroup", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+41152 mount("none", "/newroot/run", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+41152 mount("none", "/newroot/run/codex-runtime-secrets", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+41152 mount("none", "/newroot/run/codex-ssh", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+41152 mount("none", "/newroot/run/lock", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+41152 close(6</newroot>)                = 0
+41152 close(4</newroot>)                = 0
+41152 close(5</oldroot>)                = 0
+41152 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+41152 openat2(4</newroot>, "/", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 5</newroot>
+41152 close(4</newroot>)                = 0
+41152 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+41152 openat2(4</newroot>, "/workspace", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 6</newroot/workspace>
+41152 close(4</newroot>)                = 0
+41152 close(5</newroot>)                = 0
+41152 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+41152 openat2(4</newroot>, "/workspace/ruff-b-practical-95908", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 5</newroot/workspace/ruff-b-practical-95908>
+41152 close(4</newroot>)                = 0
+41152 close(6</newroot/workspace>)      = 0
+41152 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+41152 openat2(4</newroot>, "/workspace/ruff-b-practical-95908/followup-880648", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 6</newroot/workspace/ruff-b-practical-95908/followup-880648>
+41152 close(4</newroot>)                = 0
+41152 close(5</newroot/workspace/ruff-b-practical-95908>) = 0
+41152 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+41152 openat2(4</newroot>, "/workspace/ruff-b-practical-95908/followup-880648/ty05", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 5</newroot/workspace/ruff-b-practical-95908/followup-880648/ty05>
+41152 close(4</newroot>)                = 0
+41152 close(6</newroot/workspace/ruff-b-practical-95908/followup-880648>) = 0
+41152 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+41152 openat2(4</newroot>, "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 6</newroot/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture>
+41152 close(4</newroot>)                = 0
+41152 close(5</newroot/workspace/ruff-b-practical-95908/followup-880648/ty05>) = 0
+41152 openat(6</newroot/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture>, "scripts", O_RDONLY|O_NOFOLLOW|O_CLOEXEC|O_PATH) = 4</newroot/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts>
+41152 mount("tmpfs", "/proc/self/fd/4", "tmpfs", MS_NOSUID|MS_NODEV, "mode=0755") = 0
+41152 close(6</newroot/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture>) = 0
+41152 close(4</newroot/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts>) = 0
+41152 openat(AT_FDCWD</>, "/oldroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</oldroot>
+41152 openat2(4</oldroot>, "/workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture", {flags=O_RDONLY|O_PATH, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 5</oldroot/workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>
+41152 close(4</oldroot>)                = 0
+41152 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+41152 openat2(4</newroot>, "/", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 6</newroot>
+41152 close(4</newroot>)                = 0
+41152 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+41152 openat2(4</newroot>, "/workspace", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 7</newroot/workspace>
+41152 close(4</newroot>)                = 0
+41152 close(6</newroot>)                = 0
+41152 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+41152 openat2(4</newroot>, "/workspace/scratch", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 6</newroot/workspace/scratch>
+41152 close(4</newroot>)                = 0
+41152 close(7</newroot/workspace>)      = 0
+41152 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+41152 openat2(4</newroot>, "/workspace/scratch/ty05-959-env-parity-v1", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 7</newroot/workspace/scratch/ty05-959-env-parity-v1>
+41152 close(4</newroot>)                = 0
+41152 close(6</newroot/workspace/scratch>) = 0
+41152 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+41152 openat2(4</newroot>, "/workspace/scratch/ty05-959-env-parity-v1/mask-O0", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 6</newroot/workspace/scratch/ty05-959-env-parity-v1/mask-O0>
+41152 close(4</newroot>)                = 0
+41152 close(7</newroot/workspace/scratch/ty05-959-env-parity-v1>) = 0
+41152 openat(6</newroot/workspace/scratch/ty05-959-env-parity-v1/mask-O0>, "fixture", O_RDONLY|O_NOFOLLOW|O_CLOEXEC|O_PATH) = 4</newroot/workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>
+41152 mount("/proc/self/fd/5", "/proc/self/fd/4", NULL, MS_BIND|MS_REC|MS_SILENT, NULL) = 0
+41152 openat(3</proc>, "self/mountinfo", O_RDONLY|O_CLOEXEC) = 7</proc/41152/mountinfo>
+41152 close(7</proc/41152/mountinfo>)   = 0
+41152 mount("none", "/newroot/workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture", NULL, MS_NOSUID|MS_NODEV|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+41152 close(6</newroot/workspace/scratch/ty05-959-env-parity-v1/mask-O0>) = 0
+41152 close(4</newroot/workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>) = 0
+41152 close(5</oldroot/workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>) = 0
+41152 mount("oldroot", "oldroot", NULL, MS_REC|MS_SILENT|MS_PRIVATE, NULL) = 0
+41152 umount2("oldroot", MNT_DETACH)    = 0
+41152 openat(AT_FDCWD</>, "/", O_RDONLY|O_DIRECTORY) = 4</>
+41152 chdir("/newroot")                 = 0
+41152 pivot_root(".", ".")              = 0
+41152 fchdir(4</>)                      = 0
+41152 umount2(".", MNT_DETACH)          = 0
+41152 chdir("/")                        = 0
+41152 close(4</>)                       = 0
+41152 chdir("/workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture") = 0
+41152 close(3</proc>)                   = 0
+41152 execve("/usr/bin/env", ["/usr/bin/env", "-u", "PWD", "/workspace/scratch/ty05-959-raw-review-v1/O0/saved.exe"], ["LC_ALL=C.UTF-8", "TZ=UTC", "PYTHONHASHSEED=0", "PYTHONNOUSERSITE=1", "PYTHONDONTWRITEBYTECODE=1", "NO_COLOR=1", "PATH=/usr/local/bin:/usr/bin:/bin", "HOME=/workspace/scratch/ty05-959-env-parity-v1/mask-O0/launch", "RAYON_NUM_THREADS=2", "PWD=/workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture"]) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache>
+41152 close(3</etc/ld.so.cache>)        = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libc.so.6>
+41152 close(3</usr/lib/x86_64-linux-gnu/libc.so.6>) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/locale-archive", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/share/locale/locale.alias", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.UTF-8/LC_IDENTIFICATION", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.utf8/LC_IDENTIFICATION", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_IDENTIFICATION>
+41152 close(3</usr/lib/locale/C.utf8/LC_IDENTIFICATION>) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache>
+41152 close(3</usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache>) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.UTF-8/LC_MEASUREMENT", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.utf8/LC_MEASUREMENT", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_MEASUREMENT>
+41152 close(3</usr/lib/locale/C.utf8/LC_MEASUREMENT>) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.UTF-8/LC_TELEPHONE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.utf8/LC_TELEPHONE", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_TELEPHONE>
+41152 close(3</usr/lib/locale/C.utf8/LC_TELEPHONE>) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.UTF-8/LC_ADDRESS", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.utf8/LC_ADDRESS", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_ADDRESS>
+41152 close(3</usr/lib/locale/C.utf8/LC_ADDRESS>) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.UTF-8/LC_NAME", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.utf8/LC_NAME", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_NAME>
+41152 close(3</usr/lib/locale/C.utf8/LC_NAME>) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.UTF-8/LC_PAPER", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.utf8/LC_PAPER", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_PAPER>
+41152 close(3</usr/lib/locale/C.utf8/LC_PAPER>) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.UTF-8/LC_MESSAGES", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.utf8/LC_MESSAGES", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_MESSAGES>
+41152 close(3</usr/lib/locale/C.utf8/LC_MESSAGES>) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.utf8/LC_MESSAGES/SYS_LC_MESSAGES", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_MESSAGES/SYS_LC_MESSAGES>
+41152 close(3</usr/lib/locale/C.utf8/LC_MESSAGES/SYS_LC_MESSAGES>) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.UTF-8/LC_MONETARY", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.utf8/LC_MONETARY", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_MONETARY>
+41152 close(3</usr/lib/locale/C.utf8/LC_MONETARY>) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.UTF-8/LC_COLLATE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.utf8/LC_COLLATE", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_COLLATE>
+41152 close(3</usr/lib/locale/C.utf8/LC_COLLATE>) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.UTF-8/LC_TIME", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.utf8/LC_TIME", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_TIME>
+41152 close(3</usr/lib/locale/C.utf8/LC_TIME>) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.UTF-8/LC_NUMERIC", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.utf8/LC_NUMERIC", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_NUMERIC>
+41152 close(3</usr/lib/locale/C.utf8/LC_NUMERIC>) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.UTF-8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.utf8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_CTYPE>
+41152 close(3</usr/lib/locale/C.utf8/LC_CTYPE>) = 0
+41152 execve("/workspace/scratch/ty05-959-raw-review-v1/O0/saved.exe", ["/workspace/scratch/ty05-959-raw-review-v1/O0/saved.exe"], ["LC_ALL=C.UTF-8", "TZ=UTC", "PYTHONHASHSEED=0", "PYTHONNOUSERSITE=1", "PYTHONDONTWRITEBYTECODE=1", "NO_COLOR=1", "PATH=/usr/local/bin:/usr/bin:/bin", "HOME=/workspace/scratch/ty05-959-env-parity-v1/mask-O0/launch", "RAYON_NUM_THREADS=2"]) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache>
+41152 close(3</etc/ld.so.cache>)        = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libm.so.6>
+41152 close(3</usr/lib/x86_64-linux-gnu/libm.so.6>) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libgcc_s.so.1>
+41152 close(3</usr/lib/x86_64-linux-gnu/libgcc_s.so.1>) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libc.so.6>
+41152 close(3</usr/lib/x86_64-linux-gnu/libc.so.6>) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/locale-archive", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/share/locale/locale.alias", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.UTF-8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/locale/C.utf8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_CTYPE>
+41152 close(3</usr/lib/locale/C.utf8/LC_CTYPE>) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache>
+41152 close(3</usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache>) = 0
+41152 statx(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/scratch/ty05-959-raw-review-v1/pyvenv.cfg", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffcb428d8a0) = -1 ENOENT (No such file or directory)
+41152 statx(0</dev/null<char 1:3>>, NULL, AT_STATX_SYNC_AS_STAT, STATX_ALL, NULL) = -1 EFAULT (Bad address)
+41152 statx(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/scratch/ty05-959-raw-review-v1/O0/pyvenv.cfg", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffcb428d8a0) = -1 ENOENT (No such file or directory)
+41152 statx(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/local/bin/python3", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffcb428daa0) = -1 ENOENT (No such file or directory)
+41152 statx(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/usr/bin/python3", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_TYPE|STATX_MODE|STATX_NLINK|STATX_UID|STATX_GID|STATX_MTIME|STATX_CTIME|STATX_INO|STATX_SIZE|STATX_BLOCKS|STATX_MNT_ID, stx_blksize=4096, stx_attributes=STATX_ATTR_IMMUTABLE|STATX_ATTR_DAX, stx_nlink=1, stx_uid=65534, stx_gid=65534, stx_mode=S_IFREG|0755, stx_ino=9223372036855077990, stx_size=6832784, stx_blocks=13352, stx_attributes_mask=STATX_ATTR_COMPRESSED|STATX_ATTR_IMMUTABLE|STATX_ATTR_APPEND|STATX_ATTR_AUTOMOUNT|STATX_ATTR_MOUNT_ROOT|STATX_ATTR_DAX, stx_ctime={tv_sec=1786363619, tv_nsec=0} /* 2026-08-10T12:06:59+0000 */, stx_mtime={tv_sec=1786363619, tv_nsec=0} /* 2026-08-10T12:06:59+0000 */, stx_rdev_major=0, stx_rdev_minor=0, stx_dev_major=0, stx_dev_minor=27, stx_mnt_id=0x7a}) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3</proc/41152/maps>
+41152 close(3</proc/41152/maps>)        = 0
+41152 fcntl(1<pipe:[216046]>, F_GETFD)  = 0
+41152 fcntl(2<pipe:[216047]>, F_GETFD)  = 0
+41152 statx(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_blksize=4096, stx_attributes=STATX_ATTR_MOUNT_ROOT, stx_nlink=2, stx_uid=1000, stx_gid=1000, stx_mode=S_IFDIR|0755, stx_ino=1, stx_size=40, stx_blocks=0, stx_attributes_mask=STATX_ATTR_IMMUTABLE|STATX_ATTR_APPEND|STATX_ATTR_NODUMP|STATX_ATTR_AUTOMOUNT|STATX_ATTR_MOUNT_ROOT|STATX_ATTR_DAX, stx_atime={tv_sec=1794963529, tv_nsec=840531127} /* 2026-11-18T00:58:49.840531127+0000 */, stx_btime={tv_sec=1794963529, tv_nsec=840531127} /* 2026-11-18T00:58:49.840531127+0000 */, stx_ctime={tv_sec=1794963529, tv_nsec=840531127} /* 2026-11-18T00:58:49.840531127+0000 */, stx_mtime={tv_sec=1794963529, tv_nsec=840531127} /* 2026-11-18T00:58:49.840531127+0000 */, stx_rdev_major=0, stx_rdev_minor=0, stx_dev_major=0, stx_dev_minor=40, stx_mnt_id=0x86}) = 0
+41152 statx(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_blksize=4096, stx_attributes=STATX_ATTR_MOUNT_ROOT, stx_nlink=2, stx_uid=1000, stx_gid=1000, stx_mode=S_IFDIR|0755, stx_ino=1, stx_size=40, stx_blocks=0, stx_attributes_mask=STATX_ATTR_IMMUTABLE|STATX_ATTR_APPEND|STATX_ATTR_NODUMP|STATX_ATTR_AUTOMOUNT|STATX_ATTR_MOUNT_ROOT|STATX_ATTR_DAX, stx_atime={tv_sec=1794963529, tv_nsec=840531127} /* 2026-11-18T00:58:49.840531127+0000 */, stx_btime={tv_sec=1794963529, tv_nsec=840531127} /* 2026-11-18T00:58:49.840531127+0000 */, stx_ctime={tv_sec=1794963529, tv_nsec=840531127} /* 2026-11-18T00:58:49.840531127+0000 */, stx_mtime={tv_sec=1794963529, tv_nsec=840531127} /* 2026-11-18T00:58:49.840531127+0000 */, stx_rdev_major=0, stx_rdev_minor=0, stx_dev_major=0, stx_dev_minor=40, stx_mnt_id=0x86}) = 0
+41152 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_atime_nsec=840531127, st_mtime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_mtime_nsec=840531127, st_ctime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_ctime_nsec=840531127}, 0) = 0
+41152 open("/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3</workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts>
+41152 close(3</workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts>) = 0
+41152 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963529 /* 2026-11-18T00:58:49.976529509+0000 */, st_atime_nsec=976529509, st_mtime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_mtime_nsec=840531127, st_ctime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_ctime_nsec=840531127}, 0) = 0
+41152 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963529 /* 2026-11-18T00:58:49.976529509+0000 */, st_atime_nsec=976529509, st_mtime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_mtime_nsec=840531127, st_ctime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_ctime_nsec=840531127}, 0) = 0
+41152 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963529 /* 2026-11-18T00:58:49.976529509+0000 */, st_atime_nsec=976529509, st_mtime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_mtime_nsec=840531127, st_ctime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_ctime_nsec=840531127}, 0) = 0
+41152 statx(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/scratch/ty05-959-raw-review-v1/O0/saved.exe/<imre stdlib>/tomllib", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffcb4285610) = -1 ENOTDIR (Not a directory)
+41152 statx(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/scratch/ty05-959-raw-review-v1/O0/saved.exe/<imre stdlib>", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffcb4285610) = -1 ENOTDIR (Not a directory)
+41152 statx(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/scratch/ty05-959-raw-review-v1/O0/saved.exe", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_blksize=4096, stx_attributes=0, stx_nlink=1, stx_uid=1000, stx_gid=1000, stx_mode=S_IFREG|0700, stx_ino=922782, stx_size=179021584, stx_blocks=349664, stx_attributes_mask=STATX_ATTR_COMPRESSED|STATX_ATTR_IMMUTABLE|STATX_ATTR_APPEND|STATX_ATTR_NODUMP|STATX_ATTR_ENCRYPTED|STATX_ATTR_AUTOMOUNT|STATX_ATTR_MOUNT_ROOT|STATX_ATTR_VERITY|STATX_ATTR_DAX, stx_atime={tv_sec=1794961096, tv_nsec=325466923} /* 2026-11-18T00:18:16.325466923+0000 */, stx_btime={tv_sec=1794961095, tv_nsec=498621393} /* 2026-11-18T00:18:15.498621393+0000 */, stx_ctime={tv_sec=1794961096, tv_nsec=321466971} /* 2026-11-18T00:18:16.321466971+0000 */, stx_mtime={tv_sec=1794961096, tv_nsec=321466971} /* 2026-11-18T00:18:16.321466971+0000 */, stx_rdev_major=0, stx_rdev_minor=0, stx_dev_major=0, stx_dev_minor=27, stx_mnt_id=0x7a}) = 0
+41152 statx(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/scratch/ty05-959-raw-review-v1/O0/saved.exe", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_blksize=4096, stx_attributes=0, stx_nlink=1, stx_uid=1000, stx_gid=1000, stx_mode=S_IFREG|0700, stx_ino=922782, stx_size=179021584, stx_blocks=349664, stx_attributes_mask=STATX_ATTR_COMPRESSED|STATX_ATTR_IMMUTABLE|STATX_ATTR_APPEND|STATX_ATTR_NODUMP|STATX_ATTR_ENCRYPTED|STATX_ATTR_AUTOMOUNT|STATX_ATTR_MOUNT_ROOT|STATX_ATTR_VERITY|STATX_ATTR_DAX, stx_atime={tv_sec=1794961096, tv_nsec=325466923} /* 2026-11-18T00:18:16.325466923+0000 */, stx_btime={tv_sec=1794961095, tv_nsec=498621393} /* 2026-11-18T00:18:15.498621393+0000 */, stx_ctime={tv_sec=1794961096, tv_nsec=321466971} /* 2026-11-18T00:18:16.321466971+0000 */, stx_mtime={tv_sec=1794961096, tv_nsec=321466971} /* 2026-11-18T00:18:16.321466971+0000 */, stx_rdev_major=0, stx_rdev_minor=0, stx_dev_major=0, stx_dev_minor=27, stx_mnt_id=0x7a}) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/scratch/ty05-959-raw-review-v1/O0/saved.exe", O_RDONLY|O_CLOEXEC) = 3</workspace/scratch/ty05-959-raw-review-v1/O0/saved.exe>
+41152 statx(3</workspace/scratch/ty05-959-raw-review-v1/O0/saved.exe>, "", AT_STATX_SYNC_AS_STAT|AT_EMPTY_PATH, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_blksize=4096, stx_attributes=0, stx_nlink=1, stx_uid=1000, stx_gid=1000, stx_mode=S_IFREG|0700, stx_ino=922782, stx_size=179021584, stx_blocks=349664, stx_attributes_mask=STATX_ATTR_COMPRESSED|STATX_ATTR_IMMUTABLE|STATX_ATTR_APPEND|STATX_ATTR_NODUMP|STATX_ATTR_ENCRYPTED|STATX_ATTR_AUTOMOUNT|STATX_ATTR_MOUNT_ROOT|STATX_ATTR_VERITY|STATX_ATTR_DAX, stx_atime={tv_sec=1794961096, tv_nsec=325466923} /* 2026-11-18T00:18:16.325466923+0000 */, stx_btime={tv_sec=1794961095, tv_nsec=498621393} /* 2026-11-18T00:18:15.498621393+0000 */, stx_ctime={tv_sec=1794961096, tv_nsec=321466971} /* 2026-11-18T00:18:16.321466971+0000 */, stx_mtime={tv_sec=1794961096, tv_nsec=321466971} /* 2026-11-18T00:18:16.321466971+0000 */, stx_rdev_major=0, stx_rdev_minor=0, stx_dev_major=0, stx_dev_minor=27, stx_mnt_id=0x7a}) = 0
+41152 close(3</workspace/scratch/ty05-959-raw-review-v1/O0/saved.exe>) = 0
+41152 statx(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/scratch/ty05-959-raw-review-v1/O0/saved.exe/<imre stdlib>/tomllib", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffcb4286a50) = -1 ENOTDIR (Not a directory)
+41152 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963529 /* 2026-11-18T00:58:49.976529509+0000 */, st_atime_nsec=976529509, st_mtime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_mtime_nsec=840531127, st_ctime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_ctime_nsec=840531127}, 0) = 0
+41152 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963529 /* 2026-11-18T00:58:49.976529509+0000 */, st_atime_nsec=976529509, st_mtime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_mtime_nsec=840531127, st_ctime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_ctime_nsec=840531127}, 0) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3</proc/41152/cgroup>
+41152 statx(3</proc/41152/cgroup>, "", AT_STATX_SYNC_AS_STAT|AT_EMPTY_PATH, STATX_ALL, {stx_mask=STATX_BASIC_STATS|STATX_MNT_ID, stx_blksize=1024, stx_attributes=0, stx_nlink=1, stx_uid=1000, stx_gid=1000, stx_mode=S_IFREG|0444, stx_ino=220208, stx_size=0, stx_blocks=0, stx_attributes_mask=STATX_ATTR_AUTOMOUNT|STATX_ATTR_MOUNT_ROOT|STATX_ATTR_DAX, stx_atime={tv_sec=1794963530, tv_nsec=20528986} /* 2026-11-18T00:58:50.020528986+0000 */, stx_ctime={tv_sec=1794963530, tv_nsec=20528986} /* 2026-11-18T00:58:50.020528986+0000 */, stx_mtime={tv_sec=1794963530, tv_nsec=20528986} /* 2026-11-18T00:58:50.020528986+0000 */, stx_rdev_major=0, stx_rdev_minor=0, stx_dev_major=0, stx_dev_minor=30, stx_mnt_id=0x7b}) = 0
+41152 close(3</proc/41152/cgroup>)      = 0
+41152 statx(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/sys/fs/cgroup/cgroup.controllers", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_BASIC_STATS|STATX_MNT_ID, stx_blksize=4096, stx_attributes=0, stx_nlink=1, stx_uid=65534, stx_gid=65534, stx_mode=S_IFREG|0444, stx_ino=152, stx_size=0, stx_blocks=0, stx_attributes_mask=STATX_ATTR_AUTOMOUNT|STATX_ATTR_MOUNT_ROOT|STATX_ATTR_DAX, stx_atime={tv_sec=1794930795, tv_nsec=794056558} /* 2026-11-17T15:53:15.794056558+0000 */, stx_ctime={tv_sec=1794930795, tv_nsec=794056558} /* 2026-11-17T15:53:15.794056558+0000 */, stx_mtime={tv_sec=1794930795, tv_nsec=794056558} /* 2026-11-17T15:53:15.794056558+0000 */, stx_rdev_major=0, stx_rdev_minor=0, stx_dev_major=0, stx_dev_minor=24, stx_mnt_id=0x81}) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3</sys/fs/cgroup/cpu.max>
+41152 statx(3</sys/fs/cgroup/cpu.max>, "", AT_STATX_SYNC_AS_STAT|AT_EMPTY_PATH, STATX_ALL, {stx_mask=STATX_BASIC_STATS|STATX_MNT_ID, stx_blksize=4096, stx_attributes=0, stx_nlink=1, stx_uid=65534, stx_gid=65534, stx_mode=S_IFREG|0644, stx_ino=173, stx_size=0, stx_blocks=0, stx_attributes_mask=STATX_ATTR_AUTOMOUNT|STATX_ATTR_MOUNT_ROOT|STATX_ATTR_DAX, stx_atime={tv_sec=1794930793, tv_nsec=615631089} /* 2026-11-17T15:53:13.615631089+0000 */, stx_ctime={tv_sec=1794930793, tv_nsec=614056583} /* 2026-11-17T15:53:13.614056583+0000 */, stx_mtime={tv_sec=1794930793, tv_nsec=614056583} /* 2026-11-17T15:53:13.614056583+0000 */, stx_rdev_major=0, stx_rdev_minor=0, stx_dev_major=0, stx_dev_minor=24, stx_mnt_id=0x81}) = 0
+41152 close(3</sys/fs/cgroup/cpu.max>)  = 0
+41152 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963529 /* 2026-11-18T00:58:49.976529509+0000 */, st_atime_nsec=976529509, st_mtime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_mtime_nsec=840531127, st_ctime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_ctime_nsec=840531127}, 0) = 0
+41152 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963529 /* 2026-11-18T00:58:49.976529509+0000 */, st_atime_nsec=976529509, st_mtime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_mtime_nsec=840531127, st_ctime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_ctime_nsec=840531127}, 0) = 0
+41152 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963529 /* 2026-11-18T00:58:49.976529509+0000 */, st_atime_nsec=976529509, st_mtime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_mtime_nsec=840531127, st_ctime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_ctime_nsec=840531127}, 0) = 0
+41152 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963529 /* 2026-11-18T00:58:49.976529509+0000 */, st_atime_nsec=976529509, st_mtime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_mtime_nsec=840531127, st_ctime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_ctime_nsec=840531127}, 0) = 0
+41152 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963529 /* 2026-11-18T00:58:49.976529509+0000 */, st_atime_nsec=976529509, st_mtime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_mtime_nsec=840531127, st_ctime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_ctime_nsec=840531127}, 0) = 0
+41152 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963529 /* 2026-11-18T00:58:49.976529509+0000 */, st_atime_nsec=976529509, st_mtime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_mtime_nsec=840531127, st_ctime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_ctime_nsec=840531127}, 0) = 0
+41152 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963529 /* 2026-11-18T00:58:49.976529509+0000 */, st_atime_nsec=976529509, st_mtime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_mtime_nsec=840531127, st_ctime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_ctime_nsec=840531127}, 0) = 0
+41152 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963529 /* 2026-11-18T00:58:49.976529509+0000 */, st_atime_nsec=976529509, st_mtime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_mtime_nsec=840531127, st_ctime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_ctime_nsec=840531127}, 0) = 0
+41152 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963529 /* 2026-11-18T00:58:49.976529509+0000 */, st_atime_nsec=976529509, st_mtime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_mtime_nsec=840531127, st_ctime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_ctime_nsec=840531127}, 0) = 0
+41152 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963529 /* 2026-11-18T00:58:49.976529509+0000 */, st_atime_nsec=976529509, st_mtime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_mtime_nsec=840531127, st_ctime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_ctime_nsec=840531127}, 0) = 0
+41152 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963529 /* 2026-11-18T00:58:49.976529509+0000 */, st_atime_nsec=976529509, st_mtime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_mtime_nsec=840531127, st_ctime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_ctime_nsec=840531127}, 0) = 0
+41152 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963529 /* 2026-11-18T00:58:49.976529509+0000 */, st_atime_nsec=976529509, st_mtime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_mtime_nsec=840531127, st_ctime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_ctime_nsec=840531127}, 0) = 0
+41152 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963529 /* 2026-11-18T00:58:49.976529509+0000 */, st_atime_nsec=976529509, st_mtime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_mtime_nsec=840531127, st_ctime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_ctime_nsec=840531127}, 0) = 0
+41152 statx(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/scratch/ty05-959-raw-review-v1/O0/saved.exe/<imre stdlib>/pathlib", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffcb4285390) = -1 ENOTDIR (Not a directory)
+41152 statx(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/scratch/ty05-959-raw-review-v1/O0/saved.exe/<imre stdlib>", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffcb4285390) = -1 ENOTDIR (Not a directory)
+41152 statx(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/scratch/ty05-959-raw-review-v1/O0/saved.exe", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_blksize=4096, stx_attributes=0, stx_nlink=1, stx_uid=1000, stx_gid=1000, stx_mode=S_IFREG|0700, stx_ino=922782, stx_size=179021584, stx_blocks=349664, stx_attributes_mask=STATX_ATTR_COMPRESSED|STATX_ATTR_IMMUTABLE|STATX_ATTR_APPEND|STATX_ATTR_NODUMP|STATX_ATTR_ENCRYPTED|STATX_ATTR_AUTOMOUNT|STATX_ATTR_MOUNT_ROOT|STATX_ATTR_VERITY|STATX_ATTR_DAX, stx_atime={tv_sec=1794961096, tv_nsec=325466923} /* 2026-11-18T00:18:16.325466923+0000 */, stx_btime={tv_sec=1794961095, tv_nsec=498621393} /* 2026-11-18T00:18:15.498621393+0000 */, stx_ctime={tv_sec=1794961096, tv_nsec=321466971} /* 2026-11-18T00:18:16.321466971+0000 */, stx_mtime={tv_sec=1794961096, tv_nsec=321466971} /* 2026-11-18T00:18:16.321466971+0000 */, stx_rdev_major=0, stx_rdev_minor=0, stx_dev_major=0, stx_dev_minor=27, stx_mnt_id=0x7a}) = 0
+41152 statx(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/scratch/ty05-959-raw-review-v1/O0/saved.exe", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_blksize=4096, stx_attributes=0, stx_nlink=1, stx_uid=1000, stx_gid=1000, stx_mode=S_IFREG|0700, stx_ino=922782, stx_size=179021584, stx_blocks=349664, stx_attributes_mask=STATX_ATTR_COMPRESSED|STATX_ATTR_IMMUTABLE|STATX_ATTR_APPEND|STATX_ATTR_NODUMP|STATX_ATTR_ENCRYPTED|STATX_ATTR_AUTOMOUNT|STATX_ATTR_MOUNT_ROOT|STATX_ATTR_VERITY|STATX_ATTR_DAX, stx_atime={tv_sec=1794961096, tv_nsec=325466923} /* 2026-11-18T00:18:16.325466923+0000 */, stx_btime={tv_sec=1794961095, tv_nsec=498621393} /* 2026-11-18T00:18:15.498621393+0000 */, stx_ctime={tv_sec=1794961096, tv_nsec=321466971} /* 2026-11-18T00:18:16.321466971+0000 */, stx_mtime={tv_sec=1794961096, tv_nsec=321466971} /* 2026-11-18T00:18:16.321466971+0000 */, stx_rdev_major=0, stx_rdev_minor=0, stx_dev_major=0, stx_dev_minor=27, stx_mnt_id=0x7a}) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/scratch/ty05-959-raw-review-v1/O0/saved.exe", O_RDONLY|O_CLOEXEC) = 3</workspace/scratch/ty05-959-raw-review-v1/O0/saved.exe>
+41152 statx(3</workspace/scratch/ty05-959-raw-review-v1/O0/saved.exe>, "", AT_STATX_SYNC_AS_STAT|AT_EMPTY_PATH, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_blksize=4096, stx_attributes=0, stx_nlink=1, stx_uid=1000, stx_gid=1000, stx_mode=S_IFREG|0700, stx_ino=922782, stx_size=179021584, stx_blocks=349664, stx_attributes_mask=STATX_ATTR_COMPRESSED|STATX_ATTR_IMMUTABLE|STATX_ATTR_APPEND|STATX_ATTR_NODUMP|STATX_ATTR_ENCRYPTED|STATX_ATTR_AUTOMOUNT|STATX_ATTR_MOUNT_ROOT|STATX_ATTR_VERITY|STATX_ATTR_DAX, stx_atime={tv_sec=1794961096, tv_nsec=325466923} /* 2026-11-18T00:18:16.325466923+0000 */, stx_btime={tv_sec=1794961095, tv_nsec=498621393} /* 2026-11-18T00:18:15.498621393+0000 */, stx_ctime={tv_sec=1794961096, tv_nsec=321466971} /* 2026-11-18T00:18:16.321466971+0000 */, stx_mtime={tv_sec=1794961096, tv_nsec=321466971} /* 2026-11-18T00:18:16.321466971+0000 */, stx_rdev_major=0, stx_rdev_minor=0, stx_dev_major=0, stx_dev_minor=27, stx_mnt_id=0x7a}) = 0
+41152 close(3</workspace/scratch/ty05-959-raw-review-v1/O0/saved.exe>) = 0
+41152 statx(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/scratch/ty05-959-raw-review-v1/O0/saved.exe/<imre stdlib>/pathlib", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7ffcb42867d0) = -1 ENOTDIR (Not a directory)
+41152 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963529 /* 2026-11-18T00:58:49.976529509+0000 */, st_atime_nsec=976529509, st_mtime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_mtime_nsec=840531127, st_ctime=1794963529 /* 2026-11-18T00:58:49.840531127+0000 */, st_ctime_nsec=840531127}, 0) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "dist-workspace.toml", O_RDONLY|O_CLOEXEC) = 3</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture/dist-workspace.toml>
+41152 close(3</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture/dist-workspace.toml>) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "README.md", O_RDONLY|O_CLOEXEC) = 3</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture/README.md>
+41152 close(3</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture/README.md>) = 0
+41152 openat(AT_FDCWD</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture>, "README.md", O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC, 0666) = 3</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture/README.md>
+41152 close(3</workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture/README.md>) = 0
+41152 exit_group(0)                     = ?
+41151 wait4(-1, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 41152
+41151 exit_group(0)                     = ?
+41150 <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 41151
+41150 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=41151, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+41150 rename("/workspace/scratch/ty05-959-env-parity-v1/mask-O0/withdrawn.source", "/workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture/scripts/transform_readme.py") = 0
+41150 exit_group(0)                     = ?

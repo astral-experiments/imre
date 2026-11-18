@@ -280,7 +280,7 @@ pub(super) enum RegisteredCall {
         module: bool,
         discard: bool,
     },
-    InContext(Box<RegisteredCall>),
+    Scoped(ScopedCall),
     Start(Box<thread_worker::Start>),
     StartDetached(super::lowlevel_threads::Start),
     Join(thread_worker::Join),
@@ -301,6 +301,98 @@ pub(super) enum RegisteredCall {
     Recv(stdlib::socket::Recv),
 }
 
+/// The execution-local state to enter before preparing a callback and pop after it returns.
+#[derive(Clone, Copy)]
+pub(super) enum ScopeExit {
+    Context(Id),
+    SendfileWrite {
+        receiver: Id,
+        identity: crate::objects::socket::SendfileIdentity,
+        session: Id,
+    },
+}
+
+impl ScopeExit {
+    /// Enter on the owner execution. A sendfile scope also keeps its original native socket
+    /// owner on the Rust stack until the callback has completed and the guard is popped.
+    fn enter(&self, ctx: &mut Context) -> Result<Option<crate::ObjectOwner>> {
+        match *self {
+            Self::Context(context) => {
+                ctx.heap.execution.contexts.push(context);
+                Ok(None)
+            }
+            Self::SendfileWrite {
+                receiver,
+                identity,
+                session,
+            } => stdlib::socket::enter_sendfile_write(ctx, receiver, identity, session).map(Some),
+        }
+    }
+
+    fn pop(self, ctx: &mut Context) {
+        match self {
+            Self::Context(_) => {
+                ctx.heap.execution.contexts.pop();
+            }
+            Self::SendfileWrite { .. } => {
+                ctx.heap.execution.sendfile_writes.pop();
+            }
+        }
+    }
+}
+
+/// An owner-side callback ticket. Its operands remain rooted by the registered caller;
+/// no native socket owner or Context borrow travels in the ticket.
+pub(super) struct ScopedCall {
+    exit: ScopeExit,
+    callable: Id,
+    args: Vec<Id>,
+    kwargs: Vec<(String, Id)>,
+}
+
+impl ScopedCall {
+    pub(super) fn register(
+        exit: ScopeExit,
+        callable: Id,
+        args: Vec<Id>,
+        kwargs: Vec<(String, Id)>,
+    ) -> RegisteredCall {
+        RegisteredCall::Scoped(Self {
+            exit,
+            callable,
+            args,
+            kwargs,
+        })
+    }
+
+    /// Prepare under the entered scope, end that borrow before checked execution, and pop
+    /// on every Python return or error, including errors raised during preparation.
+    ///
+    /// # Safety
+    /// The caller owns the context and its marked callback operands until completion.
+    unsafe fn run(self, context: *mut Context) -> Result<Id> {
+        let Self {
+            exit,
+            callable,
+            args,
+            kwargs,
+        } = self;
+        // SAFETY: scope entry runs before the callback and cannot retain this borrow.
+        let owner = exit.enter(unsafe { &mut *context })?;
+        // SAFETY: preparation ends before the registered callback is executed.
+        let prepared = unsafe { &mut *context }.prepare_call(callable, args.into(), kwargs);
+        let result = match prepared {
+            // SAFETY: the scope and callback operands remain rooted on this execution.
+            Ok(call) => unsafe { call.run(context) },
+            Err(error) => Err(error),
+        };
+        // SAFETY: callback execution or preparation has returned to its owner.
+        exit.pop(unsafe { &mut *context });
+        drop(owner);
+        result
+    }
+}
+
 impl RegisteredCall {
     /// # Safety
     /// The executing thread must own the context that prepared this call until the call
@@ -317,13 +409,8 @@ impl RegisteredCall {
                 // SAFETY: dispatch runs on the execution that prepared and rooted the operands.
                 unsafe { &mut *context }.call_other(callable, args, kwargs.into_vec())
             }
-            Self::InContext(call) => {
-                // SAFETY: the prepared callback and the entered context belong to this execution.
-                let result = unsafe { call.run(context) };
-                // SAFETY: the callback has returned to the execution that entered the context.
-                unsafe { &mut *context }.heap.execution.contexts.pop();
-                result
-            }
+            // SAFETY: the callback and its scope belong to this exclusively executing context.
+            Self::Scoped(call) => unsafe { call.run(context) },
             // SAFETY: the owner keeps the context and its linked code live through the call.
             Self::Native(frame) => unsafe { frame.run(context) },
             Self::Code {
@@ -8792,7 +8879,7 @@ impl Context {
                     }
                     let wait = match name.as_str() {
                         "_contextvars.Context.run" => {
-                            return self.prepare_context_run(&args, kwargs);
+                            return self.prepare_context_run(args, kwargs);
                         }
                         "_socket.getaddrinfo" => {
                             return stdlib::socket::prepare_getaddrinfo(self, &args, &kwargs)

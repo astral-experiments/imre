@@ -1,0 +1,5 @@
+   Compiling imre-ast v0.1.5 (/workspace/imre-ruff-b/crates/imre-ast)
+   Compiling imre-compiler v0.1.5 (/workspace/imre-ruff-b/crates/imre-compiler)
+   Compiling imre-runtime v0.1.5 (/workspace/imre-ruff-b/crates/imre-runtime)
+   Compiling imre-runtime-jemalloc v0.1.5 (/workspace/imre-ruff-b/crates/imre-runtime-jemalloc)
+    Finished `release` profile [optimized + debuginfo] target(s) in 3m 57s

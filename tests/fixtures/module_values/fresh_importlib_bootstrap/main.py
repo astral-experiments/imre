@@ -98,8 +98,11 @@ with fresh_imports("_frozen_importlib", "_frozen_importlib_external"):
             # Linked executables cannot compile a new Python body created at runtime.
             try:
                 loader.exec_module(module)
-            except NotImplementedError as exc:
-                assert str(exc) == f"no compiled Python body for <module> ({path}:1)"
+            except ImportError as exc:
+                assert type(exc) is ImportError
+                assert exc.name == name and exc.path == path
+                assert "no matching linked code" in str(exc)
+                assert "Declare and import the qualified module" in str(exc)
             else:
                 raise AssertionError("fresh unlinked source unexpectedly executed")
         else:

@@ -1,0 +1,67 @@
+{
+  "actual_image_environment": {
+    "IMREFLAGS": "--opt-level 0",
+    "IMRE_CACHE_DIR": "/workspace/scratch/ruff-a-95908f/uv10-review/cache",
+    "LANG": "C.UTF-8",
+    "LC_ALL": "en_US.UTF-8",
+    "PATH": "/workspace/scratch/ruff-a-95908f/uv10-review/bin:/usr/bin:/bin"
+  },
+  "argv": [
+    "/usr/bin/strace",
+    "-f",
+    "-v",
+    "-yy",
+    "-qq",
+    "-s",
+    "4096",
+    "-e",
+    "trace=execve,execveat,open,openat,openat2,creat,io_uring_setup,clone,clone3,fork,vfork,rename,renameat,renameat2,newfstatat,statx,wait4,waitid,exit,exit_group,chdir,fchdir,close,close_range,dup,dup2,dup3,fcntl,unshare,mount,umount2,pivot_root,mount_setattr,open_tree,move_mount",
+    "-o",
+    "/workspace/scratch/uv10-959-env-parity-v1/O0.trace",
+    "/usr/bin/bwrap",
+    "--ro-bind",
+    "/",
+    "/",
+    "--tmpfs",
+    "/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts",
+    "--chdir",
+    "/workspace/scratch/ruff-a-95908f/uv10-review/work",
+    "--die-with-parent",
+    "--",
+    "/usr/bin/env",
+    "-u",
+    "PWD",
+    "/workspace/scratch/ruff-a-95908f/uv10-review/build/uv10-O0"
+  ],
+  "bwrap_sha256": "573236e5328ac2ebb08f59ae3a9805b4f8d12bdef14be8af4450d5463294985f",
+  "controller_sha256": "b62c68aad33584f3805e4e0d1e7b8378f0db0820169b8b11f481de11d93ed886",
+  "cwd": "/workspace/scratch/ruff-a-95908f/uv10-review/work",
+  "effects": {},
+  "env_trampoline_sha256": "eb1c64bbc9908afcdf8cb48524f17112d8dd76a249f80dee2f01da14747b3b6e",
+  "environment": {
+    "IMREFLAGS": "--opt-level 0",
+    "IMRE_CACHE_DIR": "/workspace/scratch/ruff-a-95908f/uv10-review/cache",
+    "LANG": "C.UTF-8",
+    "LC_ALL": "en_US.UTF-8",
+    "PATH": "/workspace/scratch/ruff-a-95908f/uv10-review/bin:/usr/bin:/bin"
+  },
+  "exit_code": 0,
+  "fixture_after": {
+    "Cargo.lock": "a81404faf134b0b627fbc50e12f49ef35c4ad3da8386824b2402fa736ea2c414",
+    "crates/uv-trampoline/Cargo.lock": "4e275bdc9483c9fab6a94f6e1d011a472953a76871f7964311f8efc92c5fcda0",
+    "scripts/check-trampoline-version-consistency.py": "29e5fca6ffdda841f8f12b124a65fed992b1a593523261062ff7c62230b405bf"
+  },
+  "fixture_before": {
+    "Cargo.lock": "a81404faf134b0b627fbc50e12f49ef35c4ad3da8386824b2402fa736ea2c414",
+    "crates/uv-trampoline/Cargo.lock": "4e275bdc9483c9fab6a94f6e1d011a472953a76871f7964311f8efc92c5fcda0",
+    "scripts/check-trampoline-version-consistency.py": "29e5fca6ffdda841f8f12b124a65fed992b1a593523261062ff7c62230b405bf"
+  },
+  "image_sha256": "718ec77072e973f8a0602f7772da72f961d292af892bf5749669ec2c15db243c",
+  "protected_compile_source_parent_masked": "/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts",
+  "protected_parent_source_intact": true,
+  "seconds": 1.4012,
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stdout_sha256": "d31efa624425fc18e3cc517341d86a253996abc942c7fc3a03ebdb3d36374ec3",
+  "trace_bytes": 46143,
+  "trace_sha256": "da3767d0423d9903856285adb26784c97fabd2578f3c663b44f1c3a273080283"
+}

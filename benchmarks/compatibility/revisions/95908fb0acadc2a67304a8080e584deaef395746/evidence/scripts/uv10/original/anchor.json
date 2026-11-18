@@ -1,0 +1,118 @@
+{
+  "anchor": {
+    "fixture_scope": "Complete frozen stock before-manifest and effective environment in plan.json for uv-10, checked against historical public-8668 stock and original argv; environment placeholders identify replay roles.",
+    "id": "uv-10",
+    "normalized_invocation": {
+      "argv": [
+        "$PYTHON",
+        "-B",
+        "scripts/check-trampoline-version-consistency.py"
+      ],
+      "cwd": "$WORK",
+      "env": {
+        "IMREFLAGS": "--opt-level 0",
+        "IMRE_CACHE_DIR": "$CACHE",
+        "LANG": "C.UTF-8",
+        "LC_ALL": "en_US.UTF-8",
+        "PATH": "$PATH"
+      }
+    },
+    "preimages": {
+      "Cargo.lock": "a81404faf134b0b627fbc50e12f49ef35c4ad3da8386824b2402fa736ea2c414",
+      "crates/uv-trampoline/Cargo.lock": "4e275bdc9483c9fab6a94f6e1d011a472953a76871f7964311f8efc92c5fcda0",
+      "scripts/check-trampoline-version-consistency.py": "29e5fca6ffdda841f8f12b124a65fed992b1a593523261062ff7c62230b405bf"
+    },
+    "reference": {
+      "effects_manifest": "{}",
+      "effects_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "exit_code": 0,
+      "stderr": "",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "workspace:       windows 0.61.3\nuv-trampoline:   windows 0.61.3\n\nVersions match.\n",
+      "stdout_sha256": "d31efa624425fc18e3cc517341d86a253996abc942c7fc3a03ebdb3d36374ec3"
+    },
+    "source": {
+      "commit": "24688aaca1e7fd104437a0909d5db3afdc7dcdb0",
+      "path": "scripts/check-trampoline-version-consistency.py",
+      "repo": "https://github.com/astral-sh/uv",
+      "sha256": "29e5fca6ffdda841f8f12b124a65fed992b1a593523261062ff7c62230b405bf"
+    }
+  },
+  "artifacts": {
+    "/workspace/imre/target/release/imre": {
+      "inode": 298987,
+      "mtime_ns": 1794956461123390141,
+      "sha256": "c8d8b748b6070f5b7d3c5692139040195f8506189edf03d8df65472d30a85e22",
+      "size": 251548448
+    },
+    "/workspace/imre/target/release/imre-toolchain/bin/clang": {
+      "inode": 9223372036855942240,
+      "mtime_ns": 1716798380000000000,
+      "sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+      "size": 140592
+    },
+    "/workspace/imre/target/release/imre.d": {
+      "inode": 9223372036855961713,
+      "mtime_ns": 1794956461283388243,
+      "sha256": "ffbdabd0a494a7a26d9abbfa09dcb916784400d24fc8f32e32bd1c40d900e01f",
+      "size": 68323
+    },
+    "/workspace/imre/target/release/libimre_runtime.a": {
+      "inode": 655380,
+      "mtime_ns": 1794956370892366022,
+      "sha256": "e58466bb9d8c2cc8912cdc43cce917f13e9b7b82777f3f84684ad0e813234ee3",
+      "size": 296229934
+    },
+    "/workspace/imre/target/release/libimre_runtime.d": {
+      "inode": 9223372036855961462,
+      "mtime_ns": 1794956461295388100,
+      "sha256": "c91a883b4a1b852260db9364da0895172137f3bdd560f2ccf1a367d850723768",
+      "size": 53031
+    },
+    "/workspace/ruff-a-cache/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14": {
+      "inode": 269333,
+      "mtime_ns": 1794930906057824852,
+      "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+      "size": 32359056
+    }
+  },
+  "cohort_authority": "880648b620f57905a495eb51fbb4600755ee0c54",
+  "cohort_authority_custody": "coordinator-specified immutable authority; Git object not present in this donor, not independently fetched",
+  "compiler_revision": "95908fb0acadc2a67304a8080e584deaef395746",
+  "compiler_tree": "e6405a3243de706adcab772bf16942808d6ca6fb",
+  "frozen_anchor_file": "/workspace/scratch/ruff-a-95908f/imre/benchmarks/compatibility/frozen/scripts.jsonl",
+  "frozen_anchor_raw_sha256": "45b96bc70f6fc7953bb7f88e40b3599e454067b46ff1b54c37abdddf70182f64",
+  "staged_snapshot": {
+    "Cargo.lock": {
+      "mode": "0o600",
+      "sha256": "a81404faf134b0b627fbc50e12f49ef35c4ad3da8386824b2402fa736ea2c414",
+      "size": 200090,
+      "type": "file"
+    },
+    "crates": {
+      "mode": "0o700",
+      "type": "directory"
+    },
+    "crates/uv-trampoline": {
+      "mode": "0o700",
+      "type": "directory"
+    },
+    "crates/uv-trampoline/Cargo.lock": {
+      "mode": "0o600",
+      "sha256": "4e275bdc9483c9fab6a94f6e1d011a472953a76871f7964311f8efc92c5fcda0",
+      "size": 5390,
+      "type": "file"
+    },
+    "scripts": {
+      "mode": "0o700",
+      "type": "directory"
+    },
+    "scripts/check-trampoline-version-consistency.py": {
+      "mode": "0o600",
+      "sha256": "29e5fca6ffdda841f8f12b124a65fed992b1a593523261062ff7c62230b405bf",
+      "size": 1625,
+      "type": "file"
+    }
+  },
+  "transferred_fixture": "/workspace/scratch/ruff-a-95908f/uv10-authentic-fixture"
+}

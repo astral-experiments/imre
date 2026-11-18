@@ -1,0 +1,36 @@
+{
+  "argv": [
+    "/workspace/imre/target/release/imre",
+    "build",
+    "scripts/check-trampoline-version-consistency.py",
+    "--opt-level",
+    "3",
+    "--runtime",
+    "/workspace/imre/target/release/libimre_runtime.a",
+    "--clang",
+    "/workspace/imre/target/release/imre-toolchain/bin/clang",
+    "-o",
+    "/workspace/scratch/ruff-a-95908f/uv10-review/build/uv10-O3"
+  ],
+  "cwd": "/workspace/scratch/ruff-a-95908f/uv10-review/work",
+  "elapsed_seconds": 58.797,
+  "env": {
+    "IMREFLAGS": "--opt-level 0",
+    "IMRE_CACHE_DIR": "/workspace/scratch/ruff-a-95908f/uv10-review/cache",
+    "LANG": "C.UTF-8",
+    "LC_ALL": "en_US.UTF-8",
+    "PATH": "/workspace/scratch/ruff-a-95908f/uv10-review/bin:/usr/bin:/bin"
+  },
+  "exit_code": 0,
+  "image": "/workspace/scratch/ruff-a-95908f/uv10-review/build/uv10-O3",
+  "image_exists": true,
+  "image_sha256": "a0a5fd88306e9dab05c5b93fe341f94d76513e2eacb71646d5e4751de097155d",
+  "scope": "explicit build; interpreter -B is preserved in separate exact CLI replay, not a build option",
+  "spawn_argv": null,
+  "stderr_path": "/workspace/scratch/ruff-a-95908f/uv10-review/build-O3.stderr",
+  "stderr_sha256": "f24293c28e0471f8852dcc5212a98f88f24af98d6531173ca72c70a9e007cf7a",
+  "stdout_path": "/workspace/scratch/ruff-a-95908f/uv10-review/build-O3.stdout",
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "timed_out": false,
+  "timeout_seconds": 150
+}

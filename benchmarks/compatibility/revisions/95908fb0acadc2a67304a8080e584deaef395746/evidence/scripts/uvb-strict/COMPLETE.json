@@ -1,0 +1,10 @@
+{
+  "archive_sha256": "d386a023d89c21bc5c006a523972df74e25b26913f932297499992aaa819f5c3",
+  "cases": [
+    "uv-26",
+    "uv-29"
+  ],
+  "credit": 0,
+  "manifest_sha256": "2c0444fc9c03262de9a8a28ced30a28b1cbef6dd43db29bb4ada6c45b2e9e4f9",
+  "schema": "unified959-uvb-strict-supplement-v1"
+}

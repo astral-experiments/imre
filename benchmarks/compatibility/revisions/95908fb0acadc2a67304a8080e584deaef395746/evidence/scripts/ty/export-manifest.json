@@ -1,0 +1,190 @@
+{
+  "capture/exact.py": {
+    "bytes": 7581,
+    "sha256": "68fc2752aa72a7209a12ed2fd9fd0d7ec99976d810417031ffcc9407198638de"
+  },
+  "capture/exec_gate.py": {
+    "bytes": 4675,
+    "sha256": "ccb88f3faba3fd7e5c3d4310adfe10b740604ffb0be71138ab8a6be8a7f09b72"
+  },
+  "capture/lane.py": {
+    "bytes": 9305,
+    "sha256": "f0295976d7e0aa58fde4bb7a2df8793b6fbc23b1654b88622665f6ead85eba20"
+  },
+  "capture/replay.py": {
+    "bytes": 19414,
+    "sha256": "f0a5c60f68840b99956a2666c1a8c746a8b694179179cf55fee88fbf2e5d4559"
+  },
+  "capture/ty05.py": {
+    "bytes": 6576,
+    "sha256": "157c253157a554ab432b4405c3f8cb65dcd3abac008056120816b48fd0d654e4"
+  },
+  "gates/direct-O0.json": {
+    "bytes": 1942,
+    "sha256": "8bce7bc67fcb9f43753a6a983f704807705933a6917b8db1ddd67adee19d1bf7"
+  },
+  "gates/direct-O0.stderr": {
+    "bytes": 129,
+    "sha256": "b30cb661c1768948108b65bcb5796692f74ecca28a198390523174367f9de80d"
+  },
+  "gates/direct-O0.stdout": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "gates/direct-O0.trace": {
+    "bytes": 6122,
+    "sha256": "1032f9af9eb00a531268a448e247a0491feac21552823795a8091e8331d7f591"
+  },
+  "gates/direct-O3.json": {
+    "bytes": 1942,
+    "sha256": "131ea22a050e73a441e69488409eb79996531470387dbc188c56082c26cceb08"
+  },
+  "gates/direct-O3.stderr": {
+    "bytes": 129,
+    "sha256": "b30cb661c1768948108b65bcb5796692f74ecca28a198390523174367f9de80d"
+  },
+  "gates/direct-O3.stdout": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "gates/direct-O3.trace": {
+    "bytes": 6109,
+    "sha256": "bc59e08996ecba1ecfac39ff351133a106dca17df82fdbb73671913cd9ec3ef1"
+  },
+  "gates/direct.py": {
+    "bytes": 19,
+    "sha256": "14841721c7b84f57d26a6a38a53827c683daf10930b9f297cfc15335bd1257b5"
+  },
+  "gates/imported-O0.json": {
+    "bytes": 1984,
+    "sha256": "a8b95eb09470386ea20cc3bbdf2493fdc08d763a7859645fd834ec0d35d8d5ec"
+  },
+  "gates/imported-O0.stderr": {
+    "bytes": 146,
+    "sha256": "a42c626be60532da60afce6f498d23d621a43fa208d0240473a16d5ad69e4754"
+  },
+  "gates/imported-O0.stdout": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "gates/imported-O0.trace": {
+    "bytes": 6960,
+    "sha256": "13ae7112cc194e2df3ae7d411db90214f2beb07df605ea0c3ed571980ec05047"
+  },
+  "gates/imported-O3.json": {
+    "bytes": 1984,
+    "sha256": "f99ce6c3d5ed78f17dc8a93f2a36334c7706834f4ed25e379643682cc8b6c0ac"
+  },
+  "gates/imported-O3.stderr": {
+    "bytes": 146,
+    "sha256": "a42c626be60532da60afce6f498d23d621a43fa208d0240473a16d5ad69e4754"
+  },
+  "gates/imported-O3.stdout": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "gates/imported-O3.trace": {
+    "bytes": 6960,
+    "sha256": "671b2c6743002210fd5bd26c52806d8afc0ba5fcc139ed50dc8d84fa50797306"
+  },
+  "gates/imported/control_poison.py": {
+    "bytes": 19,
+    "sha256": "14841721c7b84f57d26a6a38a53827c683daf10930b9f297cfc15335bd1257b5"
+  },
+  "gates/imported/transform_readme.py": {
+    "bytes": 2664,
+    "sha256": "f38bab13a92a1a0f643a4bb4a95416e8bf8a33e951c32c6c4e94f8a24032c304"
+  },
+  "original/report.json": {
+    "bytes": 22097,
+    "sha256": "a521a5ebada6296f1c62e94d5e1c9f1b4dc50ce4061b8691e245d3927a76253f"
+  },
+  "original/stock/effects.json": {
+    "bytes": 214,
+    "sha256": "57128fff7793fa3839a64d60d2bb067286031e5a6d891ef4771fadaf56c27a3b"
+  },
+  "original/stock/result.json": {
+    "bytes": 2796,
+    "sha256": "d76bf6481553c052581d6d42f21050d509caf17b583aeedfe5272919f913d421"
+  },
+  "original/stock/stderr": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "original/stock/stdout": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "postimages/README.md": {
+    "bytes": 5755,
+    "sha256": "8d6a1835e193986c470a85ced817c3f5469227af7a61215a255aa56ef3057829"
+  },
+  "preimages/README.md": {
+    "bytes": 5610,
+    "sha256": "8da93511cec1298648c345618960559c7dec67504b9132c1b9aee9a841e9fe08"
+  },
+  "preimages/dist-workspace.toml": {
+    "bytes": 3758,
+    "sha256": "02d617fb6e1ee474d3b0f52e4350d816ec5fdc78ec892fc9df78345ac756e0eb"
+  },
+  "preimages/scripts/transform_readme.py": {
+    "bytes": 2641,
+    "sha256": "d6a13d50218b55e3b73587974e8357b9bc68b7c364d8bb10d04708fec5e2d64f"
+  },
+  "recapture/O0/effects.json": {
+    "bytes": 214,
+    "sha256": "57128fff7793fa3839a64d60d2bb067286031e5a6d891ef4771fadaf56c27a3b"
+  },
+  "recapture/O0/result.json": {
+    "bytes": 3342,
+    "sha256": "6dfb029cd293b4d62dffa43ac76f2fca55edb344a162e2d03e3e012f4f8134ff"
+  },
+  "recapture/O0/run.trace": {
+    "bytes": 30288,
+    "sha256": "fc1aad94c1e097d6d0751f0995b29e8c98d8073db4031ca12c5610d0a2927db5"
+  },
+  "recapture/O0/stderr": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "recapture/O0/stdout": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "recapture/O3/effects.json": {
+    "bytes": 214,
+    "sha256": "57128fff7793fa3839a64d60d2bb067286031e5a6d891ef4771fadaf56c27a3b"
+  },
+  "recapture/O3/result.json": {
+    "bytes": 3342,
+    "sha256": "99659b0959e3683082672b822666722fb724371bd908d30fbc2ca6148d323316"
+  },
+  "recapture/O3/run.trace": {
+    "bytes": 30288,
+    "sha256": "fc840294a4c96dfcde4bc0e46dff2e533f3d4b000b824ed7e57fd22e9377ef2e"
+  },
+  "recapture/O3/stderr": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "recapture/O3/stdout": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "recapture/mask-smoke.json": {
+    "bytes": 1217,
+    "sha256": "8e64b428527132470022e248a39d5de2a9a380caae89d9c657d5b28576ee423a"
+  },
+  "recapture/mask-smoke.trace": {
+    "bytes": 16272,
+    "sha256": "378e53df3026bb6e3c851231dee602a6128d16a9fe5f808fe125f099c3b9ae4c"
+  },
+  "recapture/recapture_gates.py": {
+    "bytes": 2842,
+    "sha256": "28074ec9c8efb439b36f6c67924e5951f81089dbf46cab81c745c897e451ffe5"
+  },
+  "recapture/recapture_masked.py": {
+    "bytes": 4322,
+    "sha256": "c4658319e30e01d710c9b175e8bc0ccc215c1d69129af58a3647038b447a9e3d"
+  }
+}

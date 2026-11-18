@@ -1,0 +1,37 @@
+{
+  "revision": "95908fb0acadc2a67304a8080e584deaef395746",
+  "tree": "e6405a3243de706adcab772bf16942808d6ca6fb",
+  "publication": "scratch-only; no score, credit, commit, or PR",
+  "original_roster": 84,
+  "historical_stock_success_total": 72,
+  "historical_stock_exit_references_known_in_roster": 62,
+  "ruff_a_originals": 18,
+  "ruff_a_historical_stock_success": 14,
+  "ruff_a_historical_negative_controls": 4,
+  "fresh_actual_invocations": 54,
+  "independent_ruff_a_anchors": 0,
+  "setup_cost": {
+    "build_wall_seconds": 315,
+    "warm_target_gib_approx": 2.9,
+    "prior_release_backup_mib_approx": 521
+  },
+  "compiler_sha256": "c8d8b748b6070f5b7d3c5692139040195f8506189edf03d8df65472d30a85e22",
+  "runtime_sha256": "e58466bb9d8c2cc8912cdc43cce917f13e9b7b82777f3f84684ad0e813234ee3",
+  "files": {
+    "evidence/prebuild.txt": "1dfa1f58e0c47d94ccd66ac2ab97745c779265a050a54991eccd05757a87f05d",
+    "evidence/postbuild.txt": "2a2e91eb0dbf0f9d19a8f29c0c7ab6cb4cadba2875413f2750e184d29f8f577e",
+    "evidence/build.log": "1ab43a2224644ef174b090e9d9e673d29388280a1f13954c9f1891ce64db6758",
+    "evidence/depfile-custody.json": "ebda40855b8c3d97e9f4a4d5c1669b1a276e564e375f4aeeecf47b34174a18b6",
+    "evidence/prior-artifacts.sha256": "6083c10090090cd147fb9f3350196336dd97a9593ac08e38f7a8530f91e655ee",
+    "evidence/prior-artifacts.verify": "f682a120d843b32c8718e96c0f82ad9c8455b34b8799b968ce48c46d4d9e60c1",
+    "evidence/matched-artifacts.sha256": "60564de6c7aa2674ce83351ed1bdf7804c598622b8248f5a8f7ad0bd6ccd7843",
+    "evidence/roster-84.jsonl": "5a8b03713479dee32dbfd11d80c504d69c0f6e2098aed6926444fd0283265880",
+    "evidence/ruff-a-inventory.jsonl": "7ee9e92dfb43116477fdb235bde114b5cb9e0f24eee5f853f3c8e05f37d567cb",
+    "evidence/fresh-runs.jsonl": "886d76de784cc98011ae13fabb3340cd7c8025b487537977e4cc81905c6ed13a",
+    "evidence/fixture-fidelity.jsonl": "8f6cec0c4354d66bba8af8f35929b5f6492fde14a97a30e7692df4492ca9cd16",
+    "evidence/dependencies.json": "4646980cda80e12c147c18898b6bfd2f8434699b9e7c6d13e29ffbdbef85aa54",
+    "evidence/architecture.json": "c74c4e0f6b566ee87241a78389ed3ac7e86ce6131bfe3a1bc3b0d0f40f53ff6f",
+    "evidence/aot-console.json": "aeba714066bdc8092799780d3c6fe0fd01f8cc9723466ce543feded7e30ecc90"
+  },
+  "validation": "84 unique IDs; 18 Ruff-a IDs; 54 bounded invocations; raw stream and effect-manifest hashes verified; clean pinned source; diagnostic/no-image controls; withdrawal/preservation/restoration controls"
+}
