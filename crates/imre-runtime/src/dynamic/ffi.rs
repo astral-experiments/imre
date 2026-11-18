@@ -3137,7 +3137,7 @@ pub(super) unsafe extern "C" fn imre_dyn_define(
         let body = unsafe {
             match definition.tag {
                 0
-                | value::DIFFLIB_INIT_BODY..=value::PICKLE_BYTES_FRAME_READ_BODY
+                | value::DIFFLIB_INIT_BODY..=value::PICKLE_LOADS_BODY
                 | value::PATH_READ_BYTES_BODY..=value::PATH_TAIL_BODY => {
                     value::Body::Native(definition.entry.native, NONE)
                 }
@@ -3158,8 +3158,7 @@ pub(super) unsafe extern "C" fn imre_dyn_define(
             (qualname, doc),
             (filename, definition.first_line),
         );
-        if (value::DIFFLIB_INIT_BODY..=value::PICKLE_BYTES_FRAME_READ_BODY)
-            .contains(&definition.tag)
+        if (value::DIFFLIB_INIT_BODY..=value::PICKLE_LOADS_BODY).contains(&definition.tag)
             || (value::PATH_READ_BYTES_BODY..=value::PATH_TAIL_BODY).contains(&definition.tag)
         {
             let Value::Code(code) = ctx.heap.get_mut(code) else {
