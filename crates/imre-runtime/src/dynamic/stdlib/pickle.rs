@@ -2,6 +2,7 @@ use super::super::value::{DictViewKind, ELLIPSIS, NOT_IMPLEMENTED, NativeModuleS
 use super::{Context, Error, Id, NONE, Result, Value};
 use std::collections::HashMap;
 mod encoding;
+mod reader;
 
 /// The accelerator keeps the original dictionaries and observes their in-place edits.
 fn registry(ctx: &mut Context, module: Id, owner: &str, name: &str) -> Result<Id> {
