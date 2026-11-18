@@ -237,7 +237,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
-      CARGO_HOME: ${{ runner.temp }}/public-cargo-home
+      CARGO_HOME: /tmp/codex-cargo-home
       RUFF_SOURCE_REV: 0be08a206f9c3180afd3e93bcc792ed5cb1f4db1
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -251,6 +251,8 @@ jobs:
           lock = pathlib.Path('Cargo.lock')
           original = manifest.read_text()
           revision = os.environ['RUFF_SOURCE_REV']
+          if pathlib.Path(os.environ['CARGO_HOME']).exists():
+              raise SystemExit('public Cargo home must start absent')
           names = '''ruff_annotate_snippets ruff_db ruff_diagnostics ruff_index ruff_macros ruff_memory_usage ruff_notebook ruff_python_ast ruff_python_codegen ruff_python_edits ruff_python_importer ruff_python_literal ruff_python_parser ruff_python_stdlib ruff_python_trivia ruff_ranged_value ruff_source_file ruff_text_size ty_combine ty_module_resolver ty_python_core ty_python_semantic ty_site_packages ty_static ty_vendored'''.split()
           if not re.fullmatch('[0-9a-f]{40}', revision) or len(names) != 25 or len(set(names)) != 25:
               raise SystemExit('invalid public source revision or package inventory')
