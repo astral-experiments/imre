@@ -639,8 +639,33 @@ fn format_exception_line(
     } else {
         ": "
     };
-    lines.push(text.surrounded(&format!("{module}{dot}{name}{separator}"), "\n"));
+    let prefix = format!("{module}{dot}{name}{separator}");
+    let ending = import_suggestion(ctx, value).map_or(Cow::Borrowed("\n"), |hint| {
+        Cow::Owned(format!(". Did you mean: '{hint}'?\n"))
+    });
+    lines.push(text.surrounded(&prefix, &ending));
     Ok(())
+}
+
+/// Read the current named fields after the exception's string hook has run.
+fn import_suggestion(ctx: &Context, value: Id) -> Option<&'static str> {
+    let Value::Raised(error) = ctx.heap.get(value) else {
+        return None;
+    };
+    if !ctx.is_builtin_error(error, "ImportError") {
+        return None;
+    }
+    let [Some(name), _, Some(wrong)] = *super::super::exception_members::import_names(ctx, value)
+    else {
+        return None;
+    };
+    let (Value::Str(name), Value::Str(wrong)) = (
+        ctx.heap.get(ctx.scalar_value(name)),
+        ctx.heap.get(ctx.scalar_value(wrong)),
+    ) else {
+        return None;
+    };
+    crate::objects::exceptions::import_suggestion(name, wrong)
 }
 
 /// Capture the exception class name after its string hook, as traceback does.
@@ -740,4 +765,39 @@ fn displayed_label(ctx: &mut Context, label: Id) -> Result<&str> {
     }
     let displayed = super::super::builtins::format_value(ctx, label, None)?;
     ctx.str_value(displayed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dynamic::ffi;
+
+    #[test]
+    fn boxed_import_error_hint_uses_current_named_fields() {
+        let mut ctx = ffi::new_context(
+            serde_json::json!({"paths": [], "python_version": "3.14"}),
+            ["imre"],
+        );
+        let name = ctx.text("errno");
+        let spelling = ctx.text("EDAOM");
+        let mut error = Error::new("ImportError", "cannot import");
+        error.tracing().import_names = [Some(name), None, Some(spelling)];
+        let value = ctx.raised_instance(error);
+        for (fields, expected) in [
+            (
+                [Some(name), None, Some(spelling)],
+                "ImportError: cannot import. Did you mean: 'EDOM'?\n",
+            ),
+            ([None, None, Some(spelling)], "ImportError: cannot import\n"),
+            ([Some(name), None, None], "ImportError: cannot import\n"),
+        ] {
+            let Value::Raised(error) = ctx.heap.get_mut(value) else {
+                unreachable!()
+            };
+            error.tracing().import_names = fields;
+            let mut lines = Vec::new();
+            format_exception_line(&mut ctx, value, &mut lines).unwrap();
+            assert!(matches!(lines.as_slice(), [TraceText::Scalar(line)] if line == expected));
+        }
+    }
 }
