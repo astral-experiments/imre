@@ -360,7 +360,7 @@ impl<'ast> Visitor<'ast> for Calls<'_, '_> {
 
 /// Functions exposed as values can have their code replaced through an alias,
 /// container, or callback. Direct named calls do not expose the function object.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, salsa::SalsaValue)]
 struct FunctionEscapes<'db> {
     functions: HashSet<Definition<'db>>,
     unresolved_code_write: bool,
