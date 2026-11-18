@@ -414,6 +414,14 @@ pub(crate) struct Error {
     cause: Option<crate::ObjectOwner>,
 }
 
+impl std::fmt::Debug for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Error")
+            .field("kind", &self.kind)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Error {
     pub(super) fn exit_status(status: i32) -> Self {
         let word = crate::Int::small(i64::from(status)).unwrap().into_raw();
