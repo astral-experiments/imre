@@ -2,7 +2,7 @@
 
 use super::super::super::{
     Context, ffi,
-    value::{self, Code, Id, NONE, Result, Value},
+    value::{Code, Id, NONE, Result, Value},
 };
 
 const PROTO: u8 = 0x80;
@@ -85,37 +85,7 @@ impl Item {
 struct Layout {
     items: Vec<Item>,
     memo: usize,
-    used: u16,
     has_get: bool,
-}
-
-const HANDLERS: &[(u8, u32)] = &[
-    (PROTO, value::PICKLE_PROTO_BODY),
-    (FRAME, value::PICKLE_FRAME_BODY),
-    (EMPTY_LIST, value::PICKLE_EMPTY_LIST_BODY),
-    (MEMOIZE, value::PICKLE_MEMOIZE_BODY),
-    (MARK, value::PICKLE_MARK_BODY),
-    (SHORT_BINUNICODE, value::PICKLE_SHORT_UNICODE_BODY),
-    (APPENDS, value::PICKLE_APPENDS_BODY),
-    (STOP, value::PICKLE_STOP_BODY),
-    (BINGET, value::PICKLE_BINGET_BODY),
-    (LONG_BINGET, value::PICKLE_LONG_BINGET_BODY),
-];
-
-fn flag(op: u8) -> Option<u16> {
-    Some(match op {
-        PROTO => 1 << 0,
-        FRAME => 1 << 1,
-        EMPTY_LIST => 1 << 2,
-        MEMOIZE => 1 << 3,
-        MARK => 1 << 4,
-        SHORT_BINUNICODE => 1 << 5,
-        APPENDS => 1 << 6,
-        STOP => 1 << 7,
-        BINGET => 1 << 8,
-        LONG_BINGET => 1 << 9,
-        _ => return None,
-    })
 }
 
 struct Cursor<'a> {
@@ -166,7 +136,6 @@ fn preflight(data: &[u8]) -> Option<Layout> {
     if cursor.byte()? != EMPTY_LIST || cursor.byte()? != MEMOIZE || cursor.byte()? != MARK {
         return None;
     }
-    let mut used = flag(PROTO)? | flag(FRAME)? | flag(EMPTY_LIST)? | flag(MEMOIZE)? | flag(MARK)?;
     let mut items: Vec<Item> = Vec::new();
     items
         .try_reserve((end.saturating_sub(14) / 8).min(1024))
@@ -175,7 +144,6 @@ fn preflight(data: &[u8]) -> Option<Layout> {
     let mut has_get = false;
     loop {
         let op = cursor.byte()?;
-        used |= flag(op)?;
         match op {
             SHORT_BINUNICODE => {
                 let length = cursor.byte()?;
@@ -201,263 +169,15 @@ fn preflight(data: &[u8]) -> Option<Layout> {
                 if cursor.byte()? != STOP || cursor.at != end {
                     return None;
                 }
-                used |= flag(STOP)?;
                 return Some(Layout {
                     items,
                     memo,
-                    used,
                     has_get,
                 });
             }
             _ => return None,
         }
     }
-}
-
-fn source_function(ctx: &Context, function: Id, root: Id, tag: u32) -> bool {
-    matches!(ctx.heap.get(function), Value::Function { code, scope, .. }
-        if *scope == root && ctx.code_object(*code).definition.provider_body() == tag as u8)
-}
-
-fn source_class(ctx: &Context, root: Id, class: Id, expected: &str) -> bool {
-    let Value::Class {
-        metaclass,
-        name,
-        scope,
-        ancestors,
-        ..
-    } = ctx.heap.get(class)
-    else {
-        return false;
-    };
-    name == expected
-        && metaclass.is_none()
-        && ctx.scope_data(*scope).parent == Some(root)
-        && ancestors.as_slice()
-            == ctx
-                .builtins
-                .get("object")
-                .map(std::slice::from_ref)
-                .unwrap_or(&[])
-        && [
-            "__new__",
-            "__getattr__",
-            "__getattribute__",
-            "__setattr__",
-            "__bool__",
-            "__len__",
-            "__del__",
-        ]
-        .iter()
-        .all(|name| ctx.own_class_attr(class, name).is_none())
-}
-
-fn methods(ctx: &Context, root: Id, class: Id, expected: &[(&str, u32)]) -> bool {
-    expected.iter().all(|&(name, tag)| {
-        ctx.own_class_attr(class, name)
-            .is_some_and(|function| source_function(ctx, function, root, tag))
-    })
-}
-
-fn plain_fields(ctx: &Context, class: Id, fields: &[&str]) -> bool {
-    fields
-        .iter()
-        .all(|name| ctx.own_class_attr(class, name).is_none())
-}
-
-fn builtins(ctx: &Context, root: Id) -> bool {
-    let Some(table) = ctx.source_builtins else {
-        return false;
-    };
-    [
-        "bool",
-        "bytes",
-        "isinstance",
-        "str",
-        "len",
-        "getattr",
-        "type",
-        "memoryview",
-        "min",
-        "hasattr",
-    ]
-    .iter()
-    .all(|name| {
-        ctx.scalar_scope_name(root, name) == Some(None)
-            && ctx.scalar_dict_name(table, name) == Some(ctx.builtins.get(*name).copied())
-    })
-}
-
-fn io_method(ctx: &Context, class: Id, name: &str) -> bool {
-    let Some(mut member) = ctx.own_class_attr(class, name) else {
-        return false;
-    };
-    if let Value::Method { callable, .. } = ctx.heap.get(member) {
-        member = *callable;
-    }
-    matches!(ctx.heap.get(member), Value::IoMethod { owner, name: current, .. }
-        if *owner == class && *current == name)
-}
-
-fn environment(ctx: &Context, root: Id, used: u16) -> bool {
-    // _append_items evaluates this default even though exact lists always have extend.
-    if !builtins(ctx, root) || !matches!(ctx.scalar_scope_name(root, "_NoValue"), Some(Some(_))) {
-        return false;
-    }
-    let Some(Some(loads)) = ctx.scalar_scope_name(root, "loads") else {
-        return false;
-    };
-    if !source_function(ctx, loads, root, value::PICKLE_LOADS_BODY) {
-        return false;
-    }
-    let Some(Some(reader)) = ctx.scalar_scope_name(root, "_loads_reader") else {
-        return false;
-    };
-    if !source_class(ctx, root, reader, "_Unpickler")
-        || !plain_fields(
-            ctx,
-            reader,
-            &[
-                "_buffers",
-                "_file_readline",
-                "_file_read",
-                "memo",
-                "encoding",
-                "errors",
-                "proto",
-                "fix_imports",
-                "_unframer",
-                "read",
-                "readline",
-                "metastack",
-                "stack",
-                "append",
-            ],
-        )
-        || !methods(
-            ctx,
-            root,
-            reader,
-            &[
-                ("__init__", value::PICKLE_READER_INIT_BODY),
-                ("load", value::PICKLE_READER_LOAD_BODY),
-                ("_require_stack", value::PICKLE_REQUIRE_STACK_BODY),
-                ("pop_mark", value::PICKLE_POP_MARK_BODY),
-                ("_append_items", value::PICKLE_APPEND_ITEMS_BODY),
-            ],
-        )
-    {
-        return false;
-    }
-    let Some(dispatch) = ctx.own_class_attr(reader, "dispatch") else {
-        return false;
-    };
-    let Value::Dict(entries) = ctx.heap.get(dispatch) else {
-        return false;
-    };
-    for (index, &(op, tag)) in HANDLERS.iter().enumerate() {
-        if used & (1 << index) != 0 {
-            let Some(Some(handler)) = entries.lookup_ordinal(ctx, char::from(op)).continue_value()
-            else {
-                return false;
-            };
-            if !source_function(ctx, handler, root, tag) {
-                return false;
-            }
-        }
-    }
-    let Some(Some(framer)) = ctx.scalar_scope_name(root, "_Unframer") else {
-        return false;
-    };
-    if !source_class(ctx, root, framer, "_Unframer")
-        || !plain_fields(
-            ctx,
-            framer,
-            &["file_read", "file_readline", "current_frame"],
-        )
-        || !methods(
-            ctx,
-            root,
-            framer,
-            &[
-                ("__init__", value::PICKLE_UNFRAMER_INIT_BODY),
-                ("read", value::PICKLE_UNFRAMER_READ_BODY),
-                ("read_exact", value::PICKLE_UNFRAMER_EXACT_BODY),
-                ("readline", value::PICKLE_UNFRAMER_LINE_BODY),
-                ("load_frame", value::PICKLE_UNFRAMER_FRAME_BODY),
-            ],
-        )
-    {
-        return false;
-    }
-    let Some(Some(frame)) = ctx.scalar_scope_name(root, "_BytesFrame") else {
-        return false;
-    };
-    if !source_class(ctx, root, frame, "_BytesFrame")
-        || !plain_fields(ctx, frame, &["view", "pos"])
-        || !methods(
-            ctx,
-            root,
-            frame,
-            &[
-                ("__init__", value::PICKLE_BYTES_FRAME_INIT_BODY),
-                ("read", value::PICKLE_BYTES_FRAME_READ_BODY),
-            ],
-        )
-    {
-        return false;
-    }
-    let Some(Some(io)) = ctx.scalar_scope_name(root, "io") else {
-        return false;
-    };
-    let Value::Module {
-        scope: io_scope,
-        constructor: None,
-        ..
-    } = ctx.heap.get(io)
-    else {
-        return false;
-    };
-    let Some(&bytes_io) = ctx.builtins.get("_io.BytesIO") else {
-        return false;
-    };
-    if ctx.scalar_scope_name(*io_scope, "BytesIO") != Some(Some(bytes_io))
-        || !["__new__", "__init__", "read", "readline"]
-            .iter()
-            .all(|name| io_method(ctx, bytes_io, name))
-    {
-        return false;
-    }
-    let Some(Some(unpack)) = ctx.scalar_scope_name(root, "unpack") else {
-        return false;
-    };
-    if !matches!(ctx.heap.get(unpack), Value::Native(name) if name == "struct.unpack") {
-        return false;
-    }
-    let Some(Some(protocol)) = ctx.scalar_scope_name(root, "HIGHEST_PROTOCOL") else {
-        return false;
-    };
-    if !matches!(ctx.heap.get(protocol), Value::Int(n) if n.as_small() == Some(5)) {
-        return false;
-    }
-    let Some(Some(system)) = ctx.scalar_scope_name(root, "sys") else {
-        return false;
-    };
-    if Some(system) != ctx.threads.system_module {
-        return false;
-    }
-    let Value::Module {
-        scope: system_scope,
-        constructor: None,
-        ..
-    } = ctx.heap.get(system)
-    else {
-        return false;
-    };
-    let Some(Some(maxsize)) = ctx.scalar_scope_name(*system_scope, "maxsize") else {
-        return false;
-    };
-    matches!(ctx.heap.get(maxsize), Value::Int(n) if n.to_i64() == Some(isize::MAX as i64))
 }
 
 fn unobserved(ctx: &Context) -> bool {
@@ -603,9 +323,6 @@ fn attempt(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     };
     #[cfg(unix)]
     if crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Acquire) {
-        return Ok(None);
-    }
-    if !environment(ctx, root, layout.used) {
         return Ok(None);
     }
     decode(ctx, data, layout).map(Some)

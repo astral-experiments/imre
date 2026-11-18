@@ -1249,30 +1249,6 @@ impl SourceMap<'_> {
         } else if self.bundled && self.path == Path::new("<imre stdlib>/pickle.py") {
             match prefix.name {
                 "loads" => Some((Some("imre_dyn_pickle_loads"), permanent::PICKLE_LOADS_BODY)),
-                "_Unpickler.__init__" => Some((None, permanent::PICKLE_READER_INIT_BODY)),
-                "_Unpickler.load" => Some((None, permanent::PICKLE_READER_LOAD_BODY)),
-                "_Unpickler._require_stack" => Some((None, permanent::PICKLE_REQUIRE_STACK_BODY)),
-                "_Unpickler.pop_mark" => Some((None, permanent::PICKLE_POP_MARK_BODY)),
-                "_Unpickler._append_items" => Some((None, permanent::PICKLE_APPEND_ITEMS_BODY)),
-                "_Unpickler.load_proto" => Some((None, permanent::PICKLE_PROTO_BODY)),
-                "_Unpickler.load_frame" => Some((None, permanent::PICKLE_FRAME_BODY)),
-                "_Unpickler.load_empty_list" => Some((None, permanent::PICKLE_EMPTY_LIST_BODY)),
-                "_Unpickler.load_mark" => Some((None, permanent::PICKLE_MARK_BODY)),
-                "_Unpickler.load_short_binunicode" => {
-                    Some((None, permanent::PICKLE_SHORT_UNICODE_BODY))
-                }
-                "_Unpickler.load_memoize" => Some((None, permanent::PICKLE_MEMOIZE_BODY)),
-                "_Unpickler.load_appends" => Some((None, permanent::PICKLE_APPENDS_BODY)),
-                "_Unpickler.load_stop" => Some((None, permanent::PICKLE_STOP_BODY)),
-                "_Unpickler.load_binget" => Some((None, permanent::PICKLE_BINGET_BODY)),
-                "_Unpickler.load_long_binget" => Some((None, permanent::PICKLE_LONG_BINGET_BODY)),
-                "_Unframer.__init__" => Some((None, permanent::PICKLE_UNFRAMER_INIT_BODY)),
-                "_Unframer.read" => Some((None, permanent::PICKLE_UNFRAMER_READ_BODY)),
-                "_Unframer.read_exact" => Some((None, permanent::PICKLE_UNFRAMER_EXACT_BODY)),
-                "_Unframer.readline" => Some((None, permanent::PICKLE_UNFRAMER_LINE_BODY)),
-                "_Unframer.load_frame" => Some((None, permanent::PICKLE_UNFRAMER_FRAME_BODY)),
-                "_BytesFrame.__init__" => Some((None, permanent::PICKLE_BYTES_FRAME_INIT_BODY)),
-                "_BytesFrame.read" => Some((None, permanent::PICKLE_BYTES_FRAME_READ_BODY)),
                 _ => None,
             }
         } else if self.bundled && self.path == Path::new("<imre stdlib>/pathlib/__init__.py") {
