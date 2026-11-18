@@ -3273,9 +3273,15 @@ enum SlotShape {
     ScalarLeaf,
     AsciiStr,
     FreshNonshortTextList,
+    /// A certified fresh text leaf was retired with all scalar slot metadata already clear.
+    VacantText,
 }
 
 impl SlotShape {
+    fn is_vacant(self) -> bool {
+        matches!(self, Self::Vacant | Self::VacantText)
+    }
+
     /// Both scalar shapes can be marked without visiting children.
     fn is_scalar_leaf(self) -> bool {
         matches!(self, Self::ScalarLeaf | Self::AsciiStr)
@@ -4826,13 +4832,17 @@ impl Heap {
                 let slot = &mut self.slots[index];
                 free_head = slot.gc_next.replace(UNMARKED);
                 popped += 1;
+                let clean = self.slot_shapes[index] == SlotShape::VacantText;
+                debug_assert!(self.slot_shapes[index].is_vacant());
                 self.slot_shapes[index] = SlotShape::AsciiStr;
                 slot.value = Some(Value::Str(text));
-                slot.may_have_buffer_views = false;
-                slot.generation = 0;
-                slot.untracked_tuple.set(false);
-                slot.has_gc_header = false;
-                slot.finalization = Finalization::None;
+                if !clean {
+                    slot.may_have_buffer_views = false;
+                    slot.generation = 0;
+                    slot.untracked_tuple.set(false);
+                    slot.has_gc_header = false;
+                    slot.finalization = Finalization::None;
+                }
                 index
             } else {
                 Self::append_reserved_text_slot(
@@ -8228,7 +8238,7 @@ impl Heap {
     /// Recycle one occupied slot after its owner has proved it unreachable.
     fn retire_slot(&mut self, id: usize) {
         let shape = std::mem::replace(&mut self.slot_shapes[id], SlotShape::Vacant);
-        debug_assert!(shape != SlotShape::Vacant);
+        debug_assert!(!shape.is_vacant());
         debug_assert_eq!(self.traces[id].get(), UNMARKED);
         self.traces[id].set(UNMARKED);
         if self.slots[id].gc_prev.get() != UNMARKED {
@@ -8324,7 +8334,10 @@ impl Heap {
         debug_assert!(
             matches!(self.slots[id].value, Some(Value::Str(ref text)) if (3..=255).contains(&text.len()))
         );
-        self.slot_shapes[id] = SlotShape::Vacant;
+        debug_assert!(!self.slots[id].may_have_buffer_views);
+        debug_assert_eq!(self.slots[id].generation, 0);
+        debug_assert!(!self.slots[id].untracked_tuple.get());
+        self.slot_shapes[id] = SlotShape::VacantText;
         self.traces[id].set(UNMARKED);
         let slot = &mut self.slots[id];
         slot.value = None;
@@ -8336,9 +8349,7 @@ impl Heap {
         // Vacant slots supply their own free-list links. A sweep can therefore
         // retire the entire unreachable graph even if the allocator refuses growth.
         for id in span {
-            if self.traces[id].replace(UNMARKED) == UNMARKED
-                && self.slot_shapes[id] != SlotShape::Vacant
-            {
+            if self.traces[id].replace(UNMARKED) == UNMARKED && !self.slot_shapes[id].is_vacant() {
                 self.retire_slot(id);
             }
         }
@@ -8482,7 +8493,7 @@ impl Heap {
             // Python, collects, or dispatches signals. The owner is retired only after
             // the final read from this pointer.
             let child = unsafe { *items.add(position) } as usize;
-            if self.slot_shapes[child] == SlotShape::Vacant {
+            if self.slot_shapes[child].is_vacant() {
                 continue;
             }
             let Some(Value::Str(text)) = self.slots[child].value.as_ref() else {
@@ -8739,6 +8750,55 @@ mod tests {
     }
 
     #[test]
+    fn certified_vacant_text_is_skipped_by_sweep_and_reused_without_metadata_reset() {
+        assert_eq!(std::mem::size_of::<SlotShape>(), 1);
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let (owner, children) = nonshort_text_list(&mut heap, &[("alpha", true), ("bravo", true)]);
+        heap.release_temporaries_since(mark);
+        // SAFETY: this isolated producer and uninterrupted test own the distinct fresh leaves.
+        assert!(unsafe { heap.retire_certified_nonshort_text_list(owner) });
+        for &child in &children {
+            assert!(heap.slot_shapes[child as usize] == SlotShape::VacantText);
+        }
+        let free = (heap.free_head, heap.free_count);
+        // A generic vacant owner may retain arbitrary previous metadata; it must still
+        // take the full reset even when the following free leaf is already clean.
+        let dirty = &mut heap.slots[owner as usize];
+        dirty.may_have_buffer_views = true;
+        dirty.generation = 2;
+        dirty.untracked_tuple.set(true);
+        dirty.finalization = Finalization::Finalized;
+        heap.sweep_slots(children[0] as usize..children[1] as usize + 1);
+        assert_eq!((heap.free_head, heap.free_count), free);
+        heap.reserve_unobserved_texts(2).unwrap();
+        let mut values = Vec::with_capacity(2);
+        let input = b"\x8c\x03abc\x94\x8c\x03def\x94";
+        // SAFETY: both complete entries are prevalidated ASCII and all storage was reserved.
+        let (at, count) =
+            unsafe { heap.append_reserved_dense_ascii_texts(input, 0, 2, &mut values) };
+        assert_eq!((at, count), (input.len(), 2));
+        assert_eq!(values, [owner, children[0]]);
+        for (&id, expected) in values.iter().zip(["abc", "def"]) {
+            let slot = &heap.slots[id as usize];
+            assert!(matches!(slot.value.as_ref(), Some(Value::Str(text)) if text == expected));
+            assert!(
+                !slot.may_have_buffer_views && !slot.untracked_tuple.get() && !slot.has_gc_header
+            );
+            assert_eq!(slot.generation, 0);
+            assert!(slot.finalization == Finalization::None);
+            assert_eq!(slot.gc_next.get(), UNMARKED);
+        }
+        // The ordinary allocator must also accept a clean vacant leaf as a container,
+        // install its GC header and publish the new owner normally.
+        let new_owner = heap.alloc(Value::List(values.clone()));
+        assert_eq!(new_owner, children[1]);
+        assert!(heap.slots[new_owner as usize].has_gc_header);
+        heap.collect([new_owner].into_iter());
+        assert!(matches!(heap.get(new_owner), Value::List(items) if items == &values));
+    }
+
+    #[test]
     fn unrooted_text_graph_publication_preserves_aliases_cycles_and_singletons() {
         let mut heap = Heap::new();
         let mark = heap.temporary_mark();
@@ -8764,7 +8824,7 @@ mod tests {
         // Prompt collection reclaims the acyclic owner. The self-cycle follows
         // the ordinary cyclic collector's schedule rather than early retirement.
         for id in [alias, text] {
-            assert!(heap.slot_shapes[id as usize] == SlotShape::Vacant);
+            assert!(heap.slot_shapes[id as usize].is_vacant());
         }
         assert!(matches!(heap.get(short), Value::Str(value) if value == "x"));
     }
@@ -8787,7 +8847,7 @@ mod tests {
         assert!(!heap.is_fresh_nonshort_text_list(owner));
         heap.collect(std::iter::once(owner));
         for child in children {
-            assert!(heap.slot_shapes[child as usize] == SlotShape::Vacant);
+            assert!(heap.slot_shapes[child as usize].is_vacant());
         }
     }
 
@@ -8831,7 +8891,7 @@ mod tests {
             assert!(matches!(heap.get(child), Value::Str(_)));
         }
         for &child in &[children[0], children[5], children[6]] {
-            assert!(heap.slot_shapes[child as usize] == SlotShape::Vacant);
+            assert!(heap.slot_shapes[child as usize].is_vacant());
             assert_eq!(heap.traces[child as usize].get(), UNMARKED);
         }
         // SAFETY: the retired handle is rejected before any slot is changed.
