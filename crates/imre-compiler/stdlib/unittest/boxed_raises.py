@@ -190,6 +190,7 @@ def assertNotRegex(self, text, unexpected_regex, msg=None):
 TestCase.assertRegex = assertRegex
 TestCase.assertNotRegex = assertNotRegex
 TestCase.assertRaisesRegex = assertRaisesRegex
+assertRaises.__qualname__ = "TestCase.assertRaises"
 TestCase.assertRaises = assertRaises
 TestCase._assertNotWarns = _assertNotWarns
 TestCase.assertWarns = assertWarns
