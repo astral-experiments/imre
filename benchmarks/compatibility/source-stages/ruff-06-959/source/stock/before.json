@@ -1,0 +1,7 @@
+{
+  ".gitignore": "d7d71a7189cf7613e575fb302af37136a07230acd26f439cf191251c0f0def0b",
+  "crates/example/resources/not-a-tool.py": "f6fdf16c20fe287d3ddd37d53a38cf30bbb3b9706381e2af40efd46c0cdf828e",
+  "ignored/skip.py": "f6fdf16c20fe287d3ddd37d53a38cf30bbb3b9706381e2af40efd46c0cdf828e",
+  "scripts/check-scripts.py": "5d609801947008d4a72122570952f54ef7aedc46cdab4cf55f409e64adbda713",
+  "tools/rotate.py": "f6fdf16c20fe287d3ddd37d53a38cf30bbb3b9706381e2af40efd46c0cdf828e"
+}

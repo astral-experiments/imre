@@ -1,0 +1,2 @@
+tools/rotate.py
+scripts/check-scripts.py

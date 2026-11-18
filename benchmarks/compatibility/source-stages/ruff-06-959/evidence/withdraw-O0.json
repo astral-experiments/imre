@@ -1,0 +1,107 @@
+{
+  "argv": [
+    "/workspace/scratch/ruff06-controls-959/build/ruff06-O0",
+    "--write-ty-args-file",
+    "scripts.txt"
+  ],
+  "cwd": "/dev/shm/ruff06-selective-959-work",
+  "environment": {
+    "CARGO_HOME": "/workspace/scratch/ruff06-controls-959/tools-cache/cargo-home",
+    "CARGO_NET_OFFLINE": "true",
+    "GIT_ALLOW_PROTOCOL": "file",
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_TERMINAL_PROMPT": "0",
+    "HOME": "/workspace/scratch/ruff06-controls-959/tools-cache/home",
+    "LANG": "C.UTF-8",
+    "LC_ALL": "C.UTF-8",
+    "NO_COLOR": "1",
+    "PATH": "/workspace/scratch/ruff06-controls-959/tools/bin",
+    "PIP_NO_INDEX": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONHASHSEED": "0",
+    "PYTHONOPTIMIZE": "0",
+    "PYTHONPATH": "/workspace/ruff-a-cache/deps/checkscripts-venv/lib/python3.14/site-packages",
+    "RUST_BACKTRACE": "0",
+    "TMPDIR": "/workspace/scratch/ruff06-controls-959/tmp",
+    "TQDM_DISABLE": "1",
+    "TZ": "UTC",
+    "UV_OFFLINE": "true",
+    "UV_PYTHON_DOWNLOADS": "never"
+  },
+  "exit_code": 0,
+  "timeout_seconds": 30,
+  "timed_out": false,
+  "elapsed_seconds": 0.365,
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stdout_file": "withdraw-O0.stdout",
+  "stderr_file": "withdraw-O0.stderr",
+  "trace_file": "withdraw-O0.trace",
+  "trace_sha256": "05c7ae3802e89003deb8de31adca62b8d50ecd9c80341dfdbd8a2226f19279e2",
+  "trace_spawn_argv": [
+    "/usr/bin/strace",
+    "-f",
+    "-qq",
+    "-s",
+    "4096",
+    "-e",
+    "trace=execve,execveat,open,openat,openat2,clone,clone3,fork,vfork",
+    "-o",
+    "/workspace/scratch/ruff06-controls-959/evidence/withdraw-O0.trace",
+    "--",
+    "/workspace/scratch/ruff06-controls-959/build/ruff06-O0",
+    "--write-ty-args-file",
+    "scripts.txt"
+  ],
+  "before": {
+    ".gitignore": "d7d71a7189cf7613e575fb302af37136a07230acd26f439cf191251c0f0def0b",
+    "tools/rotate.py": "f6fdf16c20fe287d3ddd37d53a38cf30bbb3b9706381e2af40efd46c0cdf828e",
+    "ignored/skip.py": "f6fdf16c20fe287d3ddd37d53a38cf30bbb3b9706381e2af40efd46c0cdf828e",
+    "crates/example/resources/not-a-tool.py": "f6fdf16c20fe287d3ddd37d53a38cf30bbb3b9706381e2af40efd46c0cdf828e"
+  },
+  "after": {
+    "scripts.txt": "442305e8b0ad1dea10f57b8aa06245e77112d4711c082ed97ca1eeaf4c6ea3d0",
+    ".gitignore": "d7d71a7189cf7613e575fb302af37136a07230acd26f439cf191251c0f0def0b",
+    "tools/rotate.py": "f6fdf16c20fe287d3ddd37d53a38cf30bbb3b9706381e2af40efd46c0cdf828e",
+    "ignored/skip.py": "f6fdf16c20fe287d3ddd37d53a38cf30bbb3b9706381e2af40efd46c0cdf828e",
+    "crates/example/resources/not-a-tool.py": "f6fdf16c20fe287d3ddd37d53a38cf30bbb3b9706381e2af40efd46c0cdf828e"
+  },
+  "effects": {
+    "scripts.txt": [
+      null,
+      "442305e8b0ad1dea10f57b8aa06245e77112d4711c082ed97ca1eeaf4c6ea3d0"
+    ]
+  },
+  "effects_from_original_preimage": {
+    "scripts.txt": [
+      null,
+      "442305e8b0ad1dea10f57b8aa06245e77112d4711c082ed97ca1eeaf4c6ea3d0"
+    ],
+    "scripts/check-scripts.py": [
+      "5d609801947008d4a72122570952f54ef7aedc46cdab4cf55f409e64adbda713",
+      null
+    ]
+  },
+  "root_creation_order": [
+    "tools",
+    "crates",
+    "ignored",
+    ".gitignore",
+    "scripts"
+  ],
+  "observed_root_order": [
+    "tools",
+    "crates",
+    "ignored",
+    ".gitignore",
+    "scripts"
+  ],
+  "matches_later_effect": false,
+  "matches_later_exit": true,
+  "matches_later_streams": true,
+  "postimage_sha256": "442305e8b0ad1dea10f57b8aa06245e77112d4711c082ed97ca1eeaf4c6ea3d0",
+  "entry_withdrawn": true,
+  "preserved_sha256": "5d609801947008d4a72122570952f54ef7aedc46cdab4cf55f409e64adbda713",
+  "restored_sha256": "5d609801947008d4a72122570952f54ef7aedc46cdab4cf55f409e64adbda713"
+}

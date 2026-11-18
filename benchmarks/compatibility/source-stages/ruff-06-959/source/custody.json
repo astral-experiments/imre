@@ -1,0 +1,69 @@
+{
+  "fixture": [
+    {
+      "archive_member": "qualifier-recovery/prelaunch/ruff-06/public-full-argv-O0/work/.gitignore",
+      "bytes": 9,
+      "path": ".gitignore",
+      "sha256": "d7d71a7189cf7613e575fb302af37136a07230acd26f439cf191251c0f0def0b"
+    },
+    {
+      "archive_member": "qualifier-recovery/prelaunch/ruff-06/public-full-argv-O0/work/crates/example/resources/not-a-tool.py",
+      "bytes": 51,
+      "path": "crates/example/resources/not-a-tool.py",
+      "sha256": "f6fdf16c20fe287d3ddd37d53a38cf30bbb3b9706381e2af40efd46c0cdf828e"
+    },
+    {
+      "archive_member": "qualifier-recovery/prelaunch/ruff-06/public-full-argv-O0/work/ignored/skip.py",
+      "bytes": 51,
+      "path": "ignored/skip.py",
+      "sha256": "f6fdf16c20fe287d3ddd37d53a38cf30bbb3b9706381e2af40efd46c0cdf828e"
+    },
+    {
+      "archive_member": "qualifier-recovery/prelaunch/ruff-06/public-full-argv-O0/work/scripts/check-scripts.py",
+      "bytes": 3976,
+      "path": "scripts/check-scripts.py",
+      "sha256": "5d609801947008d4a72122570952f54ef7aedc46cdab4cf55f409e64adbda713"
+    },
+    {
+      "archive_member": "qualifier-recovery/prelaunch/ruff-06/public-full-argv-O0/work/tools/rotate.py",
+      "bytes": 51,
+      "path": "tools/rotate.py",
+      "sha256": "f6fdf16c20fe287d3ddd37d53a38cf30bbb3b9706381e2af40efd46c0cdf828e"
+    }
+  ],
+  "fixture_archive_label": "later public-8251-original-85-linux archive; contemporary stock6899 bytes authenticated independently by physical83 before-state hashes",
+  "fixture_archive_manifest_sha256": "abdb3f5c30695a715368d87e9937b9d0dc6d72bad49e5a64b3bda4eff14ee4c3",
+  "fixture_archive_sha256": "2e963b1678775a4380838b138ff7314004c8c3b37e8d0e7ba582d26c0e51eda6",
+  "historical_authority_commit": "880648b620f57905a495eb51fbb4600755ee0c54",
+  "physical83_input_manifest_sha256": "04304c806bd036bace0aba6afe46561b794516d2df1705c92945c8bd98ae7148",
+  "physical83_stock_member_prefix": "next-7668/ruff-06-14-17/ruff-06/runs/stock/O0/FILE/",
+  "raw_stock": {
+    "stock/before.json": {
+      "bytes": 475,
+      "sha256": "c1374220c0e836b863543616e1d494cf5047aa8cb0a9725f55a980cd7170387f"
+    },
+    "stock/cli.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "stock/cli.stdout": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "stock/cli.wait.json": {
+      "bytes": 272,
+      "sha256": "8d057ae5b16cb102bd13928f3aee48b34d4efc42a126faf231d578d8e28afd7b"
+    },
+    "stock/effects.json": {
+      "bytes": 108,
+      "sha256": "c4065dcbe5da307ed5c7095cf1e7e42456a9da761eab1865bc887c4e79e12fbd"
+    },
+    "stock/source-command.json": {
+      "bytes": 1816,
+      "sha256": "aa58ca8bd2184240d37a85766936843ba026cec74a25f7eaf31561ea3847d3c0"
+    }
+  },
+  "schema": "ruff06-selective-retrospective-custody-v1",
+  "stock_observation_is_historical_original": false,
+  "stock_observation_public_imre_revision": "64e6792e922fc10973747608a6a8b65ff8f3cef6"
+}

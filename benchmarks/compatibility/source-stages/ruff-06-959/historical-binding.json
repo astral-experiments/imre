@@ -1,0 +1,49 @@
+{
+  "authority_commit": "880648b620f57905a495eb51fbb4600755ee0c54",
+  "authority_path": "benchmarks/compatibility/scripts/ruff-a.jsonl",
+  "authority_record_sha256": "960dc85b9862104ce42ed264564a8d5a9752b5b1e9a118a1c4b46f65742027d3",
+  "original_inventory_count": 84,
+  "historical_stock_success_count": 72,
+  "count_custody": "historical 84/72 coordinator cohort; 84 confirmed by authority cohort.json; 72 is a separately supplied historical count",
+  "source": {
+    "repo": "https://github.com/astral-sh/ruff",
+    "commit": "65aee8892ce379af4ae9c8b5f6e0ab37b25d5ec9",
+    "path": "scripts/check-scripts.py",
+    "sha256": "5d609801947008d4a72122570952f54ef7aedc46cdab4cf55f409e64adbda713",
+    "git_blob": "f418fd1ce94b4c54737644064b704dd6036aa511"
+  },
+  "original_argv": [
+    "/home/dev-user/.local/share/imre-campaign-toolchain/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "-BS",
+    "/dev/shm/imre-frozen-4894/stock/O0/ruff-06/ruff-work/script_list/scripts/check-scripts.py",
+    "--write-ty-args-file",
+    "scripts.txt"
+  ],
+  "authority_normalized_invocation": {
+    "cwd": "$RUFF",
+    "argv": [
+      "$CPYTHON",
+      "-BS",
+      "$RUFF/scripts/check-scripts.py",
+      "--write-ty-args-file",
+      "scripts.txt"
+    ],
+    "env": {
+      "PYTHONPATH": "$DEPS/checkscripts-venv/lib/python3.14/site-packages:$RUFF/scripts/ty_benchmark/src:$RUFF/python/py-fuzzer:$RUFF/python/ruff-ecosystem:/usr/lib/python3/dist-packages",
+      "CARGO_NET_OFFLINE": "true",
+      "RUSTUP_HOME": "/workspace/.toolchains/rustup",
+      "CARGO_HOME": "/workspace/.toolchains/cargo",
+      "GITHUB_REPOSITORY": "astral-sh/ruff",
+      "GITHUB_WORKFLOW_REF": "astral-sh/ruff/.github/workflows/fuzz.yml@refs/heads/main",
+      "NO_COLOR": "1",
+      "TERM": "dumb"
+    }
+  },
+  "authority_fixture_warning": "Historical script_list fixture absent; using full recorded Ruff workspace.",
+  "later_stock_is_historical": false,
+  "later_stock_revision": "64e6792e922fc10973747608a6a8b65ff8f3cef6",
+  "later_stock_label": "LATER public6899 / physical83 stock observation",
+  "later_stock_observation_date": null,
+  "date_custody": "No exact observation date is in the selected raw command, wait, before, effects, or streams. Archive sealing is later; file mtimes are not observation evidence.",
+  "archive_preexistence_claim": false
+}
