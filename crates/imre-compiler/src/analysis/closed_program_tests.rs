@@ -4,6 +4,147 @@ use std::fs;
 use tempfile::tempdir;
 
 #[test]
+fn closed_checker_preserves_exact_reachable_return_contracts() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    // Exact 89-byte historical fixture (SHA256 af6ffed6682117e309d33a8c56f9736bd963428cfc74bf5d7bfe4896df7ff74e).
+    let original = "buffer = bytearray()\nbuffer.append(97)\nprint(buffer)\ndef f() -> int:\n    return True\nf()\n";
+    fs::write(&entry, original).unwrap();
+    for error in [
+        crate::check_file(&entry, None).unwrap_err(),
+        crate::compile_file(&entry, None, &Default::default())
+            .err()
+            .unwrap(),
+    ] {
+        assert!(
+            error.contains("main.py:5:12: Imre: expected int, got bool"),
+            "{error}"
+        );
+    }
+
+    let dynamic = "print(bytearray())\n";
+    for (annotation, value, expected) in [
+        ("int", "True", "expected int, got bool"),
+        ("float", "1", "expected float, got int"),
+    ] {
+        fs::write(
+            &entry,
+            format!("{dynamic}def f() -> {annotation}:\n    return {value}\nf()\n"),
+        )
+        .unwrap();
+        let error = crate::check_file(&entry, None).unwrap_err();
+        assert!(error.contains(expected), "{error}");
+    }
+    for (annotation, value) in [("int", "42"), ("int | bool", "True"), ("float", "1.0")] {
+        fs::write(
+            &entry,
+            format!("{dynamic}def f() -> {annotation}:\n    return {value}\nf()\n"),
+        )
+        .unwrap();
+        crate::check_file(&entry, None).unwrap();
+    }
+    fs::write(
+        &entry,
+        format!("{dynamic}def f() -> int:\n    return 'x'\nf()\n"),
+    )
+    .unwrap();
+    let error = crate::check_file(&entry, None).unwrap_err();
+    assert!(error.contains("invalid-return-type"), "{error}");
+    assert!(!error.contains("Imre: expected int, got str"), "{error}");
+}
+
+#[test]
+fn closed_return_contracts_cover_imports_and_preserve_dormant_policy() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    let provider = project.path().join("provider.py");
+    fs::write(project.path().join("dynamic.py"), "print(bytearray())\n").unwrap();
+    fs::write(&entry, "import dynamic\nimport provider\nprovider.f()\n").unwrap();
+    fs::write(&provider, "def f() -> int:\n    return True\n").unwrap();
+    let error = crate::check_file(&entry, None).unwrap_err();
+    assert!(
+        error.contains("provider.py:2:12: Imre: expected int, got bool"),
+        "{error}"
+    );
+
+    fs::write(
+        project.path().join("contracts.py"),
+        "type Choice = int | bool\ntype Count = int\n",
+    )
+    .unwrap();
+    fs::write(
+        &provider,
+        "from contracts import Choice\ndef f() -> Choice:\n    return True\n",
+    )
+    .unwrap();
+    crate::check_file(&entry, None).unwrap();
+    fs::write(
+        &provider,
+        "from contracts import Count\ndef f() -> Count:\n    return True\n",
+    )
+    .unwrap();
+    let error = crate::check_file(&entry, None).unwrap_err();
+    assert!(
+        error.contains("provider.py:3:12: Imre: expected int, got bool"),
+        "{error}"
+    );
+
+    fs::write(
+        &provider,
+        "def f() -> int:\n    if False:\n        return True\n    return 1\n",
+    )
+    .unwrap();
+    crate::check_file(&entry, None).unwrap();
+    fs::write(
+        &provider,
+        "def f() -> int:\n    if False:\n        return 'x'\n    return 1\n",
+    )
+    .unwrap();
+    let error = crate::check_file(&entry, None).unwrap_err();
+    assert!(
+        error.contains("provider.py:3:16: Imre: expected int, got str"),
+        "{error}"
+    );
+}
+
+#[test]
+fn closed_return_waits_for_its_operand_and_respects_operand_masks() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    for (value, inner_error) in [
+        ("True", "expected int, got bool"),
+        ("'x'", "invalid-argument-type"),
+    ] {
+        fs::write(&entry, format!("print(bytearray())\ndef take(value: int) -> bool:\n    return True\ndef f() -> int:\n    return take({value})\nf()\n")).unwrap();
+        let error = crate::check_file(&entry, None).unwrap_err();
+        assert!(error.contains(inner_error), "{error}");
+        assert!(
+            !error.contains("main.py:5:12: Imre: expected int, got bool"),
+            "{error}"
+        );
+    }
+    fs::write(&entry, "print(bytearray())\ndef boom() -> bool:\n    raise RuntimeError()\ndef f() -> int:\n    return boom()\nf()\n").unwrap();
+    crate::check_file(&entry, None).unwrap();
+
+    let source = "print(bytearray())\ndef f() -> int:\n    return True\nf()\n";
+    fs::write(&entry, source).unwrap();
+    let mut graph = crate::modules::SourceGraph::load(&entry, None, &[]).unwrap();
+    let (_, proofs) = graph.diagnostic_scopes();
+    let mut skipped = vec![Vec::new(); graph.modules.len()];
+    let start = ruff_text_size::TextSize::new(source.find("True").unwrap() as u32);
+    skipped[graph.entry].push(ruff_text_size::TextRange::at(
+        start,
+        ruff_text_size::TextSize::new(4),
+    ));
+    graph
+        .session
+        .closed_program_session(None, &graph.inputs)
+        .unwrap()
+        .closed_program_errors(&graph.modules, Some(&skipped), &proofs, None, None)
+        .unwrap();
+}
+
+#[test]
 fn fallback_call_bytearray_preserves_exact_argument_contract() {
     let project = tempdir().unwrap();
     let entry = project.path().join("main.py");
