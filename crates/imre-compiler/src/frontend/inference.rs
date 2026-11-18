@@ -3051,7 +3051,10 @@ run(True, [1])
                 "{classes}def consume(groups: list[list[Left]]) -> None: pass\ndef run(flag: bool) -> None:\n    values = []\n    values.append(Left())\n{boundary}    values.append(Right())\nrun(True)\n"
             );
             let error = crate::check(&source).unwrap_err();
-            assert!(error.contains("expected main.Left, got main.Right"), "{error}");
+            assert!(
+                error.contains("expected main.Left, got main.Right"),
+                "{error}"
+            );
         }
         let monomorphic = format!(
             "{classes}def run() -> None:\n    values = []\n    print(0)\n    values.append(Left())\n    values.append(Left())\nrun()\n"
@@ -3076,7 +3079,10 @@ run(True, [1])
             "{classes}def run() -> None:\n    values = []\n    values.append(Left())\n    values.append(Right())\n    values.append(make())\nrun()\n"
         );
         let error = crate::check(&incompatible).unwrap_err();
-        assert!(error.contains("expected main.Left, got main.Right"), "{error}");
+        assert!(
+            error.contains("expected main.Left, got main.Right"),
+            "{error}"
+        );
         crate::check(
             "def run() -> None:\n    values = []\n    alias = values\n    values.append(1)\n    seen = set()\n    seen.add(1)\nrun()\n",
         )
