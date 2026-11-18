@@ -182,15 +182,21 @@ impl BuildOptions {
         if command != "check" {
             options.read(command, &mut environment_flags()?.into_iter(), false)?;
         }
-        options.read(command, args, true)?;
+        let python_flags = options.read(command, args, true)?;
+        if !python_flags.is_empty() && !options.help && options.compile.module_entry.is_none() {
+            return Err("Python startup flags require build -m MODULE".into());
+        }
         options.add_pythonpath();
         if command == "build"
             && !options.help
             && let Some(name) = options.compile.module_entry.take()
         {
             options.compile.require_checked_module_entry = true;
-            let mut operand = std::iter::once(OsString::from(name));
-            let (invocation, _) = crate::python_command::parse("-m".into(), &mut operand)
+            let mut python_args = python_flags
+                .into_iter()
+                .chain([OsString::from("-m"), OsString::from(name)]);
+            let first = python_args.next().expect("module invocation");
+            let (invocation, _) = crate::python_command::parse(first, &mut python_args)
                 .map_err(|error| match error {
                     crate::python_command::ParseError::Usage(message) => message,
                     crate::python_command::ParseError::FatalStartup(message)
@@ -361,7 +367,8 @@ impl BuildOptions {
         command: &OsStr,
         args: &mut impl Iterator<Item = OsString>,
         command_line: bool,
-    ) -> Result<(), String> {
+    ) -> Result<Vec<OsString>, String> {
+        let mut python_flags = Vec::new();
         while let Some(flag) = args.next() {
             if command_line && !flag.as_encoded_bytes().starts_with(b"-") {
                 if self.source_path.replace(flag.into()).is_some() {
@@ -372,6 +379,14 @@ impl BuildOptions {
             if command_line && (flag == "--help" || flag == "-h") {
                 self.help = true;
                 break;
+            }
+            if command_line
+                && command == "build"
+                && self.source_path.is_none()
+                && matches!(flag.to_str(), Some("-B" | "-S" | "-BS" | "-SB"))
+            {
+                python_flags.push(flag);
+                continue;
             }
             if command == "check" && (flag == "--watch" || flag == "-w") {
                 self.watch = true;
@@ -469,7 +484,7 @@ impl BuildOptions {
                 _ => return Err(format!("Unknown option: {}\n{USAGE}", flag.display())),
             }
         }
-        Ok(())
+        Ok(python_flags)
     }
 
     fn add_extension_path(&mut self, path: PathBuf) {
