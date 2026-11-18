@@ -19,8 +19,13 @@ class RecordingLoader(SourceFileLoader):
         if sys.implementation.name == "imre":
             try:
                 super().exec_module(module)
-            except NotImplementedError as exc:
-                assert str(exc) == f"no compiled Python body for <module> ({self.path}:1)"
+            except ImportError as exc:
+                assert type(exc) is ImportError
+                assert exc.name == self.name and exc.path == self.path
+                assert "no matching linked code" in str(exc)
+                assert "Declare and import the qualified module" in str(exc)
+                # This custom hook checks disk syntax explicitly after the default refusal.
+                self.source_to_code(self.get_data(self.path), self.path)
             else:
                 raise AssertionError("fresh unlinked source unexpectedly executed")
             module.owner = sys.modules[module.__name__]

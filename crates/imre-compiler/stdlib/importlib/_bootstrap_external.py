@@ -10,6 +10,7 @@ from _imre_importlib import (
     compile_file as _compile_file,
     compile_filename as _compile_filename,
     get_code as _registered_code,
+    get_code_optional as _optional_registered_code,
     get_source_data as _registered_source_data,
     loader_fields as _loader_fields,
     path_stats as _path_stats,
@@ -215,8 +216,8 @@ def _compile_source(compiler, data, path, _optimize, registration=None):
     if registration is not None:
         loader, fullname, read_name = registration
         if type(read_name) is str and type(filename) is str and read_name == filename:
-            code = _registered_code(loader, filename, fullname, _file_data, _source_compiler)
-            if code is not None:
+            code = _optional_registered_code(loader, filename, fullname, _file_data, _source_compiler)
+            if code is not None and code is not True:
                 return code
     return _compile_file(compiler, data, filename, dont_inherit=True)
 
@@ -254,6 +255,15 @@ class SourceLoader(_LoaderBasics):
             return self.source_to_code(data, path)
         if issubclass(type(self), SourceFileLoader) and _uses_builtin_compile(_source_compiler):
             code = _registered_code(self, path, fullname, _file_data, _source_compiler)
+            # Native resolution returns Code, True (authenticate bytes), or None (custom).
+            # A trusted miss raises natively and cannot reach the custom fallback.
+            if code is True:
+                data = self.get_data(path)
+                if not _uses_builtin_compile(_source_compiler):
+                    return self.source_to_code(data, path)
+                code = _registered_code(self, path, fullname, _file_data, _source_compiler, data)
+                if code is None:
+                    return self.source_to_code(data, path)
             if code is not None:
                 return code
         data = self.get_data(path)
