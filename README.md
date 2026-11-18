@@ -112,7 +112,7 @@ with Rust-competitive performance.
 
 Revision `95908fb0acadc2a67304a8080e584deaef395746` · CPython **3.14.5** · Linux x86-64. These are original-test receipts at this revision, not cumulative credits.
 
-Frozen 45-family cohort: **398 pinned receipts** of **16,225 raw upstream originals**, **393 observed stock/O0/O3 pass intersections**, **393 verified credited pairs**; **15,827 originals have no validated receipt**.
+Frozen 45-family cohort: **674 pinned receipts** of **16,225 raw upstream originals**, **666 observed stock/O0/O3 pass intersections**, **666 verified credited pairs**; **15,551 originals have no validated receipt**.
 
 Supplemental pilots, outside the frozen cohort: **0 receipts** of **3 originals**, **0 observed intersections**, **0 verified credited pairs**.
 
@@ -129,7 +129,7 @@ Scripts: **4 of 84 original command IDs have receipts**; **4 verified / 72 histo
 | `contextlib` | 149 | not run | not run | not run | unknown (not run) | unknown (not run) | 149 |
 | `copy` | 81 | not run | not run | not run | unknown (not run) | unknown (not run) | 81 |
 | `csv` | 128 | not run | not run | not run | unknown (not run) | unknown (not run) | 122 |
-| `dataclasses` | 276 | not run | not run | not run | unknown (not run) | unknown (not run) | 273 |
+| `dataclasses` | 276 | 275 pass, 1 skip | 273 pass, 1 error, 2 skip | 273 pass, 1 error, 2 skip | 273 | 273 verified | 273 |
 | `datetime` | 1,098 | not run | not run | not run | unknown (not run) | unknown (not run) | 1,029 |
 | `fnmatch` | 24 | 24 pass | 24 pass | 24 pass | 24 | 24 verified | 24 |
 | `fractions` | 50 | not run | not run | not run | unknown (not run) | unknown (not run) | 50 |
