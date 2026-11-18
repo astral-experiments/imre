@@ -6,7 +6,7 @@
       "old_git_blob": "6ccce37c5e0c9ad50873c66a2dcab8e01c848b6d",
       "old_sha256": "0bf7e5356451e63133eb6adf0cfac9e7550aaefed88ddf65d5dd4f8a79e1588a",
       "path": "benchmarks/compatibility/raw_control.py",
-      "post_sha256": "d018a19e4260228bc8a278acc37a808693d1bbc08f0bedb7620fa3f1160054d1"
+      "post_sha256": "0ceb8fb097c984a6b28c10e1cf878eaf84148e2a85dff4cfb4b5af5b4934ebd6"
     }
   ],
   "mode": {
@@ -14,6 +14,6 @@
   },
   "patch": "benchmarks/compatibility/extensions/completed_unittest959_v1/patches/completed-unittest.patch",
   "schema": "imre.compatibility.future-policy.v1",
-  "sha256": "4a13f0d9ffa5a397696664795659c186e7deeb24875fb633c86d40f2f0dafe72",
+  "sha256": "5ba2a8956041c4d3583a8640c186973bc6356989cdd4cca1ee4c75f8a8d5ec70",
   "status": "proposed; not applied to live pinned scorecard"
 }

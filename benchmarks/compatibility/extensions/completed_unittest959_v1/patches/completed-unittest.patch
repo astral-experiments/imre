@@ -49,7 +49,7 @@
          # A successful io_uring setup would permit unobserved asynchronous opens.
          require(not re.search(r'\bio_uring_setup\(.*= [0-9]+$', line), 'native io_uring may hide file access')
 -        m = OPEN.match(line) or re.match(r'^\d+\s+newfstatat\(.*?("(?:[^"\\]|\\.)*")', line) or (re.match(r'^\d+\s+statx\(.*?("(?:[^"\\]|\\.)*")',line) if chain_policy else None)
-+        m = OPEN.match(line) or re.match(r'^\d+\s+newfstatat\(.*?("(?:[^"\\]|\\.)*")', line) or (re.match(r'^\d+\s+statx\(.*?("(?:[^"\\]|\\.)*")',line) if probe_policy else None)
++        m = OPEN.match(line) or re.match(r'^\d+\s+newfstatat\(.*?("(?:[^"\\]|\\.)*")', line) or (re.match(r'^\d+\s+statx\(.*?("(?:[^"\\]|\\.)*")',line) if chain_policy or probe_policy else None)
          if m:
              try: path = ast.literal_eval(m[1])
              except (ValueError, SyntaxError): require(False, "invalid traced path")
@@ -62,7 +62,7 @@
      result = parse(path if isinstance(path,bytes) else path.read_bytes(), False)
      require(result['inventory_complete'] and result['summary'] is not None, 'raw unittest collection or summary incomplete')
      index = {}
-@@ -480,6 +480,30 @@
+@@ -480,6 +480,45 @@
          key = (row['id'], row['occurrence'])
          require(key not in index and row['outcome'] in {'pass','fail','error','skip'}, 'raw unittest original missing a completed outcome')
          index[key] = row
@@ -72,28 +72,43 @@
 +    return event_capture(path,require)[1]
 +
 +
-+def completed_unittest(raw, exit_code, trace, pid, require):
-+    """Bind a completed ordinary unittest outcome stream to its traced writes and exit."""
++def traced_output(lines, pid, fd, require):
++    """Reconstruct complete target-PID writes to one captured pipe descriptor."""
++    chunks=[];prefix=r'^'+re.escape(str(pid))+r'\s+write(?:v)?\('+str(fd)+r'(?:<[^<>]*>)?,'
++    pattern=r'^'+re.escape(str(pid))+r'\s+write\('+str(fd)+r'<pipe:\[[0-9]+\]>, ("(?:[^"\\]|\\.)*"), ([0-9]+)\) = ([0-9]+)$'
++    for line in lines:
++        if not re.match(prefix,line):continue
++        m=re.fullmatch(pattern,line);require(m is not None and m[2]==m[3], 'completed unittest fd '+str(fd)+' write is partial or unverified')
++        try:chunk=ast.literal_eval('b'+m[1])
++        except (SyntaxError,ValueError):require(False,'completed unittest pipe write is undecodable')
++        require(len(chunk)==int(m[2]),'completed unittest pipe write is truncated');chunks.append(chunk)
++    return b''.join(chunks)
++
++
++def completed_unittest(raw, exit_code, trace, pid, require, *, stdout, canonical):
++    """Authenticate one complete, canonically ordered unittest protocol and both output pipes."""
++    require(isinstance(canonical,list) and canonical and all(isinstance(k,tuple) and len(k)==2 and isinstance(k[0],str) and type(k[1]) is int for k in canonical) and len(canonical)==len(set(canonical)), 'completed unittest canonical ordered occurrences missing or duplicated')
++    require(isinstance(raw,bytes) and raw.endswith(b'\n') and isinstance(stdout,bytes), 'completed unittest output framing is incomplete')
++    events=[]
++    for line in raw.splitlines(keepends=True):
++        require(line.endswith(b'\n') and line.startswith(b'IMRE_UNITTEST '), 'completed unittest contains non-event stderr')
++        try:event=json.loads(line[len(b'IMRE_UNITTEST '):-1])
++        except (ValueError,UnicodeDecodeError):require(False,'completed unittest event is malformed')
++        require(isinstance(event,dict) and isinstance(event.get('event'),str), 'completed unittest event framing differs');events.append(event['event'])
++    require(events and events[0]=='collection' and events[-1]=='summary' and events.count('collection')==events.count('summary')==1, 'completed unittest summary is premature, duplicated or not final')
++    n=len(canonical);require(events[1:n+1]==['inventory']*n and all(e in {'start','result','subtest_skip'} for e in events[n+1:-1]), 'completed unittest protocol event order differs')
 +    result,index=event_capture(raw,require);summary=result['summary'];outcomes=[row['outcome'] for row in index.values()]
-+    require(type(summary.get('run')) is int and summary['run']==result['collection']==len(index)
++    require(list(index)==canonical and type(summary.get('run')) is int and summary['run']==result['collection']==len(canonical)
 +            and not result['fixtures'] and type(summary.get('successful')) is bool
 +            and summary['successful']==(not any(x in {'fail','error'} for x in outcomes))
 +            and type(exit_code) is int and exit_code==(0 if summary['successful'] else 1),
-+            'completed unittest summary, outcomes or expected exit differs')
++            'completed unittest canonical inventory, summary, outcomes or expected exit differs')
 +    lines=trace.splitlines();require(child_exit_code(lines,pid,require)==exit_code,'completed unittest traced child exit differs')
-+    chunks=[]
-+    for line in lines:
-+        if not re.match(r'^'+re.escape(str(pid))+r'\s+write(?:v)?\(2(?:<[^<>]*>)?,',line):continue
-+        m=re.fullmatch(r'^'+re.escape(str(pid))+r'\s+write\(2<pipe:\[[0-9]+\]>, ("(?:[^"\\]|\\.)*"), ([0-9]+)\) = ([0-9]+)$',line)
-+        require(m is not None and m[2]==m[3],'completed unittest stderr write is partial or unverified')
-+        try:chunk=ast.literal_eval('b'+m[1])
-+        except (SyntaxError,ValueError):require(False,'completed unittest stderr write is undecodable')
-+        require(len(chunk)==int(m[2]),'completed unittest stderr write is truncated');chunks.append(chunk)
-+    require(b''.join(chunks)==raw,'completed unittest raw stderr differs from traced target writes')
++    require(traced_output(lines,pid,1,require)==stdout and traced_output(lines,pid,2,require)==raw, 'completed unittest stdout or stderr differs from traced target writes')
      return index
  
  
-@@ -723,13 +747,13 @@
+@@ -723,13 +762,18 @@
      else:
          parent,child=execs(lines,require);expected_env={**meta['environment'],'IMRE_WITHDRAW_LAUNCHER':launcher,'IMRE_WITHDRAW_ARCHIVE':archive};legacy=context['legacy']
          require(child[2]==image and exec_environment(lines[parent[0]],require)==expected_env and exec_environment(lines[child[0]],require)==meta['environment'] and not any(k.startswith('IMRE_WITHDRAW_') for k in meta['environment']) and (not legacy or meta['supervisor_environment']==expected_env),tier+' finite withdrawal environment differs')
@@ -105,20 +120,30 @@
      """One finite gate, tier, inventory, effects and withdrawal acceptance path."""
      require=api.require;legacy=context['legacy'];run=context['run'];positive=data('positive_launcher');builds={t:obj(t+'_build_json') for t in ('O0','O3')};command=builds['O0']['argv'];compiler=command[0];runtime=api.runtime_argument(command);extension=api.option(command,'--extension-path');launcher=command[2];comparable_run(run,extension,compiler,require,context.get('tier_environment'))
 -    context={**context,'family':family};withdrawal=context['withdrawal'];tree_role=withdrawal['tree_relative_to_extension'];suffix=withdrawal['tree_stash_suffix'];require(tree_role=='test' and suffix.startswith('.') and '/' not in suffix, 'finite withdrawal tree roles escape their source graph')
-+    context={**context,'family':family};completion=context.get('completion');require(completion is None or completion=={'schema':'imre.compatibility.completed-unittest.v1'},'unrecognized finite completion policy');withdrawal=context['withdrawal'];tree_role=withdrawal['tree_relative_to_extension'];suffix=withdrawal['tree_stash_suffix'];require(tree_role=='test' and suffix.startswith('.') and '/' not in suffix, 'finite withdrawal tree roles escape their source graph')
++    context={**context,'family':family};completion=context.get('completion');require(completion is None or completion=={'schema':'imre.compatibility.completed-unittest.v1'},'unrecognized finite completion policy');ordered=context.get('ordered_originals')
++    if completion:
++        require(isinstance(ordered,list) and ordered and all(isinstance(k,tuple) and len(k)==2 and isinstance(k[0],str) and type(k[1]) is int for k in ordered),'finite completed cohort lacks canonical ordered occurrences')
++        enrolled=set(ordered);frozen=[k[1:] for k in api.canonical_originals('stdlib') if k[0]==family and k[1:] in enrolled]
++        require(len(enrolled)==len(ordered) and frozen==ordered,'finite completed cohort lacks canonical ordered occurrences')
++    withdrawal=context['withdrawal'];tree_role=withdrawal['tree_relative_to_extension'];suffix=withdrawal['tree_stash_suffix'];require(tree_role=='test' and suffix.startswith('.') and '/' not in suffix, 'finite withdrawal tree roles escape their source graph')
      if context.get('exec_policy'):
          archive=None;rules=obj('policy')['families'][family]['readonly_data_files'];roles=context['resource_roles'];require(set(roles)=={r['source']['path'] for r in rules} and len(set(roles.values()))==len(roles), 'finite immutable resource role closure differs');resource_sources(api,rules,obj('resource_archive_proof'),lambda p:data(roles[p]),extension,require)
      else:
-@@ -750,7 +774,7 @@
+@@ -750,11 +794,11 @@
                  poison=data('poison');path=str(Path(launcher).parent/(context['poison_module']+'.py')) if legacy else meta['poison_path'];require(poison==b'status: int = True\n' and sha(poison)==meta['poison_sha256'] and path==str(Path(launcher).parent/(context['poison_module']+'.py')), 'finite first-party poison differs');trace_gate(trace,gated,probe,path,diagnostic,require,expected_exit=1)
      inventories={};paths={};effects=[];outputs=[]
      for tier in api.TIERS:
 -        meta=run['runs'][tier];capture=obj(tier+'_meta');raw=data(tier+'_stderr');stdout=data(tier+'_stdout');before=data(tier+'_effects_before');after=data(tier+'_effects_after');require(meta.get('exit_code')==0 and meta.get('timed_out') is False and sha(raw)==meta.get('stderr_sha256') and sha(stdout)==meta.get('stdout_sha256') and stdout==b'' and before==after and sha(before)==meta.get('effects_before_sha256') and sha(after)==meta.get('effects_after_sha256'), tier+' finite observation or effects differ');effects.append(b'no changes' if context.get('identity') else before);outputs.append(raw);inventories[tier]=event_index(raw,require);paths[tier]=context['roles'][tier+'_stderr'] if context.get('identity') else file(tier+'_stderr').relative_to(api.ROOT).as_posix()
-+        meta=run['runs'][tier];capture=obj(tier+'_meta');raw=data(tier+'_stderr');stdout=data(tier+'_stdout');before=data(tier+'_effects_before');after=data(tier+'_effects_after');require((completion is not None or meta.get('exit_code')==0) and meta.get('timed_out') is False and sha(raw)==meta.get('stderr_sha256') and sha(stdout)==meta.get('stdout_sha256') and stdout==b'' and before==after and sha(before)==meta.get('effects_before_sha256') and sha(after)==meta.get('effects_after_sha256'), tier+' finite observation or effects differ');effects.append(b'no changes' if context.get('identity') else before);outputs.append(raw);trace=text(tier+'_trace') if completion else None;target=exec_sequence(trace.splitlines(),require,1 if tier=='stock' else 2)[-1] if completion else None;inventories[tier]=completed_unittest(raw,meta.get('exit_code'),trace,target[1],require) if completion else event_index(raw,require);paths[tier]=context['roles'][tier+'_stderr'] if context.get('identity') else file(tier+'_stderr').relative_to(api.ROOT).as_posix()
++        meta=run['runs'][tier];capture=obj(tier+'_meta');raw=data(tier+'_stderr');stdout=data(tier+'_stdout');before=data(tier+'_effects_before');after=data(tier+'_effects_after');require((completion is not None or meta.get('exit_code')==0) and meta.get('timed_out') is False and sha(raw)==meta.get('stderr_sha256') and sha(stdout)==meta.get('stdout_sha256') and stdout==b'' and before==after and sha(before)==meta.get('effects_before_sha256') and sha(after)==meta.get('effects_after_sha256'), tier+' finite observation or effects differ');effects.append(b'no changes' if context.get('identity') else before);outputs.append(raw);trace=text(tier+'_trace') if completion else None;target=exec_sequence(trace.splitlines(),require,1 if tier=='stock' else 2)[-1] if completion else None;inventories[tier]=completed_unittest(raw,meta.get('exit_code'),trace,target[1],require,stdout=stdout,canonical=ordered) if completion else event_index(raw,require);paths[tier]=context['roles'][tier+'_stderr'] if context.get('identity') else file(tier+'_stderr').relative_to(api.ROOT).as_posix()
          if tier=='stock':
              require(capture==meta,'finite stock capture differs')
              if not legacy:
-@@ -770,7 +794,7 @@
+-                trace=text('stock_trace');lines=trace.splitlines();child=exec_sequence(lines,require,1)[0];identity=context['stock_interpreter'];expected_source=str(Path(extension)/Path(source['path']).relative_to('Lib'));events=list(api.successful_open_paths(trace,meta['cwd'],kernel_events=True));required={launcher,expected_source};opened={str(e['path']) for e in events if e['pid']==child[1] and e['path']==e['returned'] and e['flags'] in {'O_RDONLY','O_RDONLY|O_CLOEXEC'} and 'AT_FDCWD<'+meta['cwd']+'>' in lines[e['line']-1]};require(sha(data('stock_trace'))==meta['trace_sha256'] and child[2]==identity['path']==meta['argv'][0] and child[3]==meta['argv'] and exec_environment(lines[child[0]],require)==meta['environment'] and required<=opened, 'finite stock exec, cwd, environment, launcher or source differs');find(lines,rf'^{child[1]}\s+exit_group\(0\)',child[0]+1)
++                trace=text('stock_trace');lines=trace.splitlines();child=exec_sequence(lines,require,1)[0];identity=context['stock_interpreter'];expected_source=str(Path(extension)/Path(source['path']).relative_to('Lib'));events=list(api.successful_open_paths(trace,meta['cwd'],kernel_events=True));required={launcher,expected_source};opened={str(e['path']) for e in events if e['pid']==child[1] and e['path']==e['returned'] and e['flags'] in {'O_RDONLY','O_RDONLY|O_CLOEXEC'} and 'AT_FDCWD<'+meta['cwd']+'>' in lines[e['line']-1]};require(sha(data('stock_trace'))==meta['trace_sha256'] and child[2]==identity['path']==meta['argv'][0] and child[3]==meta['argv'] and exec_environment(lines[child[0]],require)==meta['environment'] and required<=opened, 'finite stock exec, cwd, environment, launcher or source differs');find(lines,rf'^{child[1]}\s+exit_group\({meta["exit_code"] if completion else 0}\)',child[0]+1)
+                 if context.get('identity'):finite_identity_stock(api,context,meta,child,data)
+                 if context.get('exec_policy'):
+                     case=obj('policy')['families'][family];rules=case['readonly_data_files'];expected={r['runtime']:r['source']['sha256'] for r in rules};seen=Counter()
+@@ -770,7 +814,7 @@
          if context.get('identity'):finite_identity_build(api,tier,context,build,meta,data,text)
          finite_withdrawal(api,tier,source,context,meta,image,launcher,extension,archive,data,text,obj)
      if context.get('ordered_originals') is not None:require(all(list(inventories[t])==context['ordered_originals'] for t in api.TIERS),'finite ordered original occurrence inventory differs')
@@ -127,7 +152,7 @@
      return {**run,'platform':context['platform'],'source':source},inventories,paths
  
  
-@@ -869,11 +893,11 @@
+@@ -869,11 +913,11 @@
      """Normalize a versioned semantic role binding into the same finite core."""
      if manifest.get('identity',{}).get('capture_format')=='held-supervised-v1':
          from extensions.data_resource959_v1.identity_roles import HeldCapture
@@ -137,7 +162,7 @@
      from extensions.successor959_v1 import authority as successor
      require=api.require;raw_obj=obj;obj,run=finite_identity_normalize(api,manifest,raw_obj,data);assessment=obj('assessment');require(source==manifest['source'] and binding['source_leaf']==source['path'] and run['family']==family and run['revision']==assessment['revision']==api.COHORT['imre_revision'] and assessment['canonical_denominator']==manifest['canonical_denominator'] and assessment['observed_originals']==manifest['observed_originals'] and assessment['other_originals_not_run']==manifest['other_originals_not_run'], 'finite source/denominator/revision differs');validate_stock_source(file('stock_source'),None,source,None,require);successor.donor(api,entry,assessment['product']);require(sha(data('positive_launcher'))==assessment['launcher_sha256'] and assessment['stock_python_version']=='Python '+api.COHORT['cpython_version'], 'finite launcher/stock identity differs');identity=binding['stock_interpreter'];expected=successor.predecessor_stock(api);require((identity['sha256'],identity['version'])==(assessment['stock_python_sha256'],assessment['stock_python_version'])==expected and Path(identity['path']).is_absolute(), 'finite stock identity differs from public predecessor');probe=obj('gate_probe_build');require(probe['source_sha256']==sha(data('gate_probe_source')), 'finite gate probe source differs')
 -    return finite_core(api,family,source,binding,file,data,text,obj,{'legacy':False,'run':run,'platform':dict(api.COHORT['platform']),'gate_tiers':('O0','O3'),'poison_module':binding['poison_module'],'operations':binding['gate_operations'],'probe':probe,'observed':manifest['observed_originals'],'withdrawal':binding['withdrawal'],'stock_interpreter':identity,'identity':manifest['identity'],'roles':manifest['roles'],'join_modes':manifest['identity']['join_modes'],'raw_obj':raw_obj,'product':assessment['product'],'source':source})
-+    return finite_core(api,family,source,binding,file,data,text,obj,{'legacy':False,'run':run,'platform':dict(api.COHORT['platform']),'gate_tiers':('O0','O3'),'poison_module':binding['poison_module'],'operations':binding['gate_operations'],'probe':probe,'observed':manifest['observed_originals'],'withdrawal':binding['withdrawal'],'stock_interpreter':identity,'identity':manifest['identity'],'roles':manifest['roles'],'join_modes':manifest['identity']['join_modes'],'raw_obj':raw_obj,'product':assessment['product'],'source':source,'completion':binding.get('completion')})
++    return finite_core(api,family,source,binding,file,data,text,obj,{'legacy':False,'run':run,'platform':dict(api.COHORT['platform']),'gate_tiers':('O0','O3'),'poison_module':binding['poison_module'],'operations':binding['gate_operations'],'probe':probe,'observed':manifest['observed_originals'],'withdrawal':binding['withdrawal'],'stock_interpreter':identity,'identity':manifest['identity'],'roles':manifest['roles'],'join_modes':manifest['identity']['join_modes'],'raw_obj':raw_obj,'product':assessment['product'],'source':source,'completion':binding.get('completion'),'ordered_originals':[(x['id'],x['occurrence']) for x in manifest['originals']]})
  
  
  @lru_cache(maxsize=None)
