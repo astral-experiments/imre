@@ -283,7 +283,7 @@ impl Builtin {
                     | PathOperation::Iterdir
                     | PathOperation::Walk
                     | PathOperation::Glob { .. } => true,
-                    PathOperation::ContextNew { .. }
+                    PathOperation::ContextNew
                     | PathOperation::ContextEnter
                     | PathOperation::UnionText
                     | PathOperation::Scripts

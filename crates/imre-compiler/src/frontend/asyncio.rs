@@ -310,15 +310,9 @@ impl Checker<'_> {
             return self.block(suite);
         };
         if let ast::Expr::Call(call) = &item.context_expr
-            && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::NullContext))
-            && self.graph.session.is_stdlib_class(
-                self.module,
-                &call.func,
-                "contextlib",
-                "nullcontext",
-            )
+            && matches!(self.resolve(&call.func), Some(Binding::RegisteredClass(_)))
         {
-            return Err(self.scoped_builtin_error("asynchronous contextlib.nullcontext", item));
+            return Err(self.scoped_builtin_error("asynchronous registered context manager", item));
         }
         let value = self.expr(&item.context_expr)?;
         let ty = value.ty;

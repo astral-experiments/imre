@@ -215,32 +215,8 @@ impl<'syntax> Classes<'syntax> {
             })
     }
 
-    pub(crate) fn subclass(&self, graph: &SourceGraph, child: usize, parent: usize) -> bool {
-        let bases = &self.definitions[child].bases;
-        if child == parent || bases.contains(&parent) {
-            return true;
-        }
-        graph.is_abstract_context_manager(self.definitions[parent].definition)
-            && ["__enter__", "__exit__"].iter().all(|&name| {
-                std::iter::once(&child).chain(bases).find_map(|&id| {
-                    self.definitions[id]
-                        .node
-                        .body
-                        .iter()
-                        .rev()
-                        .find_map(|stmt| match stmt {
-                            ast::Stmt::FunctionDef(f) if f.name.as_str() == name => Some(true),
-                            ast::Stmt::Assign(a)
-                                if a.targets.iter().any(|target| {
-                                    target.as_name_expr().is_some_and(|n| n.id.as_str() == name)
-                                }) =>
-                            {
-                                Some(!matches!(&*a.value, ast::Expr::NoneLiteral(_)))
-                            }
-                            _ => None,
-                        })
-                }) == Some(true)
-            })
+    pub(crate) fn subclass(&self, child: usize, parent: usize) -> bool {
+        child == parent || self.definitions[child].bases.contains(&parent)
     }
 
     /// The entry module may need to execute class bodies even without module globals.
@@ -935,13 +911,11 @@ fn collect_class<'syntax>(
                         return Err(module.diagnostic(method, "an abstract record method must be a declaration on an ABC"));
                     }
                     abstract_methods.insert(name.to_owned());
-                    if !graph.is_abstract_context_manager(definition) {
-                        if !names.insert(name.to_owned()) {
-                            return Err(module.diagnostic(method, "duplicate abstract method"));
-                        }
-                        class_bindings.insert(name.to_owned());
-                        continue;
+                    if !names.insert(name.to_owned()) {
+                        return Err(module.diagnostic(method, "duplicate abstract method"));
                     }
+                    class_bindings.insert(name.to_owned());
+                    continue;
                 } else {
                     abstract_methods.remove(name);
                 }

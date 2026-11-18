@@ -1,0 +1,11 @@
+{
+  "schema": "imre.compatibility.959-successor-supplements.v1",
+  "files": [
+    {
+      "name": "json959-held-stock-v1.tar.gz",
+      "bytes": 9351,
+      "sha256": "88728eff6ed6a02c52de34aa32b6999c679f5262846a0fd751a4553348a524d0"
+    }
+  ],
+  "credit": 0
+}
