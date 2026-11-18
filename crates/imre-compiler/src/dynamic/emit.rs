@@ -754,6 +754,7 @@ impl<'a> PreparedBody<'a> {
             type_aliases,
             module_annotations: sites.module_annotations.into_body(),
             bundled,
+            profile_constrained: profile_exclusions.is_some(),
             path,
             module_start,
             docs,
@@ -1016,6 +1017,8 @@ struct SourceInfo<'a> {
     namespace_operations: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
     module_annotations: Option<crate::frontend::AnnotationProvider>,
     bundled: bool,
+    /// A constrained module's source bodies contain runtime exclusion traps.
+    profile_constrained: bool,
     path: Cow<'a, Path>,
     module_start: ruff_text_size::TextSize,
     docs: Option<crate::modules::doctest::SealedDocs>,
@@ -1214,7 +1217,9 @@ impl SourceMap<'_> {
                 }
             }
         }
-        let provider = if self.bundled && self.path == Path::new("<imre stdlib>/difflib.py") {
+        let provider = if self.profile_constrained {
+            None
+        } else if self.bundled && self.path == Path::new("<imre stdlib>/difflib.py") {
             match prefix.name {
                 "_calculate_ratio" => Some((None, permanent::DIFFLIB_CALCULATE_RATIO_BODY)),
                 "SequenceMatcher.__init__" => {
@@ -1239,6 +1244,35 @@ impl SourceMap<'_> {
                     Some("imre_dyn_difflib_ratio"),
                     permanent::DIFFLIB_RATIO_BODY,
                 )),
+                _ => None,
+            }
+        } else if self.bundled && self.path == Path::new("<imre stdlib>/pickle.py") {
+            match prefix.name {
+                "loads" => Some((Some("imre_dyn_pickle_loads"), permanent::PICKLE_LOADS_BODY)),
+                "_Unpickler.__init__" => Some((None, permanent::PICKLE_READER_INIT_BODY)),
+                "_Unpickler.load" => Some((None, permanent::PICKLE_READER_LOAD_BODY)),
+                "_Unpickler._require_stack" => Some((None, permanent::PICKLE_REQUIRE_STACK_BODY)),
+                "_Unpickler.pop_mark" => Some((None, permanent::PICKLE_POP_MARK_BODY)),
+                "_Unpickler._append_items" => Some((None, permanent::PICKLE_APPEND_ITEMS_BODY)),
+                "_Unpickler.load_proto" => Some((None, permanent::PICKLE_PROTO_BODY)),
+                "_Unpickler.load_frame" => Some((None, permanent::PICKLE_FRAME_BODY)),
+                "_Unpickler.load_empty_list" => Some((None, permanent::PICKLE_EMPTY_LIST_BODY)),
+                "_Unpickler.load_mark" => Some((None, permanent::PICKLE_MARK_BODY)),
+                "_Unpickler.load_short_binunicode" => {
+                    Some((None, permanent::PICKLE_SHORT_UNICODE_BODY))
+                }
+                "_Unpickler.load_memoize" => Some((None, permanent::PICKLE_MEMOIZE_BODY)),
+                "_Unpickler.load_appends" => Some((None, permanent::PICKLE_APPENDS_BODY)),
+                "_Unpickler.load_stop" => Some((None, permanent::PICKLE_STOP_BODY)),
+                "_Unpickler.load_binget" => Some((None, permanent::PICKLE_BINGET_BODY)),
+                "_Unpickler.load_long_binget" => Some((None, permanent::PICKLE_LONG_BINGET_BODY)),
+                "_Unframer.__init__" => Some((None, permanent::PICKLE_UNFRAMER_INIT_BODY)),
+                "_Unframer.read" => Some((None, permanent::PICKLE_UNFRAMER_READ_BODY)),
+                "_Unframer.read_exact" => Some((None, permanent::PICKLE_UNFRAMER_EXACT_BODY)),
+                "_Unframer.readline" => Some((None, permanent::PICKLE_UNFRAMER_LINE_BODY)),
+                "_Unframer.load_frame" => Some((None, permanent::PICKLE_UNFRAMER_FRAME_BODY)),
+                "_BytesFrame.__init__" => Some((None, permanent::PICKLE_BYTES_FRAME_INIT_BODY)),
+                "_BytesFrame.read" => Some((None, permanent::PICKLE_BYTES_FRAME_READ_BODY)),
                 _ => None,
             }
         } else if self.bundled
@@ -5999,6 +6033,24 @@ second = (lambda data: data)(t'{client.lookup(*args)}{(lambda v: v)(values)}')",
                 prepared.standalone()
             },
         ).unwrap();
+    }
+
+    #[test]
+    fn constrained_bundled_definitions_keep_their_source_entry() {
+        let mut prepared = PreparedBody::module(
+            "pickle",
+            Path::new("<imre stdlib>/pickle.py"),
+            "def loads(data):\n    return data\n",
+            0,
+            ModuleOrigin::Bundled(None),
+        )
+        .unwrap();
+        let (_, ordinary) = prepared.standalone().unwrap();
+        assert!(ordinary.contains("call i64 @imre_dyn_pickle_loads("));
+        prepared.source.profile_constrained = true;
+        let (_, constrained) = prepared.standalone().unwrap();
+        assert!(!constrained.contains("call i64 @imre_dyn_pickle_loads("));
+        assert!(!constrained.lines().any(|line| line.ends_with(", i32 11 }")));
     }
 
     #[test]
