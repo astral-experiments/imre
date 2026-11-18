@@ -223,7 +223,9 @@ impl UpdateHash {
         match ctx.heap.get(callable) {
             Value::Native(name) => match Self::native_class(name) {
                 Some("hash") => matches!(ctx.heap.get(receiver), Value::Hash(_)),
-                Some(class) => matches!(ctx.heap.get(receiver), Value::Hash(hash) if hash.lock().class_name() == class),
+                Some(class) => {
+                    matches!(ctx.heap.get(receiver), Value::Hash(hash) if hash.lock().class_name() == class)
+                }
                 None => false,
             },
             Value::HeapTypeMethod {
