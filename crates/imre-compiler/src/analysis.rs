@@ -25,7 +25,7 @@ use std::sync::{Arc, LazyLock};
 use ruff_db::diagnostic::{Diagnostic, DiagnosticId, DisplayDiagnosticConfig, Severity};
 use ruff_db::files::{File, Files, system_path_to_file};
 use ruff_db::parsed::ParsedModuleRef;
-use ruff_db::system::{InMemorySystem, System, SystemPath, SystemPathBuf};
+use ruff_db::system::{InMemorySystem, MemoryFileSystem, System, SystemPath, SystemPathBuf};
 use ruff_db::vendored::VendoredFileSystem;
 use ruff_python_ast::token::{TokenKind, Tokens};
 use ruff_python_ast::visitor::{Visitor, walk_stmt};
@@ -1895,7 +1895,14 @@ impl Session {
         registered: Option<&dyn Fn(&Path) -> bool>,
     ) -> Result<Self, String> {
         let root = root.to_str().ok_or("module paths must be valid UTF-8")?;
-        let system = InMemorySystem::default();
+        let system = std::env::current_dir()
+            .ok()
+            .and_then(|cwd| cwd.to_str().map(SystemPathBuf::from))
+            .filter(|cwd| cwd.starts_with("/"))
+            .map(|cwd| {
+                InMemorySystem::from_memory_fs(MemoryFileSystem::with_current_directory(cwd))
+            })
+            .unwrap_or_default();
         system
             .fs()
             .create_directory_all(root)
