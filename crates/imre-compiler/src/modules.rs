@@ -860,7 +860,6 @@ pub(crate) enum Intrinsic {
     ShellOutput {
         status: bool,
     },
-    NullContext,
     IntConstant(i64),
     WallTime,
     MathAcos,
@@ -1735,7 +1734,6 @@ impl IntrinsicModule {
             (Self::Inspect, "markcoroutinefunction") => Intrinsic::InspectCoroutine { mark: true },
             (Self::Inspect, "_sentinel") => Intrinsic::InspectSentinel,
             (Self::Contextlib, "contextmanager") => Intrinsic::ContextManager,
-            (Self::Contextlib, "nullcontext") => Intrinsic::NullContext,
             (Self::Warnings, "simplefilter") => Intrinsic::WarningFilter { simple: true },
             (Self::Warnings, "filterwarnings") => Intrinsic::WarningFilter { simple: false },
             (Self::Warnings, "catch_warnings") => Intrinsic::CatchWarnings,

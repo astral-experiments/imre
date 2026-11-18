@@ -14719,11 +14719,8 @@ impl<'a> Checker<'a> {
             Some(Binding::Intrinsic(Intrinsic::TemporaryFile)) => return self.temporary_file(call),
             _ => {}
         }
-        if let Some(Binding::Intrinsic(
-            kind @ (Intrinsic::TemporaryDirectory | Intrinsic::NullContext),
-        )) = binding
-        {
-            return self.directory_manager(kind, call);
+        if binding == Some(Binding::Intrinsic(Intrinsic::TemporaryDirectory)) {
+            return self.directory_manager(call);
         }
         if matches!(binding, Some(Binding::Intrinsic(Intrinsic::SubprocessRun))) {
             return self.process_run(call);

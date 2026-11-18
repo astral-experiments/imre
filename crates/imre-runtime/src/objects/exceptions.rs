@@ -2914,7 +2914,7 @@ mod tests {
             assert!(!name.is_null());
             // SAFETY: creation transfers one string owner. The manager acquires its own reference.
             let (name, manager) = unsafe {
-                let manager = imre_directory_context_new(name as usize, 1);
+                let manager = imre_directory_context_new(name as usize);
                 (
                     StrOwner::from_raw(name),
                     crate::ObjectOwner::from_raw(manager),
