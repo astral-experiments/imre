@@ -1,0 +1,52 @@
+41057 execve("/workspace/scratch/ty05-959-raw-review-v1/gates/gate-probe", ["/workspace/scratch/ty05-959-raw-review-v1/gates/gate-probe", "gate", "/workspace/scratch/ty05-959-raw-review-v1/gates/imported-O0.exe", "/workspace/ruff-b-practical-95908/product/imre", "build", "/workspace/scratch/ty05-959-raw-review-v1/gates/imported/transform_readme.py", "--opt-level", "0", "--runtime", "/workspace/ruff-b-practical-95908/product/libimre_runtime.a", "-q", "-o", "/workspace/scratch/ty05-959-raw-review-v1/gates/imported-O0.exe"], 0x7ffc3c6d3168 /* 4 vars */) = 0
+41057 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache>
+41057 close(3</etc/ld.so.cache>)        = 0
+41057 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libc.so.6>
+41057 close(3</usr/lib/x86_64-linux-gnu/libc.so.6>) = 0
+41057 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/workspace/scratch/ty05-959-raw-review-v1/gates/imported-O0.exe", 0x7ffcfe7733e0, 0) = -1 ENOENT (No such file or directory)
+41057 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7f9ff5f95a10) = 41058
+41057 wait4(41058,  <unfinished ...>
+41058 execve("/workspace/ruff-b-practical-95908/product/imre", ["/workspace/ruff-b-practical-95908/product/imre", "build", "/workspace/scratch/ty05-959-raw-review-v1/gates/imported/transform_readme.py", "--opt-level", "0", "--runtime", "/workspace/ruff-b-practical-95908/product/libimre_runtime.a", "-q", "-o", "/workspace/scratch/ty05-959-raw-review-v1/gates/imported-O0.exe"], 0x7ffcfe775718 /* 4 vars */) = 0
+41058 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache>
+41058 close(3</etc/ld.so.cache>)        = 0
+41058 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libgcc_s.so.1>
+41058 close(3</usr/lib/x86_64-linux-gnu/libgcc_s.so.1>) = 0
+41058 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libm.so.6>
+41058 close(3</usr/lib/x86_64-linux-gnu/libm.so.6>) = 0
+41058 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libc.so.6>
+41058 close(3</usr/lib/x86_64-linux-gnu/libc.so.6>) = 0
+41058 fcntl(0</dev/null<char 1:3>>, F_GETFD) = 0
+41058 fcntl(1<pipe:[218275]>, F_GETFD)  = 0
+41058 fcntl(2<pipe:[218276]>, F_GETFD)  = 0
+41058 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3</proc/41058/maps>
+41058 close(3</proc/41058/maps>)        = 0
+41058 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/workspace/ruff-b-practical-95908/product/libimre_runtime.a", O_RDONLY|O_CLOEXEC) = 3</workspace/ruff-b-practical-95908/product/libimre_runtime.a>
+41058 close(3</workspace/ruff-b-practical-95908/product/libimre_runtime.a>) = 0
+41058 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/workspace/ruff-b-practical-95908/product/imre-toolchain/lib", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3</workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/lib>
+41058 close(3</workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/lib>) = 0
+41058 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/workspace/scratch/ty05-959-raw-review-v1/gates/.cache/imre/v1/00fcaf6d237e0c0369ec8e931acce94e03c34c9e6015a0ed769b9ddb4a731d5b.json", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41058 openat2(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/workspace/scratch/ty05-959-raw-review-v1/gates/imported/transform_readme.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3</workspace/scratch/ty05-959-raw-review-v1/gates/imported/transform_readme.py>
+41058 close(3</workspace/scratch/ty05-959-raw-review-v1/gates/imported/transform_readme.py>) = 0
+41058 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3</proc/41058/cgroup>
+41058 close(3</proc/41058/cgroup>)      = 0
+41058 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3</sys/fs/cgroup/cpu.max>
+41058 close(3</sys/fs/cgroup/cpu.max>)  = 0
+41058 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3</proc/41058/cgroup>
+41058 close(3</proc/41058/cgroup>)      = 0
+41058 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3</sys/fs/cgroup/cpu.max>
+41058 close(3</sys/fs/cgroup/cpu.max>)  = 0
+41058 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3</proc/41058/cgroup>
+41058 close(3</proc/41058/cgroup>)      = 0
+41058 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3</sys/fs/cgroup/cpu.max>
+41058 close(3</sys/fs/cgroup/cpu.max>)  = 0
+41058 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3</proc/41058/maps>
+41058 close(3</proc/41058/maps>)        = 0
+41058 openat2(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/workspace/scratch/ty05-959-raw-review-v1/gates/imported/control_poison.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3</workspace/scratch/ty05-959-raw-review-v1/gates/imported/control_poison.py>
+41058 close(3</workspace/scratch/ty05-959-raw-review-v1/gates/imported/control_poison.py>) = 0
+41058 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/workspace/scratch/ty05-959-raw-review-v1/gates/imported", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3</workspace/scratch/ty05-959-raw-review-v1/gates/imported>
+41058 close(3</workspace/scratch/ty05-959-raw-review-v1/gates/imported>) = 0
+41058 exit_group(1)                     = ?
+41057 <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 1}], 0, NULL) = 41058
+41057 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=41058, si_uid=1000, si_status=1, si_utime=21 /* 0.21 s */, si_stime=11 /* 0.11 s */} ---
+41057 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/workspace/scratch/ty05-959-raw-review-v1/gates/imported-O0.exe", 0x7ffcfe7733e0, 0) = -1 ENOENT (No such file or directory)
+41057 exit_group(0)                     = ?

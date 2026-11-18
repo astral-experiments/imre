@@ -1,0 +1,32 @@
+{
+  "pin": "95908fb0acadc2a67304a8080e584deaef395746",
+  "tree": "e6405a3243de706adcab772bf16942808d6ca6fb",
+  "product": {
+    "imre": "e2d0886948f766332df6370a2e3140a5be5c8b0fc108224ef7242fc38fc58bd4",
+    "libimre_runtime.a": "33ae5dfef5eff3c1fac5e0a5e19263daa980d7d80a5917979b426e85fa128c5c",
+    "imre.d": "988b937a995cdba3b39954620115ce717463469b060f9fd6c79a4632905eaef8",
+    "libimre_runtime.d": "b3eebec3bdad48392e272b9665b4ea50ac005fe4e452eea77a41c62af0d5dcad",
+    "imre-toolchain/bin/clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+  },
+  "depfile_custody": {
+    "imre.d": {
+      "sha256": "988b937a995cdba3b39954620115ce717463469b060f9fd6c79a4632905eaef8",
+      "source_entries": 779,
+      "source_entries_in_public_tree": 779,
+      "unmapped": []
+    },
+    "libimre_runtime.d": {
+      "sha256": "b3eebec3bdad48392e272b9665b4ea50ac005fe4e452eea77a41c62af0d5dcad",
+      "source_entries": 599,
+      "source_entries_in_public_tree": 599,
+      "unmapped": []
+    }
+  },
+  "launcher_sha256": "b765beaf627cce312f7e180ecce0c328fccde487a9064bef0c7a27446302a560",
+  "fixture_sha256": "b6218bf75e1920ca273339589b88e522969184dc02eefe5272e1798fa7cc2f0c",
+  "fixture_blob": "5daaf3b3fddb9eae3eb87bc420b8508b967146d2",
+  "probe_sha256": "1294e97884c87cd49368a05ebbcd89962081b52663a2e9d955f8bd5ecded2a36",
+  "platform": "Linux 6.18.57 x86_64",
+  "stock_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+  "stock_version": "Python 3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]"
+}

@@ -2,7 +2,7 @@
 
 use super::calls::RegisteredCall;
 use super::thread_callback::Callback;
-use super::thread_lock::NativeWait;
+use super::thread_lock::OwnedWait;
 use super::value::{Heap, ParkedExecution};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak, atomic::Ordering, mpsc};
 use std::thread::{self, JoinHandle};
@@ -66,9 +66,9 @@ impl Join {
     /// The registered caller owns this context on the current thread through wait and resumption.
     #[inline(never)]
     pub(super) unsafe fn run(self, context: *mut Context) -> Result<Id> {
+        let mut wait = OwnedWait::Join(self.deadline, self.handle, Completion::Join);
         // SAFETY: the registered caller owns the interrupted frame through signal dispatch.
-        let result =
-            unsafe { NativeWait::Join(self.deadline, &self.handle, Completion::Join).run(context) };
+        let result = unsafe { wait.run(context) };
         // SAFETY: the native wait and any signal callback have returned to their owner.
         let ctx = unsafe { &mut *context };
         result.map_err(|error| super::stdlib::io::qualify_error(ctx, error, None))?;
@@ -263,8 +263,13 @@ impl Handle {
         self.state.lock().unwrap().worker_pending()
     }
 
-    pub(super) fn join_pending(&self) -> bool {
-        self.state.lock().unwrap().join_pending()
+    /// Public joiners may pass a detached handle; shutdown still waits for its worker.
+    pub(super) fn completion_pending(&self, completion: Completion) -> bool {
+        let state = *self.state.lock().unwrap();
+        match completion {
+            Completion::Join => state.join_pending(),
+            Completion::Shutdown => state.worker_pending(),
+        }
     }
 
     pub(super) fn set_done(&self) -> Result<()> {
@@ -742,9 +747,10 @@ unsafe fn join_shutdown_handles(context: *mut Context) -> Result<()> {
             .find(|handle| handle.awaiting_exit())
             .cloned();
         let Some(handle) = handle else { break };
+        let mut wait = OwnedWait::Join(None, handle, Completion::Shutdown);
         // SAFETY: the registered caller owns the context through signal dispatch.
         // Only the owned native handle crosses the wait.
-        unsafe { NativeWait::Join(None, &handle, Completion::Shutdown).run(context) }?;
+        unsafe { wait.run(context) }?;
     }
     // Other workers may have published completion during an interruptible wait.
     // Finish their native joins, which can still block in native thread teardown.
@@ -998,37 +1004,25 @@ fn worker_target(
         callable, receiver, ..
     } = *target_value
         && keywords.is_empty()
+        && let [input] = pos.as_slice()
     {
-        let (symbol, storage) = match ctx.heap.get(callable) {
-            Value::Native(symbol) => (symbol.as_str(), receiver),
-            Value::HeapTypeMethod {
-                owner,
-                name: "update",
-                ..
-            } if ctx.heap.get(receiver).instance_class() == Some(*owner) => {
-                ("hash.update", ctx.scalar_value(receiver))
-            }
-            _ => ("", receiver),
-        };
-        let operation = match (ctx.heap.get(storage), pos.as_slice()) {
-            (value @ Value::Hash(hash), [id])
-                if super::builtins::method_name(value, "update").as_deref() == Some(symbol) =>
-            {
-                if let Value::Bytes(data) = ctx.heap.get(*id) {
-                    Some(Operation::UpdateHash {
-                        hash: hash.clone(),
-                        data: super::copy_ids(data)?,
-                    })
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        };
-        if let Some(operation) = operation {
-            // The bound call owns its expanded arguments even if the caller clears the list.
-            return Ok((operation, super::concat_ids(roots, pos)?));
-        }
+        let input = *input;
+        let operation =
+            super::thread_callback::prepare_hash_update(ctx, callable, receiver, receiver, input)
+                .map_err(|error| {
+                    if error.kind == "MemoryError" {
+                        error
+                    } else {
+                        super::thread_callback::unsupported_target()
+                    }
+                })?
+                .ok_or_else(super::thread_callback::unsupported_target)?;
+        // Retain the selected callable, original receiver, and expanded argument even if the
+        // creator replaces the target field or clears the original argument container.
+        return Ok((
+            operation,
+            super::concat_ids(roots, &[callable, receiver, input])?,
+        ));
     }
     Err(super::thread_callback::unsupported_target())
 }

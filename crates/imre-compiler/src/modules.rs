@@ -2876,9 +2876,16 @@ pub(crate) struct SourceModule {
     pub(crate) executable: Vec<usize>,
     pub(crate) is_package: bool,
     search_roots: SearchRoots,
-    entry_ownership: Option<bool>,
+    entry_ownership: Option<EntryOwnership>,
     /// A rebuilt module is declared by a .pyi beside its platform-specific archive.
     pub(crate) archive: Option<NativeArchive>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EntryOwnership {
+    Provider,
+    Program,
+    CheckedProgram,
 }
 
 impl SourceModule {
@@ -2906,15 +2913,21 @@ impl SourceModule {
     pub(crate) fn is_program_source(&self) -> bool {
         !self.bundled
             && self.archive.is_none()
-            && self
-                .entry_ownership
-                .unwrap_or(matches!(self.search_roots, SearchRoots::Single(0)))
+            && self.entry_ownership.map_or(
+                matches!(self.search_roots, SearchRoots::Single(0)),
+                |owner| owner != EntryOwnership::Provider,
+            )
     }
 
-    /// The existing lexical contract checker covers the launch directory. A linked
-    /// signature on an additional search root also applies to live, rebound calls.
+    /// Check launch-directory sources and individually admitted saved-entry sources.
     pub(crate) fn checks_source_contracts(&self) -> bool {
-        self.is_program_source() && matches!(self.search_roots, SearchRoots::Single(0))
+        self.is_program_source()
+            && (matches!(self.search_roots, SearchRoots::Single(0)) || self.saved_source_contract())
+    }
+
+    /// A resolved physical source admitted by the saved named-entry ownership policy.
+    pub(crate) fn saved_source_contract(&self) -> bool {
+        self.entry_ownership == Some(EntryOwnership::CheckedProgram)
     }
 }
 
@@ -4207,7 +4220,47 @@ impl SourceGraph {
             reachable_only,
             options.entry_profile.as_deref(),
         )?;
-        if let SearchRoots::Single(index) = graph.modules[entry].search_roots {
+        if options.require_checked_module_entry {
+            let roots = crate::installed_wheels::ModuleEntryRoots::new(options, &mut fs);
+            let mut by_root = BTreeMap::<usize, Vec<ModuleId>>::new();
+            for id in 0..graph.modules.len() {
+                let module = &graph.modules[id];
+                if graph.python_file(&module.name) == Some(id)
+                    && let SearchRoots::Single(index) = module.search_roots
+                {
+                    by_root.entry(index).or_default().push(id);
+                }
+            }
+            for (index, ids) in by_root {
+                let root = index
+                    .checked_sub(skipped)
+                    .and_then(|i| graph.filesystem_roots.get(i));
+                let owner = root.and_then(|root| {
+                    crate::installed_wheels::ModuleEntryRoot::select_root(
+                        root,
+                        (skipped == 0).then(|| graph.filesystem_roots[0].as_path()),
+                        &roots,
+                        &mut site_probes.wheel_records,
+                        &mut graph.inputs,
+                        &mut fs,
+                    )
+                });
+                for id in ids {
+                    let module = &mut graph.modules[id];
+                    module.entry_ownership = Some(
+                        if root
+                            .zip(owner.as_ref())
+                            .and_then(|(root, owner)| owner.is_program(root, &module.path))
+                            == Some(true)
+                        {
+                            EntryOwnership::CheckedProgram
+                        } else {
+                            EntryOwnership::Provider
+                        },
+                    );
+                }
+            }
+        } else if let SearchRoots::Single(index) = graph.modules[entry].search_roots {
             let root = &graph.filesystem_roots[index - skipped];
             if let Some(owner) = crate::installed_wheels::ModuleEntryRoot::select(
                 Some((root, &graph.modules[entry].path)),
@@ -4219,7 +4272,14 @@ impl SourceGraph {
             ) {
                 for module in &mut graph.modules {
                     if matches!(module.search_roots, SearchRoots::Single(i) if i == index) {
-                        module.entry_ownership = owner.is_program(root, &module.path);
+                        module.entry_ownership =
+                            owner.is_program(root, &module.path).map(|program| {
+                                if program {
+                                    EntryOwnership::Program
+                                } else {
+                                    EntryOwnership::Provider
+                                }
+                            });
                     }
                 }
             }

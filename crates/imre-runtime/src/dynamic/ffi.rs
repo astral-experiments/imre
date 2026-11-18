@@ -967,7 +967,6 @@ fn context_with_heap<S: Into<crate::Str>>(
         },
         config: Arc::clone(&interpreter.config),
         interpreter,
-        sendfile_writes: Vec::new(),
         argv: NONE,
         startup_path0: None,
         saved_entry_root: None,

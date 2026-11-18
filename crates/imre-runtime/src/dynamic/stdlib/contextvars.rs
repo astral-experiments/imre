@@ -1,8 +1,9 @@
 //! Context-local bindings hold boxed heap handles, including arbitrary wheel-defined objects.
 
+use std::borrow::Cow;
 use std::rc::Rc;
 
-use crate::dynamic::calls::RegisteredCall;
+use crate::dynamic::calls::{RegisteredCall, ScopeExit, ScopedCall};
 
 use super::{Context, Error, Id, NONE, Result, Value};
 use crate::objects::{consume_context_token, replace_context_binding};
@@ -10,14 +11,16 @@ use crate::objects::{consume_context_token, replace_context_binding};
 impl Context {
     pub(in crate::dynamic) fn prepare_context_run(
         &mut self,
-        args: &[Id],
+        args: Cow<'_, [Id]>,
         kwargs: Vec<(String, Id)>,
     ) -> Result<RegisteredCall> {
         // Keywords belong to the callback, including those matching Context.run's receiver.
-        let (context, args) =
-            super::builtins::method_receiver_args(self, "_contextvars.Context", "run", args, &[])?;
-        let (callable, rest) = imre_ast::context_run_arguments(args)
+        let (context, written) =
+            super::builtins::method_receiver_args(self, "_contextvars.Context", "run", &args, &[])?;
+        let (callable, rest) = imre_ast::context_run_arguments(written)
             .map_err(|message| Error::new("TypeError", message))?;
+        let callable = *callable;
+        let skip = args.len() - rest.len();
         if self.heap.context_is_entered(context) {
             return Err(Error::new(
                 "RuntimeError",
@@ -27,16 +30,14 @@ impl Context {
                 ),
             ));
         }
-        self.heap.execution.contexts.push(context);
-        match self.prepare_call(*callable, rest.into(), kwargs) {
-            Ok(call) if !matches!(call, RegisteredCall::Returned(_)) => {
-                Ok(RegisteredCall::InContext(Box::new(call)))
-            }
-            result => {
-                self.heap.execution.contexts.pop();
-                result
-            }
-        }
+        let mut callback_args = crate::dynamic::owned_ids(args)?;
+        drop(callback_args.drain(..skip));
+        Ok(ScopedCall::register(
+            ScopeExit::Context(context),
+            callable,
+            callback_args,
+            kwargs,
+        ))
     }
 
     /// Use the entered context, creating the implicit one on its first copy or set.
@@ -246,6 +247,50 @@ pub(super) fn call(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scoped_run_exits_after_immediate_return_and_preparation_error() {
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let explicit = call(&mut ctx, "Context", &[], &[]).unwrap();
+        let run = ctx.lookup_attr(explicit, "run").unwrap();
+        let len = ctx.builtin("len");
+        let data = ctx.alloc(Value::Bytes(b"abc".to_vec()));
+        let value = ctx.call(run, vec![len, data], vec![]).unwrap();
+        assert_eq!(value, ctx.int(3));
+        assert!(ctx.heap.execution.contexts.is_empty());
+        let scalar = ctx.int(1);
+        assert_eq!(
+            ctx.call(run, vec![len, scalar], vec![]).unwrap_err().kind,
+            "TypeError"
+        );
+        assert!(ctx.heap.execution.contexts.is_empty());
+
+        unsafe extern "C" fn entry(_: *mut Context, _: Id) -> Id {
+            NONE
+        }
+        let globals = ctx.scope("scope_test", None);
+        let name = ctx.text("requires_two");
+        let signature = ctx.text(r#"{"positional":["first","second"]}"#);
+        let file = ctx.text("scope_test.py");
+        let code = ctx.prelinked_code(
+            crate::dynamic::value::Body::Native(entry, NONE),
+            globals,
+            name,
+            signature,
+            (name, NONE),
+            (file, 1),
+        );
+        let callback = ctx
+            .define_function(code, globals, name, NONE, name, NONE, NONE, false)
+            .unwrap();
+        assert_eq!(
+            ctx.call(run, vec![callback, data], vec![])
+                .unwrap_err()
+                .kind,
+            "TypeError"
+        );
+        assert!(ctx.heap.execution.contexts.is_empty());
+    }
 
     #[test]
     fn shared_snapshot_detaches_only_for_a_different_value() {

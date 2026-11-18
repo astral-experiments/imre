@@ -35,8 +35,11 @@ except FileNotFoundError:
         raise AssertionError("external loader returned another loader's source")
     try:
         external.get_code(loader.name)
-    except FileNotFoundError:
-        pass
+    except ImportError as exc:
+        assert type(exc) is ImportError
+        assert exc.name == loader.name and exc.path == origin
+        assert "no matching linked code" in str(exc)
+        assert "Declare and import the qualified module" in str(exc)
     else:
         raise AssertionError("external loader returned another loader's code")
 else:

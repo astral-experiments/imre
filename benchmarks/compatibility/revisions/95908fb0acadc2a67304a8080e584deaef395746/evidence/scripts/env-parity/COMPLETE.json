@@ -1,0 +1,42 @@
+{
+  "cases": [
+    "uv-10",
+    "uv-26",
+    "uv-29",
+    "ty-05"
+  ],
+  "compiler_revision": "95908fb0acadc2a67304a8080e584deaef395746",
+  "credit": 0,
+  "env_trampoline": {
+    "path": "/usr/bin/env",
+    "sha256": "eb1c64bbc9908afcdf8cb48524f17112d8dd76a249f80dee2f01da14747b3b6e"
+  },
+  "lanes": {
+    "ty": {
+      "archive_sha256": "88ea8d9dac126a88a11202ccdf0768cfcb79ab3329607158236ed72163662d51",
+      "credit": 0,
+      "lane": "ty",
+      "manifest_sha256": "e45d03a23e55d245f9188df7ee52c1d3b91a75fe66fbea674f371e513c4914b1",
+      "schema": "imre.compatibility.env-parity-inbox.v1"
+    },
+    "uv10": {
+      "archive_sha256": "e1a1643eb96d84f2eeb1e1442c3e9bbd4f0f0b874c85241c0f4383caa0cb56a3",
+      "credit": 0,
+      "lane": "uv10",
+      "manifest_sha256": "9c40f3f489f514a20f6a8160962028e8c884736f9bbf36691cc6acabcae25b7f",
+      "schema": "imre.compatibility.env-parity-inbox.v1"
+    },
+    "uvb": {
+      "archive_sha256": "e5d0b1f660963908e64a9b012c5561757deb3d0a81f101155e4a1e3f2eddecf2",
+      "credit": 0,
+      "lane": "uvb",
+      "manifest_sha256": "8f7c42cd1c7ce254a39da185d45f989b816793b9a6da84f4fb08d353bd1d820c",
+      "schema": "imre.compatibility.env-parity-inbox.v1"
+    }
+  },
+  "retrospective_generated_witness": {
+    "path": "/workspace/scratch/unified959-generated-witness-v1.json",
+    "sha256": "5facddf547bed1baedeaa19544ed2f6845f6234d59b64b25df3a2fb991344b95"
+  },
+  "schema": "imre.compatibility.unified959-env-parity-complete.v1"
+}

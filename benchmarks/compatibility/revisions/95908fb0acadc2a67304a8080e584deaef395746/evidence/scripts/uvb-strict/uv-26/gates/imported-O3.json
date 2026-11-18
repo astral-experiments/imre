@@ -1,0 +1,29 @@
+{
+  "argv": [
+    "/workspace/scratch/uvb-959-strict-recapture-v1/gate-probe",
+    "gate",
+    "/workspace/scratch/uvb-959-strict-recapture-v1/uv-26/gates/imported-O3.exe",
+    "/workspace/scratch/imre-95908-transferred-v1/product/imre",
+    "build",
+    "/workspace/uv-b-959-replay-v1/uv-26/import-control/work/scripts/reverse-changelog.py",
+    "--module-root",
+    "/workspace/uv-b-959-replay-v1/uv-26/import-control/work",
+    "--no-cache",
+    "--opt-level",
+    "3",
+    "--runtime",
+    "/workspace/scratch/imre-95908-transferred-v1/product/libimre_runtime.a",
+    "--clang",
+    "/workspace/scratch/imre-95908-transferred-v1/product/imre-toolchain/bin/clang",
+    "-o",
+    "/workspace/scratch/uvb-959-strict-recapture-v1/uv-26/gates/imported-O3.exe"
+  ],
+  "compiler_exit": 1,
+  "image_missing": true,
+  "probe_exit": 0,
+  "probe_sha256": "1294e97884c87cd49368a05ebbcd89962081b52663a2e9d955f8bd5ecded2a36",
+  "probe_source_sha256": "fa57a3d90c735b76210df621af5e32619afb282729922246da93c836d9437cd2",
+  "stderr_sha256": "4944b9d77c6aa78f5888cf6abe3f180b84bea2dfea707eced6ae494612d60f58",
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "trace_sha256": "23394c9547f59118ff442aecdc490007e2cda714642a757343df18b68f8942a7"
+}

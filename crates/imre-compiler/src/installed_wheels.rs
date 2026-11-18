@@ -102,6 +102,43 @@ pub(crate) struct ModuleEntryRoot<'a> {
     installed: &'a HashSet<Rc<Path>>,
 }
 
+/// Canonical search-root eligibility shared by selected named-entry sources.
+#[derive(Default)]
+pub(crate) struct ModuleEntryRoots {
+    pythonpath: HashSet<PathBuf>,
+    installed: HashSet<PathBuf>,
+}
+
+impl ModuleEntryRoots {
+    /// Resolve root provenance once, preserving the first extension index for aliases.
+    pub(crate) fn new(options: &crate::CompileOptions, fs: &mut FileSystem<'_>) -> Self {
+        let mut first_extension = HashMap::new();
+        for (index, path) in options.extension_paths.iter().enumerate() {
+            if let Ok(identity) = fs.canonicalize(path) {
+                first_extension.entry(identity).or_insert(index);
+            }
+        }
+        let pythonpath = first_extension
+            .into_iter()
+            .filter_map(|(path, index)| options.pythonpath.contains(&index).then_some(path))
+            .collect();
+        let installed = options
+            .installed_dirs()
+            .filter_map(|path| fs.canonicalize(path).ok())
+            .collect();
+        Self {
+            pythonpath,
+            installed,
+        }
+    }
+
+    fn allows(&self, root: &Path, fs: &mut FileSystem<'_>) -> bool {
+        fs.canonicalize(root).ok().is_some_and(|identity| {
+            self.pythonpath.contains(&identity) && !self.installed.contains(&identity)
+        })
+    }
+}
+
 impl<'a> ModuleEntryRoot<'a> {
     pub(crate) fn select(
         selected_entry: Option<(&Path, &Path)>,
@@ -113,29 +150,38 @@ impl<'a> ModuleEntryRoot<'a> {
     ) -> Option<Self> {
         // A bundled launcher has no source directory of its own. Its application
         // imports still use the launch directory and that directory's wheel records.
-        let (root, pythonpath_entry) = match selected_entry {
-            Some((root, path)) => (root, (Some(root) != path_zero).then_some(path)),
-            None => (path_zero?, None),
+        let root = selected_entry.map_or_else(|| path_zero, |(root, _)| Some(root))?;
+        let roots = if Some(root) == path_zero {
+            ModuleEntryRoots::default()
+        } else {
+            ModuleEntryRoots::new(options, fs)
         };
+        let mut owner = Self::select_root(root, path_zero, &roots, records, inputs, fs)?;
+        if let Some((_, path)) = selected_entry.filter(|(root, _)| Some(*root) != path_zero) {
+            owner.application = !owner.installed.contains(path);
+        }
+        Some(owner)
+    }
+
+    /// Classify one resolved source root and reuse its RECORD membership for selected files.
+    pub(crate) fn select_root(
+        root: &Path,
+        path_zero: Option<&Path>,
+        roots: &ModuleEntryRoots,
+        records: &'a mut WheelRecords,
+        inputs: &mut SourceInputs,
+        fs: &mut FileSystem<'_>,
+    ) -> Option<Self> {
         if !fs.is_dir(root) {
             return None;
         }
-        if pythonpath_entry.is_some() {
-            if options.pythonpath.is_empty() {
-                return None;
-            }
-            let identity = fs.canonicalize(root).ok()?;
-            let mut matches =
-                |path: &PathBuf| fs.canonicalize(path).ok().as_ref() == Some(&identity);
-            let index = options.extension_paths.iter().position(&mut matches)?;
-            if !options.pythonpath.contains(&index) || options.installed_dirs().any(matches) {
-                return None;
-            }
+        if Some(root) != path_zero && !roots.allows(root, fs) {
+            return None;
         }
         let wheels = records.discover(root, inputs, fs);
         let installed = records.membership(wheels);
         Some(Self {
-            application: pythonpath_entry.is_none_or(|entry| !installed.contains(entry)),
+            application: true,
             root: root.to_owned(),
             installed,
         })

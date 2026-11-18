@@ -1,0 +1,143 @@
+{
+  "as_built_python_identity": {
+    "argv": [
+      "/workspace/fixture-policy-private/bin/python3.14",
+      "-I",
+      "-c",
+      "import json,sys; print(json.dumps({\"executable\":sys.executable,\"prefix\":sys.prefix},sort_keys=True))"
+    ],
+    "exit_code": 0,
+    "sha256": "592965c0dbce14ebd212fb28940254dfdb8de5c07d49fa287da16492d96337c6",
+    "stdout": "python_identity.raw"
+  },
+  "cargo_cc_effective": {
+    "argv": [
+      "/usr/bin/readlink",
+      "-f",
+      "/usr/bin/cc"
+    ],
+    "exit_code": 0,
+    "sha256": "335bbd287a3a6b5a6c1e38b917a807cb92bc1328b6d98d9890904531408821b7",
+    "stdout": "cargo_cc_effective.raw"
+  },
+  "cargo_cc_version": {
+    "argv": [
+      "/usr/bin/cc",
+      "--version"
+    ],
+    "exit_code": 0,
+    "sha256": "78fc11ae2c3ff7c235eb18ed90989d18f6cc864fb27027f839368cd0888deebc",
+    "stdout": "cargo_cc_version.raw"
+  },
+  "cargo_version": {
+    "argv": [
+      "/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/cargo",
+      "--version"
+    ],
+    "exit_code": 0,
+    "sha256": "9950bbb2d5c3417b1a068f0e81f6d3cac991a363193bdf2a22d447f5acf8b503",
+    "stdout": "cargo_version.raw"
+  },
+  "clang_version": {
+    "argv": [
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "--version"
+    ],
+    "exit_code": 0,
+    "sha256": "53286e7ef0a1006c2ac878387d1c6a7ebe0001f21d6dccb50b95d11be229ba2d",
+    "stdout": "clang_version.raw"
+  },
+  "head": {
+    "argv": [
+      "git",
+      "-C",
+      "/workspace/imre-public-d26",
+      "rev-parse",
+      "HEAD"
+    ],
+    "exit_code": 0,
+    "sha256": "4048fa5427e26657f80b0a4dafd65f363bedf63a0919e068f512d96972fbb4f7",
+    "stdout": "head.raw"
+  },
+  "manifest_path": "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_d26_v3/evidence/identity/commands.json",
+  "prebuild_order": [
+    "head",
+    "tree",
+    "status",
+    "cargo_build"
+  ],
+  "probe_build": {
+    "argv": [
+      "/usr/bin/cc",
+      "-O2",
+      "-Wall",
+      "-Wextra",
+      "-o",
+      "/workspace/practical-d26-scratch-retry/raw_control_probe",
+      "/workspace/imre-practical-publish/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe.c"
+    ],
+    "exit_code": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stdout": "probe_build.raw"
+  },
+  "python_identity": {
+    "argv": [
+      "/workspace/fixture-policy-private/bin/python3.14",
+      "-I",
+      "-B",
+      "-c",
+      "import json,sys; print(json.dumps({\"executable\":sys.executable,\"prefix\":sys.prefix},sort_keys=True))"
+    ],
+    "exit_code": 0,
+    "sha256": "592965c0dbce14ebd212fb28940254dfdb8de5c07d49fa287da16492d96337c6",
+    "stdout": "python_identity_B.raw"
+  },
+  "rustc_version": {
+    "argv": [
+      "/workspace/.toolchains/rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin/rustc",
+      "--version"
+    ],
+    "exit_code": 0,
+    "sha256": "2073de5abf149185c2f4d7473dc833bc921b99135560d24ae7b2293f33a9c376",
+    "stdout": "rustc_version.raw"
+  },
+  "status": {
+    "argv": [
+      "git",
+      "-C",
+      "/workspace/imre-public-d26",
+      "status",
+      "--porcelain",
+      "--untracked-files=all"
+    ],
+    "exit_code": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stdout": "status.raw"
+  },
+  "supervisor_build": {
+    "argv": [
+      "/usr/bin/cc",
+      "-O2",
+      "-Wall",
+      "-Wextra",
+      "-o",
+      "/workspace/practical-d26-scratch-retry/supervisor",
+      "/workspace/imre-practical-publish/benchmarks/supplemental/practical_workloads/native_replay/supervisor.c"
+    ],
+    "exit_code": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stdout": "supervisor_build.raw"
+  },
+  "tree": {
+    "argv": [
+      "git",
+      "-C",
+      "/workspace/imre-public-d26",
+      "rev-parse",
+      "HEAD^{tree}"
+    ],
+    "exit_code": 0,
+    "sha256": "53d11363a8999adace4ed91d9aa9fdd37fa3f1ea3fe337ddb4bbf139ff648f4d",
+    "stdout": "tree.raw"
+  }
+}

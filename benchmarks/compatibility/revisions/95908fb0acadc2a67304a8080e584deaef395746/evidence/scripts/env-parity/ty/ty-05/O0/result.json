@@ -1,0 +1,104 @@
+{
+  "actual_image_environment": {
+    "HOME": "/workspace/scratch/ty05-959-env-parity-v1/mask-O0/launch",
+    "LC_ALL": "C.UTF-8",
+    "NO_COLOR": "1",
+    "PATH": "/usr/local/bin:/usr/bin:/bin",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONHASHSEED": "0",
+    "PYTHONNOUSERSITE": "1",
+    "RAYON_NUM_THREADS": "2",
+    "TZ": "UTC"
+  },
+  "after": {
+    "README.md": {
+      "sha256": "8d6a1835e193986c470a85ced817c3f5469227af7a61215a255aa56ef3057829",
+      "size": 5755
+    },
+    "dist-workspace.toml": {
+      "sha256": "02d617fb6e1ee474d3b0f52e4350d816ec5fdc78ec892fc9df78345ac756e0eb",
+      "size": 3758
+    },
+    "scripts/transform_readme.py": {
+      "sha256": "d6a13d50218b55e3b73587974e8357b9bc68b7c364d8bb10d04708fec5e2d64f",
+      "size": 2641
+    }
+  },
+  "argv": [
+    "/usr/bin/strace",
+    "-f",
+    "-v",
+    "-yy",
+    "-qq",
+    "-s",
+    "4096",
+    "-e",
+    "trace=execve,execveat,open,openat,openat2,creat,io_uring_setup,clone,clone3,fork,vfork,rename,renameat,renameat2,newfstatat,statx,wait4,waitid,exit,exit_group,chdir,fchdir,close,close_range,dup,dup2,dup3,fcntl,unshare,mount,umount2,pivot_root,mount_setattr,open_tree,move_mount",
+    "-o",
+    "/workspace/scratch/ty05-959-env-parity-v1/mask-O0/run.trace",
+    "/workspace/scratch/ty05-959-raw-review-v1/supervisor",
+    "/workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture/scripts/transform_readme.py",
+    "/workspace/scratch/ty05-959-env-parity-v1/mask-O0/withdrawn.source",
+    "-",
+    "-",
+    "/usr/bin/bwrap",
+    "/usr/bin/bwrap",
+    "--ro-bind",
+    "/",
+    "/",
+    "--tmpfs",
+    "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts",
+    "--bind",
+    "/workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture",
+    "/workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture",
+    "--chdir",
+    "/workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture",
+    "--die-with-parent",
+    "--",
+    "/usr/bin/env",
+    "-u",
+    "PWD",
+    "/workspace/scratch/ty05-959-raw-review-v1/O0/saved.exe"
+  ],
+  "before": {
+    "README.md": {
+      "sha256": "8da93511cec1298648c345618960559c7dec67504b9132c1b9aee9a841e9fe08",
+      "size": 5610
+    },
+    "dist-workspace.toml": {
+      "sha256": "02d617fb6e1ee474d3b0f52e4350d816ec5fdc78ec892fc9df78345ac756e0eb",
+      "size": 3758
+    },
+    "scripts/transform_readme.py": {
+      "sha256": "d6a13d50218b55e3b73587974e8357b9bc68b7c364d8bb10d04708fec5e2d64f",
+      "size": 2641
+    }
+  },
+  "bwrap_sha256": "573236e5328ac2ebb08f59ae3a9805b4f8d12bdef14be8af4450d5463294985f",
+  "controller_sha256": "ff6cd21e4efa91f0b513e5efcf9cf7e0b9feb4b6d559f0fc48443371ce0e48fe",
+  "cwd": "/workspace/scratch/ty05-959-env-parity-v1/mask-O0/fixture",
+  "effects_sha256": "57128fff7793fa3839a64d60d2bb067286031e5a6d891ef4771fadaf56c27a3b",
+  "env_trampoline_sha256": "eb1c64bbc9908afcdf8cb48524f17112d8dd76a249f80dee2f01da14747b3b6e",
+  "environment": {
+    "HOME": "/workspace/scratch/ty05-959-env-parity-v1/mask-O0/launch",
+    "LC_ALL": "C.UTF-8",
+    "NO_COLOR": "1",
+    "PATH": "/usr/local/bin:/usr/bin:/bin",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONHASHSEED": "0",
+    "PYTHONNOUSERSITE": "1",
+    "RAYON_NUM_THREADS": "2",
+    "TZ": "UTC"
+  },
+  "exit_code": 0,
+  "image_sha256": "e39f264bcbe70402152efc804c4234553fb2c34e7917ebee74802f04638279b0",
+  "protected_compile_source_masked_by_child_tmpfs": "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts",
+  "protected_parent_source_intact": true,
+  "scratch_source_restored": true,
+  "seconds": 0.2939,
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "supervisor_sha256": "36cce31bde9b0e1e7847d20d4a0821b2b509dca186d0b7c0231bb3e5fb14c88a",
+  "trace_bytes": 53424,
+  "trace_sha256": "b7ec4724cc3b63020d31842a0c6a071886aa2b268251e27af314b286e637b828"
+}

@@ -1,0 +1,71 @@
+{
+  "controller_sha256": "d2dcd86141b43dc1154215618975d2ff541da488772086ce8cbffe89d899a77d",
+  "argv": [
+    "/usr/bin/strace",
+    "-f",
+    "-y",
+    "-v",
+    "-qq",
+    "-s",
+    "512",
+    "-e",
+    "trace=execve,execveat,open,openat,openat2,creat,io_uring_setup,newfstatat,rename,wait4,waitid,exit,exit_group,chdir,fchdir,close,close_range,dup,dup2,dup3,fcntl,clone,clone3,fork,vfork",
+    "-o",
+    "/workspace/scratch/fnmatch-95908-replay-v1/correction-v2/raw/O3.trace",
+    "/workspace/scratch/fnmatch-95908-replay-v1/correction-v2/raw-control-probe-child-env",
+    "withdraw",
+    "/workspace/scratch/fnmatch-95908-replay-v1/fixtures/Lib/test",
+    "/workspace/scratch/fnmatch-95908-replay-v1/fixtures/Lib/test.raw-control-stash",
+    "/workspace/scratch/fnmatch-95908-replay-v1/fixtures/Lib/test/test_fnmatch.py",
+    "/workspace/scratch/fnmatch-95908-replay-v1/O3.exe"
+  ],
+  "cwd": "/workspace/scratch/fnmatch-95908-replay-v1/empty",
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/fnmatch-95908-replay-v1/fixtures/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "TMPDIR": "/workspace/scratch/fnmatch-95908-replay-v1/tmp",
+    "PATH": "/workspace/scratch/imre-95908-transferred-stdlib-v1/product/imre-toolchain/bin",
+    "IMRE_PYTHON": "/workspace/scratch/imre-95908-transferred-stdlib-v1/product/imre",
+    "IMREFLAGS": "--opt-level 3"
+  },
+  "timeout_seconds": 60,
+  "seconds": 0.403,
+  "exit_code": 0,
+  "timed_out": false,
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "63b4a15c737743bcd262e9d13ff37189989867c30648c53fd5b7d93c01a7ac2e",
+  "effects_before_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+  "effects_after_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+  "effects_equal": true,
+  "supervisor_environment": {
+    "PYTHONPATH": "/workspace/scratch/fnmatch-95908-replay-v1/fixtures/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "TMPDIR": "/workspace/scratch/fnmatch-95908-replay-v1/tmp",
+    "PATH": "/workspace/scratch/imre-95908-transferred-stdlib-v1/product/imre-toolchain/bin",
+    "IMRE_PYTHON": "/workspace/scratch/imre-95908-transferred-stdlib-v1/product/imre",
+    "IMREFLAGS": "--opt-level 3",
+    "IMRE_WITHDRAW_LAUNCHER": "/workspace/scratch/fnmatch-95908-replay-v1/launch/launcher.py",
+    "IMRE_WITHDRAW_ARCHIVE": "/workspace/scratch/fnmatch-95908-replay-v1/launch/stock.source.py"
+  },
+  "trace_sha256": "e9a4d51fbfa33c8c3a2fcf502a0c6e9ce1f7a5c26c3cceb5a2943e995af00c28",
+  "trace_bytes": 66182,
+  "before": {
+    "/workspace/scratch/fnmatch-95908-replay-v1/O3.exe": "2c707263143609d04408b2638c63bebcdb71af0185277a7d054edfbc07fdb460",
+    "/workspace/scratch/fnmatch-95908-replay-v1/fixtures/Lib/test/test_fnmatch.py": "b6218bf75e1920ca273339589b88e522969184dc02eefe5272e1798fa7cc2f0c",
+    "/workspace/scratch/fnmatch-95908-replay-v1/launch/launcher.py": "b765beaf627cce312f7e180ecce0c328fccde487a9064bef0c7a27446302a560",
+    "/workspace/scratch/fnmatch-95908-replay-v1/launch/stock.source.py": "b6218bf75e1920ca273339589b88e522969184dc02eefe5272e1798fa7cc2f0c"
+  },
+  "after": {
+    "/workspace/scratch/fnmatch-95908-replay-v1/O3.exe": "2c707263143609d04408b2638c63bebcdb71af0185277a7d054edfbc07fdb460",
+    "/workspace/scratch/fnmatch-95908-replay-v1/fixtures/Lib/test/test_fnmatch.py": "b6218bf75e1920ca273339589b88e522969184dc02eefe5272e1798fa7cc2f0c",
+    "/workspace/scratch/fnmatch-95908-replay-v1/launch/launcher.py": "b765beaf627cce312f7e180ecce0c328fccde487a9064bef0c7a27446302a560",
+    "/workspace/scratch/fnmatch-95908-replay-v1/launch/stock.source.py": "b6218bf75e1920ca273339589b88e522969184dc02eefe5272e1798fa7cc2f0c"
+  },
+  "restored": true,
+  "image_sha256": "2c707263143609d04408b2638c63bebcdb71af0185277a7d054edfbc07fdb460",
+  "supervisor_sha256": "1e8c802ae42dd768fef9a88cb316321276c9bbd6ed534cd00ebf3e44d943cf7a"
+}
