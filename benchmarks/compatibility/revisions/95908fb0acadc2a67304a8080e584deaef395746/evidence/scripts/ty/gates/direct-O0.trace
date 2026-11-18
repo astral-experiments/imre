@@ -1,0 +1,48 @@
+41052 execve("/workspace/scratch/ty05-959-raw-review-v1/gates/gate-probe", ["/workspace/scratch/ty05-959-raw-review-v1/gates/gate-probe", "gate", "/workspace/scratch/ty05-959-raw-review-v1/gates/direct-O0.exe", "/workspace/ruff-b-practical-95908/product/imre", "build", "/workspace/scratch/ty05-959-raw-review-v1/gates/direct.py", "--opt-level", "0", "--runtime", "/workspace/ruff-b-practical-95908/product/libimre_runtime.a", "-q", "-o", "/workspace/scratch/ty05-959-raw-review-v1/gates/direct-O0.exe"], 0x7ffc0a285d08 /* 4 vars */) = 0
+41052 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache>
+41052 close(3</etc/ld.so.cache>)        = 0
+41052 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libc.so.6>
+41052 close(3</usr/lib/x86_64-linux-gnu/libc.so.6>) = 0
+41052 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/workspace/scratch/ty05-959-raw-review-v1/gates/direct-O0.exe", 0x7fff5a2df130, 0) = -1 ENOENT (No such file or directory)
+41052 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7f8ba6324a10) = 41053
+41052 wait4(41053,  <unfinished ...>
+41053 execve("/workspace/ruff-b-practical-95908/product/imre", ["/workspace/ruff-b-practical-95908/product/imre", "build", "/workspace/scratch/ty05-959-raw-review-v1/gates/direct.py", "--opt-level", "0", "--runtime", "/workspace/ruff-b-practical-95908/product/libimre_runtime.a", "-q", "-o", "/workspace/scratch/ty05-959-raw-review-v1/gates/direct-O0.exe"], 0x7fff5a2e1468 /* 4 vars */) = 0
+41053 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache>
+41053 close(3</etc/ld.so.cache>)        = 0
+41053 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libgcc_s.so.1>
+41053 close(3</usr/lib/x86_64-linux-gnu/libgcc_s.so.1>) = 0
+41053 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libm.so.6>
+41053 close(3</usr/lib/x86_64-linux-gnu/libm.so.6>) = 0
+41053 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libc.so.6>
+41053 close(3</usr/lib/x86_64-linux-gnu/libc.so.6>) = 0
+41053 fcntl(0</dev/null<char 1:3>>, F_GETFD) = 0
+41053 fcntl(1<pipe:[218269]>, F_GETFD)  = 0
+41053 fcntl(2<pipe:[218270]>, F_GETFD)  = 0
+41053 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3</proc/41053/maps>
+41053 close(3</proc/41053/maps>)        = 0
+41053 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/workspace/ruff-b-practical-95908/product/libimre_runtime.a", O_RDONLY|O_CLOEXEC) = 3</workspace/ruff-b-practical-95908/product/libimre_runtime.a>
+41053 close(3</workspace/ruff-b-practical-95908/product/libimre_runtime.a>) = 0
+41053 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/workspace/ruff-b-practical-95908/product/imre-toolchain/lib", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3</workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/lib>
+41053 close(3</workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/lib>) = 0
+41053 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/workspace/scratch/ty05-959-raw-review-v1/gates/.cache/imre/v1/2f0650407cae8ea2002b742a1704b76036db89084c5367d1c0602f5efd600d49.json", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41053 openat2(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/workspace/scratch/ty05-959-raw-review-v1/gates/direct.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3</workspace/scratch/ty05-959-raw-review-v1/gates/direct.py>
+41053 close(3</workspace/scratch/ty05-959-raw-review-v1/gates/direct.py>) = 0
+41053 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3</proc/41053/cgroup>
+41053 close(3</proc/41053/cgroup>)      = 0
+41053 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3</sys/fs/cgroup/cpu.max>
+41053 close(3</sys/fs/cgroup/cpu.max>)  = 0
+41053 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3</proc/41053/cgroup>
+41053 close(3</proc/41053/cgroup>)      = 0
+41053 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3</sys/fs/cgroup/cpu.max>
+41053 close(3</sys/fs/cgroup/cpu.max>)  = 0
+41053 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3</proc/41053/cgroup>
+41053 close(3</proc/41053/cgroup>)      = 0
+41053 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3</sys/fs/cgroup/cpu.max>
+41053 close(3</sys/fs/cgroup/cpu.max>)  = 0
+41053 openat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3</proc/41053/maps>
+41053 close(3</proc/41053/maps>)        = 0
+41053 exit_group(1)                     = ?
+41052 <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 1}], 0, NULL) = 41053
+41052 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=41053, si_uid=1000, si_status=1, si_utime=2 /* 0.02 s */, si_stime=3 /* 0.03 s */} ---
+41052 newfstatat(AT_FDCWD</workspace/scratch/ty05-959-raw-review-v1/gates/imported>, "/workspace/scratch/ty05-959-raw-review-v1/gates/direct-O0.exe", 0x7fff5a2df130, 0) = -1 ENOENT (No such file or directory)
+41052 exit_group(0)                     = ?

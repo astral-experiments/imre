@@ -180,7 +180,7 @@ An observed intersection means the same original passed stock, O0 and O3; frozen
 <!-- compatibility-scorecard:end -->
 
 <!-- current-compatibility-snapshot:start -->
-### Current compatibility snapshot
+### Frozen historical compatibility snapshot
 
 Revision `8571ca2dbecabf8d7863c369dc776611fd57d8ad` · **3,163 validated receipts**, **1,276 verified pairs**.
 
@@ -200,6 +200,8 @@ Revision `8571ca2dbecabf8d7863c369dc776611fd57d8ad` · **3,163 validated receipt
 | `urllib` | 178 | 174 verified |
 
 [Full revision table](benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/docs/stdlib.md)
+
+These historical totals were validated at public commit [`d0b396559a8ffda965cb495063b2967847d116aa`](https://github.com/astral-experiments/imre/commit/d0b396559a8ffda965cb495063b2967847d116aa). The evolving scorecard sources in this checkout do not validate that frozen snapshot; see the [exact checkout instructions](benchmarks/compatibility/README.md#frozen-857-verification).
 <!-- current-compatibility-snapshot:end -->
 
 ### Prospective practical scripts

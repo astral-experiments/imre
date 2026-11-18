@@ -1,0 +1,352 @@
+{
+  "commit": "880648b620f57905a495eb51fbb4600755ee0c54",
+  "assets": {
+    "benchmarks/compatibility/historical-scripts/archived-survey-7724.tsv": {
+      "git_blob": "8f53f1cd96ad2c75943c6036d125c92e8090ab42",
+      "sha256": "fd6b397128a744694bf7a6c0a942bef6245bd3cb164459977a8a8699468a4a18",
+      "bytes": 240585
+    },
+    "benchmarks/compatibility/historical-scripts/join.jsonl": {
+      "git_blob": "18eb9369753c90e9fdf337fcefdcbeface41de09",
+      "sha256": "d45389ce9d3c3eff80c3fc7a213ced85d11169e8c60b303177e028d468afcfff",
+      "bytes": 52646
+    },
+    "benchmarks/compatibility/historical-scripts/verify.py": {
+      "git_blob": "4d21367dfdaa6533a9c8d51e1d3b0a045514db3d",
+      "sha256": "a98123ce6bbd35620bb967a1894194be742eb79f9207f9e10ded64da1bb72ca3",
+      "bytes": 9700
+    },
+    "benchmarks/compatibility/frozen/scripts.jsonl": {
+      "git_blob": "df5243520615ada5a5352f202f340686e4747da0",
+      "sha256": "b558dfc9780b41ad00ed7911c4b07db8f9e05ca2266b4a9ece957176a8132823",
+      "bytes": 20655
+    }
+  },
+  "reviewed_frozen_anchors": {
+    "uv-10": {
+      "raw_line_sha256": "af524647216ad27262321cf10d0c5dce82617f46ee1b8487e90e77df4c3a9c8f",
+      "source": {
+        "commit": "24688aaca1e7fd104437a0909d5db3afdc7dcdb0",
+        "path": "scripts/check-trampoline-version-consistency.py",
+        "repo": "https://github.com/astral-sh/uv",
+        "sha256": "29e5fca6ffdda841f8f12b124a65fed992b1a593523261062ff7c62230b405bf"
+      },
+      "normalized_invocation": {
+        "argv": [
+          "$PYTHON",
+          "-B",
+          "scripts/check-trampoline-version-consistency.py"
+        ],
+        "cwd": "$WORK",
+        "env": {
+          "IMREFLAGS": "--opt-level 0",
+          "IMRE_CACHE_DIR": "$CACHE",
+          "LANG": "C.UTF-8",
+          "LC_ALL": "en_US.UTF-8",
+          "PATH": "$PATH"
+        }
+      },
+      "archived_checkout": "24688aaca1e7fd104437a0909d5db3afdc7dcdb0",
+      "canonical_file_commit": "24688aaca1e7fd104437a0909d5db3afdc7dcdb0",
+      "commit_relation": "exact",
+      "argv_relation": "structural_roles",
+      "role_mapping": [
+        {
+          "archive_value": "/home/dev-user/.local/share/imre-campaign-toolchain/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "canonical": "$PYTHON",
+          "index": 0,
+          "role": "$PYTHON"
+        }
+      ],
+      "archived_original_argv": [
+        "/home/dev-user/.local/share/imre-campaign-toolchain/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "scripts/check-trampoline-version-consistency.py"
+      ]
+    },
+    "uv-extra-02": {
+      "raw_line_sha256": "0cd4203c658d6c1367038587e25525b81a1bcf787116b2a03cdbe80415a833b0",
+      "source": {
+        "repo": "https://github.com/astral-sh/uv",
+        "commit": "24688aaca1e7fd104437a0909d5db3afdc7dcdb0",
+        "path": "crates/uv-build/python/uv_build/__main__.py",
+        "sha256": "44d3061ee13523b399a218c08923e6e92de0fbef8caa4780730855d790a1f43c"
+      },
+      "normalized_invocation": {
+        "cwd": "$WORK",
+        "argv": [
+          "$PYTHON",
+          "-B",
+          "-m",
+          "uv_build",
+          "--help"
+        ],
+        "env": {
+          "LC_ALL": "C.UTF-8",
+          "NO_COLOR": "1",
+          "PATH": "/usr/bin:/bin",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "PYTHONNOUSERSITE": "1",
+          "TZ": "UTC",
+          "HOME": "$TASK_HOME",
+          "PYTHONPATH": "$WORK/crates/uv-build/python"
+        }
+      },
+      "archived_checkout": "24688aaca1e7fd104437a0909d5db3afdc7dcdb0",
+      "canonical_file_commit": "24688aaca1e7fd104437a0909d5db3afdc7dcdb0",
+      "commit_relation": "exact",
+      "argv_relation": "structural_roles",
+      "role_mapping": [
+        {
+          "archive_value": "/tmp/uvdisc/sdk-stock/python/bin/python3.14",
+          "canonical": "$PYTHON",
+          "index": 0,
+          "role": "$PYTHON"
+        }
+      ],
+      "archived_original_argv": [
+        "/tmp/uvdisc/sdk-stock/python/bin/python3.14",
+        "-B",
+        "-m",
+        "uv_build",
+        "--help"
+      ]
+    },
+    "ty-05": {
+      "raw_line_sha256": "53cc722af7239871f66fb1214c4d4db3b6f0caaa298007a1c5f25441695a6cd4",
+      "source": {
+        "repo": "https://github.com/astral-sh/ty",
+        "commit": "d4e4bf90906c7677049bc3a29d1735de7d22052d",
+        "path": "scripts/transform_readme.py",
+        "sha256": "d6a13d50218b55e3b73587974e8357b9bc68b7c364d8bb10d04708fec5e2d64f"
+      },
+      "normalized_invocation": {
+        "argv": [
+          "<python>",
+          "<repo>/scripts/transform_readme.py"
+        ],
+        "cwd": "<repo>",
+        "env": {
+          "LC_ALL": "C.UTF-8",
+          "TZ": "UTC",
+          "PYTHONHASHSEED": "0",
+          "PYTHONNOUSERSITE": "1",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "NO_COLOR": "1",
+          "PATH": "/usr/local/bin:/usr/bin:/bin",
+          "HOME": "<launch>",
+          "RAYON_NUM_THREADS": "2"
+        }
+      },
+      "archived_checkout": "9b48f40c9f4fbea54387264318b8c0c6f0d6d184",
+      "canonical_file_commit": "d4e4bf90906c7677049bc3a29d1735de7d22052d",
+      "commit_relation": "different_checkout_same_recorded_bytes",
+      "argv_relation": "exact_historical_vector",
+      "role_mapping": [],
+      "archived_original_argv": [
+        "/home/dev-user/.local/share/imre-campaign-toolchain/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "/dev/shm/imre-frozen-4894/shared-input-path/O0/ty-05/ty/role/O0/5/launch/ty/scripts/transform_readme.py"
+      ]
+    },
+    "uv-26": {
+      "raw_line_sha256": "ac38a9e6c92e840eaffc8af28dc59a86af3be702537daa869f5868ae382caba5",
+      "source": {
+        "repo": "https://github.com/astral-sh/uv",
+        "commit": "24688aaca1e7fd104437a0909d5db3afdc7dcdb0",
+        "path": "scripts/reverse-changelog.py",
+        "sha256": "a64754cb29823660ed73b02d5fa6511ea070e6df3a0bee61cf37e38940f7eb9d"
+      },
+      "normalized_invocation": {
+        "cwd": "$WORK",
+        "argv": [
+          "$PYTHON",
+          "-B",
+          "scripts/reverse-changelog.py",
+          "CHANGELOG.md"
+        ],
+        "env": {
+          "LC_ALL": "C.UTF-8",
+          "NO_COLOR": "1",
+          "PATH": "/usr/bin:/bin",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "PYTHONNOUSERSITE": "1",
+          "TZ": "UTC",
+          "HOME": "$TASK_HOME"
+        }
+      },
+      "archived_checkout": "24688aaca1e7fd104437a0909d5db3afdc7dcdb0",
+      "canonical_file_commit": "24688aaca1e7fd104437a0909d5db3afdc7dcdb0",
+      "commit_relation": "exact",
+      "argv_relation": "structural_roles",
+      "role_mapping": [
+        {
+          "archive_value": "/home/dev-user/.local/share/imre-campaign-toolchain/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "canonical": "$PYTHON",
+          "index": 0,
+          "role": "$PYTHON"
+        }
+      ],
+      "archived_original_argv": [
+        "/home/dev-user/.local/share/imre-campaign-toolchain/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "scripts/reverse-changelog.py",
+        "CHANGELOG.md"
+      ]
+    },
+    "uv-29": {
+      "raw_line_sha256": "8c3ead8936e565f1729d4183bd215b3bd04993140087cde57997e65746c65f3b",
+      "source": {
+        "repo": "https://github.com/astral-sh/uv",
+        "commit": "24688aaca1e7fd104437a0909d5db3afdc7dcdb0",
+        "path": "scripts/transform_readme.py",
+        "sha256": "5e2667b59cd363c887fbcae04d14db51e12995a053478e7c40ce50e506d3fcdc"
+      },
+      "normalized_invocation": {
+        "cwd": "$WORK",
+        "argv": [
+          "$PYTHON",
+          "-B",
+          "scripts/transform_readme.py",
+          "--target",
+          "pypi"
+        ],
+        "env": {
+          "LC_ALL": "C.UTF-8",
+          "NO_COLOR": "1",
+          "PATH": "/usr/bin:/bin",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "PYTHONNOUSERSITE": "1",
+          "TZ": "UTC",
+          "HOME": "$TASK_HOME"
+        }
+      },
+      "archived_checkout": "24688aaca1e7fd104437a0909d5db3afdc7dcdb0",
+      "canonical_file_commit": "24688aaca1e7fd104437a0909d5db3afdc7dcdb0",
+      "commit_relation": "exact",
+      "argv_relation": "structural_roles",
+      "role_mapping": [
+        {
+          "archive_value": "/home/dev-user/.local/share/imre-campaign-toolchain/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "canonical": "$PYTHON",
+          "index": 0,
+          "role": "$PYTHON"
+        }
+      ],
+      "archived_original_argv": [
+        "/home/dev-user/.local/share/imre-campaign-toolchain/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "scripts/transform_readme.py",
+        "--target",
+        "pypi"
+      ]
+    },
+    "ruff-module-help": {
+      "raw_line_sha256": "6405f3bf4d789740ff537cb07667c8e9239b95d5ffec449809c8ab42659f525c",
+      "source": {
+        "commit": "65aee8892ce379af4ae9c8b5f6e0ab37b25d5ec9",
+        "path": "python/ruff/__main__.py",
+        "repo": "https://github.com/astral-sh/ruff",
+        "sha256": "f28dfadbcc89b3715a2a732335f3e695b5b1609708d79e4b3a9ac2f80e55774d"
+      },
+      "normalized_invocation": {
+        "argv": [
+          "{python-3.14.5}",
+          "-BS",
+          "-m",
+          "ruff",
+          "--help"
+        ],
+        "cwd": "{fixture}",
+        "env": {
+          "HOME": "{task-home}",
+          "LANG": "C.UTF-8",
+          "LC_ALL": "C.UTF-8",
+          "PATH": "/usr/bin:/bin",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "PYTHONNOUSERSITE": "1",
+          "PYTHONPATH": "{fixture}/python",
+          "RAYON_NUM_THREADS": "2",
+          "TZ": "UTC",
+          "XDG_CACHE_HOME": "{task-xdg}"
+        }
+      },
+      "archived_checkout": "65aee8892ce379af4ae9c8b5f6e0ab37b25d5ec9",
+      "canonical_file_commit": "65aee8892ce379af4ae9c8b5f6e0ab37b25d5ec9",
+      "commit_relation": "exact",
+      "argv_relation": "exact_historical_vector",
+      "role_mapping": [],
+      "archived_original_argv": [
+        "/tmp/rd/sdk-stock/python/bin/python3.14",
+        "-BS",
+        "-m",
+        "ruff",
+        "--help"
+      ]
+    },
+    "ruff-module-lint": {
+      "raw_line_sha256": "dd6d8ff102cd93c43028e8044eb948bec5b76394fbea014e9db10e56f1a9ec69",
+      "source": {
+        "commit": "65aee8892ce379af4ae9c8b5f6e0ab37b25d5ec9",
+        "path": "python/ruff/__main__.py",
+        "repo": "https://github.com/astral-sh/ruff",
+        "sha256": "f28dfadbcc89b3715a2a732335f3e695b5b1609708d79e4b3a9ac2f80e55774d"
+      },
+      "normalized_invocation": {
+        "argv": [
+          "{python-3.14.5}",
+          "-BS",
+          "-m",
+          "ruff",
+          "check",
+          "--isolated",
+          "--no-cache",
+          "--select",
+          "F401",
+          "python/ruff/__main__.py"
+        ],
+        "cwd": "{fixture}",
+        "env": {
+          "HOME": "{task-home}",
+          "LANG": "C.UTF-8",
+          "LC_ALL": "C.UTF-8",
+          "PATH": "/usr/bin:/bin",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "PYTHONNOUSERSITE": "1",
+          "PYTHONPATH": "{fixture}/python",
+          "RAYON_NUM_THREADS": "2",
+          "TZ": "UTC",
+          "XDG_CACHE_HOME": "{task-xdg}"
+        }
+      },
+      "archived_checkout": "65aee8892ce379af4ae9c8b5f6e0ab37b25d5ec9",
+      "canonical_file_commit": "65aee8892ce379af4ae9c8b5f6e0ab37b25d5ec9",
+      "commit_relation": "exact",
+      "argv_relation": "exact_historical_vector",
+      "role_mapping": [],
+      "archived_original_argv": [
+        "/tmp/rd/sdk-stock/python/bin/python3.14",
+        "-BS",
+        "-m",
+        "ruff",
+        "check",
+        "--isolated",
+        "--no-cache",
+        "--select",
+        "F401",
+        "python/ruff/__main__.py"
+      ]
+    }
+  },
+  "selected_ids": [
+    "uv-10",
+    "uv-26",
+    "uv-29",
+    "ty-05"
+  ],
+  "limits": "Only these seven independently reviewed frozen anchors exist; argv role substitutions and different ty checkout/file commit are explicit and do not establish tree equivalence."
+}

@@ -1,0 +1,26 @@
+{
+  "controller_sha256": "d2dcd86141b43dc1154215618975d2ff541da488772086ce8cbffe89d899a77d",
+  "argv": [
+    "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "-B",
+    "/workspace/scratch/fnmatch-95908-replay-v1/launch/launcher.py"
+  ],
+  "cwd": "/workspace/scratch/fnmatch-95908-replay-v1/empty",
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/fnmatch-95908-replay-v1/fixtures/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "TMPDIR": "/workspace/scratch/fnmatch-95908-replay-v1/tmp",
+    "PATH": "/workspace/scratch/imre-95908-transferred-stdlib-v1/product/imre-toolchain/bin"
+  },
+  "timeout_seconds": 60,
+  "seconds": 0.212,
+  "exit_code": 0,
+  "timed_out": false,
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "63b4a15c737743bcd262e9d13ff37189989867c30648c53fd5b7d93c01a7ac2e",
+  "effects_before_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+  "effects_after_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+  "effects_equal": true
+}
