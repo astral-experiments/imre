@@ -9,18 +9,18 @@
   },
   "credit": 0,
   "files": {
-    "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/authority.py": "9306e0ee5bc26000dde84d78ddd16497bf6176e80a4bedbc29c426778443fb44",
+    "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/authority.py": "43a4dcadf1649602b186c810f130c90d8926bf6a030af08eb74fb1145b778ba0",
     "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/binding.json": "4f9ef20f71778508da812a26d5acaeb8a9d2a7e9e90f47f8ea7d4aae0e0bb007",
     "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/direct.launcher.py": "215cd70f18978a9605616a6a6e03b70e7f5a83ff1f612d3be359701ea23300e0",
-    "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/identity_roles.py": "fa9a09fc99a30f81c568d2000da78255dbef31111af6a09f2bbb62022b208277",
+    "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/identity_roles.py": "5bc64f9149c86f0033447925b800e4d9a8149cd01f382290c13af7451662429d",
     "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/imported.launcher.py": "5100d217bface70602d226933cb654ab7751c60c7a903402ca65c40dfe8cf2f1",
     "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/native-open-policy.json": "a68ef04ecb0d90de32f406a0fb8eb7dda480d500a3a205abef1810e4e07b773d",
     "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/poison.py": "14841721c7b84f57d26a6a38a53827c683daf10930b9f297cfc15335bd1257b5",
     "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/post-custody.json": "c9355baf80e744067a3b9386e27fc6e15cf295afc6554472e16aca2a1dbc4c59",
     "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/second-builds.COMPLETE.json": "284043fc6b4773df09b23de9f0ee373f3f89d72ce93ab4090d9a0f63de4ca4f2",
     "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/second-builds.tar.gz": "e5aac60a4de8da96c191b69d558e46fb37c71598e785de6629727b5aa9ec2b75",
-    "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/test_controls.py": "e252943b5be87bcb5ee798a4322bb61db3f90e589e004cda1a5d9826e039dce0",
-    "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/validators.patch": "513fc9494d5f889b084cf2f52e31da67006e4b3b2eaaa0d965918c05f9f5836a"
+    "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/test_controls.py": "5ac5a9283b91c7bdc7d438485f47ee0d54140549734c897935f50580b3972704",
+    "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/validators.patch": "adca3f3df2998379017812f94e9e40e62ccf2d78571086e63e1e23626c1db171"
   },
   "patch": {
     "files": [
@@ -28,29 +28,29 @@
         "old_git_blob": "4402a2b116d3e9ae5e4d183b5f56f0ea51550556",
         "old_sha256": "8e95150c1fb45bd1a75b42ee14ec9ef7683957ae9f5e4837934ce607a0c3d6df",
         "path": "benchmarks/compatibility/scorecard.py",
-        "post_sha256": "885c65268247386e8355ed35309f0b1f8fb709c6bb0677a9c34a67be4ecba294"
+        "post_sha256": "e8e361c12da9ff79017b66893a96ce3967163316d823ea16939751a3d314cfab"
       },
       {
         "old_git_blob": "6ccce37c5e0c9ad50873c66a2dcab8e01c848b6d",
         "old_sha256": "0bf7e5356451e63133eb6adf0cfac9e7550aaefed88ddf65d5dd4f8a79e1588a",
         "path": "benchmarks/compatibility/raw_control.py",
-        "post_sha256": "31bc5b75849bb8fa48bc792a424c6ab88b08ef84645d43360622f36bfd0904ba"
+        "post_sha256": "355b1462e763f4588e86a3f0e4cd1022c2e4c4437c6ecb23bc108ab08537c4dc"
       },
       {
         "old_git_blob": "ddce0b6c52fe88558840c3a26098d6ec0470fba4",
         "old_sha256": "57fea6dc567cf64c4ca9aabc5b796be5ae1d02e78972c0f4f30ace02af554e00",
         "path": "benchmarks/compatibility/extensions/successor959_v1/authority.py",
-        "post_sha256": "07a81a9fcb7da323af77e682161416b3f6b37891abb87f48e9075c43b5d50bd3"
+        "post_sha256": "00a15bf2862c6a0500aa36c44e5aff13820ca95db650e9c0c03167aaa6d9dbc7"
       },
       {
         "old_git_blob": "16ea46fa3e0867db090f4241e42fa83fb3529f2d",
         "old_sha256": "4de58c8c630a41b771b5023457c469419585f4afe4159a2a6af8d284ccc34a4c",
         "path": "benchmarks/compatibility/extensions/data_resource959_v1/authority.py",
-        "post_sha256": "69e30549dc05737b52f6e441439a426308269a2059da69d0d0c86d410f55657d"
+        "post_sha256": "a5423af6f702989e27b4a9122cfde0eb09f10a944bb6beacbd3a690e93dd28f6"
       }
     ],
     "path": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/validators.patch",
-    "sha256": "513fc9494d5f889b084cf2f52e31da67006e4b3b2eaaa0d965918c05f9f5836a"
+    "sha256": "adca3f3df2998379017812f94e9e40e62ccf2d78571086e63e1e23626c1db171"
   },
   "schema": "imre.compatibility.completed-finite-amendment.v1",
   "source_stage": {
