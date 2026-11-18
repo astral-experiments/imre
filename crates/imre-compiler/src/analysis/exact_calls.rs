@@ -23,7 +23,7 @@ impl Session {
     /// representation contract, for example `take(True)` where `take` expects `int`.
     pub(super) fn exact_scalar_calls(
         &self,
-        module: usize,
+        file: File,
         path: &Path,
         declarations: DeclaredSignatures<'_>,
         returns: &[FileScopeId],
@@ -32,11 +32,11 @@ impl Session {
         errors: &mut Vec<(TextSize, String)>,
     ) {
         let db = &self.db;
-        let source = db.program_file(self.files[module]);
-        let parsed = self.parsed(self.files[module]);
+        let source = db.program_file(file);
+        let parsed = self.parsed(file);
         let mut calls = Calls {
             session: self,
-            file: self.files[module],
+            file,
             model: SemanticModel::new(db, source),
             index: ty_python_core::semantic_index(db, source),
             declarations,
