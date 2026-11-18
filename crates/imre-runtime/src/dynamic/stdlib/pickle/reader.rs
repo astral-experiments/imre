@@ -93,7 +93,8 @@ struct Layout {
     memo: usize,
     has_get: bool,
     texts: usize,
-    dense_ascii: bool,
+    dense_prefix: usize,
+    prefix_extra_memo: usize,
 }
 
 struct Cursor<'a> {
@@ -132,9 +133,6 @@ impl<'a> Cursor<'a> {
 /// Validate the accepted grammar and UTF-8 before publishing Python objects;
 /// retain only packed positions into the immutable input, not copies of text.
 fn preflight(data: &[u8]) -> Option<Layout> {
-    if let Some(layout) = preflight_dense_ascii(data) {
-        return Some(layout);
-    }
     if data.get(..3)? != [PROTO, 4, FRAME] && data.get(..3)? != [PROTO, 5, FRAME] {
         return None;
     }
@@ -147,13 +145,30 @@ fn preflight(data: &[u8]) -> Option<Layout> {
     if cursor.byte()? != EMPTY_LIST || cursor.byte()? != MEMOIZE || cursor.byte()? != MARK {
         return None;
     }
+    // The frame itself encodes offsets and lengths for a run of memoized
+    // ASCII text. Keep that prefix in place even if a later item needs the
+    // general grammar; only the remaining pushes need packed descriptors.
+    let mut dense_prefix = 0usize;
+    while cursor.at < end && data[cursor.at] == SHORT_BINUNICODE {
+        let Some(&length) = data.get(cursor.at.checked_add(1)?) else {
+            break;
+        };
+        let start = cursor.at.checked_add(2)?;
+        let text_end = start.checked_add(usize::from(length))?;
+        if text_end >= end || data[text_end] != MEMOIZE || !data[start..text_end].is_ascii() {
+            break;
+        }
+        cursor.at = text_end + 1;
+        dense_prefix = dense_prefix.checked_add(1)?;
+    }
     let mut items: Vec<Item> = Vec::new();
     items
-        .try_reserve((end.saturating_sub(14) / 8).min(1024))
+        .try_reserve((end.saturating_sub(cursor.at) / 8).min(1024))
         .ok()?;
-    let mut memo = 1usize;
+    let mut memo = dense_prefix.checked_add(1)?;
     let mut has_get = false;
-    let mut texts = 0usize;
+    let mut texts = dense_prefix;
+    let mut prefix_extra_memo = 0usize;
     loop {
         let op = cursor.byte()?;
         match op {
@@ -179,7 +194,13 @@ fn preflight(data: &[u8]) -> Option<Layout> {
                 has_get = true;
             }
             MEMOIZE => {
-                items.last_mut()?.memoize()?;
+                if let Some(item) = items.last_mut() {
+                    item.memoize()?;
+                } else if dense_prefix != 0 && (prefix_extra_memo as u64) < Item::MAX_MEMO - 1 {
+                    prefix_extra_memo += 1;
+                } else {
+                    return None;
+                }
                 memo = memo.checked_add(1)?;
             }
             APPENDS => {
@@ -191,52 +212,8 @@ fn preflight(data: &[u8]) -> Option<Layout> {
                     memo,
                     has_get,
                     texts,
-                    dense_ascii: false,
-                });
-            }
-            _ => return None,
-        }
-    }
-}
-
-/// Validate a dense run directly in the immutable frame. Its bytes already
-/// encode every offset, length, and memo operation, so no descriptor is needed.
-fn preflight_dense_ascii(data: &[u8]) -> Option<Layout> {
-    if data.get(..3)? != [PROTO, 4, FRAME] && data.get(..3)? != [PROTO, 5, FRAME] {
-        return None;
-    }
-    let size = u64::from_le_bytes(data.get(3..11)?.try_into().ok()?);
-    let end = 11usize.checked_add(usize::try_from(size).ok()?)?;
-    if end > data.len()
-        || end > u32::MAX as usize
-        || data.get(11..14)? != [EMPTY_LIST, MEMOIZE, MARK]
-    {
-        return None;
-    }
-    let mut at = 14usize;
-    let mut texts = 0usize;
-    loop {
-        match *data.get(at).filter(|_| at < end)? {
-            SHORT_BINUNICODE => {
-                let length = usize::from(*data.get(at.checked_add(1)?)?);
-                let start = at.checked_add(2)?;
-                let text_end = start.checked_add(length)?;
-                if text_end >= end
-                    || !data.get(start..text_end)?.is_ascii()
-                    || data[text_end] != MEMOIZE
-                {
-                    return None;
-                }
-                at = text_end + 1;
-                texts = texts.checked_add(1)?;
-            }
-            APPENDS if at.checked_add(2)? == end && data.get(at + 1) == Some(&STOP) => {
-                return Some(Layout {
-                    items: Vec::new(),
-                    memo: texts.checked_add(1)?,
-                    has_get: false,
-                    texts,
-                    dense_ascii: true,
+                    dense_prefix,
+                    prefix_extra_memo,
                 });
             }
             _ => return None,
@@ -315,11 +292,7 @@ fn valid_options(ctx: &Context, option: impl Fn(&str) -> Option<Id>) -> bool {
 fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
     let mut values = Vec::new();
     values
-        .try_reserve_exact(if layout.dense_ascii {
-            layout.texts
-        } else {
-            layout.items.len()
-        })
+        .try_reserve_exact(layout.dense_prefix + layout.items.len())
         .map_err(|_| crate::Error::memory_error())?;
     let mut memo = Vec::new();
     if layout.has_get {
@@ -337,9 +310,9 @@ fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
     // backing allocation does not move when heap slots grow. No callback,
     // collection, signal checkpoint, or mutation runs while decoding.
     let input = unsafe { std::slice::from_raw_parts(pointer, length) };
-    if layout.dense_ascii {
+    if layout.dense_prefix != 0 {
         let mut at = 14usize;
-        for _ in 0..layout.texts {
+        for position in 0..layout.dense_prefix {
             // SAFETY: dense preflight validated the complete frame, its short
             // text lengths and ASCII contents. The rooted bytes cannot change.
             let length = usize::from(unsafe { *input.get_unchecked(at + 1) });
@@ -350,25 +323,31 @@ fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
                     length,
                 ))
             };
-            values.push(ctx.heap.unobserved_text(text, true));
-            at += length + 3;
-        }
-    } else {
-        for item in layout.items {
-            let top = if item.is_get() {
-                memo[item.index()]
-            } else {
-                let start = item.index();
-                // SAFETY: preflight checked both the range and UTF-8, and the rooted
-                // immutable input has not changed. CompactString copies into its slot.
-                let text =
-                    unsafe { std::str::from_utf8_unchecked(&input[start..start + item.length()]) };
-                ctx.heap.unobserved_text(text, item.is_ascii())
-            };
+            let top = ctx.heap.unobserved_text(text, true);
             values.push(top);
             if layout.has_get {
-                memo.extend(std::iter::repeat_n(top, item.memo_count()));
+                memo.push(top);
+                if position + 1 == layout.dense_prefix {
+                    memo.extend(std::iter::repeat_n(top, layout.prefix_extra_memo));
+                }
             }
+            at += length + 3;
+        }
+    }
+    for item in layout.items {
+        let top = if item.is_get() {
+            memo[item.index()]
+        } else {
+            let start = item.index();
+            // SAFETY: preflight checked both the range and UTF-8, and the rooted
+            // immutable input has not changed. CompactString copies into its slot.
+            let text =
+                unsafe { std::str::from_utf8_unchecked(&input[start..start + item.length()]) };
+            ctx.heap.unobserved_text(text, item.is_ascii())
+        };
+        values.push(top);
+        if layout.has_get {
+            memo.extend(std::iter::repeat_n(top, item.memo_count()));
         }
     }
     let result = ctx.alloc(Value::List(values));
@@ -556,9 +535,12 @@ mod tests {
             STOP,
         ];
         let layout = preflight(&good).unwrap();
-        assert_eq!((layout.items.len(), layout.memo), (2, 2));
+        assert_eq!(
+            (layout.dense_prefix + layout.items.len(), layout.memo),
+            (2, 2)
+        );
         assert!(layout.has_get);
-        assert!(layout.items[1].is_get());
+        assert!(layout.items[0].is_get());
         assert!(preflight(&good[..good.len() - 1]).is_none());
         let mut sparse = good;
         sparse[14] = b'q'; // BINPUT is intentionally unsupported.
@@ -575,7 +557,7 @@ mod tests {
         }
         let bytes = frame(b"]\x94(\x8c\x03abc\x94\x8c\x00\x94e.");
         let layout = preflight(&bytes).unwrap();
-        assert!(layout.dense_ascii);
+        assert_eq!(layout.dense_prefix, 2);
         assert_eq!((layout.texts, layout.memo), (2, 3));
         let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
         let data = ctx.alloc(Value::Bytes(bytes.clone()));
@@ -587,11 +569,22 @@ mod tests {
         assert!(matches!(ctx.heap.get(values[1]), Value::Str(value) if value.is_empty()));
 
         let unicode = frame(b"]\x94(\x8c\x02\xc3\xa9\x94e.");
-        assert!(!preflight(&unicode).unwrap().dense_ascii);
+        assert_eq!(preflight(&unicode).unwrap().dense_prefix, 0);
         let alias = frame(b"]\x94(\x8c\x03abc\x94h\x01e.");
-        assert!(preflight(&alias).unwrap().has_get);
+        let layout = preflight(&alias).unwrap();
+        assert_eq!(layout.dense_prefix, 1);
+        assert!(layout.has_get);
+        let repeated = frame(b"]\x94(\x8c\x03abc\x94\x94h\x02e.");
+        let layout = preflight(&repeated).unwrap();
+        assert_eq!(layout.prefix_extra_memo, 1);
+        let data = ctx.alloc(Value::Bytes(repeated));
+        let result = decode(&mut ctx, data, layout).unwrap();
+        let Value::List(values) = ctx.heap.get(result) else {
+            panic!("not a list")
+        };
+        assert_eq!(values[0], values[1]);
         assert!(preflight(&bytes[..bytes.len() - 1]).is_none());
         let no_memo = frame(b"]\x94(\x8c\x03abce.");
-        assert!(!preflight(&no_memo).unwrap().dense_ascii);
+        assert_eq!(preflight(&no_memo).unwrap().dense_prefix, 0);
     }
 }
