@@ -4599,44 +4599,52 @@ impl Context {
 
     pub(super) fn heap_and_roots(&mut self) -> (&mut Heap, impl Iterator<Item = Id> + '_) {
         self.heap.reap_finished_workers();
+        // Keep the root order while bounding the depth of each chained iterator.
+        let borrowed_left = self
+            .classes
+            .values()
+            .chain(self.enum_scopes.values())
+            .chain(
+                self.signal_handlers
+                    .iter()
+                    .chain(self.displaced_sni_callbacks.iter()),
+            )
+            .chain(self.typing.roots().chain(self.builtins.values()));
+        let borrowed_right = self
+            .native_type_dicts
+            .0
+            .values()
+            .map(super::NativeTypeNamespace::dictionary)
+            .chain(self.warning_state.iter().flat_map(|state| state.roots()))
+            .chain(self.codec_entries.roots().chain(&self.audit_hooks))
+            .chain(self.fork_hooks.iter().flatten().chain(&self.exit_callbacks));
+        let owned_left = self
+            .threads
+            .roots()
+            .chain(self.fault_file)
+            .chain(self.fault_user_files.values().copied());
+        let owned_right = self
+            .original_builtins
+            .into_iter()
+            .chain(self.source_builtins)
+            .chain([
+                self.argv,
+                self.zip_path_importers,
+                self.modules,
+                self.import_missing,
+                self.bootstrap_globals,
+                self.bootstrap_module,
+                self.bootstrap_file_spec,
+                self.finder_external,
+                self.default_encoding,
+                self.token_missing,
+            ]);
         (
             &mut self.heap,
-            self.classes
-                .values()
-                .chain(self.enum_scopes.values())
-                .chain(self.signal_handlers.iter())
-                .chain(self.displaced_sni_callbacks.iter())
-                .chain(self.typing.roots())
-                .chain(self.builtins.values())
-                .chain(
-                    self.native_type_dicts
-                        .0
-                        .values()
-                        .map(super::NativeTypeNamespace::dictionary),
-                )
-                .chain(self.warning_state.iter().flat_map(|state| state.roots()))
-                .chain(self.codec_entries.roots())
-                .chain(&self.audit_hooks)
-                .chain(self.fork_hooks.iter().flatten())
-                .chain(&self.exit_callbacks)
+            borrowed_left
+                .chain(borrowed_right)
                 .copied()
-                .chain(self.threads.roots())
-                .chain(self.fault_file)
-                .chain(self.fault_user_files.values().copied())
-                .chain(self.original_builtins)
-                .chain(self.source_builtins)
-                .chain([
-                    self.argv,
-                    self.zip_path_importers,
-                    self.modules,
-                    self.import_missing,
-                    self.bootstrap_globals,
-                    self.bootstrap_module,
-                    self.bootstrap_file_spec,
-                    self.finder_external,
-                    self.default_encoding,
-                    self.token_missing,
-                ]),
+                .chain(owned_left.chain(owned_right)),
         )
     }
 
@@ -5075,6 +5083,140 @@ impl Context {
 mod tests {
     use super::*;
     use std::rc::{Rc, Weak};
+
+    #[test]
+    fn context_roots_preserve_segment_order_duplicates_and_resume() {
+        let mut ctx = new_context(
+            serde_json::json!({"paths": [], "python_version": "3.14"}),
+            ["imre"],
+        );
+        let marker = ctx.builtin("len");
+        let other = ctx.builtin("object");
+        let enum_scope = ctx.scope("root-test", None);
+        let sys = ctx.module("sys").unwrap();
+        let builtins = ctx.module("builtins").unwrap();
+        ctx.typing.callable_factory = Some(marker);
+        let managed = ctx.dict(Vec::new());
+        let instance = ctx.dict(Vec::new());
+        let int_class = ctx.builtin("int");
+        ctx.native_type_dicts.insert(other, managed);
+        ctx.native_type_dicts.attach(int_class, instance);
+        stdlib::warnings_accel::ensure_state(&mut ctx).unwrap();
+        stdlib::call(&mut ctx, "codecs.register", &[marker], &[]).unwrap();
+        ctx.classes.insert("root-test".to_owned(), other);
+        ctx.enum_scopes.insert(other, enum_scope);
+        ctx.signal_handlers.extend([NONE, marker]);
+        ctx.displaced_sni_callbacks.insert(marker);
+        ctx.audit_hooks.extend([marker, NONE]);
+        ctx.fork_hooks[1].push(other);
+        ctx.exit_callbacks.push(marker);
+        ctx.threads.system_module = Some(sys);
+        ctx.threads.default_unraisable_hook = Some(marker);
+        ctx.fault_file = Some(other);
+        ctx.fault_user_files.insert(999, marker);
+        ctx.original_builtins = Some(builtins);
+        ctx.source_builtins = Some(NONE);
+
+        assert!(ctx.typing.roots().next().is_some());
+        assert!(ctx.native_type_dicts.0.len() >= 2);
+        assert_eq!(ctx.warning_state.as_ref().unwrap().roots().count(), 5);
+        assert!(ctx.codec_entries.roots().next().is_some());
+
+        let mut expected = Vec::new();
+        expected.extend(ctx.classes.values().copied());
+        expected.extend(ctx.enum_scopes.values().copied());
+        expected.extend(ctx.signal_handlers.iter().copied());
+        expected.extend(ctx.displaced_sni_callbacks.iter().copied());
+        expected.extend(ctx.typing.roots().copied());
+        expected.extend(ctx.builtins.values().copied());
+        let borrowed_right = expected.len();
+        expected.extend(
+            ctx.native_type_dicts
+                .0
+                .values()
+                .map(super::super::NativeTypeNamespace::dictionary)
+                .copied(),
+        );
+        expected.extend(
+            ctx.warning_state
+                .iter()
+                .flat_map(|state| state.roots())
+                .copied(),
+        );
+        expected.extend(ctx.codec_entries.roots().copied());
+        expected.extend(ctx.audit_hooks.iter().copied());
+        expected.extend(ctx.fork_hooks.iter().flatten().copied());
+        expected.extend(ctx.exit_callbacks.iter().copied());
+        let owned_start = expected.len();
+        expected.extend(ctx.threads.roots());
+        expected.extend(ctx.fault_file);
+        expected.extend(ctx.fault_user_files.values().copied());
+        expected.extend(ctx.original_builtins);
+        expected.extend(ctx.source_builtins);
+        let fixed_array = expected.len();
+        expected.extend([
+            ctx.argv,
+            ctx.zip_path_importers,
+            ctx.modules,
+            ctx.import_missing,
+            ctx.bootstrap_globals,
+            ctx.bootstrap_module,
+            ctx.bootstrap_file_spec,
+            ctx.finder_external,
+            ctx.default_encoding,
+            ctx.token_missing,
+        ]);
+
+        assert_eq!(ctx.heap_and_roots().1.collect::<Vec<_>>(), expected);
+        let first_marker = expected.iter().position(|&id| id == marker).unwrap();
+        let (_, mut roots) = ctx.heap_and_roots();
+        assert_ne!(first_marker, 0);
+        assert_eq!(roots.next(), expected.first().copied());
+        assert_eq!(
+            roots.try_fold((), |(), id| {
+                if id == marker {
+                    std::ops::ControlFlow::Break(id)
+                } else {
+                    std::ops::ControlFlow::Continue(())
+                }
+            }),
+            std::ops::ControlFlow::Break(marker),
+        );
+        assert_eq!(
+            roots.by_ref().collect::<Vec<_>>(),
+            expected[first_marker + 1..]
+        );
+        assert_eq!(roots.next(), None);
+        assert_eq!(roots.next(), None);
+        drop(roots);
+
+        // Model RootTrace's reserve failure after pulling the pending ID: the
+        // buffered prefix, pending ID, and resumed suffix must preserve every root.
+        for split in [borrowed_right, owned_start, fixed_array] {
+            let (_, mut roots) = ctx.heap_and_roots();
+            let mut prefix = Vec::new();
+            let pending = match roots.try_fold((), |(), id| {
+                if prefix.len() == split {
+                    std::ops::ControlFlow::Break(id)
+                } else {
+                    prefix.push(id);
+                    std::ops::ControlFlow::Continue(())
+                }
+            }) {
+                std::ops::ControlFlow::Break(id) => id,
+                std::ops::ControlFlow::Continue(()) => panic!("missing pending root"),
+            };
+            assert_eq!(
+                prefix
+                    .iter()
+                    .copied()
+                    .chain([pending])
+                    .chain(roots)
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
+    }
 
     fn replacement_context() -> (Context, Id) {
         let mut ctx = new_context(serde_json::json!({"paths": []}), ["imre"]);

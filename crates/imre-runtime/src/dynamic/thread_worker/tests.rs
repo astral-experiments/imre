@@ -724,6 +724,9 @@ fn joined_and_detached_operands_are_released_at_their_own_checkpoints() {
         let main = ctx.int(thread_ident() as i64);
         assert!(!ctx.equal(ident, main));
         assert!(ctx.heap.workers.has_unreaped_workers());
+        drop(ctx.heap_and_roots());
+        assert!(ctx.heap.workers.has_unreaped_workers());
+        assert!(ctx.heap.workers.roots().any(|&id| id == operand));
         assert!(ctx.heap.workers.shutdown_handles().next().is_none());
         assert!(ctx.heap.workers.live_threads().next().is_none());
         assert!(ctx.check_thread_reporter_mutable().is_err());
@@ -758,6 +761,9 @@ fn joined_and_detached_operands_are_released_at_their_own_checkpoints() {
     ctx.reap_thread_operands();
     assert!(ctx.heap.workers.has_unreaped_workers());
     assert!(ctx.heap.workers.roots().any(|&id| id == operand));
+    drop(ctx.heap_and_roots());
+    assert!(!ctx.heap.workers.has_unreaped_workers());
+    assert!(!ctx.heap.workers.roots().any(|&id| id == operand));
     ctx.collect_unreachable();
     assert!(!ctx.heap.workers.has_unreaped_workers());
     assert!(matches!(ctx.heap.get(weak), Value::Weak(wr) if wr.target.is_none()));
