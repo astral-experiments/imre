@@ -82,6 +82,55 @@ fn emit_registered_body(source: &str, function: &crate::frontend::RegisteredFunc
 }
 
 #[test]
+fn a_replacement_region_requires_a_private_result_and_terminal_read() {
+    fn selected(source: &str, fast: bool) -> bool {
+        use ruff_text_size::Ranged;
+        let mut graph = SourceGraph::single(source).unwrap();
+        graph.registered_startup = true;
+        crate::checked_lower(&mut graph).unwrap();
+        let definition = graph.modules[graph.entry]
+            .parsed
+            .syntax()
+            .body
+            .iter()
+            .filter_map(|statement| statement.as_function_def_stmt())
+            .find(|definition| definition.name.as_str() == "exercise")
+            .unwrap();
+        let frames = graph.registered_functions();
+        let Some(function) = frames
+            .get(&graph.entry)
+            .and_then(|frames| frames.get(&definition.start()))
+        else {
+            return false;
+        };
+        super::ownership::replacement(function, |_| fast).is_some()
+    }
+    let valid = concat!(
+        "def loads(data: bytes) -> object:\n",
+        "    return data\n",
+        "def exercise(data: bytes, count: int) -> object:\n",
+        "    result = loads(data)\n",
+        "    for i in range(count):\n",
+        "        result = loads(data)\n",
+        "    return result\n",
+        "print(exercise(b'', 0))\n",
+    );
+    assert!(selected(valid, true));
+    assert!(!selected(valid, false));
+    assert!(!selected(
+        &valid.replace(
+            "        result = loads(data)",
+            "        saved = result\n        result = loads(data)"
+        ),
+        true
+    ));
+    assert!(!selected(
+        &valid.replace("    return result", "    return (result, result)"),
+        true
+    ));
+}
+
+#[test]
 fn a_typed_parameter_keeps_its_python_slice_receiver() {
     let source = "def section(text: str) -> str:\n    return text[:2] + text[4:]\nprint(section('example'))\n";
     let mut graph = SourceGraph::single(source).unwrap();

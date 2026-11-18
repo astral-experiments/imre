@@ -589,6 +589,13 @@ impl<'a> PreparedBody<'a> {
         let method_imports = registered_values.map_or(Cow::Owned(bindings), |values| {
             Cow::Borrowed(&values.method_imports)
         });
+        let imports_pickle_loads = syntax.body.iter().any(|statement| {
+            matches!(statement, ast::Stmt::ImportFrom(import)
+                if import.level == 0 && import.module.as_deref() == Some("pickle")
+                && import.names.iter().any(|alias|
+                    alias.name.as_str() == "loads"
+                    && alias.asname.as_ref().is_none_or(|name| name.as_str() == "loads")))
+        });
         let future_flags = match origin {
             ModuleOrigin::ExecLiteral { flags, .. } => flags,
             ModuleOrigin::Interactive(inherited, _) => {
@@ -754,6 +761,7 @@ impl<'a> PreparedBody<'a> {
             type_aliases,
             module_annotations: sites.module_annotations.into_body(),
             bundled,
+            imports_pickle_loads,
             profile_constrained: profile_exclusions.is_some(),
             path,
             module_start,
@@ -1017,6 +1025,8 @@ struct SourceInfo<'a> {
     namespace_operations: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
     module_annotations: Option<crate::frontend::AnnotationProvider>,
     bundled: bool,
+    /// Admit private replacement only in source modules that import this exact public entry.
+    imports_pickle_loads: bool,
     /// A constrained module's source bodies contain runtime exclusion traps.
     profile_constrained: bool,
     path: Cow<'a, Path>,
@@ -1315,6 +1325,10 @@ enum Callable<'a> {
 }
 
 impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<'a, 'p, '_> {
+    fn imports_pickle_loads(&self) -> bool {
+        self.source.imports_pickle_loads && !self.source.profile_constrained
+    }
+
     fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites<'p>) {
         (&mut self.frame, &self.sites)
     }
@@ -7120,6 +7134,88 @@ second = (lambda data: data)(t'{client.lookup(*args)}{(lambda v: v)(values)}')",
         );
         assert!(llvm.contains("finished"));
         assert!(!llvm.contains("unreached yield"));
+    }
+
+    #[test]
+    fn private_replacement_emits_one_per_invocation_witness_after_the_loop_checkpoint() {
+        fn emitted(source: &str, imported: bool, constrained: bool) -> String {
+            let mut graph = crate::modules::SourceGraph::single(source).unwrap();
+            graph.registered_startup = true;
+            crate::checked_lower(&mut graph).unwrap();
+            let functions = graph.registered_functions();
+            let mut module = PreparedBody::module(
+                "app",
+                Path::new("app.py"),
+                source,
+                0,
+                ModuleOrigin::Program(functions.get(&graph.entry)),
+            )
+            .unwrap();
+            module.source.imports_pickle_loads = imported;
+            module.source.profile_constrained = constrained;
+            module.standalone().unwrap().1
+        }
+        let source = concat!(
+            "def loads(data: bytes) -> object:\n",
+            "    return data\n",
+            "def exercise(data: bytes, count: int) -> object:\n",
+            "    result = loads(data)\n",
+            "    for i in range(count):\n",
+            "        result = loads(data)\n",
+            "    return result\n",
+            "print(exercise(b'x', 2))\n",
+        );
+        assert!(!emitted(source, false, false).contains("call void @imre_dyn_replacement_commit("));
+        assert!(!emitted(source, true, true).contains("call void @imre_dyn_replacement_commit("));
+        let llvm = emitted(source, true, false);
+        assert_eq!(
+            llvm.matches("call i64 @imre_dyn_replacement_positional_call_at(")
+                .count(),
+            1
+        );
+        assert_eq!(
+            llvm.matches("call void @imre_dyn_replacement_commit(")
+                .count(),
+            1
+        );
+        let (_, after_checkpoint) = llvm
+            .split_once("call void @imre_dyn_replacement_statement(")
+            .unwrap();
+        let (_, after_call) = after_checkpoint
+            .split_once("call i64 @imre_dyn_replacement_positional_call_at(")
+            .unwrap();
+        let (_, after_store) = after_call
+            .split_once("call i64 @imre_dyn_replacement_assign_target(")
+            .unwrap();
+        assert!(after_store.contains("call void @imre_dyn_replacement_commit("));
+        let aliased = source.replace(
+            "        result = loads(data)",
+            "        saved = result\n        result = loads(data)",
+        );
+        assert!(
+            !emitted(&aliased, true, false).contains("call void @imre_dyn_replacement_commit(")
+        );
+    }
+
+    #[test]
+    fn private_replacement_requires_the_public_pickle_import_spelling() {
+        for (source, expected) in [
+            ("from pickle import loads\n", true),
+            ("from pickle import loads as loads\n", true),
+            ("from pickle import loads as decode\n", false),
+            ("from other import loads\n", false),
+            ("def loads(data): return data\n", false),
+        ] {
+            let module = PreparedBody::module(
+                "app",
+                Path::new("app.py"),
+                source,
+                0,
+                ModuleOrigin::Program(None),
+            )
+            .unwrap();
+            assert_eq!(module.source.imports_pickle_loads, expected, "{source}");
+        }
     }
 
     #[test]

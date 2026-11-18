@@ -4765,6 +4765,75 @@ impl Heap {
         self.slot_shapes[id as usize] = SlotShape::FreshTextList;
     }
 
+    /// Producer provenance checked when a direct decode returns its per-call witness.
+    pub(super) fn is_fresh_text_list(&self, id: Id) -> bool {
+        usize::try_from(id)
+            .ok()
+            .and_then(|index| self.slot_shapes.get(index))
+            == Some(&SlotShape::FreshTextList)
+    }
+
+    /// A compiler-certified source local has no live frame, namespace, cell, or
+    /// worker that can expose its current binding without executing Python first.
+    /// This is only an admission check; it does not prove an object's uniqueness.
+    pub(super) fn private_replacement_frame(&self, scope: Id) -> bool {
+        let current = self.execution.current();
+        let fault_worker = self.fault_workers.try_borrow().map_or(true, |workers| {
+            workers
+                .as_ref()
+                .is_some_and(|worker| worker.upgrade().is_some())
+        });
+        if current.scope != scope
+            || current.object.is_some()
+            || !matches!(current.owner, FrameOwner::Function(_))
+            || self.execution.pending.is_some()
+            || self.workers.has_unreaped_workers()
+            || self.parked_executions.iter().any(Option::is_some)
+            || fault_worker
+        {
+            return false;
+        }
+        let Value::Scope(frame) = self.get(scope) else {
+            return false;
+        };
+        frame.parent.is_some()
+            && !frame.in_class_body
+            && frame.enum_namespace.is_none()
+            && frame.class_namespace.is_none()
+            && frame.namespace.is_none()
+            && frame.exec_globals.is_none()
+            && frame.exec_locals.is_none()
+            && frame.globals.is_empty()
+            && frame.closure.nonlocals.is_empty()
+            && frame.closure.cells.is_empty()
+            && frame.closure.extra_locals.is_none()
+            && !frame.closure.environment
+            && !frame.closure.cleared
+    }
+
+    /// A guarded checkpoint cannot collect, finalize, or publish an allocation trace.
+    pub(super) fn replacement_checkpoint_safe(&self, scope: Id) -> bool {
+        self.private_replacement_frame(scope)
+            && !self.collection_requested()
+            && !self.has_weak_values
+            && !self.has_unstarted_coroutines()
+            && self.gc_callback(0).is_none()
+            && !self.full_collection_active()
+            && !self.allocation_traces.is_tracing()
+    }
+
+    /// Release all ordinary statement operands after a successful private store.
+    /// The supplied roots are compiler-owned cursor/item/flag words, never the old binding.
+    pub(super) fn replace_statement_roots(&mut self, live: &[Id]) -> bool {
+        let roots = &mut self.execution.current_mut().live;
+        if roots.capacity() < live.len() {
+            return false;
+        }
+        roots.clear();
+        roots.extend_from_slice(live);
+        true
+    }
+
     /// Cached integers are permanent. A fresh slot roots the integer in the active frame.
     pub(super) fn owned_integer(&mut self, integer: crate::Int) -> Id {
         integer
@@ -7144,6 +7213,12 @@ impl Heap {
             || self.gc_schedule.requested()
     }
 
+    #[cfg(test)]
+    pub(super) fn request_collection_after_next_slot_for_test(&mut self) {
+        assert_eq!(self.free_head, END);
+        self.next_collection = self.slots.len() + 1;
+    }
+
     /// A potentially unbound finalizer needs its roots checked after publishing the next statement.
     pub(super) fn take_finalizer_check(&mut self) -> bool {
         std::mem::take(&mut self.check_finalizers_next_statement)
@@ -8043,10 +8118,6 @@ impl Heap {
     /// other Python observer can run until this method returns. The slot shape is
     /// producer provenance only; it is not a uniqueness proof. Failed verification
     /// leaves every slot unchanged.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "awaiting compiler ownership proof")
-    )]
     pub(super) unsafe fn retire_proven_fresh_text_list(&mut self, id: Id) -> bool {
         let Ok(index) = usize::try_from(id) else {
             return false;

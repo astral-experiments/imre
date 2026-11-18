@@ -9920,6 +9920,25 @@ impl Context {
         }
     }
 
+    /// Attempt this exact invocation of the authenticated bundled pickle body.
+    /// A miss does not bind arguments, call Python, or execute the source fallback.
+    pub(super) fn try_direct_pickle_call(&mut self, callable: Id, data: Id) -> Result<Option<Id>> {
+        let Value::Function {
+            scope,
+            code,
+            kwdefaults,
+            ..
+        } = *self.heap.get(callable)
+        else {
+            return Ok(None);
+        };
+        if u32::from(self.code_object(code).definition.provider_body()) != value::PICKLE_LOADS_BODY
+        {
+            return Ok(None);
+        }
+        stdlib::pickle::try_direct_loads(self, scope, kwdefaults, data)
+    }
+
     pub(super) fn prepare_function_call(
         &mut self,
         callable: Id,

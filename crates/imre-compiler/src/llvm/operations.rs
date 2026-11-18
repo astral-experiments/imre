@@ -1395,6 +1395,9 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         match stmt {
             Statement::Position(..) => {}
             Statement::Assign(slot, expr) => {
+                if let Entry::Registered(frame) = &mut self.0 {
+                    frame.begin_replacement_assignment(*slot);
+                }
                 let previous_small = match &mut self.0 {
                     Entry::Native(emitter) => {
                         let Some(small) = emitter.prepare_assignment(*slot, expr) else {
@@ -1408,6 +1411,9 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 match &mut self.0 {
                     Entry::Native(emitter) => emitter.assign_native(*slot, value, previous_small),
                     Entry::Registered(frame) => frame.assign(*slot, value),
+                }
+                if let Entry::Registered(frame) = &mut self.0 {
+                    frame.replacement_rhs = false;
                 }
             }
             Statement::AugmentItem(receiver, key, op, rhs) => {

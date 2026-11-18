@@ -45,7 +45,22 @@ impl Context {
     /// # Safety
     /// The caller owns this context and its active frame throughout the checkpoint.
     pub(super) unsafe fn dispatch_pending_calls(context: *mut Self) -> Result<()> {
+        // SAFETY: this is the same active, published execution as the ordinary dispatcher.
+        unsafe { Self::dispatch_pending_calls_before(context, || {}) }
+    }
+
+    /// Run `before` after atomically claiming a pending dispatch, but before a
+    /// signal handler or wakeup-fd unraisable hook can inspect the interrupted frame.
+    ///
+    /// # Safety
+    /// `context` has the same exclusive execution and published-frame requirements
+    /// as `dispatch_pending_calls`.
+    pub(super) unsafe fn dispatch_pending_calls_before(
+        context: *mut Self,
+        before: impl FnOnce(),
+    ) -> Result<()> {
         if signals::begin_dispatch() {
+            before();
             // SAFETY: a registered handler returns to the interrupted caller on this thread.
             unsafe { Self::dispatch_pending_signals(context)? };
             // SAFETY: delivery has completed, including any nested callbacks.
