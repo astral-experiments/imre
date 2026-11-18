@@ -1,0 +1,94 @@
+{
+  "annotation_controls": {
+    "O0": {
+      "direct": "expected int, got bool; compiler exit 1; no image",
+      "imported": "expected int, got bool; compiler exit 1; no image"
+    },
+    "O3": {
+      "direct": "expected int, got bool; compiler exit 1; no image",
+      "imported": "expected int, got bool; compiler exit 1; no image"
+    }
+  },
+  "canonical_originals": 276,
+  "credit": 0,
+  "custody": {
+    "products": {
+      "cc": "a23ecab8ff08f09ad8c80602c2c5df7f49e09c25905cb8975902e101bf72635f",
+      "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+      "cli": "e2d0886948f766332df6370a2e3140a5be5c8b0fc108224ef7242fc38fc58bd4",
+      "cli_depfile": "988b937a995cdba3b39954620115ce717463469b060f9fd6c79a4632905eaef8",
+      "probe": "a4686257bc9fda18820da4a774e2b4d3340eb216082615e2bc9be5012a00f9b9",
+      "probe_source": "5e850ab6d1c977d4dae2a4949e7221b518fade280af57b25ff0f3dcc21ceaf3d",
+      "runtime": "33ae5dfef5eff3c1fac5e0a5e19263daa980d7d80a5917979b426e85fa128c5c",
+      "runtime_depfile": "b3eebec3bdad48392e272b9665b4ea50ac005fe4e452eea77a41c62af0d5dcad",
+      "stock": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+    },
+    "public_donor": "benchmarks/compatibility/extensions/data_resource959_v1/bindings/configparser.json",
+    "transfer_archive_sha256": "c9cfcd02e0cc62dc7928119d68a4c4da5125f8030657c1c52b2cd3d49cb554b0"
+  },
+  "evidence": {
+    "archive": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/dataclasses-959.tar.gz",
+    "receipt": "benchmarks/compatibility/extensions/completed_unittest959_v1/templates/dataclasses.jsonl",
+    "receipt_sha256": "518d5bd9ea86538d69a7931604d438dda2cdb732a6a364f71a310a828a70f71b",
+    "seal": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/COMPLETE.json",
+    "sha256": "02e8924aa17e58de615b5f3e70e1e8ed6b19828b8cbc2c2b567f0a7a97bbc7d8"
+  },
+  "files": {
+    "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/COMPLETE.json": "d52af675171cdc42c1b3a7767d9a76494ec2d1a214e2805ce254e5bbf461afd0",
+    "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/dataclasses-959.tar.gz": "02e8924aa17e58de615b5f3e70e1e8ed6b19828b8cbc2c2b567f0a7a97bbc7d8",
+    "benchmarks/compatibility/extensions/completed_unittest959_v1/templates/dataclasses.jsonl": "518d5bd9ea86538d69a7931604d438dda2cdb732a6a364f71a310a828a70f71b"
+  },
+  "first_blocker": "current shared finite acceptance requires exit 0 and identical whole-suite raw streams; the actual complete native suites exited 1 with genuine tier-specific outcomes",
+  "fixture_files": 1639,
+  "frozen_original_receipt": "benchmarks/compatibility/stdlib/dataclasses.jsonl",
+  "identity_limits": [
+    "stock and gates have continuously held hashed path FD brackets and traced exec paths, but no live /proc sample",
+    "positive O0/O3 CLI after-exec samples and O3 clang sample are non-atomic to exec",
+    "no per-tier independently captured before/after cwd+TMP effect manifests; traces and final restored fixture are retained"
+  ],
+  "inventory_sha256": "b6d4db80e0deccf73b60b689809a48be218b63e51708d7d255d1b9373e72639f",
+  "observed_originals": 276,
+  "observed_pass_intersection": 273,
+  "other_originals_not_run": 0,
+  "predecessor_public_main": "91fee1a5123ed0dad2a20df091c0262356e33e9b",
+  "results": {
+    "O0": {
+      "outcomes": {
+        "error": 1,
+        "pass": 273,
+        "skip": 2
+      },
+      "seconds": 12.384903048000012,
+      "suite_exit_code": 1,
+      "timed_out": false
+    },
+    "O3": {
+      "outcomes": {
+        "error": 1,
+        "pass": 273,
+        "skip": 2
+      },
+      "seconds": 12.508494086000042,
+      "suite_exit_code": 1,
+      "timed_out": false
+    },
+    "stock": {
+      "outcomes": {
+        "pass": 275,
+        "skip": 1
+      },
+      "seconds": 2.2741941550000035,
+      "suite_exit_code": 0,
+      "timed_out": false
+    }
+  },
+  "revision": "95908fb0acadc2a67304a8080e584deaef395746",
+  "schema": "imre.compatibility.completed-unittest-stage.v1",
+  "source": {
+    "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "git_blob": "fed32260c792707dbe9f43b7da4b99dd8ebcea2d",
+    "path": "Lib/test/test_dataclasses/__init__.py",
+    "repo": "https://github.com/python/cpython",
+    "sha256": "725ec19fa8c47f91b7aed7a8f2b1f3e74e6454647efd11e9a3e0e29245605af0"
+  }
+}
