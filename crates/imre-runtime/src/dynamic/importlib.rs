@@ -65,11 +65,7 @@ pub(super) enum LoaderResolution {
 
 impl LoaderResolution {
     /// A strict loader miss raises before Python can select a fallback; optional lookups miss as None.
-    pub(super) fn into_python(
-        self,
-        ctx: &Context,
-        strict_origin: Option<(Id, Id)>,
-    ) -> Result<Id> {
+    pub(super) fn into_python(self, ctx: &Context, strict_origin: Option<(Id, Id)>) -> Result<Id> {
         match self {
             Self::Linked(code) => Ok(code),
             Self::NeedsBytes => Ok(TRUE),
@@ -85,7 +81,8 @@ impl LoaderResolution {
                          SourceFileLoader whose name differs from the registered module is \
                          unsupported (including pydoc.importfile(path) on a package submodule). \
                          Declare and import the qualified module, or use its linked registered provider",
-                        ctx.repr(name), ctx.repr(path),
+                        ctx.repr(name),
+                        ctx.repr(path),
                     ),
                 );
                 let trace = error.tracing();
@@ -1326,16 +1323,31 @@ mod linked_compilation_tests {
             bundled_text: None,
             single_inputs: None,
         };
-        ctx.sources.entry("pkg.first").or_default().push(source(first));
-        ctx.sources.entry("pkg.second").or_default().push(source(second));
+        ctx.sources
+            .entry("pkg.first")
+            .or_default()
+            .push(source(first));
+        ctx.sources
+            .entry("pkg.second")
+            .or_default()
+            .push(source(second));
         let name = ctx.text("pkg.first");
         let selected = ctx
             .select_file_compilation(origin, Some(name), 0, true)
             .unwrap()
             .unwrap();
-        assert!(std::ptr::fn_addr_eq(selected.1.unwrap(), first as value::Code));
-        ctx.sources.entry("pkg.first").or_default().push(source(second));
-        assert!(ctx.select_file_compilation(origin, Some(name), 0, true).is_err());
+        assert!(std::ptr::fn_addr_eq(
+            selected.1.unwrap(),
+            first as value::Code
+        ));
+        ctx.sources
+            .entry("pkg.first")
+            .or_default()
+            .push(source(second));
+        assert!(
+            ctx.select_file_compilation(origin, Some(name), 0, true)
+                .is_err()
+        );
     }
 
     #[test]
