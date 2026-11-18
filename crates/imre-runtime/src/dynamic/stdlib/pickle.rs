@@ -3,6 +3,7 @@ use super::{Context, Error, Id, NONE, Result, Value};
 use std::collections::HashMap;
 mod encoding;
 mod reader;
+mod vm;
 
 /// The accelerator keeps the original dictionaries and observes their in-place edits.
 fn registry(ctx: &mut Context, module: Id, owner: &str, name: &str) -> Result<Id> {

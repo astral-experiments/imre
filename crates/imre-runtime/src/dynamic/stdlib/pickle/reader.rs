@@ -331,14 +331,21 @@ fn attempt(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     if !unobserved(ctx) {
         return Ok(None);
     }
-    let Some(layout) = preflight(bytes) else {
-        return Ok(None);
+    let layout = preflight(bytes);
+    let vm = if layout.is_none() {
+        super::vm::preflight(bytes)
+    } else {
+        None
     };
     #[cfg(unix)]
     if crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Acquire) {
         return Ok(None);
     }
-    decode(ctx, data, layout).map(Some)
+    match (layout, vm) {
+        (Some(layout), _) => decode(ctx, data, layout).map(Some),
+        (_, Some(layout)) => super::vm::decode(ctx, data, layout).map(Some),
+        _ => Ok(None),
+    }
 }
 
 #[cfg(test)]
