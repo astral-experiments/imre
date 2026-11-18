@@ -89,7 +89,7 @@ fn receiver(ctx: &Context, scope: Id) -> Option<Id> {
 }
 
 /// Skipping source statements must not skip a Python observer or change an allocation trace.
-fn unobserved_checkpoints(ctx: &Context) -> bool {
+pub(super) fn unobserved_checkpoints(ctx: &Context) -> bool {
     #[cfg(unix)]
     if crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Acquire)
         || !unobserved_signal_handlers(ctx)

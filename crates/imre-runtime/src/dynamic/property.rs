@@ -74,6 +74,10 @@ impl Context {
 }
 
 impl Property {
+    pub(super) fn getter(&self) -> Id {
+        self.get
+    }
+
     pub(super) fn readonly(get: Id, name: Id) -> Self {
         Self {
             get,

@@ -932,6 +932,41 @@ pub(super) fn read_path_bytes(path: &str) -> Result<Bytes> {
     close_file(file).map_err(errno_error).and(result)
 }
 
+/// Read like an unbuffered FileIO, dispatching default SIGINT before retrying EINTR.
+/// An empty nonblocking read returns None, while a partial read returns its bytes.
+pub(crate) fn read_path_bytes_interruptible(path: &str) -> Result<Option<Bytes>> {
+    let path = super::text::try_owned_string(path)?;
+    let (file, _) = open_file(&path, 0)?;
+    let mut bytes = Vec::new();
+    let mut chunk = [0; 8192];
+    let result = loop {
+        match super::os::try_readinto(file.as_raw_fd(), &mut chunk) {
+            Ok(None) => {
+                if let Err(error) = super::stdlib::check_interrupt() {
+                    break Err(error);
+                }
+            }
+            Ok(Some(0)) => break Ok(Some(bytes)),
+            Ok(Some(count)) => {
+                if bytes.try_reserve(count).is_err() {
+                    break Err(Error::memory_error());
+                }
+                bytes.extend_from_slice(&chunk[..count]);
+            }
+            Err(error)
+                if error.os_args().is_some_and(|args| {
+                    args.errno == i64::from(libc::EAGAIN)
+                        || args.errno == i64::from(libc::EWOULDBLOCK)
+                }) =>
+            {
+                break Ok((!bytes.is_empty()).then_some(bytes));
+            }
+            Err(error) => break Err(error),
+        }
+    };
+    close_file(file).map_err(errno_error).and(result)
+}
+
 pub(super) fn write_path_bytes(path: &str, bytes: &[u8]) -> Result<usize> {
     with_path_file(path, 1, true, |state| state.write_bytes(bytes))?;
     Ok(Int::from_usize(bytes.len()).into_raw())
