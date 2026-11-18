@@ -256,7 +256,9 @@ impl Context {
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!()
         };
-        frame.names.insert(crate::Str::new("__qualname__"), name);
+        frame
+            .names_mut()
+            .insert(crate::Str::new("__qualname__"), name);
         self.finish_namespace_class(class, scope, layout_base, cell, None, Vec::new())
     }
 
@@ -503,7 +505,7 @@ impl Context {
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!()
         };
-        frame.names.insert("__qualname__".into(), qualname);
+        frame.names_mut().insert("__qualname__".into(), qualname);
         let Value::Class {
             metaclass: class_meta,
             ..
@@ -548,7 +550,7 @@ impl Context {
         frame.in_class_body = true;
         frame.class_cell = Some(cell);
         // type.__new__ has already copied the supplied mapping into the type's own dictionary.
-        frame.namespace = layout.dictionary;
+        frame.set_namespace(layout.dictionary);
         frame.class_namespace = Some(Box::new(layout));
         scope
     }

@@ -929,7 +929,7 @@ impl Context {
                 let Value::Module { scope, .. } = *self.heap.get(module) else {
                     return None;
                 };
-                self.scope_data(scope).namespace
+                self.scope_data(scope).namespace()
             });
         let linked_name = self.str_value(name)?;
         let main_alias = (main_globals == Some(globals) && linked_name != "__main__")
@@ -947,7 +947,7 @@ impl Context {
 
     pub(super) fn bind_doctest_source(&mut self, test: Id, module: Id) {
         if let Value::Module { scope, .. } = *self.heap.get(module)
-            && let Some(globals) = self.scope_data(scope).namespace
+            && let Some(globals) = self.scope_data(scope).namespace()
             && let Some(super::LinkedSource::Doctest(source)) =
                 self.heap.linked_sources.get(&globals)
         {

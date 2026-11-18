@@ -2940,7 +2940,7 @@ impl Context {
         if let Some(locals) = frame.exec_locals {
             return Ok(locals);
         }
-        if frame.parent.is_none() && !frame.closure.cleared {
+        if frame.parent.is_none() && !frame.closure().cleared {
             return self.module_globals(scope);
         }
         if frame.in_class_body {
@@ -2960,7 +2960,7 @@ impl Context {
             }
         }
         let snapshot = self.dict(bindings);
-        if let Some(extras) = self.scope_data(scope).closure.extra_locals {
+        if let Some(extras) = self.scope_data(scope).closure().extra_locals {
             self.for_each_mapping_item(
                 extras,
                 snapshot,
@@ -2989,13 +2989,13 @@ impl Context {
             let parameters = self.parsed_parameters(code)?;
             // Argument slots come first, including arguments held in closure cells.
             for name in parameters.argument_slots() {
-                if frame.names.contains_key(name) || frame.closure.cells.contains_key(name) {
+                if frame.names().contains_key(name) || frame.closure().cells.contains_key(name) {
                     names.insert(name.to_owned());
                 }
             }
             // Slot order comes from the code layout even when a branch skipped the first store.
             for name in parameters.locals.iter() {
-                if frame.names.contains_key(name.as_str()) {
+                if frame.names().contains_key(name.as_str()) {
                     names.insert(name.clone());
                 }
             }
@@ -3003,10 +3003,10 @@ impl Context {
         let mut local = scope;
         loop {
             let frame = self.scope_data(local);
-            names.extend(frame.names.keys().map(|name| name.as_str().to_owned()));
-            let mut cells: Vec<_> = frame.closure.cells.keys().cloned().collect();
+            names.extend(frame.names().keys().map(|name| name.as_str().to_owned()));
+            let mut cells: Vec<_> = frame.closure().cells.keys().cloned().collect();
             // A class proxy's closure environment already has its owned cells before its free cells.
-            if code != NONE || !frame.closure.environment {
+            if code != NONE || !frame.closure().environment {
                 cells.sort_unstable();
             }
             names.extend(cells);
@@ -3045,7 +3045,7 @@ impl Context {
             }
         }
         if include_unbound {
-            names.extend(frame.closure.declared.iter().cloned());
+            names.extend(frame.closure().declared.iter().cloned());
         }
         // The implicit argument wins when a free variable has the same public spelling.
         if names.contains(imre_ast::annotations::FORMAT_PARAMETER) {

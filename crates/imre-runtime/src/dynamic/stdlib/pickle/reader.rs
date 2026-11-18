@@ -145,9 +145,55 @@ fn dense_text_is_ascii(bytes: &[u8]) -> bool {
     bits & 0x80 == 0
 }
 
-/// Validate the accepted grammar and UTF-8 before publishing Python objects;
-/// retain only packed positions into the immutable input, not copies of text.
-fn preflight(data: &[u8]) -> Option<Layout> {
+/// Consume consecutive equal-width short ASCII strings directly from the frame.
+/// Header bytes, payload high bits and the memo opcode share one packed comparison.
+#[inline(always)]
+fn dense_text_run<const WIDTH: usize>(data: &[u8], mut at: usize, end: usize) -> (usize, usize) {
+    debug_assert!((3..=8).contains(&WIDTH));
+    let start = at;
+    let stride = WIDTH + 3;
+    while end - at >= stride {
+        if end - at < 8 {
+            let text_end = at + WIDTH + 2;
+            if data[at] == SHORT_BINUNICODE
+                && data[at + 1] == WIDTH as u8
+                && data[text_end] == MEMOIZE
+                && dense_text_is_ascii(&data[at + 2..text_end])
+            {
+                at += stride;
+            }
+            break;
+        }
+        let word = u64::from_le_bytes(data[at..at + 8].try_into().unwrap());
+        let payload = match WIDTH {
+            3 => 0x0000_0080_8080_0000,
+            4 => 0x0000_8080_8080_0000,
+            5 => 0x0080_8080_8080_0000,
+            _ => 0x8080_8080_8080_0000,
+        };
+        let mut mask = payload | 0xffff;
+        let mut expected = u64::from(SHORT_BINUNICODE) | ((WIDTH as u64) << 8);
+        if WIDTH <= 5 {
+            mask |= 0xffu64 << ((WIDTH + 2) * 8);
+            expected |= u64::from(MEMOIZE) << ((WIDTH + 2) * 8);
+        }
+        if word & mask != expected {
+            break;
+        }
+        if WIDTH >= 6
+            && ((WIDTH >= 7 && data[at + 8] & 0x80 != 0)
+                || (WIDTH >= 8 && data[at + 9] & 0x80 != 0)
+                || data[at + WIDTH + 2] != MEMOIZE)
+        {
+            break;
+        }
+        at += stride;
+    }
+    (at, (at - start) / stride)
+}
+
+/// Validate the framed exact-list prolog shared by the text and primitive readers.
+fn list_cursor(data: &[u8]) -> Option<Cursor<'_>> {
     if data.get(..3)? != [PROTO, 4, FRAME] && data.get(..3)? != [PROTO, 5, FRAME] {
         return None;
     }
@@ -160,6 +206,19 @@ fn preflight(data: &[u8]) -> Option<Layout> {
     if cursor.byte()? != EMPTY_LIST || cursor.byte()? != MEMOIZE || cursor.byte()? != MARK {
         return None;
     }
+    Some(cursor)
+}
+
+#[cfg(test)]
+fn preflight(data: &[u8]) -> Option<Layout> {
+    preflight_text(list_cursor(data)?)
+}
+
+/// Validate text and memo pushes before publishing Python objects; retain only
+/// packed positions into the immutable input, not copies of text.
+fn preflight_text(mut cursor: Cursor<'_>) -> Option<Layout> {
+    let data = cursor.data;
+    let end = cursor.end;
     // The frame itself encodes offsets and lengths for a run of memoized
     // ASCII text. Keep that prefix in place even if a later item needs the
     // general grammar; only the remaining pushes need packed descriptors.
@@ -168,6 +227,23 @@ fn preflight(data: &[u8]) -> Option<Layout> {
         let Some(&length) = data.get(cursor.at.checked_add(1)?) else {
             break;
         };
+        let run = match length {
+            3 => Some(dense_text_run::<3>(data, cursor.at, end)),
+            4 => Some(dense_text_run::<4>(data, cursor.at, end)),
+            5 => Some(dense_text_run::<5>(data, cursor.at, end)),
+            6 => Some(dense_text_run::<6>(data, cursor.at, end)),
+            7 => Some(dense_text_run::<7>(data, cursor.at, end)),
+            8 => Some(dense_text_run::<8>(data, cursor.at, end)),
+            _ => None,
+        };
+        if let Some((next, count)) = run {
+            if count == 0 {
+                break;
+            }
+            cursor.at = next;
+            dense_prefix = dense_prefix.checked_add(count)?;
+            continue;
+        }
         let start = cursor.at.checked_add(2)?;
         let text_end = start.checked_add(usize::from(length))?;
         if text_end >= end
@@ -326,9 +402,14 @@ fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
     let (pointer, length) = (bytes.as_ptr(), bytes.len());
     // SAFETY: the call operands root this exact immutable bytes object; its Vec
     // backing allocation does not move when heap slots grow. No callback,
-    // collection, signal checkpoint, or mutation runs while decoding.
+    // collection, signal checkpoint, or mutation runs while decoding. All
+    // recoverable failures and vector reservations precede the first leaf;
+    // nonsingleton leaves are published through the rooted result list before
+    // any later operation can observe or collect them.
     let input = unsafe { std::slice::from_raw_parts(pointer, length) };
     let mut saw_short = false;
+    let solely_dense = layout.items.is_empty();
+    let mut batch_count = 0;
     if layout.dense_prefix != 0 {
         let mut at = 14usize;
         let mut first = 0usize;
@@ -344,6 +425,7 @@ fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
                     &mut values,
                 )
             };
+            batch_count = first;
         }
         for position in first..layout.dense_prefix {
             // SAFETY: dense preflight validated the complete frame, its short
@@ -357,7 +439,7 @@ fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
                 ))
             };
             let top = if layout.has_get {
-                ctx.heap.unobserved_text(text, true)
+                ctx.heap.unrooted_unobserved_text(text, true)
             } else {
                 ctx.heap
                     .unobserved_text_noting_short(text, true, &mut saw_short)
@@ -382,7 +464,7 @@ fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
             let text =
                 unsafe { std::str::from_utf8_unchecked(&input[start..start + item.length()]) };
             if layout.has_get {
-                ctx.heap.unobserved_text(text, item.is_ascii())
+                ctx.heap.unrooted_unobserved_text(text, item.is_ascii())
             } else {
                 ctx.heap
                     .unobserved_text_noting_short(text, item.is_ascii(), &mut saw_short)
@@ -395,7 +477,15 @@ fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
     }
     let result = ctx.alloc(Value::List(values));
     if !layout.has_get {
-        if layout.texts != 0 && !saw_short {
+        if solely_dense
+            && batch_count != 0
+            && batch_count == layout.dense_prefix
+            && layout.texts == batch_count
+        {
+            // SAFETY: the complete nonempty no-GET list was produced by the closed
+            // reserved batch, which accepts only exact 3..=8-byte inline ASCII strings.
+            unsafe { ctx.heap.mark_fresh_inline_text_list(result) };
+        } else if layout.texts != 0 && !saw_short {
             ctx.heap.mark_fresh_nonshort_text_list(result);
         } else {
             ctx.heap.mark_fresh_text_list(result);
@@ -486,8 +576,19 @@ fn attempt_data(
     if !unobserved(ctx) {
         return Ok(None);
     }
-    let layout = preflight(bytes);
-    let vm = if layout.is_none() {
+    let mut primitive = None;
+    let layout = match list_cursor(bytes) {
+        Some(cursor)
+            if cursor.at < cursor.end
+                && super::primitive_list::starts(cursor.data.get(cursor.at).copied()) =>
+        {
+            primitive = super::primitive_list::preflight(bytes, cursor.at, cursor.end);
+            None
+        }
+        Some(cursor) => preflight_text(cursor),
+        None => None,
+    };
+    let vm = if layout.is_none() && primitive.is_none() {
         super::vm::preflight(bytes)
     } else {
         None
@@ -496,18 +597,24 @@ fn attempt_data(
     if crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Acquire) {
         return Ok(None);
     }
-    if direct && (layout.is_some() || vm.is_some()) {
+    if direct && (layout.is_some() || primitive.is_some() || vm.is_some()) {
         ctx.check_call_depth(0)?;
     }
-    match (layout, vm) {
-        (Some(layout), _) if !layout.has_get => decode(ctx, data, layout)
+    match (layout, primitive, vm) {
+        (Some(layout), _, _) if !layout.has_get => decode(ctx, data, layout)
             .map(DirectLoad::FreshText)
             .map(Some),
-        (Some(layout), _) => {
+        (Some(layout), _, _) => {
             before_nonfresh();
             decode(ctx, data, layout).map(DirectLoad::Other).map(Some)
         }
-        (_, Some(layout)) => {
+        (_, Some(layout), _) => {
+            before_nonfresh();
+            super::primitive_list::decode(ctx, data, layout)
+                .map(DirectLoad::Other)
+                .map(Some)
+        }
+        (_, _, Some(layout)) => {
             before_nonfresh();
             super::vm::decode(ctx, data, layout)
                 .map(DirectLoad::Other)
@@ -520,6 +627,43 @@ fn attempt_data(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn packed_dense_runs_validate_every_width_and_payload_bit() {
+        fn framed(payload: &[u8]) -> Vec<u8> {
+            let mut data = vec![PROTO, 5, FRAME];
+            data.extend_from_slice(&(payload.len() as u64).to_le_bytes());
+            data.extend_from_slice(payload);
+            data
+        }
+        for width in 3usize..=8 {
+            let mut payload = vec![EMPTY_LIST, MEMOIZE, MARK];
+            for _ in 0..3 {
+                payload.extend([SHORT_BINUNICODE, width as u8]);
+                payload.extend(std::iter::repeat_n(b'a', width));
+                payload.push(MEMOIZE);
+            }
+            payload.extend([APPENDS, STOP]);
+            assert_eq!(preflight(&framed(&payload)).unwrap().dense_prefix, 3);
+            let second_payload = 3 + (width + 3) + 2;
+            for position in 0..width {
+                payload[second_payload + position] = 0x80;
+                assert!(
+                    preflight(&framed(&payload)).is_none(),
+                    "width {width}, position {position}"
+                );
+                payload[second_payload + position] = b'a';
+            }
+        }
+        let mut payload = vec![EMPTY_LIST, MEMOIZE, MARK];
+        for width in [3u8, 8, 5, 1, 6, 0, 7, 4, 9, 2, 255] {
+            payload.extend([SHORT_BINUNICODE, width]);
+            payload.extend(std::iter::repeat_n(b'a', usize::from(width)));
+            payload.push(MEMOIZE);
+        }
+        payload.extend([APPENDS, STOP]);
+        assert_eq!(preflight(&framed(&payload)).unwrap().dense_prefix, 11);
+    }
 
     #[test]
     fn bounded_dense_ascii_checks_every_payload_byte_and_falls_back_at_boundaries() {
@@ -559,6 +703,23 @@ mod tests {
     }
 
     #[test]
+    fn framed_list_dispatch_does_not_consume_a_scalar_outside_the_frame() {
+        let bytes = b"\x80\x05\x95\x03\0\0\0\0\0\0\0]\x94(N";
+        let cursor = list_cursor(bytes).unwrap();
+        assert_eq!(cursor.at, cursor.end);
+        assert!(preflight(bytes).is_none());
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let data = ctx.alloc(Value::Bytes(bytes.to_vec()));
+        let invalidated = std::cell::Cell::new(false);
+        assert!(
+            attempt_data(&mut ctx, data, false, || invalidated.set(true))
+                .unwrap()
+                .is_none()
+        );
+        assert!(!invalidated.get());
+    }
+
+    #[test]
     fn direct_receipt_is_minted_only_for_the_immediate_text_reader_without_gets() {
         let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
         for (bytes, fresh) in [
@@ -571,6 +732,7 @@ mod tests {
                 false,
             ),
             (&b"\x80\x05\x95\x06\0\0\0\0\0\0\0]\x94K\x01a."[..], false),
+            (&b"\x80\x05\x95\x08\0\0\0\0\0\0\0]\x94(NK\x01e."[..], false),
         ] {
             let data = ctx.alloc(Value::Bytes(bytes.to_vec()));
             let invalidated = std::cell::Cell::new(false);
@@ -626,6 +788,38 @@ mod tests {
                 };
                 assert_ne!(items[0], items[1]);
             }
+        }
+    }
+
+    #[test]
+    fn inline_text_provenance_requires_the_entire_closed_dense_batch() {
+        fn frame(payload: &[u8]) -> Vec<u8> {
+            let mut bytes = vec![PROTO, 5, FRAME];
+            bytes.extend_from_slice(&(payload.len() as u64).to_le_bytes());
+            bytes.extend_from_slice(payload);
+            bytes
+        }
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        for (payload, inline) in [
+            (&b"]\x94(\x8c\x03abc\x94\x8c\x08abcdefgh\x94e."[..], true),
+            (&b"]\x94(\x8c\x03abc\x94\x8c\x09abcdefghi\x94e."[..], false),
+            (&b"]\x94(\x8c\x03abc\x94\x8c\x01x\x94e."[..], false),
+            (
+                &b"]\x94(\x8c\x03abc\x94\x8c\x03\xe2\x82\xac\x94e."[..],
+                false,
+            ),
+            (&b"]\x94(\x8c\x03abc\x94h\x01e."[..], false),
+            (&b"]\x94(e."[..], false),
+        ] {
+            let data = ctx.alloc(Value::Bytes(frame(payload)));
+            let result = attempt_data(&mut ctx, data, false, || {})
+                .unwrap()
+                .unwrap()
+                .value();
+            assert_eq!(
+                ctx.heap.is_fresh_inline_text_list(result),
+                inline && std::mem::size_of::<String>() >= 8
+            );
         }
     }
 

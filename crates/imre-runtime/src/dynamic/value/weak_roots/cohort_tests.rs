@@ -46,7 +46,7 @@ fn learning_preserves_live_finalizer_branches_without_reviving_a_stale_owner() {
     let Value::Scope(bindings) = ctx.heap.get_mut(scope) else {
         unreachable!()
     };
-    bindings.names.insert("holder".into(), holder);
+    bindings.names_mut().insert("holder".into(), holder);
     ctx.heap.release_temporaries_since(0);
     let globals = ctx.finalizer_path_roots();
     assert!(ctx.heap.learn_finalizer_paths(globals, None));
@@ -79,7 +79,7 @@ fn retained_closure_owner_rechecks_the_cell_and_its_contents() {
     let Value::Scope(frame) = ctx.heap.get_mut(scope) else {
         unreachable!()
     };
-    frame.closure.cells.insert("held".into(), cell);
+    frame.closure_mut().cells.insert("held".into(), cell);
 
     let roots = [scope, NONE];
     let paths =
@@ -93,7 +93,7 @@ fn retained_closure_owner_rechecks_the_cell_and_its_contents() {
     let Value::Scope(frame) = ctx.heap.get_mut(scope) else {
         unreachable!()
     };
-    frame.closure.cells.insert("held".into(), replacement);
+    frame.closure_mut().cells.insert("held".into(), replacement);
     assert!(!paths.valid(&ctx.heap, roots));
 }
 
@@ -146,7 +146,7 @@ fn a_bound_method_keeps_its_receiver_alive_until_the_binding_is_removed() {
     let Value::Scope(bindings) = heap.get_mut(scope) else {
         unreachable!()
     };
-    bindings.names.insert("callback".into(), method);
+    bindings.names_mut().insert("callback".into(), method);
     heap.release_temporaries_since(0);
 
     heap.learn_finalizer_paths(globals, None);
@@ -156,7 +156,7 @@ fn a_bound_method_keeps_its_receiver_alive_until_the_binding_is_removed() {
     let Value::Scope(bindings) = heap.get_mut(scope) else {
         unreachable!()
     };
-    bindings.names.clear();
+    bindings.names_mut().clear();
     assert!(!heap.finalizer_roots.valid(heap, globals));
 }
 
@@ -189,8 +189,8 @@ fn finalizer_paths_recheck_scope_owners_and_their_weak_references() {
     let Value::Scope(bindings) = heap.get_mut(scope) else {
         unreachable!()
     };
-    bindings.names.insert("held".into(), held);
-    bindings.names.insert("refs".into(), refs);
+    bindings.names_mut().insert("held".into(), held);
+    bindings.names_mut().insert("refs".into(), refs);
     heap.release_temporaries_since(0);
 
     heap.learn_finalizer_paths(globals, streams.as_ref());
@@ -435,7 +435,7 @@ fn a_wide_frame_probe_leaves_room_to_follow_global_modules() {
     let Value::Scope(global_scope) = ctx.heap.get_mut(globals) else {
         unreachable!()
     };
-    global_scope.names.insert("target".into(), target);
+    global_scope.names_mut().insert("target".into(), target);
 
     let items = (0..MAX_NODES)
         .map(|_| ctx.alloc(Value::List(Vec::new())))
@@ -446,7 +446,7 @@ fn a_wide_frame_probe_leaves_room_to_follow_global_modules() {
     let Value::Scope(caller) = ctx.heap.get_mut(scope) else {
         unreachable!()
     };
-    caller.names.insert("wide".into(), wide);
+    caller.names_mut().insert("wide".into(), wide);
     let globals = [module, NONE];
     let paths =
         RootPaths::discover(&ctx.heap, globals, [target].into_iter(), false, false).unwrap();
@@ -472,7 +472,7 @@ fn wide_frame_contents_do_not_hide_direct_global_roots() {
     let Value::Scope(frame) = ctx.heap.get_mut(scope) else {
         unreachable!()
     };
-    frame.names.insert("wide".into(), wide);
+    frame.names_mut().insert("wide".into(), wide);
     ctx.heap.release_temporaries_since(0);
 
     let paths = RootPaths::discover(
@@ -589,7 +589,7 @@ fn generator_ownership_tracks_live_iterator_inputs_and_scope_bindings() {
     let Value::Scope(locals) = heap.get_mut(scope) else {
         unreachable!()
     };
-    locals.names.insert("item".into(), root);
+    locals.names_mut().insert("item".into(), root);
     assert!(!heap.short_path_keeps_owner(root, owner));
     assert!(!heap.retained_paths_keep_owners([root].into_iter(), true));
 }

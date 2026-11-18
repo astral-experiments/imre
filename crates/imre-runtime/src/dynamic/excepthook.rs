@@ -78,7 +78,7 @@ pub(super) fn report(ctx: &mut Context, sys: Id, error: Error, interrupted: &mut
         ("last_value", value),
         ("last_traceback", tb),
     ] {
-        if let Some(dict) = ctx.scope_data(scope).namespace {
+        if let Some(dict) = ctx.scope_data(scope).namespace() {
             // A colliding Python key can raise. CPython still publishes the other fields.
             let key = ctx.heap.code_name(name);
             let _ = ctx.put_item(dict, key, id);
@@ -86,7 +86,7 @@ pub(super) fn report(ctx: &mut Context, sys: Id, error: Error, interrupted: &mut
             ctx.bind(scope, name, id);
         }
     }
-    let hook = if let Some(dict) = ctx.scope_data(scope).namespace {
+    let hook = if let Some(dict) = ctx.scope_data(scope).namespace() {
         let key = ctx.heap.code_name("excepthook");
         ctx.get_item(dict, key).ok()
     } else {

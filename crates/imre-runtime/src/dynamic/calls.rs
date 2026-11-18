@@ -3055,7 +3055,7 @@ impl Context {
         let Value::Scope(environment) = self.heap.get_mut(scope) else {
             unreachable!()
         };
-        environment.namespace = Some(globals);
+        environment.set_namespace(Some(globals));
         environment.exec_globals = Some(value::ExecGlobals {
             dict: globals,
             builtins,
@@ -4960,10 +4960,10 @@ impl Context {
                             "code lacks closure metadata",
                         ));
                     }
-                    if closure == NONE && self.scope_data(scope).closure.environment {
+                    if closure == NONE && self.scope_data(scope).closure().environment {
                         let cells = self
                             .scope_data(scope)
-                            .closure
+                            .closure()
                             .cells
                             .values()
                             .copied()
@@ -10081,9 +10081,9 @@ impl Context {
         let Value::Scope(frame) = self.heap.get_mut(local) else {
             unreachable!()
         };
-        frame.closure.declared = sig.locals.clone();
-        frame.closure.nonlocals = sig.nonlocals.clone();
-        frame.closure.declared_complete = sig.locals_complete;
+        frame.closure_mut().declared = sig.locals.clone();
+        frame.closure_mut().nonlocals = sig.nonlocals.clone();
+        frame.closure_mut().declared_complete = sig.locals_complete;
 
         let shape = sig.shape();
         let omitted = match arguments {
@@ -10157,7 +10157,7 @@ impl Context {
             }
         };
         let supplied_types = self.check_supplied_types(callable, &sig, &name, |param| {
-            self.scope_data(local).names.get(param).copied()
+            self.scope_data(local).names().get(param).copied()
         });
         for slot in omitted {
             let value = self.bound_default(&shape, slot, defaults, kwdefaults);
@@ -10295,7 +10295,7 @@ impl Context {
         let frame = self.scope_data(scope);
         // A method may capture just its class dictionary ahead of its globals.
         let (scope, local) = if let Some(parent) = frame.parent {
-            let cells = &frame.closure.cells;
+            let cells = &frame.closure().cells;
             if cells.len() != 1 {
                 return None;
             }
@@ -10363,7 +10363,7 @@ impl Context {
         if name.contains('.') {
             return None;
         }
-        let cells = &self.scope_data(scope).closure.cells;
+        let cells = &self.scope_data(scope).closure().cells;
         let binding = |name: &str| match self.heap.get(*cells.get(name)?) {
             Value::Cell(value) => *value,
             _ => None,
@@ -10549,8 +10549,10 @@ impl Context {
                 .annotation_dict_cell
                 .is_some()
         {
-            class_scope.namespace = Some(dictionary);
-            class_scope.names.retain(|name, _| name == "__qualname__");
+            class_scope.set_namespace(Some(dictionary));
+            class_scope
+                .names_mut()
+                .retain(|name, _| name == "__qualname__");
         }
         if let Some(dict) = dictionary {
             let members = self.dict_entries(dict).expect("class dictionary").to_vec();
@@ -10892,12 +10894,12 @@ impl Context {
             unreachable!()
         };
         body_scope.in_class_body = true;
-        body_scope.closure.nonlocals = bindings.scope_nonlocals.try_into()?;
+        body_scope.closure_mut().nonlocals = bindings.scope_nonlocals.try_into()?;
         body_scope.enum_namespace = enum_namespace;
         body_scope.class_cell = Some(cell);
         body_scope.globals = bindings.class_globals;
         if let Some((_, mapping)) = prepared {
-            body_scope.namespace = Some(mapping);
+            body_scope.set_namespace(Some(mapping));
             body_scope
                 .class_namespace
                 .get_or_insert_with(Default::default)
@@ -11015,7 +11017,7 @@ impl Context {
             // The type keeps the namespace after the body returns. Its readers own their cells.
             frame.parent = Some(globals);
             frame.globals.clear();
-            frame.closure.nonlocals = Default::default();
+            frame.closure_mut().nonlocals = Default::default();
         }
         if self.scope_name(scope, "__qualname__").is_none() {
             let qualname = self.text(&name);
@@ -11134,7 +11136,10 @@ impl Context {
             .and_then(|namespace| namespace.slot_names.as_deref())
             .is_some_and(|slots| slots.iter().any(|slot| slot == "__doc__"));
         if !has_doc_slot {
-            class_scope.names.entry("__doc__".into()).or_insert(NONE);
+            class_scope
+                .names_mut()
+                .entry("__doc__".into())
+                .or_insert(NONE);
         }
         if let Some(body) = exposed_body {
             // type.__new__ replaces the body namespace with the finished type's dictionary.
@@ -11271,7 +11276,7 @@ mod tests {
             )
             .unwrap();
         let scope = ctx.heap.current_scope();
-        assert_eq!(ctx.scope_data(scope).names.get("value"), Some(&argument));
+        assert_eq!(ctx.scope_data(scope).names().get("value"), Some(&argument));
         assert_eq!(ctx.scope_data(scope).class_cell, Some(cell));
         // SAFETY: this test owns the context and the prepared native activation.
         assert_eq!(unsafe { call.run(&raw mut ctx) }.unwrap(), argument);
@@ -11345,12 +11350,12 @@ mod tests {
         let scope = ctx.heap.current_scope();
         let frame = ctx.scope_data(scope);
         assert_eq!(
-            ctx.tuple_elements(*frame.names.get("rest").unwrap())
+            ctx.tuple_elements(*frame.names().get("rest").unwrap())
                 .unwrap(),
             &[extra]
         );
         assert_eq!(
-            ctx.dict_named_item(*frame.names.get("options").unwrap(), "flag"),
+            ctx.dict_named_item(*frame.names().get("options").unwrap(), "flag"),
             Some(extra)
         );
         // SAFETY: this test owns the context and the prepared native activation.

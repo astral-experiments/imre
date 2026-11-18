@@ -694,7 +694,7 @@ fn plain_match_make(ctx: &Context, class: Id) -> bool {
         return false;
     }
     let environment = ctx.scope_data(*scope);
-    if !environment.closure.environment || environment.closure.cells.len() != 3 {
+    if !environment.closure().environment || environment.closure().cells.len() != 3 {
         return false;
     }
     let Some(root) = environment.parent else {

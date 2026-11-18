@@ -1,11 +1,11 @@
 mod encoder_state;
+mod fields;
 mod notes;
+mod owners;
 mod scanstring;
 pub(super) use encoder_state::encoder_state;
 use notes::{Location, noted};
 pub(super) use scanstring::scanstring;
-
-use std::collections::HashMap;
 
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value, required_args};
 use crate::objects::{
@@ -13,6 +13,8 @@ use crate::objects::{
     write_json_fragment, write_json_string,
 };
 use crate::{Str, StrOwner};
+use fields::ObjectFields;
+use owners::{DocumentKeys, KeySource};
 
 /// Recognize an exact dict's bound getter without inspecting an arbitrary parse_constant hook.
 pub(super) fn is_constants_lookup(ctx: &Context, constants: Id, hook: Id) -> bool {
@@ -90,7 +92,6 @@ pub(super) fn scan_once(
 }
 
 /// The key memo compares decoded contents, including literal and escaped spellings of a key.
-#[derive(Eq, PartialEq, Hash)]
 enum ParsedString {
     Text(String),
     Surrogates(Vec<u32>),
@@ -137,25 +138,6 @@ impl ParsedString {
             Self::Surrogates(points) => ctx.alloc(Value::SurrogateStr(points)),
         }
     }
-
-    fn boxed_key(&self, ctx: &mut Context) -> std::result::Result<Id, crate::Error> {
-        match self {
-            Self::Text(s) => {
-                let mut copy = String::new();
-                copy.try_reserve_exact(s.len())
-                    .map_err(|_| crate::Error::allocation())?;
-                copy.push_str(s);
-                Ok(ctx.text(copy))
-            }
-            Self::Surrogates(points) => {
-                let mut copy = Vec::new();
-                copy.try_reserve_exact(points.len())
-                    .map_err(|_| crate::Error::allocation())?;
-                copy.extend_from_slice(points);
-                Ok(ctx.alloc(Value::SurrogateStr(copy)))
-            }
-        }
-    }
 }
 
 fn parse(
@@ -166,8 +148,8 @@ fn parse(
     constant: Id,
     pairs_hook: Id,
 ) -> std::result::Result<(Id, usize), JsonTokenError<Error>> {
-    let mut keys = HashMap::new();
-    // A callback can collect while the scanner's per-document key memo is live.
+    let mut keys = DocumentKeys::default();
+    // A callback can collect while the scanner's per-document canonical owners are live.
     let key_roots = (pairs_hook != NONE).then(|| ctx.alloc(Value::List(Vec::new())));
     decode_json_tokens_at(
         text,
@@ -200,43 +182,35 @@ fn parse(
                 DecodedJson::String(body) => ParsedString::read(ctx, text, wide, body)?.boxed(ctx),
                 DecodedJson::Array(items) => ctx.alloc(Value::List(items)),
                 DecodedJson::Object(fields) => {
-                    let mut entries = Vec::new();
-                    let mut positions = HashMap::new();
+                    let mut entries = if pairs_hook == NONE {
+                        Some(ObjectFields::with_capacity(fields.len())?)
+                    } else {
+                        None
+                    };
                     let mut pairs = Vec::new();
                     let allocation = |_| crate::Error::allocation();
-                    if pairs_hook == NONE {
-                        entries.try_reserve(fields.len()).map_err(allocation)?;
-                        positions.try_reserve(fields.len()).map_err(allocation)?;
-                    } else {
+                    if pairs_hook != NONE {
                         pairs.try_reserve(fields.len()).map_err(allocation)?;
                     }
-                    keys.try_reserve(fields.len()).map_err(allocation)?;
                     for (body, value) in fields {
-                        let name = ParsedString::read(ctx, text, wide, body)?;
-                        let key = match keys.entry(name) {
-                            std::collections::hash_map::Entry::Occupied(e) => *e.get(),
-                            std::collections::hash_map::Entry::Vacant(e) => {
-                                let id = e.key().boxed_key(ctx)?;
-                                if let Some(root) = key_roots {
-                                    let Value::List(keys) = ctx.heap.get_mut(root) else {
-                                        unreachable!()
-                                    };
-                                    keys.try_reserve(1).map_err(allocation)?;
-                                    keys.push(id);
-                                }
-                                *e.insert(id)
-                            }
+                        let source = if wide.is_none() && !text[body.clone()].contains('\\') {
+                            KeySource::Borrowed(&text[body])
+                        } else {
+                            KeySource::Decoded(ParsedString::read(ctx, text, wide, body)?)
                         };
+                        let (key, fresh) = keys.intern(ctx, source)?;
+                        if fresh && let Some(root) = key_roots {
+                            let Value::List(roots) = ctx.heap.get_mut(root) else {
+                                unreachable!()
+                            };
+                            roots.try_reserve(1).map_err(allocation)?;
+                            roots.push(key);
+                        }
                         if pairs_hook != NONE {
                             pairs.push(ctx.alloc(Value::Tuple(vec![key, value])));
                             continue;
                         }
-                        let position = *positions.entry(key).or_insert(entries.len());
-                        if position == entries.len() {
-                            entries.push((key, value));
-                        } else {
-                            entries[position] = (key, value);
-                        }
+                        entries.as_mut().unwrap().push(key, value);
                     }
                     if let Some(mark) = mark {
                         let argument = ctx.alloc(Value::List(pairs));
@@ -246,7 +220,7 @@ fn parse(
                         released = Some(argument);
                         result
                     } else {
-                        ctx.dict(entries)
+                        ctx.dict(entries.unwrap().into_entries())
                     }
                 }
             };

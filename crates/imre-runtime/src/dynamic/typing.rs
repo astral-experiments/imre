@@ -1931,7 +1931,7 @@ fn capture_parameter_class(ctx: &mut Context, scope: Id, outer: Id, names: Id) {
     };
     for (name, cell) in [("__classdict__", dictionary), (CONDITIONAL, conditional)] {
         if let Some(cell) = cell {
-            parameters.closure.cells.insert(name.to_owned(), cell);
+            parameters.closure_mut().cells.insert(name.to_owned(), cell);
         }
     }
     parameters.class_cell = class_cell;
@@ -1979,11 +1979,8 @@ fn initialize_parameters(ctx: &mut Context, scope: Id, names: Id, class: bool) -
         unreachable!()
     };
     let frame = frame.as_mut();
-    frame
-        .closure
-        .declared
-        .extend(frame.names.keys().map(|name| name.as_str().to_owned()));
-    frame.closure.declared_complete = true;
+    frame.declare_current_names();
+    frame.closure_mut().declared_complete = true;
     if class {
         // __type_params__ retains the pack itself; the implicit base is Generic[*Ts].
         let params = unpacked_parameters(ctx, declared)?;
