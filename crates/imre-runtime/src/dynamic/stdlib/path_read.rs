@@ -68,9 +68,16 @@ fn canonical_builtins(ctx: &Context, root: Id) -> bool {
     })
 }
 
-fn module_scope(ctx: &Context, id: Id) -> Option<Id> {
+fn module_scope(ctx: &Context, id: Id, name: &str) -> Option<Id> {
+    if ctx.scalar_dict_name(ctx.modules, name) != Some(Some(id)) {
+        return None;
+    }
     match ctx.heap.get(id) {
-        Value::Module { scope, .. } => Some(*scope),
+        Value::Module {
+            scope,
+            constructor: None,
+            ..
+        } => Some(*scope),
         _ => None,
     }
 }
@@ -154,7 +161,7 @@ fn environment(ctx: &Context, root: Id, receiver: Id) -> Option<Slots> {
     {
         return None;
     }
-    let io = module_scope(ctx, binding(ctx, root, "io")?)?;
+    let io = module_scope(ctx, binding(ctx, root, "io")?, "io")?;
     if binding(ctx, io, "open") != ctx.builtins.get("open").copied() {
         return None;
     }
@@ -162,7 +169,7 @@ fn environment(ctx: &Context, root: Id, receiver: Id) -> Option<Slots> {
     if ctx.class_attr(class, "parser") != Some(parser) {
         return None;
     }
-    let parser_scope = module_scope(ctx, parser)?;
+    let parser_scope = module_scope(ctx, parser, "posixpath")?;
     if !matches!(ctx.heap.get(binding(ctx, parser_scope, "sep")?), Value::Str(sep) if sep == "/")
         || binding(ctx, parser_scope, "altsep") != Some(NONE)
         || !native(
