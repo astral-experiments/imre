@@ -112,7 +112,7 @@ with Rust-competitive performance.
 
 Revision `95908fb0acadc2a67304a8080e584deaef395746` · CPython **3.14.5** · Linux x86-64. These are original-test receipts at this revision, not cumulative credits.
 
-Frozen 45-family cohort: **54 pinned receipts** of **16,225 raw upstream originals**, **54 observed stock/O0/O3 pass intersections**, **54 verified credited pairs**; **16,171 originals have no validated receipt**.
+Frozen 45-family cohort: **398 pinned receipts** of **16,225 raw upstream originals**, **393 observed stock/O0/O3 pass intersections**, **393 verified credited pairs**; **15,827 originals have no validated receipt**.
 
 Supplemental pilots, outside the frozen cohort: **0 receipts** of **3 originals**, **0 observed intersections**, **0 verified credited pairs**.
 
@@ -125,7 +125,7 @@ Scripts: **4 of 84 original command IDs have receipts**; **4 verified / 72 histo
 | `argparse` | 1,893 | not run | not run | not run | unknown (not run) | unknown (not run) | 1,887 |
 | `base64` | 41 | not run | not run | not run | unknown (not run) | unknown (not run) | 40 |
 | `collections` | 659 | not run | not run | not run | unknown (not run) | unknown (not run) | 639 |
-| `configparser` | 344 | not run | not run | not run | unknown (not run) | unknown (not run) | 339 |
+| `configparser` | 344 | 339 pass, 5 skip | 339 pass, 5 skip | 339 pass, 5 skip | 339 | 339 verified | 339 |
 | `contextlib` | 149 | not run | not run | not run | unknown (not run) | unknown (not run) | 149 |
 | `copy` | 81 | not run | not run | not run | unknown (not run) | unknown (not run) | 81 |
 | `csv` | 128 | not run | not run | not run | unknown (not run) | unknown (not run) | 122 |
