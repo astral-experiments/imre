@@ -39,19 +39,22 @@ pub(in crate::dynamic) unsafe extern "C" fn imre_dyn_pickle_loads(
 }
 
 /// One validated stack push. The low 32 bits are either an input-byte offset
-/// or a memo index, bits 32..40 hold a short string length, and bits 40..63
-/// count subsequent MEMOIZE operations. The top bit distinguishes memo gets.
+/// or a memo index, bits 32..40 hold a short string length, and bits 40..62
+/// count subsequent MEMOIZE operations, bit 62 records ASCII, and bit 63 distinguishes memo gets.
 #[derive(Clone, Copy)]
 struct Item(u64);
 
 impl Item {
     const GET: u64 = 1 << 63;
+    const ASCII: u64 = 1 << 62;
     const MEMO: u64 = 1 << 40;
-    const MAX_MEMO: u64 = (1 << 23) - 1;
+    const MAX_MEMO: u64 = (1 << 22) - 1;
 
-    fn text(offset: usize, length: u8) -> Option<Self> {
+    fn text(offset: usize, length: u8, ascii: bool) -> Option<Self> {
         Some(Self(
-            u64::from(u32::try_from(offset).ok()?) | (u64::from(length) << 32),
+            u64::from(u32::try_from(offset).ok()?)
+                | (u64::from(length) << 32)
+                | if ascii { Self::ASCII } else { 0 },
         ))
     }
 
@@ -77,6 +80,9 @@ impl Item {
     fn length(self) -> usize {
         ((self.0 >> 32) & 0xff) as usize
     }
+    fn is_ascii(self) -> bool {
+        self.0 & Self::ASCII != 0
+    }
     fn is_get(self) -> bool {
         self.0 & Self::GET != 0
     }
@@ -86,6 +92,7 @@ struct Layout {
     items: Vec<Item>,
     memo: usize,
     has_get: bool,
+    texts: usize,
 }
 
 struct Cursor<'a> {
@@ -142,15 +149,21 @@ fn preflight(data: &[u8]) -> Option<Layout> {
         .ok()?;
     let mut memo = 1usize;
     let mut has_get = false;
+    let mut texts = 0usize;
     loop {
         let op = cursor.byte()?;
         match op {
             SHORT_BINUNICODE => {
                 let length = cursor.byte()?;
                 let offset = cursor.at;
-                std::str::from_utf8(cursor.take(usize::from(length))?).ok()?;
+                let bytes = cursor.take(usize::from(length))?;
+                let ascii = bytes.is_ascii();
+                if !ascii {
+                    std::str::from_utf8(bytes).ok()?;
+                }
                 items.try_reserve(1).ok()?;
-                items.push(Item::text(offset, length)?);
+                items.push(Item::text(offset, length, ascii)?);
+                texts = texts.checked_add(1)?;
             }
             BINGET | LONG_BINGET => {
                 let index = cursor.get_index(op)?;
@@ -173,6 +186,7 @@ fn preflight(data: &[u8]) -> Option<Layout> {
                     items,
                     memo,
                     has_get,
+                    texts,
                 });
             }
             _ => return None,
@@ -260,8 +274,7 @@ fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
             .map_err(|_| crate::Error::memory_error())?;
         memo.push(NONE); // placeholder for the result list itself
     }
-    ctx.heap
-        .reserve_temporaries(layout.items.len().saturating_add(1))?;
+    ctx.heap.reserve_unobserved_texts(layout.texts)?;
     let mark = ctx.heap.temporary_mark();
     let Value::Bytes(bytes) = ctx.heap.get(data) else {
         unreachable!()
@@ -280,7 +293,7 @@ fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
             // immutable input has not changed. CompactString copies into its slot.
             let text =
                 unsafe { std::str::from_utf8_unchecked(&input[start..start + item.length()]) };
-            ctx.text(text)
+            ctx.heap.unobserved_text(text, item.is_ascii())
         };
         values.push(top);
         if layout.has_get {

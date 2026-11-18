@@ -4670,6 +4670,64 @@ impl Heap {
         self.fill_slot(SlotShape::text(&text), false, true, || Value::Str(text))
     }
 
+    /// Reserve the parallel slot arrays once for a callback-free run of exact text leaves.
+    pub(super) fn reserve_unobserved_texts(&mut self, count: usize) -> Result<()> {
+        let additional = count.saturating_sub(self.free_count);
+        self.slot_shapes
+            .try_reserve(additional)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        self.traces
+            .try_reserve(additional)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        self.slots
+            .try_reserve(additional)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        self.reserve_temporaries(count.saturating_add(1))
+    }
+
+    /// Fill one reserved untracked text slot without the generic object/finalizer path.
+    /// The caller must exclude allocation traces and retain the source bytes until copying finishes.
+    pub(super) fn unobserved_text(&mut self, text: &str, ascii: bool) -> Id {
+        debug_assert!(!self.allocation_traces.is_tracing());
+        debug_assert_eq!(ascii, text.is_ascii());
+        if text.len() <= 2
+            && let Some(id) = self.short_string(text)
+        {
+            return id;
+        }
+        let shape = if ascii {
+            SlotShape::AsciiStr
+        } else {
+            SlotShape::ScalarLeaf
+        };
+        let value = Value::Str(text.into());
+        let index = if self.free_head != END {
+            let index = self.free_head;
+            self.free_head = self.slots[index].gc_next.replace(UNMARKED);
+            self.free_count -= 1;
+            self.slot_shapes[index] = shape;
+            let slot = &mut self.slots[index];
+            slot.value = Some(value);
+            slot.may_have_buffer_views = false;
+            slot.generation = 0;
+            slot.untracked_tuple.set(false);
+            slot.has_gc_header = false;
+            slot.finalization = Finalization::None;
+            index
+        } else {
+            debug_assert!(self.slot_shapes.len() < self.slot_shapes.capacity());
+            debug_assert!(self.traces.len() < self.traces.capacity());
+            debug_assert!(self.slots.len() < self.slots.capacity());
+            self.slot_shapes.push(shape);
+            self.traces.push(Cell::new(UNMARKED));
+            self.slots.push(Slot::new(value));
+            self.slots.len() - 1
+        };
+        let id = index as Id;
+        self.keep(id);
+        id
+    }
+
     /// Cached integers are permanent. A fresh slot roots the integer in the active frame.
     pub(super) fn owned_integer(&mut self, integer: crate::Int) -> Id {
         integer
@@ -8010,6 +8068,31 @@ impl Heap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reserved_text_leaves_reuse_slots_and_remain_reachable_through_a_list() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let old = heap.alloc(Value::List(Vec::new()));
+        heap.release_temporaries_since(mark);
+        heap.collect(std::iter::empty());
+        heap.reserve_unobserved_texts(4).unwrap();
+        let ascii = heap.unobserved_text("alpha", true);
+        let unicode = heap.unobserved_text("éclair", false);
+        let singleton = heap.unobserved_text("x", true);
+        let same = heap.unobserved_text("x", true);
+        assert_eq!(ascii, old);
+        assert_eq!(singleton, same);
+        let list = heap.alloc(Value::List(vec![ascii, unicode, singleton]));
+        heap.release_temporaries_since(mark);
+        heap.collect(std::iter::once(list));
+        assert!(matches!(heap.get(ascii), Value::Str(s) if s == "alpha"));
+        assert!(matches!(heap.get(unicode), Value::Str(s) if s == "éclair"));
+        assert!(heap.is_ascii_str(ascii));
+        assert!(!heap.is_ascii_str(unicode));
+        heap.collect(std::iter::empty());
+        assert!(heap.slots[ascii as usize].value.is_none());
+    }
 
     #[test]
     fn pending_syntax_error_traces_the_same_members_as_its_raised_instance() {
