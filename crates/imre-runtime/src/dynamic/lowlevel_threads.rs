@@ -187,7 +187,7 @@ impl Start {
         if let Some(sys) = ctx.threads.system_module
         && let Value::Module { scope, .. } = ctx.heap.get(sys)
         // Once exposed, the live dict can be changed through an arbitrary alias.
-        && (ctx.scope_data(*scope).namespace.is_some()
+        && (ctx.scope_data(*scope).namespace().is_some()
             || ctx.scope_name(*scope, "unraisablehook").is_some_and(|hook| Some(hook) != ctx.threads.default_unraisable_hook)
             || ctx.heap.standard_outputs[1].is_none_or(|stderr| {
                 ctx.scope_name(*scope, "stderr") != Some(stderr)

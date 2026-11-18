@@ -86,8 +86,8 @@ fn frame_scope(ctx: &mut Context, frame: Id) -> Result<(Id, Id, bool)> {
     let Value::Scope(data) = ctx.heap.get_mut(empty) else {
         unreachable!()
     };
-    data.closure.cleared = true;
-    data.closure.declared = declared;
+    data.closure_mut().cleared = true;
+    data.closure_mut().declared = declared;
     let Value::PythonFrame { scope, .. } = ctx.heap.get_mut(frame) else {
         unreachable!()
     };
@@ -171,7 +171,7 @@ fn snapshot(ctx: &mut Context, frame: Id) -> Result<Id> {
         return ctx.locals_for_code(scope, code);
     }
     // A proxy explicitly constructed from an unoptimized frame exposes only extra keys.
-    match ctx.scope_data(scope).closure.extra_locals {
+    match ctx.scope_data(scope).closure().extra_locals {
         Some(extras) => builtins::call(ctx, "dict", &[extras], &[]),
         None => Ok(ctx.dict(Vec::new())),
     }
@@ -218,9 +218,9 @@ fn access(ctx: &mut Context, frame: Id, key: Id, op: Access) -> Result<Option<Id
                 None
             };
             if cell.is_some()
-                || data.closure.declared.contains(name)
-                || data.closure.cells.contains_key(name)
-                || data.names.contains_key(name.as_str())
+                || data.closure().declared.contains(name)
+                || data.closure().cells.contains_key(name)
+                || data.names().contains_key(name.as_str())
             {
                 return match op {
                     Access::Read => Ok(match cell {
@@ -239,13 +239,13 @@ fn access(ctx: &mut Context, frame: Id, key: Id, op: Access) -> Result<Option<Id
                             if owner == scope
                                 && optimized
                                 && code != NONE
-                                && !data.closure.cells.contains_key(name)
-                                && let Some(&old) = data.names.get(name.as_str())
+                                && !data.closure().cells.contains_key(name)
+                                && let Some(&old) = data.names().get(name.as_str())
                                 && old != value
                                 && ctx
                                     .parsed_parameters(code)?
                                     .cell_layout
-                                    .retains_displaced(name, data.closure.cleared)
+                                    .retains_displaced(name, data.closure().cleared)
                             {
                                 ctx.heap.retain_overwritten_local(frame, old)?;
                             }
@@ -263,7 +263,7 @@ fn access(ctx: &mut Context, frame: Id, key: Id, op: Access) -> Result<Option<Id
             owner = parent;
         }
     }
-    let extras = match (ctx.scope_data(scope).closure.extra_locals, op) {
+    let extras = match (ctx.scope_data(scope).closure().extra_locals, op) {
         (Some(extras), _) => extras,
         (None, Access::Read | Access::Remove) => return Ok(None),
         (None, Access::Write(_)) => {
@@ -271,7 +271,7 @@ fn access(ctx: &mut Context, frame: Id, key: Id, op: Access) -> Result<Option<Id
             let Value::Scope(data) = ctx.heap.get_mut(scope) else {
                 unreachable!()
             };
-            data.closure.extra_locals = Some(extras);
+            data.closure_mut().extra_locals = Some(extras);
             extras
         }
     };

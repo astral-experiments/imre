@@ -392,7 +392,7 @@ impl Context {
             | "lookup_class_annotation_global" => {
                 let name = self.copy_name(b)?;
                 if op != "lookup_annotation_global" {
-                    if let Some(&cell) = self.scope_data(a).closure.cells.get("__classdict__") {
+                    if let Some(&cell) = self.scope_data(a).closure().cells.get("__classdict__") {
                         let Value::Cell(Some(mapping)) = *self.heap.get(cell) else {
                             return Err(self.missing_binding(a, a, "__classdict__"));
                         };
@@ -1501,7 +1501,11 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     let main = match frame {
         // SAFETY: finish owns the boxed context. The loader's borrow has ended and its
         // rooted frame remains active until the native script returns.
-        Ok(frame) => unsafe { frame.run(&raw mut *ctx) },
+        Ok(frame) => {
+            ctx.seal_launcher_sys_streams();
+            // SAFETY: finish owns the boxed context and prepared FILE frame.
+            unsafe { frame.run(&raw mut *ctx) }
+        }
         Err(error) => Err(error),
     };
     let result = main.and_then(|main| {
@@ -2422,7 +2426,7 @@ pub(super) unsafe extern "C" fn imre_dyn_lookup_local(
         )
     };
     if ctx.heap.execution.pending.is_none()
-        && ctx.scope_data(scope).namespace.is_none()
+        && ctx.scope_data(scope).namespace().is_none()
         && let Some(value) = ctx.scope_name(scope, key)
     {
         ctx.heap.take_call_position();
@@ -2439,10 +2443,10 @@ impl Context {
             return false;
         }
         let frame = self.scope_data(scope);
-        if frame.names.contains_key(name) {
+        if frame.names().contains_key(name) {
             return true;
         }
-        if local || frame.closure.declared.contains(name) {
+        if local || frame.closure().declared.contains(name) {
             return false;
         }
         let Some(parent) = frame.parent else {
@@ -2452,7 +2456,7 @@ impl Context {
         root.parent.is_none()
             && !root.in_class_body
             && root.exec_locals.is_none()
-            && !root.closure.cells.contains_key(name)
+            && !root.closure().cells.contains_key(name)
             && self
                 .scalar_scope_name(parent, name)
                 .is_some_and(|binding| binding.is_some())
@@ -2488,7 +2492,7 @@ unsafe extern "C" fn imre_dyn_replacement_lookup(
         return NONE;
     }
     if local
-        && ctx.scope_data(scope).namespace.is_none()
+        && ctx.scope_data(scope).namespace().is_none()
         && let Some(value) = ctx.scope_name(scope, name)
     {
         ctx.heap.take_call_position();
@@ -2523,7 +2527,7 @@ unsafe extern "C" fn imre_dyn_replacement_guard_item_store(
         && (!ctx.heap.private_replacement_frame(scope)
             || ctx
                 .scope_data(scope)
-                .names
+                .names()
                 .get(name)
                 .is_some_and(|&old| !matches!(ctx.heap.get(old), Value::Int(_))))
     {
@@ -2589,7 +2593,7 @@ unsafe extern "C" fn imre_dyn_replacement_assign_target(
         let Value::Scope(frame) = ctx.heap.get_mut(scope) else {
             unreachable!("private replacement scope")
         };
-        *frame.names.get_mut(name).expect("witnessed binding") = value;
+        *frame.names_mut().get_mut(name).expect("witnessed binding") = value;
         Ok(FALSE)
     } else {
         ctx.store_source_name(scope, name, value).map(flag)
@@ -2634,7 +2638,7 @@ unsafe extern "C" fn imre_dyn_replacement_guard_result_store(
         return;
     }
     if *proof != NONE
-        && (ctx.scope_data(scope).names.get(name) != Some(proof)
+        && (ctx.scope_data(scope).names().get(name) != Some(proof)
             || !ctx.heap.is_fresh_text_list(*proof))
     {
         *proof = NONE;
@@ -2651,7 +2655,7 @@ impl Context {
             && proof != value
             && !self.heap.has_weak_values
             && self.heap.private_replacement_frame(scope)
-            && self.scope_data(scope).names.get(name) == Some(&proof)
+            && self.scope_data(scope).names().get(name) == Some(&proof)
             && self.heap.is_fresh_text_list(proof)
     }
 }
@@ -3733,10 +3737,12 @@ impl Context {
                 if frame.globals.contains(name) {
                     return Some(false);
                 }
-                if frame.closure.declared.contains(name) || frame.closure.cells.contains_key(name) {
+                if frame.closure().declared.contains(name)
+                    || frame.closure().cells.contains_key(name)
+                {
                     return Some(true);
                 }
-                if !frame.closure.declared_complete {
+                if !frame.closure().declared_complete {
                     return None;
                 }
                 if name == "__class__" && frame.class_cell.is_some() {
@@ -3751,20 +3757,20 @@ impl Context {
     pub(super) fn capture_free_cell(&mut self, mut cursor: Id, name: &str) -> Id {
         loop {
             let frame = self.scope_data(cursor);
-            if let Some(&cell) = frame.closure.cells.get(name) {
+            if let Some(&cell) = frame.closure().cells.get(name) {
                 return cell;
             }
-            if !frame.in_class_body && frame.closure.declared.contains(name) {
+            if !frame.in_class_body && frame.closure().declared.contains(name) {
                 let Value::Scope(frame) = self.heap.get_mut(cursor) else {
                     unreachable!()
                 };
-                let value = frame.names.shift_remove(name);
+                let value = frame.names_mut().shift_remove(name);
                 let cell = self.alloc(Value::Cell(value));
                 self.heap.keep(cell);
                 let Value::Scope(frame) = self.heap.get_mut(cursor) else {
                     unreachable!()
                 };
-                frame.closure.cells.insert(name.to_owned(), cell);
+                frame.closure_mut().cells.insert(name.to_owned(), cell);
                 return cell;
             }
             if !frame.in_class_body
@@ -3826,7 +3832,7 @@ impl Context {
         let lexical = if annotation_class
             && !self
                 .scope_data(scope)
-                .closure
+                .closure()
                 .cells
                 .contains_key("__classdict__")
         {
@@ -4313,7 +4319,7 @@ unsafe extern "C" fn imre_dyn_replacement_commit(
     let fresh = std::mem::replace(next, NONE);
     if ctx.heap.execution.pending.is_some()
         || !ctx.heap.private_replacement_frame(scope)
-        || ctx.scope_data(scope).names.get(name) != Some(&value)
+        || ctx.scope_data(scope).names().get(name) != Some(&value)
     {
         return;
     }
@@ -5370,7 +5376,7 @@ mod tests {
         assert_eq!(result, NONE);
         assert!(ctx.heap.execution.pending.is_some());
         assert_eq!((proof, next), (NONE, NONE));
-        assert_eq!(ctx.scope_data(scope).names.get("result"), Some(&old));
+        assert_eq!(ctx.scope_data(scope).names().get("result"), Some(&old));
 
         (proof, next) = (old, old);
         // SAFETY: all operands remain valid; the pending-error path must clear the
@@ -5417,7 +5423,7 @@ mod tests {
         assert_eq!(proof, NONE);
         assert!(ctx.heap.is_fresh_text_list(old));
         assert!(ctx.heap.is_fresh_nonshort_text_list(old));
-        assert_eq!(ctx.scope_data(scope).names.get("result"), Some(&old));
+        assert_eq!(ctx.scope_data(scope).names().get("result"), Some(&old));
     }
 
     #[test]
@@ -5746,10 +5752,10 @@ mod tests {
             unreachable!()
         };
         frame
-            .closure
+            .closure_mut()
             .declared
             .extend(["kept".into(), "other".into(), "unused".into()]);
-        frame.closure.declared_complete = true;
+        frame.closure_mut().declared_complete = true;
         let (kept, kept_probe) = payload(&mut ctx);
         let (unused, unused_probe) = payload(&mut ctx);
         ctx.bind(outer, "kept", kept);
@@ -5779,8 +5785,8 @@ mod tests {
             unreachable!()
         };
         assert_eq!(closure, NONE);
-        let cell = ctx.scope_data(scope).closure.cells["kept"];
-        let other = ctx.scope_data(scope).closure.cells["other"];
+        let cell = ctx.scope_data(scope).closure().cells["kept"];
+        let other = ctx.scope_data(scope).closure().cells["other"];
         for (roots, keeps_value) in [
             (&[function][..], true),
             (&[cell][..], true),

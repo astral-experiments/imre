@@ -1244,6 +1244,28 @@ pub(super) enum ComprehensionKind {
     Ordinary,
 }
 
+#[derive(Default, PartialEq, Eq)]
+enum ScopeNamesLayout {
+    #[default]
+    Generic,
+    SysStreams,
+    Demoted,
+}
+
+impl Clone for ScopeNamesLayout {
+    fn clone(&self) -> Self {
+        Self::Demoted
+    }
+}
+
+impl ScopeNamesLayout {
+    fn demote(&mut self) {
+        if *self == Self::SysStreams {
+            *self = Self::Demoted;
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct Scope {
     pub in_class_body: bool,
@@ -1252,9 +1274,10 @@ pub(super) struct Scope {
     pub comprehension: Option<ComprehensionKind>,
     pub class_cell: Option<Id>,
     pub class_namespace: Option<Box<ClassNamespace>>,
-    pub names: indexmap::IndexMap<crate::Str, Id>,
-    pub closure: ClosureScope,
-    pub namespace: Option<Id>,
+    names: indexmap::IndexMap<crate::Str, Id>,
+    binding_layout: ScopeNamesLayout,
+    closure: ClosureScope,
+    namespace: Option<Id>,
     pub globals: HashSet<String>,
     pub exec_globals: Option<ExecGlobals>,
     pub exec_locals: Option<Id>,
@@ -1263,6 +1286,124 @@ pub(super) struct Scope {
 }
 
 impl Scope {
+    const SYS_STDOUT_SLOT: usize = 37;
+    const SYS_STDERR_SLOT: usize = 39;
+    const SYS_STDIN_SLOT: usize = 41;
+
+    pub(super) fn names(&self) -> &indexmap::IndexMap<crate::Str, Id> {
+        &self.names
+    }
+
+    /// Replace a value in place or append a new key without changing existing name ordinals.
+    pub(super) fn insert_name(&mut self, name: &str, value: Id) -> Option<Id> {
+        if let Some(binding) = self.names.get_mut(name) {
+            Some(std::mem::replace(binding, value))
+        } else {
+            self.names.insert(crate::Str::new(name), value);
+            None
+        }
+    }
+
+    /// Bind a checked parameter while preserving the original reserve and insertion order.
+    pub(super) fn insert_argument_name(
+        &mut self,
+        name: crate::Str,
+        value: Id,
+    ) -> Result<Option<Id>> {
+        if !self.names.contains_key(name.as_str()) {
+            self.names
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+        }
+        Ok(self.names.insert(name, value))
+    }
+
+    /// Any mutable access permanently ends the launcher's fixed-name layout.
+    pub(super) fn names_mut(&mut self) -> &mut indexmap::IndexMap<crate::Str, Id> {
+        self.binding_layout.demote();
+        &mut self.names
+    }
+
+    pub(super) fn take_names(&mut self) -> indexmap::IndexMap<crate::Str, Id> {
+        std::mem::take(self.names_mut())
+    }
+
+    pub(super) fn replace_names(&mut self, map: indexmap::IndexMap<crate::Str, Id>) {
+        *self.names_mut() = map;
+    }
+
+    pub(super) fn closure(&self) -> &ClosureScope {
+        &self.closure
+    }
+
+    pub(super) fn closure_mut(&mut self) -> &mut ClosureScope {
+        self.binding_layout.demote();
+        &mut self.closure
+    }
+
+    pub(super) fn declare_current_names(&mut self) {
+        self.binding_layout.demote();
+        self.closure
+            .declared
+            .extend(self.names.keys().map(|name| name.as_str().to_owned()));
+    }
+
+    pub(super) fn namespace(&self) -> Option<Id> {
+        self.namespace
+    }
+
+    pub(super) fn set_namespace(&mut self, namespace: Option<Id>) {
+        self.binding_layout.demote();
+        self.namespace = namespace;
+    }
+
+    /// Seal the original sys scope once, after all launcher initialization succeeds.
+    pub(super) fn seal_sys_streams(&mut self) {
+        if self.binding_layout != ScopeNamesLayout::Generic {
+            return;
+        }
+        self.binding_layout = ScopeNamesLayout::Demoted;
+        if self.namespace.is_none()
+            && self.closure.cells.is_empty()
+            && [
+                (Self::SYS_STDOUT_SLOT, "__stdout__"),
+                (Self::SYS_STDERR_SLOT, "__stderr__"),
+                (Self::SYS_STDIN_SLOT, "__stdin__"),
+            ]
+            .into_iter()
+            .all(|(index, name)| {
+                self.names
+                    .get_index(index)
+                    .is_some_and(|(key, _)| key == name)
+            })
+        {
+            self.binding_layout = ScopeNamesLayout::SysStreams;
+        }
+    }
+
+    /// Read the live authoritative values, without retaining copies or derived indices.
+    pub(super) fn sealed_sys_streams(&self) -> Option<[Id; 3]> {
+        if self.binding_layout != ScopeNamesLayout::SysStreams {
+            return None;
+        }
+        debug_assert!(self.namespace.is_none());
+        debug_assert!(self.closure.cells.is_empty());
+        Some(
+            [
+                Self::SYS_STDIN_SLOT,
+                Self::SYS_STDOUT_SLOT,
+                Self::SYS_STDERR_SLOT,
+            ]
+            .map(|index| {
+                *self
+                    .names
+                    .get_index(index)
+                    .expect("sealed sys stream slot")
+                    .1
+            }),
+        )
+    }
+
     pub(super) fn conditional_annotation_cell(&self) -> Option<Id> {
         self.class_namespace.as_ref()?.annotation_scratch?.1
     }
@@ -1281,6 +1422,7 @@ impl Scope {
             class_cell: None,
             class_namespace: None,
             names: Default::default(),
+            binding_layout: ScopeNamesLayout::Generic,
             closure: Default::default(),
             namespace: None,
             globals: Default::default(),
@@ -3273,9 +3415,17 @@ enum SlotShape {
     ScalarLeaf,
     AsciiStr,
     FreshNonshortTextList,
+    /// A certified fresh text leaf was retired with all scalar slot metadata already clear.
+    VacantText,
+    /// The authenticated dense producer constructed every distinct child inline.
+    FreshInlineTextList,
 }
 
 impl SlotShape {
+    fn is_vacant(self) -> bool {
+        matches!(self, Self::Vacant | Self::VacantText)
+    }
+
     /// Both scalar shapes can be marked without visiting children.
     fn is_scalar_leaf(self) -> bool {
         matches!(self, Self::ScalarLeaf | Self::AsciiStr)
@@ -3286,7 +3436,10 @@ impl SlotShape {
     }
 
     fn is_fresh_text_list(self) -> bool {
-        matches!(self, Self::FreshTextList | Self::FreshNonshortTextList)
+        matches!(
+            self,
+            Self::FreshTextList | Self::FreshNonshortTextList | Self::FreshInlineTextList
+        )
     }
 
     fn text(value: &str) -> Self {
@@ -3949,9 +4102,6 @@ pub(super) struct Heap {
     descriptor_owners: Vec<Id>,
     // Weak registrations. The slot remembers prior finalization across resurrection.
     ordinary_finalizers: Vec<Id>,
-    // The unmaterialized sys scope owns these three handles until its next mutation.
-    stream_binding_scope: Cell<Id>,
-    standard_stream_bindings: Cell<[Id; 3]>,
     // These IDs are not roots. A tracing sweep checks the frame state before recycling slots.
     unstarted_coroutines: Vec<Id>,
     scheduled_unawaited: bool,
@@ -4381,8 +4531,6 @@ impl Heap {
             check_finalizers_next_statement: false,
             descriptor_owners: Vec::new(),
             ordinary_finalizers: Vec::new(),
-            stream_binding_scope: Cell::new(NONE),
-            standard_stream_bindings: Cell::new([NONE; 3]),
             unstarted_coroutines: Vec::new(),
             scheduled_unawaited: false,
             finalizer_bindings: Cell::new([None; 2]),
@@ -4773,7 +4921,8 @@ impl Heap {
     /// immutable input is a sequence of the validated short-text opcode, length, ASCII payload,
     /// and memo opcode. The batch stops before any payload outside the allocation-free 3–8 byte
     /// range. No callback, checkpoint, collector, recoverable error, or arbitrary iterator runs
-    /// while the free head is held locally. Every leaf is rooted and published in source order.
+    /// while the free head is held locally. The caller publishes all non-singleton leaves
+    /// through their owning list before any collection, callback or recoverable error.
     ///
     /// # Safety
     /// All `count` encoded entries beginning at `at` must have been fully validated in this exact
@@ -4801,16 +4950,77 @@ impl Heap {
         debug_assert!(self.slot_shapes.capacity() - self.slot_shapes.len() >= additional);
         debug_assert!(self.traces.capacity() - self.traces.len() >= additional);
 
+        // The caller reserved these inert placeholders before entering the batch. Nothing can
+        // observe the output until the produced prefix replaces them and the unused tail is gone.
+        let start = values.len();
+        values.resize(start + count, NONE);
+        let slots = &mut values[start..];
         let mut free_head = self.free_head;
         let mut popped = 0usize;
         let mut consumed = 0usize;
-        let live = &mut self.execution.current_mut().live;
         while consumed < count {
             // SAFETY: the caller guarantees that each dense entry, including this length byte,
             // was preflighted against this immutable input.
             let length = usize::from(unsafe { *input.get_unchecked(at + 1) });
             if !(3..=8).contains(&length) {
                 break;
+            }
+            let next = at + length + 3;
+            if consumed + 1 < count
+                // SAFETY: the caller preflighted every one of the remaining dense entries.
+                && usize::from(unsafe { *input.get_unchecked(next + 1) }) == length
+            {
+                // SAFETY: the caller validated the entire immutable dense prefix. The two
+                // adjacent entries establish the selected constant-width run.
+                let run = unsafe {
+                    match length {
+                        3 => self.append_reserved_dense_ascii_run::<3>(
+                            input,
+                            &mut at,
+                            &mut slots[consumed..],
+                            &mut free_head,
+                            &mut popped,
+                        ),
+                        4 => self.append_reserved_dense_ascii_run::<4>(
+                            input,
+                            &mut at,
+                            &mut slots[consumed..],
+                            &mut free_head,
+                            &mut popped,
+                        ),
+                        5 => self.append_reserved_dense_ascii_run::<5>(
+                            input,
+                            &mut at,
+                            &mut slots[consumed..],
+                            &mut free_head,
+                            &mut popped,
+                        ),
+                        6 => self.append_reserved_dense_ascii_run::<6>(
+                            input,
+                            &mut at,
+                            &mut slots[consumed..],
+                            &mut free_head,
+                            &mut popped,
+                        ),
+                        7 => self.append_reserved_dense_ascii_run::<7>(
+                            input,
+                            &mut at,
+                            &mut slots[consumed..],
+                            &mut free_head,
+                            &mut popped,
+                        ),
+                        8 => self.append_reserved_dense_ascii_run::<8>(
+                            input,
+                            &mut at,
+                            &mut slots[consumed..],
+                            &mut free_head,
+                            &mut popped,
+                        ),
+                        _ => unreachable!(),
+                    }
+                };
+                consumed += run;
+                continue;
             }
             // SAFETY: preflight checked the exact payload range and its ASCII contents.
             let text = unsafe {
@@ -4821,37 +5031,92 @@ impl Heap {
             };
             // compact_str stores at most eight bytes inline and cannot allocate or fail here.
             let text: crate::Str = text.into();
-            let index = if free_head != END {
-                let index = free_head;
-                let slot = &mut self.slots[index];
-                free_head = slot.gc_next.replace(UNMARKED);
-                popped += 1;
-                self.slot_shapes[index] = SlotShape::AsciiStr;
-                slot.value = Some(Value::Str(text));
+            slots[consumed] =
+                self.fill_reserved_dense_ascii_text(text, &mut free_head, &mut popped);
+            at = next;
+            consumed += 1;
+        }
+        values.truncate(start + consumed);
+        self.free_head = free_head;
+        self.free_count -= popped;
+        (at, consumed)
+    }
+
+    /// Copy a run whose inline payload width is constant, without publishing the local free head.
+    ///
+    /// # Safety
+    /// The remaining entries and all output/slot capacities must satisfy the enclosing dense
+    /// batch's preflight and reservation contract. The first two entries have width `N`.
+    #[inline(always)]
+    unsafe fn append_reserved_dense_ascii_run<const N: usize>(
+        &mut self,
+        input: &[u8],
+        at: &mut usize,
+        values: &mut [Id],
+        free_head: &mut usize,
+        popped: &mut usize,
+    ) -> usize {
+        debug_assert!((3..=8).contains(&N));
+        debug_assert!(values.len() >= 2);
+        let remaining = values.len();
+        let mut consumed = 0;
+        loop {
+            // SAFETY: the enclosing batch validated this immutable payload as ASCII, and the
+            // dispatch or preceding iteration proved this entry has exactly `N` bytes.
+            let text = unsafe {
+                std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                    input.as_ptr().add(*at + 2),
+                    N,
+                ))
+            };
+            let text: crate::Str = text.into();
+            values[consumed] = self.fill_reserved_dense_ascii_text(text, free_head, popped);
+            *at += N + 3;
+            consumed += 1;
+            if consumed == remaining
+                // SAFETY: another complete preflighted entry remains after this one.
+                || usize::from(unsafe { *input.get_unchecked(*at + 1) }) != N
+            {
+                return consumed;
+            }
+        }
+    }
+
+    /// Install one already copied inline ASCII text while the batch owns the unpublished free head.
+    #[inline(always)]
+    fn fill_reserved_dense_ascii_text(
+        &mut self,
+        text: crate::Str,
+        free_head: &mut usize,
+        popped: &mut usize,
+    ) -> Id {
+        let index = if *free_head != END {
+            let index = *free_head;
+            let slot = &mut self.slots[index];
+            *free_head = slot.gc_next.replace(UNMARKED);
+            *popped += 1;
+            let clean = self.slot_shapes[index] == SlotShape::VacantText;
+            debug_assert!(self.slot_shapes[index].is_vacant());
+            self.slot_shapes[index] = SlotShape::AsciiStr;
+            slot.value = Some(Value::Str(text));
+            if !clean {
                 slot.may_have_buffer_views = false;
                 slot.generation = 0;
                 slot.untracked_tuple.set(false);
                 slot.has_gc_header = false;
                 slot.finalization = Finalization::None;
-                index
-            } else {
-                Self::append_reserved_text_slot(
-                    &mut self.slots,
-                    &mut self.slot_shapes,
-                    &mut self.traces,
-                    text,
-                    SlotShape::AsciiStr,
-                )
-            };
-            let id = index as Id;
-            live.push(id);
-            values.push(id);
-            at += length + 3;
-            consumed += 1;
-        }
-        self.free_head = free_head;
-        self.free_count -= popped;
-        (at, consumed)
+            }
+            index
+        } else {
+            Self::append_reserved_text_slot(
+                &mut self.slots,
+                &mut self.slot_shapes,
+                &mut self.traces,
+                text,
+                SlotShape::AsciiStr,
+            )
+        };
+        index as Id
     }
 
     /// Fill one reserved untracked text slot without the generic object/finalizer path.
@@ -4869,7 +5134,21 @@ impl Heap {
         id
     }
 
-    /// Record byte-short text while performing the existing singleton check. A no-GET decoder
+    /// Build a reserved graph leaf without a separate operand root. Short values retain
+    /// their original rooted path; the caller must publish the owner before any collection,
+    /// callback, checkpoint or recoverable error can occur.
+    pub(super) fn unrooted_unobserved_text(&mut self, text: &str, ascii: bool) -> Id {
+        debug_assert!(!self.allocation_traces.is_tracing());
+        debug_assert_eq!(ascii, text.is_ascii());
+        if text.len() <= 2 {
+            return self.unobserved_text(text, ascii);
+        }
+        self.fill_reserved_text_slot(text.into(), ascii)
+    }
+
+    /// Record byte-short text while performing the existing rooted singleton path. Values
+    /// longer than two bytes are not operand roots; the decoder must publish their owner
+    /// before any collection, callback, checkpoint or recoverable error. A no-GET decoder
     /// uses the flag to distinguish its narrow nonshort producer provenance after decoding.
     pub(super) fn unobserved_text_noting_short(
         &mut self,
@@ -4881,13 +5160,9 @@ impl Heap {
         debug_assert_eq!(ascii, text.is_ascii());
         if text.len() <= 2 {
             *saw_short = true;
-            if let Some(id) = self.short_string(text) {
-                return id;
-            }
+            return self.unobserved_text(text, ascii);
         }
-        let id = self.fill_reserved_text_slot(text.into(), ascii);
-        self.keep(id);
-        id
+        self.fill_reserved_text_slot(text.into(), ascii)
     }
 
     /// Record a decoder result whose non-singleton text children were allocated afresh.
@@ -4901,14 +5176,32 @@ impl Heap {
     }
 
     /// Record a nonempty no-GET decoder list whose distinct exact text leaves
-    /// all have more than two UTF-8 bytes and cannot be short-string singletons.
+    /// all have 3..=255 UTF-8 bytes and cannot be short-string singletons.
     pub(super) fn mark_fresh_nonshort_text_list(&mut self, id: Id) {
         debug_assert!(
             matches!(self.get(id), Value::List(items) if !items.is_empty()
-            && items.iter().all(|&child| matches!(self.get(child), Value::Str(text) if text.len() > 2)))
+            && items.iter().all(|&child| matches!(self.get(child), Value::Str(text) if (3..=255).contains(&text.len()))))
         );
         debug_assert!(self.slot_shapes[id as usize] == SlotShape::Other);
         self.slot_shapes[id as usize] = SlotShape::FreshNonshortTextList;
+    }
+
+    /// Record a nonempty no-GET graph produced entirely by the reserved dense ASCII batch.
+    ///
+    /// # Safety
+    /// Each distinct private child must have been constructed as an exact `Value::Str`
+    /// from a 3..=8-byte ASCII `&str` by the closed dense batch on a target whose
+    /// `compact_str` inline capacity (`size_of::<String>()`) is at least eight. No later action may alter
+    /// this provenance without invalidating the owner shape.
+    pub(super) unsafe fn mark_fresh_inline_text_list(&mut self, id: Id) {
+        debug_assert!(std::mem::size_of::<String>() >= 8);
+        debug_assert!(
+            matches!(self.get(id), Value::List(items) if !items.is_empty()
+            && items.iter().all(|&child| matches!(self.get(child), Value::Str(text)
+                if (3..=8).contains(&text.len()) && text.is_ascii() && !text.is_heap_allocated())))
+        );
+        debug_assert!(self.slot_shapes[id as usize] == SlotShape::Other);
+        self.slot_shapes[id as usize] = SlotShape::FreshInlineTextList;
     }
 
     /// Producer provenance checked when a direct decode returns its per-call witness.
@@ -4924,7 +5217,19 @@ impl Heap {
         usize::try_from(id)
             .ok()
             .and_then(|index| self.slot_shapes.get(index))
-            == Some(&SlotShape::FreshNonshortTextList)
+            .is_some_and(|shape| {
+                matches!(
+                    shape,
+                    SlotShape::FreshNonshortTextList | SlotShape::FreshInlineTextList
+                )
+            })
+    }
+
+    pub(super) fn is_fresh_inline_text_list(&self, id: Id) -> bool {
+        usize::try_from(id)
+            .ok()
+            .and_then(|index| self.slot_shapes.get(index))
+            == Some(&SlotShape::FreshInlineTextList)
     }
 
     /// A compiler-certified source local has no live frame, namespace, cell, or
@@ -5423,7 +5728,6 @@ impl Heap {
         target: Id,
     ) -> Option<(&Value, &mut Value)> {
         let target_id = target as usize;
-        self.invalidate_stream_bindings(target_id);
         if source != target
             && let shape = *self.slot_shapes.get(target_id)?
             && (shape.is_scalar_leaf() || shape.is_fresh_text_list())
@@ -5442,26 +5746,8 @@ impl Heap {
         Some((source, target))
     }
 
-    /// Return the most recently observed bindings while this scope's values remain unchanged.
-    pub(super) fn standard_stream_bindings(&self, scope: Id) -> Option<[Id; 3]> {
-        (self.stream_binding_scope.get() == scope).then(|| self.standard_stream_bindings.get())
-    }
-
-    /// Remember the owning scope separately so a borrowed or recycled slot invalidates all three IDs.
-    pub(super) fn cache_standard_stream_bindings(&self, scope: Id, streams: [Id; 3]) {
-        self.standard_stream_bindings.set(streams);
-        self.stream_binding_scope.set(scope);
-    }
-
-    fn invalidate_stream_bindings(&self, index: usize) {
-        if self.stream_binding_scope.get() as usize == index {
-            self.stream_binding_scope.set(NONE);
-        }
-    }
-
     fn prepare_slot_write(&mut self, index: usize) {
         self.root_trace.changed(index);
-        self.invalidate_stream_bindings(index);
         self.generator_owners.reconsider(index);
         if self.slot_shapes[index].is_fresh_text_list() {
             self.slot_shapes[index] = SlotShape::Other;
@@ -6064,7 +6350,7 @@ impl Heap {
             && unoptimized_locals.is_none()
         {
             // Clearing again releases extras but keeps local slots rebound after the first clear.
-            self.collect_next_statement |= data.closure.extra_locals.take().is_some();
+            self.collect_next_statement |= data.closure_mut().extra_locals.take().is_some();
             return Ok(());
         }
         if scope != NONE
@@ -6104,9 +6390,9 @@ impl Heap {
             let Value::Scope(data) = self.get_mut(cells) else {
                 unreachable!()
             };
-            data.closure.extra_locals = None;
+            data.closure_mut().extra_locals = None;
             if !data.closure.cleared {
-                let closure = &mut data.closure;
+                let closure = data.closure_mut();
                 closure
                     .declared
                     .extend(closure.cells.drain(..).map(|(name, _)| name));
@@ -7206,10 +7492,72 @@ impl Heap {
         &self,
         streams: &crate::dynamic::stdlib::io::StandardStreamRoots,
     ) -> bool {
-        self.descriptor_owners
-            .iter()
-            .chain(&self.ordinary_finalizers)
-            .all(|owner| streams.contains(owner) || self.caller_keeps_generator(*owner))
+        if self.has_stock_stream_finalizers(streams) {
+            return true;
+        }
+        if let Some(index) = Self::first_nonstream_owner(&self.descriptor_owners, streams) {
+            return self.finalizers_kept_by_other(streams, true, index);
+        }
+        if let Some(index) = Self::first_nonstream_owner(&self.ordinary_finalizers, streams) {
+            return self.finalizers_kept_by_other(streams, false, index);
+        }
+        true
+    }
+
+    /// Compare the authoritative registrations to the exact buffered sys startup order.
+    #[inline]
+    fn has_stock_stream_finalizers(&self, streams: &[Id; 5]) -> bool {
+        self.descriptor_owners.is_empty()
+            && matches!(self.ordinary_finalizers.as_slice(), [stdout, stderr, raw, buffer, input]
+                if *stdout == streams[3] && *stderr == streams[4] && *raw == streams[2]
+                    && *buffer == streams[1] && *input == streams[0])
+    }
+
+    /// Find the first owner not held by one of the five current standard-stream roots.
+    #[inline]
+    fn first_nonstream_owner(owners: &[Id], streams: &[Id; 5]) -> Option<usize> {
+        let [input, buffer, raw, stdout, stderr] = *streams;
+        for (index, &owner) in owners.iter().enumerate() {
+            if owner != input
+                && owner != buffer
+                && owner != raw
+                && owner != stdout
+                && owner != stderr
+            {
+                return Some(index);
+            }
+        }
+        None
+    }
+
+    /// Preserve generator and frame ownership checks for owners outside the standard streams.
+    #[cold]
+    #[inline(never)]
+    fn finalizers_kept_by_other(
+        &self,
+        streams: &crate::dynamic::stdlib::io::StandardStreamRoots,
+        descriptor_miss: bool,
+        index: usize,
+    ) -> bool {
+        let (first, descriptor_tail, ordinary_tail) = if descriptor_miss {
+            (
+                self.descriptor_owners[index],
+                &self.descriptor_owners[index + 1..],
+                self.ordinary_finalizers.as_slice(),
+            )
+        } else {
+            (
+                self.ordinary_finalizers[index],
+                &[][..],
+                &self.ordinary_finalizers[index + 1..],
+            )
+        };
+        let kept = |owners: &[Id]| {
+            owners
+                .iter()
+                .all(|owner| streams.contains(owner) || self.caller_keeps_generator(*owner))
+        };
+        (self.caller_keeps_generator(first) && kept(descriptor_tail) && kept(ordinary_tail))
             || self.frame_keeps_stream_finalizers(Some(streams), &self.descriptor_owners)
     }
 
@@ -8219,7 +8567,7 @@ impl Heap {
     /// Recycle one occupied slot after its owner has proved it unreachable.
     fn retire_slot(&mut self, id: usize) {
         let shape = std::mem::replace(&mut self.slot_shapes[id], SlotShape::Vacant);
-        debug_assert!(shape != SlotShape::Vacant);
+        debug_assert!(!shape.is_vacant());
         debug_assert_eq!(self.traces[id].get(), UNMARKED);
         self.traces[id].set(UNMARKED);
         if self.slots[id].gc_prev.get() != UNMARKED {
@@ -8239,7 +8587,6 @@ impl Heap {
             self.text_position.set(TextPosition::default());
         }
         self.root_trace.recycled(id);
-        self.invalidate_stream_bindings(id);
         let slot = &mut self.slots[id];
         if slot.has_gc_header {
             self.gc_schedule.freed();
@@ -8269,9 +8616,70 @@ impl Heap {
             self.text_position.set(TextPosition::default());
         }
         self.root_trace.recycled(id);
-        self.invalidate_stream_bindings(id);
         let slot = &mut self.slots[id];
         slot.value = None;
+        slot.gc_next.set(free_head);
+    }
+
+    /// A certified SHORT_BINUNICODE leaf cannot own a legitimate long-text cursor.
+    fn certified_text_position_clear(&self) -> bool {
+        let position = self.text_position.get().slot;
+        position == NONE || usize::try_from(position).ok().is_some_and(|index| {
+            self.slot_shapes.get(index) == Some(&SlotShape::ScalarLeaf)
+                && matches!(self.slots.get(index).and_then(|slot| slot.value.as_ref()), Some(Value::Str(text)) if text.len() >= 256)
+        })
+    }
+
+    /// Recycle one private immutable text leaf after the aggregate side-state proof.
+    #[inline]
+    fn retire_private_text_leaf(&mut self, id: usize, free_head: usize) {
+        debug_assert!(self.slot_shapes[id].is_scalar_leaf());
+        debug_assert_eq!(self.traces[id].get(), UNMARKED);
+        debug_assert_eq!(self.slots[id].gc_prev.get(), UNMARKED);
+        debug_assert!(!self.slots[id].has_gc_header);
+        debug_assert!(self.slots[id].finalization == Finalization::None);
+        debug_assert!(
+            self.root_trace
+                .flags
+                .get(id)
+                .is_none_or(|&flags| flags == 0)
+        );
+        debug_assert!(
+            matches!(self.slots[id].value, Some(Value::Str(ref text)) if (3..=255).contains(&text.len()))
+        );
+        debug_assert!(!self.slots[id].may_have_buffer_views);
+        debug_assert_eq!(self.slots[id].generation, 0);
+        debug_assert!(!self.slots[id].untracked_tuple.get());
+        self.slot_shapes[id] = SlotShape::VacantText;
+        let slot = &mut self.slots[id];
+        slot.value = None;
+        slot.gc_next.set(free_head);
+    }
+
+    /// Recycle a private string constructed inline by the closed dense producer.
+    /// Its `CompactString` representation owns no allocation or other Drop resource.
+    #[inline]
+    fn retire_private_inline_text_leaf(&mut self, id: usize, free_head: usize) {
+        debug_assert!(self.slot_shapes[id] == SlotShape::AsciiStr);
+        debug_assert_eq!(self.traces[id].get(), UNMARKED);
+        debug_assert_eq!(self.slots[id].gc_prev.get(), UNMARKED);
+        debug_assert!(!self.slots[id].has_gc_header);
+        debug_assert!(self.slots[id].finalization == Finalization::None);
+        debug_assert!(
+            self.root_trace
+                .flags
+                .get(id)
+                .is_none_or(|&flags| flags == 0)
+        );
+        debug_assert!(matches!(self.slots[id].value, Some(Value::Str(ref text))
+            if (3..=8).contains(&text.len()) && text.is_ascii() && !text.is_heap_allocated()));
+        debug_assert!(!self.slots[id].may_have_buffer_views);
+        debug_assert_eq!(self.slots[id].generation, 0);
+        debug_assert!(!self.slots[id].untracked_tuple.get());
+        self.slot_shapes[id] = SlotShape::VacantText;
+        let slot = &mut self.slots[id];
+        // `take` clears the slot; this producer proves the inline value has no resource to drop.
+        std::mem::forget(slot.value.take());
         slot.gc_next.set(free_head);
     }
 
@@ -8280,9 +8688,7 @@ impl Heap {
         // Vacant slots supply their own free-list links. A sweep can therefore
         // retire the entire unreachable graph even if the allocator refuses growth.
         for id in span {
-            if self.traces[id].replace(UNMARKED) == UNMARKED
-                && self.slot_shapes[id] != SlotShape::Vacant
-            {
+            if self.traces[id].replace(UNMARKED) == UNMARKED && !self.slot_shapes[id].is_vacant() {
                 self.retire_slot(id);
             }
         }
@@ -8298,8 +8704,12 @@ impl Heap {
     /// trace, finalization, callback or signal dispatch may have touched the
     /// owner or any child. The old binding and all operand roots must have been
     /// removed. The producer guarantees a nonempty exact list containing only
-    /// distinct dynamic exact string slots with UTF-8 byte length greater than
-    /// two; those slots have no GC header/link, trace or finalization state.
+    /// distinct dynamic exact SHORT_BINUNICODE string slots with UTF-8 byte length
+    /// 3..=255; those slots have no GC header/link, trace or finalization state.
+    /// Every child was appended beyond the root-trace flags or allocated from a
+    /// vacant slot whose previous retirement cleared its flags. No root trace may
+    /// have been rebuilt or marked since that allocation, so every child flag is
+    /// still absent or zero even if unrelated slots retain root-trace flags.
     /// No Python observer or collector may run until this method returns.
     /// Failing an owner check changes no slot.
     pub(super) unsafe fn retire_certified_nonshort_text_list(&mut self, id: Id) -> bool {
@@ -8309,7 +8719,7 @@ impl Heap {
         if index < FIRST_DYNAMIC_SLOT
             || self.full_collection_active()
             || self.allocation_traces.is_tracing()
-            || self.slot_shapes.get(index) != Some(&SlotShape::FreshNonshortTextList)
+            || !self.is_fresh_nonshort_text_list(id)
             || self.traces[index].get() != UNMARKED
         {
             return false;
@@ -8327,15 +8737,34 @@ impl Heap {
         let count = items.len();
         let items = items.as_ptr();
         let mut free_head = self.free_head;
-        for position in (0..count).rev() {
-            // SAFETY: the immediate producer and uninterrupted compiler witness
-            // prove each item is a distinct dynamic nonshort exact string. The
-            // separate item allocation and slot vector remain stable: scalar
-            // retirement cannot allocate, collect, call Python or mutate the
-            // owner, which is retired only after the final pointer read.
-            let child = unsafe { *items.add(position) } as usize;
-            self.retire_verified_text_leaf(child, free_head);
-            free_head = child;
+        let side_state_clear = self.certified_text_position_clear();
+        if side_state_clear && self.is_fresh_inline_text_list(id) {
+            for position in (0..count).rev() {
+                // SAFETY: the immediate closed dense producer and uninterrupted ownership
+                // witness additionally prove each private ASCII string was constructed inline.
+                let child = unsafe { *items.add(position) } as usize;
+                self.retire_private_inline_text_leaf(child, free_head);
+                free_head = child;
+            }
+        } else if side_state_clear {
+            for position in (0..count).rev() {
+                // SAFETY: the immediate producer and uninterrupted compiler witness
+                // prove each item is a distinct private 3..=255-byte exact string.
+                // The witness proves zero root-trace flags; the aggregate guard
+                // excludes every such leaf from cursor side metadata.
+                // No allocation, callback, collection, or owner mutation occurs.
+                let child = unsafe { *items.add(position) } as usize;
+                self.retire_private_text_leaf(child, free_head);
+                free_head = child;
+            }
+        } else {
+            for position in (0..count).rev() {
+                // SAFETY: the same producer and witness prove distinct exact leaves;
+                // the full helper preserves all side-state invalidation on guard miss.
+                let child = unsafe { *items.add(position) } as usize;
+                self.retire_verified_text_leaf(child, free_head);
+                free_head = child;
+            }
         }
         self.free_head = free_head;
         self.free_count += count;
@@ -8412,7 +8841,7 @@ impl Heap {
             // Python, collects, or dispatches signals. The owner is retired only after
             // the final read from this pointer.
             let child = unsafe { *items.add(position) } as usize;
-            if self.slot_shapes[child] == SlotShape::Vacant {
+            if self.slot_shapes[child].is_vacant() {
                 continue;
             }
             let Some(Value::Str(text)) = self.slots[child].value.as_ref() else {
@@ -8539,6 +8968,116 @@ mod tests {
         (list, children)
     }
 
+    fn inline_text_list(heap: &mut Heap) -> (Id, Vec<Id>) {
+        let mut input = Vec::new();
+        for width in 3..=8 {
+            input.extend([0x8c, width]);
+            input.extend(std::iter::repeat_n(b'x', usize::from(width)));
+            input.push(0x94);
+        }
+        heap.reserve_unobserved_texts(6).unwrap();
+        let mut children = Vec::with_capacity(6);
+        // SAFETY: these six complete dense ASCII entries and all reserved capacities are exact.
+        let (at, count) =
+            unsafe { heap.append_reserved_dense_ascii_texts(&input, 0, 6, &mut children) };
+        assert_eq!((at, count), (input.len(), 6));
+        let owner = heap.alloc(Value::List(children.clone()));
+        // SAFETY: all six distinct children came directly from the closed dense batch.
+        unsafe { heap.mark_fresh_inline_text_list(owner) };
+        (owner, children)
+    }
+
+    #[test]
+    fn inline_producer_retirement_preserves_free_order_and_clean_slot_reuse() {
+        if std::mem::size_of::<String>() < 8 {
+            return;
+        }
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let retired = heap.alloc(Value::List(Vec::new()));
+        heap.release_temporaries_since(mark);
+        heap.collect(std::iter::empty());
+        let initial_head = heap.free_head;
+        let mark = heap.temporary_mark();
+        let (owner, children) = inline_text_list(&mut heap);
+        assert_eq!(children[0] as usize, initial_head);
+        assert_eq!(children[0], retired);
+        assert!(heap.is_fresh_nonshort_text_list(owner));
+        assert!(heap.is_fresh_inline_text_list(owner));
+        heap.release_temporaries_since(mark);
+        let old_head = heap.free_head;
+        // SAFETY: this test holds the unchanged, unmarked, private producer graph.
+        assert!(unsafe { heap.retire_certified_nonshort_text_list(owner) });
+        assert_eq!(heap.free_head, owner as usize);
+        assert_eq!(
+            heap.slots[owner as usize].gc_next.get(),
+            children[0] as usize
+        );
+        for (i, &child) in children.iter().enumerate() {
+            let index = child as usize;
+            assert!(heap.slot_shapes[index] == SlotShape::VacantText);
+            assert!(heap.slots[index].value.is_none());
+            assert_eq!(heap.traces[index].get(), UNMARKED);
+            assert_eq!(
+                heap.slots[index].gc_next.get(),
+                children.get(i + 1).map_or(old_head, |&id| id as usize)
+            );
+        }
+        let replacement = heap.alloc(Value::List(Vec::new()));
+        assert_eq!(replacement, owner);
+        let replacement_text = heap.unobserved_text("another", true);
+        assert_eq!(replacement_text, children[0]);
+        assert!(matches!(heap.get(replacement_text), Value::Str(text) if text == "another"));
+    }
+
+    #[test]
+    fn inline_producer_mutation_and_side_state_miss_preserve_full_behavior() {
+        if std::mem::size_of::<String>() < 8 {
+            return;
+        }
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let (owner, children) = inline_text_list(&mut heap);
+        heap.release_temporaries_since(mark);
+        let mut position = TextPosition::default();
+        position.slot = children[0];
+        heap.text_position.set(position);
+        assert!(!heap.certified_text_position_clear());
+        // SAFETY: the graph itself remains private and unchanged; the deliberate metadata
+        // miss requires the ordinary per-child invalidation path.
+        assert!(unsafe { heap.retire_certified_nonshort_text_list(owner) });
+        assert_eq!(heap.text_position.get().slot, NONE);
+        assert!(heap.slot_shapes[children[0] as usize] == SlotShape::Vacant);
+        let mark = heap.temporary_mark();
+        let (other, _) = inline_text_list(&mut heap);
+        assert!(heap.is_fresh_inline_text_list(other));
+        let _ = heap.get_mut(other);
+        assert!(!heap.is_fresh_inline_text_list(other));
+        heap.release_temporaries_since(mark);
+        // SAFETY: an invalidated owner must reject without inspecting its children.
+        assert!(!unsafe { heap.retire_certified_nonshort_text_list(other) });
+        heap.collect(std::iter::once(other));
+        assert!(matches!(heap.get(other), Value::List(_)));
+    }
+
+    #[test]
+    fn heap_backed_short_text_is_never_inline_provenance() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let mut text = crate::Str::with_capacity(64);
+        text.push_str("abc");
+        assert!(text.is_heap_allocated());
+        let child = heap.alloc(Value::Str(text));
+        let owner = heap.alloc(Value::List(vec![child]));
+        heap.mark_fresh_nonshort_text_list(owner);
+        assert!(!heap.is_fresh_inline_text_list(owner));
+        heap.release_temporaries_since(mark);
+        // SAFETY: the nonshort graph is isolated and private, but only the normal
+        // destructor path is allowed for a heap-backed string regardless of its length.
+        assert!(unsafe { heap.retire_certified_nonshort_text_list(owner) });
+        assert!(heap.slots[child as usize].value.is_none());
+    }
+
     #[test]
     fn certified_nonshort_retirement_rejects_owner_without_changing_any_slot() {
         let mut heap = Heap::new();
@@ -8573,6 +9112,174 @@ mod tests {
     }
 
     #[test]
+    fn private_text_retirement_falls_back_for_uncertain_cursor_state() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let (owner, children) = nonshort_text_list(&mut heap, &[("alpha", true), ("bravo", true)]);
+        heap.release_temporaries_since(mark);
+        let child = children[0] as usize;
+        heap.root_trace.flags.resize(heap.slots.len(), 0);
+        heap.root_trace.valid = true;
+        let mut position = TextPosition::default();
+        position.slot = children[0];
+        heap.text_position.set(position);
+        assert!(!heap.certified_text_position_clear());
+        // SAFETY: this isolated producer graph is private and unchanged, with zero
+        // child root-trace flags. Uncertain cursor metadata deliberately
+        // force the full invalidation path before any slot is reused.
+        assert!(unsafe { heap.retire_certified_nonshort_text_list(owner) });
+        assert_eq!(heap.root_trace.flags[child], 0);
+        assert!(heap.root_trace.valid);
+        assert_eq!(heap.text_position.get().slot, NONE);
+        assert_eq!(heap.free_head, owner as usize);
+        assert_eq!(
+            heap.slots[owner as usize].gc_next.get(),
+            children[0] as usize
+        );
+    }
+
+    #[test]
+    fn private_text_retirement_accepts_unrelated_flags_for_reused_and_appended_leaves() {
+        let mut heap = Heap::new();
+        let unrelated = heap.alloc(Value::Str("unrelated".into())) as usize;
+        let mark = heap.temporary_mark();
+        let reused = heap.alloc(Value::Str("retired".into())) as usize;
+        heap.release_temporaries_since(mark);
+        heap.root_trace.flags.resize(heap.slots.len(), 0);
+        heap.root_trace.flags[reused] = RootTrace::COVERED;
+        heap.retire_slot(reused);
+        assert_eq!(heap.root_trace.flags[reused], 0);
+        heap.root_trace.flags[unrelated] = RootTrace::COVERED | RootTrace::FRONTIER;
+        heap.root_trace.valid = true;
+
+        let appended = heap.slots.len();
+        let mark = heap.temporary_mark();
+        let (owner, children) = nonshort_text_list(&mut heap, &[("alpha", true), ("bravo", true)]);
+        heap.release_temporaries_since(mark);
+        assert_eq!(children, [reused as Id, appended as Id]);
+        assert_eq!(heap.root_trace.flags.get(reused), Some(&0));
+        assert!(heap.root_trace.flags.get(appended).is_none());
+        assert!(heap.certified_text_position_clear());
+        // SAFETY: both leaves were freshly allocated from a cleared vacant slot
+        // or beyond the flags table, and no mark/observer ran after production.
+        assert!(unsafe { heap.retire_certified_nonshort_text_list(owner) });
+        assert_eq!(
+            heap.root_trace.flags[unrelated],
+            RootTrace::COVERED | RootTrace::FRONTIER
+        );
+        assert!(heap.root_trace.valid);
+        assert_eq!(heap.free_head, owner as usize);
+        assert_eq!(heap.slots[owner as usize].gc_next.get(), reused);
+        assert_eq!(heap.slots[reused].gc_next.get(), appended);
+    }
+
+    #[test]
+    fn private_text_retirement_preserves_unrelated_legitimate_side_metadata() {
+        let mut heap = Heap::new();
+        let long = heap.alloc(Value::Str("é".repeat(128).into()));
+        let mut position = TextPosition::default();
+        position.slot = long;
+        heap.text_position.set(position);
+        let mark = heap.temporary_mark();
+        let (owner, children) = nonshort_text_list(&mut heap, &[("alpha", true), ("€", false)]);
+        heap.release_temporaries_since(mark);
+        assert!(heap.certified_text_position_clear());
+        // SAFETY: the exact decoder-style leaves are private, distinct, unmarked and
+        // unreachable outside this isolated owner, with no observer during retirement.
+        assert!(unsafe { heap.retire_certified_nonshort_text_list(owner) });
+        assert_eq!(heap.text_position.get().slot, long);
+        assert_eq!(heap.free_head, owner as usize);
+        assert_eq!(
+            heap.slots[owner as usize].gc_next.get(),
+            children[0] as usize
+        );
+        assert_eq!(
+            heap.slots[children[0] as usize].gc_next.get(),
+            children[1] as usize
+        );
+    }
+
+    #[test]
+    fn certified_vacant_text_is_skipped_by_sweep_and_reused_without_metadata_reset() {
+        assert_eq!(std::mem::size_of::<SlotShape>(), 1);
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let (owner, children) = nonshort_text_list(&mut heap, &[("alpha", true), ("bravo", true)]);
+        heap.release_temporaries_since(mark);
+        // SAFETY: this isolated producer and uninterrupted test own the distinct fresh leaves.
+        assert!(unsafe { heap.retire_certified_nonshort_text_list(owner) });
+        for &child in &children {
+            assert!(heap.slot_shapes[child as usize] == SlotShape::VacantText);
+        }
+        let free = (heap.free_head, heap.free_count);
+        // A generic vacant owner may retain arbitrary previous metadata; it must still
+        // take the full reset even when the following free leaf is already clean.
+        let dirty = &mut heap.slots[owner as usize];
+        dirty.may_have_buffer_views = true;
+        dirty.generation = 2;
+        dirty.untracked_tuple.set(true);
+        dirty.finalization = Finalization::Finalized;
+        heap.sweep_slots(children[0] as usize..children[1] as usize + 1);
+        assert_eq!((heap.free_head, heap.free_count), free);
+        heap.reserve_unobserved_texts(2).unwrap();
+        let mut values = Vec::with_capacity(2);
+        let input = b"\x8c\x03abc\x94\x8c\x03def\x94";
+        // SAFETY: both complete entries are prevalidated ASCII and all storage was reserved.
+        let (at, count) =
+            unsafe { heap.append_reserved_dense_ascii_texts(input, 0, 2, &mut values) };
+        assert_eq!((at, count), (input.len(), 2));
+        assert_eq!(values, [owner, children[0]]);
+        for (&id, expected) in values.iter().zip(["abc", "def"]) {
+            let slot = &heap.slots[id as usize];
+            assert!(matches!(slot.value.as_ref(), Some(Value::Str(text)) if text == expected));
+            assert!(
+                !slot.may_have_buffer_views && !slot.untracked_tuple.get() && !slot.has_gc_header
+            );
+            assert_eq!(slot.generation, 0);
+            assert!(slot.finalization == Finalization::None);
+            assert_eq!(slot.gc_next.get(), UNMARKED);
+        }
+        // The ordinary allocator must also accept a clean vacant leaf as a container,
+        // install its GC header and publish the new owner normally.
+        let new_owner = heap.alloc(Value::List(values.clone()));
+        assert_eq!(new_owner, children[1]);
+        assert!(heap.slots[new_owner as usize].has_gc_header);
+        heap.collect([new_owner].into_iter());
+        assert!(matches!(heap.get(new_owner), Value::List(items) if items == &values));
+    }
+
+    #[test]
+    fn unrooted_text_graph_publication_preserves_aliases_cycles_and_singletons() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        heap.reserve_unobserved_texts(3).unwrap();
+        let text = heap.unrooted_unobserved_text("alpha", true);
+        assert!(!heap.execution.current().live[mark..].contains(&text));
+        let short = heap.unrooted_unobserved_text("x", true);
+        assert!(heap.execution.current().live[mark..].contains(&short));
+        let alias = heap.alloc(Value::List(vec![text, text, short]));
+        let unicode = heap.unrooted_unobserved_text("€", false);
+        let cycle = heap.alloc(Value::List(vec![unicode, short]));
+        let Value::List(items) = heap.get_mut(cycle) else {
+            unreachable!()
+        };
+        items.push(cycle);
+        heap.release_temporaries_since(mark);
+        heap.collect([alias, cycle].into_iter());
+        assert!(matches!(heap.get(alias), Value::List(items) if items == &[text, text, short]));
+        assert!(matches!(heap.get(cycle), Value::List(items) if items == &[unicode, short, cycle]));
+        assert!(matches!(heap.get(text), Value::Str(value) if value == "alpha"));
+        assert!(matches!(heap.get(unicode), Value::Str(value) if value == "€"));
+        heap.collect(std::iter::empty());
+        // Prompt collection reclaims the acyclic owner. The self-cycle follows
+        // the ordinary cyclic collector's schedule rather than early retirement.
+        for id in [alias, text] {
+            assert!(heap.slot_shapes[id as usize].is_vacant());
+        }
+        assert!(matches!(heap.get(short), Value::Str(value) if value == "x"));
+    }
+
+    #[test]
     fn nonshort_owner_traverses_children_and_invalidates_on_mutable_borrow() {
         let mut heap = Heap::new();
         let mark = heap.temporary_mark();
@@ -8590,7 +9297,7 @@ mod tests {
         assert!(!heap.is_fresh_nonshort_text_list(owner));
         heap.collect(std::iter::once(owner));
         for child in children {
-            assert!(heap.slot_shapes[child as usize] == SlotShape::Vacant);
+            assert!(heap.slot_shapes[child as usize].is_vacant());
         }
     }
 
@@ -8634,7 +9341,7 @@ mod tests {
             assert!(matches!(heap.get(child), Value::Str(_)));
         }
         for &child in &[children[0], children[5], children[6]] {
-            assert!(heap.slot_shapes[child as usize] == SlotShape::Vacant);
+            assert!(heap.slot_shapes[child as usize].is_vacant());
             assert_eq!(heap.traces[child as usize].get(), UNMARKED);
         }
         // SAFETY: the retired handle is rejected before any slot is changed.
@@ -8708,7 +9415,6 @@ mod tests {
         let mut position = TextPosition::default();
         position.slot = children[0];
         heap.text_position.set(position);
-        heap.cache_standard_stream_bindings(children[0], [NONE; 3]);
 
         // SAFETY: all non-singleton leaves and their exact owner are isolated,
         // unmarked, unlinked and cannot be observed during retirement.
@@ -8716,7 +9422,6 @@ mod tests {
         assert!(!heap.root_trace.valid);
         assert_eq!(heap.root_trace.flags[first], 0);
         assert_eq!(heap.text_position.get().slot, NONE);
-        assert!(heap.standard_stream_bindings(children[0]).is_none());
         assert_eq!(heap.free_count, free_count + 3);
         assert_eq!(heap.free_head, list as usize);
         assert_eq!(heap.slots[list as usize].gc_next.get(), first);
@@ -8814,10 +9519,8 @@ mod tests {
         ];
         assert_eq!(values, expected);
         assert_eq!(values[0], recycled);
-        assert_eq!(
-            batch.execution.current().live[mark..],
-            scalar.execution.current().live[scalar_mark..]
-        );
+        assert!(batch.execution.current().live[mark..].is_empty());
+        assert_eq!(scalar.execution.current().live[scalar_mark..], expected);
         assert_eq!(
             (batch.free_head, batch.free_count),
             (scalar.free_head, scalar.free_count)
@@ -8849,6 +9552,151 @@ mod tests {
         assert!(matches!(batch.get(values[0]), Value::Str(s) if s == "abc"));
         assert!(matches!(batch.get(values[1]), Value::Str(s) if s == "abcdefgh"));
         assert!(matches!(batch.get(values[2]), Value::Str(s) if s == "x"));
+    }
+
+    #[test]
+    fn dense_ascii_constant_width_runs_preserve_recycled_append_and_short_order() {
+        fn seeded(count: usize) -> Heap {
+            let mut heap = Heap::new();
+            let mark = heap.temporary_mark();
+            for _ in 0..6 {
+                heap.alloc(Value::List(Vec::new()));
+            }
+            heap.release_temporaries_since(mark);
+            heap.collect(std::iter::empty());
+            assert_eq!(heap.free_count, 6);
+            heap.reserve_unobserved_texts(count).unwrap();
+            heap
+        }
+
+        let mut texts = (0..10).map(|i| format!("{i:05}")).collect::<Vec<_>>();
+        texts.extend((10..100).map(|i| format!("{i:06}")));
+        texts.push("x".into());
+        let mut input = Vec::new();
+        for text in &texts {
+            input.extend_from_slice(&[0x8c, text.len() as u8]);
+            input.extend_from_slice(text.as_bytes());
+            input.push(0x94);
+        }
+
+        let mut batch = seeded(texts.len());
+        let mut scalar = seeded(texts.len());
+        let mark = batch.temporary_mark();
+        let mut values = Vec::with_capacity(texts.len());
+        // SAFETY: every entry above is complete ASCII, and both heap/output capacities were reserved.
+        let (at, consumed) =
+            unsafe { batch.append_reserved_dense_ascii_texts(&input, 0, texts.len(), &mut values) };
+        assert_eq!(consumed, 100);
+        assert_eq!(&input[at..], b"\x8c\x01x\x94");
+        let expected = texts[..100]
+            .iter()
+            .map(|text| scalar.unobserved_text(text, true))
+            .collect::<Vec<_>>();
+        assert_eq!(values, expected);
+        assert_eq!(batch.temporary_mark(), mark);
+        assert_eq!(
+            (batch.free_head, batch.free_count),
+            (scalar.free_head, scalar.free_count)
+        );
+        assert_eq!((batch.free_head, batch.free_count), (END, 0));
+        assert_eq!(batch.slots.len(), scalar.slots.len());
+        for (&id, text) in values.iter().zip(&texts) {
+            assert!(matches!(batch.get(id), Value::Str(value) if value == text.as_str()));
+            assert!(batch.slot_shapes[id as usize] == scalar.slot_shapes[id as usize]);
+            assert_eq!(
+                batch.slots[id as usize].gc_next.get(),
+                scalar.slots[id as usize].gc_next.get()
+            );
+            assert_eq!(
+                batch.traces[id as usize].get(),
+                scalar.traces[id as usize].get()
+            );
+        }
+        assert_eq!(
+            batch.unobserved_text("x", true),
+            scalar.unobserved_text("x", true)
+        );
+        assert_eq!(
+            (batch.free_head, batch.free_count),
+            (scalar.free_head, scalar.free_count)
+        );
+    }
+
+    #[test]
+    fn dense_ascii_batch_stop_after_one_preserves_existing_output_and_removes_unused_tail() {
+        let texts = std::iter::once("00000".to_owned())
+            .chain(std::iter::once("x".to_owned()))
+            .chain((2..100).map(|i| format!("{i:05}")))
+            .collect::<Vec<_>>();
+        let mut input = Vec::new();
+        for text in &texts {
+            input.extend_from_slice(&[0x8c, text.len() as u8]);
+            input.extend_from_slice(text.as_bytes());
+            input.push(0x94);
+        }
+        let mut heap = Heap::new();
+        let prefix = heap.unobserved_text("prefix", true);
+        heap.reserve_unobserved_texts(texts.len()).unwrap();
+        let mut values = Vec::with_capacity(texts.len() + 1);
+        values.push(prefix);
+        // SAFETY: all entries above were validated as complete ASCII and all capacities reserved.
+        let (at, consumed) =
+            unsafe { heap.append_reserved_dense_ascii_texts(&input, 0, texts.len(), &mut values) };
+        assert_eq!((at, consumed), (8, 1));
+        assert_eq!(values.len(), 2);
+        assert_eq!(values[0], prefix);
+        assert!(matches!(heap.get(values[1]), Value::Str(text) if text == "00000"));
+        assert_eq!(&input[at..at + 4], b"\x8c\x01x\x94");
+        let singleton = heap.unobserved_text("x", true);
+        values.push(singleton);
+        assert_eq!(values.len(), 3);
+        assert!(matches!(heap.get(values[2]), Value::Str(text) if text == "x"));
+    }
+
+    #[test]
+    fn dense_ascii_constant_width_dispatch_covers_boundaries_and_alternation() {
+        let widths = [3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 3, 4, 3];
+        let mut input = Vec::new();
+        let mut texts = Vec::new();
+        for (index, width) in widths.into_iter().enumerate() {
+            let text =
+                std::iter::repeat_n(char::from(b'a' + index as u8), width).collect::<String>();
+            input.extend_from_slice(&[0x8c, width as u8]);
+            input.extend_from_slice(text.as_bytes());
+            input.push(0x94);
+            texts.push(text);
+        }
+        let mut batch = Heap::new();
+        let mut scalar = Heap::new();
+        batch.reserve_unobserved_texts(texts.len()).unwrap();
+        scalar.reserve_unobserved_texts(texts.len()).unwrap();
+        let mut values = Vec::with_capacity(texts.len());
+        // SAFETY: every encoded entry above is complete ASCII, and all capacities are reserved.
+        let (at, consumed) =
+            unsafe { batch.append_reserved_dense_ascii_texts(&input, 0, texts.len(), &mut values) };
+        assert_eq!((at, consumed), (input.len(), texts.len()));
+        let expected = texts
+            .iter()
+            .map(|text| scalar.unobserved_text(text, true))
+            .collect::<Vec<_>>();
+        assert_eq!(values, expected);
+        assert_eq!(
+            (batch.free_head, batch.free_count),
+            (scalar.free_head, scalar.free_count)
+        );
+        for (&id, text) in values.iter().zip(&texts) {
+            assert!(matches!(batch.get(id), Value::Str(value) if value == text.as_str()));
+        }
+        let outside = b"\x8c\x09abcdefghi\x94";
+        batch.reserve_unobserved_texts(1).unwrap();
+        let mut none = Vec::with_capacity(1);
+        let free = (batch.free_head, batch.free_count);
+        // SAFETY: this complete ASCII entry is known, and the capacity is reserved; width nine
+        // intentionally falls outside the batch's inline range.
+        let result = unsafe { batch.append_reserved_dense_ascii_texts(outside, 0, 1, &mut none) };
+        assert_eq!(result, (0, 0));
+        assert!(none.is_empty());
+        assert_eq!((batch.free_head, batch.free_count), free);
     }
 
     #[test]
@@ -9406,41 +10254,13 @@ mod tests {
     }
 
     #[test]
-    fn standard_stream_bindings_expire_on_scope_writes_and_recycling() {
-        let mut heap = Heap::new();
-        let source = heap.alloc(Value::List(Vec::new()));
-        let scope = heap.alloc(Value::Scope(allocator_api2::boxed::Box::new(Scope::new(
-            String::new(),
-            None,
-        ))));
-        let streams = [source, NONE, source];
-        heap.cache_standard_stream_bindings(scope, streams);
-        assert_eq!(heap.standard_stream_bindings(scope), Some(streams));
-        assert_eq!(heap.standard_stream_bindings(source), None);
-        heap.get_mut(source);
-        assert_eq!(heap.standard_stream_bindings(scope), Some(streams));
-
-        heap.get_mut(scope);
-        assert_eq!(heap.standard_stream_bindings(scope), None);
-        heap.cache_standard_stream_bindings(scope, streams);
-        heap.source_and_target(source, scope).unwrap();
-        assert_eq!(heap.standard_stream_bindings(scope), None);
-
-        heap.cache_standard_stream_bindings(scope, streams);
-        heap.release_temporaries_since(0);
-        heap.collect(std::iter::empty());
-        assert_eq!(heap.alloc(Value::List(Vec::new())), scope);
-        assert_eq!(heap.standard_stream_bindings(scope), None);
-    }
-
-    #[test]
     fn namespace_finalizer_bindings_follow_the_current_value() {
         let mut heap = Heap::new();
         let owner = heap.alloc(Value::List(Vec::new()));
         let replacement = heap.alloc(Value::List(Vec::new()));
         let namespace = heap.alloc(Value::Dict(vec![(TRUE, owner)].into()));
         let mut scope = Scope::new(String::new(), None);
-        scope.namespace = Some(namespace);
+        scope.set_namespace(Some(namespace));
         let scope = heap.alloc(Value::Scope(allocator_api2::boxed::Box::new(scope)));
         heap.execution.frames[0].scope = scope;
 
@@ -9727,7 +10547,7 @@ mod tests {
         let original = heap.alloc(Value::Tuple(vec![child; 256]));
         *heap.get_mut(child) = Value::List(vec![original]);
         let mut frame = Scope::new(String::new(), None);
-        frame.names.insert(crate::Str::new("items"), original);
+        frame.names_mut().insert(crate::Str::new("items"), original);
         let scope = heap.alloc(Value::Scope(allocator_api2::boxed::Box::new(frame)));
         heap.execution.frames[0].scope = scope;
         heap.release_temporaries_since(0);
@@ -9739,7 +10559,7 @@ mod tests {
         let Value::Scope(frame) = heap.get_mut(scope) else {
             unreachable!()
         };
-        *frame.names.get_mut("items").unwrap() = replacement;
+        *frame.names_mut().get_mut("items").unwrap() = replacement;
         heap.release_temporaries_since(0);
         heap.collect(std::iter::empty());
         assert!(!heap.root_trace.roots.contains(&original));
@@ -9789,7 +10609,7 @@ mod tests {
         let child = heap.alloc(Value::List(Vec::new()));
         let owner = heap.alloc(Value::List(vec![child; RootTrace::MIN_CONTAINER]));
         let mut frame = Scope::new(String::new(), None);
-        frame.names.insert(crate::Str::new("items"), owner);
+        frame.names_mut().insert(crate::Str::new("items"), owner);
         heap.execution.frames[0].scope =
             heap.alloc(Value::Scope(allocator_api2::boxed::Box::new(frame)));
         heap.release_temporaries_since(0);
@@ -9969,6 +10789,329 @@ mod tests {
     }
 
     #[test]
+    fn finalizer_membership_verifies_live_sys_registration_order() {
+        use super::super::{ffi, stdlib};
+
+        let mut ctx = ffi::new_context(
+            serde_json::json!({"paths": [], "python_version": "3.14"}),
+            ["imre"],
+        );
+        let sys = ctx.module("sys").expect("initialize sys module");
+        let roots = stdlib::io::rooted_standard_streams(&ctx).expect("initialized sys streams");
+        let complete = !roots.contains(&NONE)
+            && roots
+                .iter()
+                .enumerate()
+                .all(|(index, root)| !roots[..index].contains(root));
+        if complete {
+            assert!(ctx.heap.descriptor_owners.is_empty());
+            assert_eq!(
+                ctx.heap.ordinary_finalizers,
+                [roots[3], roots[4], roots[2], roots[1], roots[0]]
+            );
+            assert!(ctx.heap.has_stock_stream_finalizers(&roots));
+        }
+        let expected = ctx
+            .heap
+            .descriptor_owners
+            .iter()
+            .chain(&ctx.heap.ordinary_finalizers)
+            .all(|owner| roots.contains(owner) || ctx.heap.caller_keeps_generator(*owner))
+            || ctx
+                .heap
+                .frame_keeps_stream_finalizers(Some(&roots), &ctx.heap.descriptor_owners);
+        assert_eq!(ctx.heap.finalizers_kept_by(&roots), expected);
+
+        if complete {
+            ctx.set_attr(sys, "__stdout__", roots[4]).unwrap();
+            let rebound = stdlib::io::rooted_standard_streams(&ctx).unwrap();
+            assert!(!ctx.heap.has_stock_stream_finalizers(&rebound));
+        }
+    }
+
+    #[test]
+    fn sealed_sys_streams_follow_rebinding_namespace_and_cells() {
+        use super::super::{ffi, stdlib};
+
+        let mut ctx = ffi::new_context(
+            serde_json::json!({"paths": [], "python_version": "3.14"}),
+            ["imre"],
+        );
+        let sys = ctx.module("sys").unwrap();
+        let Value::Module { scope, .. } = *ctx.heap.get(sys) else {
+            unreachable!()
+        };
+        let original = stdlib::io::rooted_standard_streams(&ctx).unwrap();
+        let bindings = ctx.scope_data(scope);
+        let eligible = bindings.namespace().is_none()
+            && bindings.closure().cells.is_empty()
+            && [
+                (Scope::SYS_STDOUT_SLOT, "__stdout__"),
+                (Scope::SYS_STDERR_SLOT, "__stderr__"),
+                (Scope::SYS_STDIN_SLOT, "__stdin__"),
+            ]
+            .into_iter()
+            .all(|(slot, key)| {
+                bindings
+                    .names()
+                    .get_index(slot)
+                    .is_some_and(|(actual, _)| actual == key)
+            });
+        let live = ["__stdin__", "__stdout__", "__stderr__"]
+            .map(|name| ctx.uncached_scope_name(scope, name).unwrap_or(NONE));
+        ctx.seal_launcher_sys_streams();
+        assert_eq!(
+            ctx.scope_data(scope).sealed_sys_streams(),
+            eligible.then_some(live)
+        );
+        assert_eq!(stdlib::io::rooted_standard_streams(&ctx), Some(original));
+        assert!(ctx.scope_data(scope).clone().sealed_sys_streams().is_none());
+
+        ctx.publish_builtin_module_names(scope).unwrap();
+        assert_eq!(
+            ctx.scope_data(scope).sealed_sys_streams(),
+            eligible.then_some(live)
+        );
+
+        ctx.set_attr(sys, "__stdout__", original[4]).unwrap();
+        assert_eq!(
+            ctx.scope_data(scope).sealed_sys_streams(),
+            eligible.then_some([live[0], original[4], live[2]])
+        );
+        assert_eq!(
+            stdlib::io::rooted_standard_streams(&ctx),
+            Some([
+                original[0],
+                original[1],
+                original[2],
+                original[4],
+                original[4]
+            ])
+        );
+        ctx.set_attr(sys, "__stdout__", NONE).unwrap();
+        assert_eq!(stdlib::io::rooted_standard_streams(&ctx).unwrap()[3], NONE);
+        ctx.delete_attr(sys, "__stdout__").unwrap();
+        assert!(ctx.scope_data(scope).sealed_sys_streams().is_none());
+        ctx.seal_launcher_sys_streams();
+        assert!(
+            ctx.scope_data(scope).sealed_sys_streams().is_none(),
+            "a demoted scope cannot reseal"
+        );
+        assert_eq!(stdlib::io::rooted_standard_streams(&ctx).unwrap()[3], NONE);
+
+        let dict = ctx.lookup_attr(sys, "__dict__").unwrap();
+        let key = ctx.text("__stdout__");
+        ctx.put_item(dict, key, original[3]).unwrap();
+        assert_eq!(
+            stdlib::io::rooted_standard_streams(&ctx).unwrap()[3],
+            original[3]
+        );
+        ctx.delete_item(dict, key).unwrap();
+        assert_eq!(stdlib::io::rooted_standard_streams(&ctx).unwrap()[3], NONE);
+        ctx.put_item(dict, key, original[3]).unwrap();
+
+        let cell = ctx.alloc(Value::Cell(Some(original[4])));
+        let Value::Scope(frame) = ctx.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        frame.closure_mut().cells.insert("__stdout__".into(), cell);
+        assert_eq!(
+            stdlib::io::rooted_standard_streams(&ctx).unwrap()[3],
+            original[4]
+        );
+        ctx.heap.replace_cell(cell, None);
+        assert_eq!(
+            stdlib::io::rooted_standard_streams(&ctx).unwrap()[3],
+            NONE,
+            "empty cell shadows namespace"
+        );
+        let Value::Scope(frame) = ctx.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        frame.closure_mut().cells.shift_remove("__stdout__");
+        assert_eq!(
+            stdlib::io::rooted_standard_streams(&ctx).unwrap()[3],
+            original[3]
+        );
+        let stdin = ctx.heap.code_name("__stdin__");
+        ctx.put_item(dict, stdin, NONE).unwrap();
+        assert_eq!(
+            stdlib::io::rooted_standard_streams(&ctx).unwrap()[..3],
+            [NONE; 3]
+        );
+    }
+
+    #[test]
+    fn sealed_sys_streams_validate_keys_and_fail_once() {
+        let mut scope = Scope::new("sys".into(), None);
+        for index in 0..=Scope::SYS_STDIN_SLOT {
+            scope
+                .names_mut()
+                .insert(format!("name{index}").into(), index as Id);
+        }
+        scope.seal_sys_streams();
+        assert!(scope.sealed_sys_streams().is_none());
+        let corrected = (0..=Scope::SYS_STDIN_SLOT)
+            .map(|index| {
+                let name = match index {
+                    Scope::SYS_STDOUT_SLOT => "__stdout__".into(),
+                    Scope::SYS_STDERR_SLOT => "__stderr__".into(),
+                    Scope::SYS_STDIN_SLOT => "__stdin__".into(),
+                    _ => format!("name{index}").into(),
+                };
+                (name, index as Id)
+            })
+            .collect();
+        scope.replace_names(corrected);
+        scope.seal_sys_streams();
+        assert!(
+            scope.sealed_sys_streams().is_none(),
+            "a failed one-shot seal cannot warm later"
+        );
+    }
+
+    #[test]
+    fn sealed_sys_streams_demote_through_disjoint_scope_mutation() {
+        fn sealed_scope() -> Scope {
+            let mut scope = Scope::new("sys".into(), None);
+            for index in 0..=Scope::SYS_STDIN_SLOT {
+                let name = match index {
+                    Scope::SYS_STDOUT_SLOT => "__stdout__".into(),
+                    Scope::SYS_STDERR_SLOT => "__stderr__".into(),
+                    Scope::SYS_STDIN_SLOT => "__stdin__".into(),
+                    _ => format!("name{index}").into(),
+                };
+                scope.names_mut().insert(name, NONE);
+            }
+            scope.seal_sys_streams();
+            assert_eq!(scope.sealed_sys_streams(), Some([NONE; 3]));
+            scope
+        }
+        let mut heap = Heap::new();
+        let source = heap.alloc(Value::List(Vec::new()));
+        let mut inserted = sealed_scope();
+        let count = inserted.names().len();
+        assert_eq!(inserted.insert_name("flags", source), None);
+        assert_eq!(
+            inserted.names().get_index(count),
+            Some((&crate::Str::new("flags"), &source))
+        );
+        assert_eq!(inserted.insert_name("flags", NONE), Some(source));
+        assert_eq!(inserted.insert_name("__stdout__", source), Some(NONE));
+        assert_eq!(inserted.sealed_sys_streams(), Some([NONE, source, NONE]));
+        let scope = heap.alloc(Value::Scope(
+            allocator_api2::boxed::Box::new(sealed_scope()),
+        ));
+        let (_, target) = heap.source_and_target(source, scope).unwrap();
+        let Value::Scope(target) = target else {
+            unreachable!()
+        };
+        target.names_mut().insert("later".into(), source);
+        assert!(target.sealed_sys_streams().is_none());
+
+        let namespace = heap.alloc(Value::Dict(Default::default()));
+        let cell = heap.alloc(Value::Cell(Some(source)));
+        let mut namespace_scope = sealed_scope();
+        namespace_scope.set_namespace(Some(namespace));
+        assert!(namespace_scope.sealed_sys_streams().is_none());
+        let mut cell_scope = sealed_scope();
+        cell_scope
+            .closure_mut()
+            .cells
+            .insert("__stdin__".into(), cell);
+        assert!(cell_scope.sealed_sys_streams().is_none());
+    }
+
+    #[test]
+    fn finalizer_membership_stock_guard_checks_ids_and_order() {
+        let mut heap = Heap::new();
+        let roots = std::array::from_fn(|_| heap.alloc(Value::List(Vec::new())));
+        for owner in [roots[3], roots[4], roots[2], roots[1], roots[0]] {
+            heap.register_finalizer(owner);
+        }
+        assert!(heap.has_stock_stream_finalizers(&roots));
+        heap.ordinary_finalizers.swap(0, 1);
+        assert!(!heap.has_stock_stream_finalizers(&roots));
+        assert!(heap.finalizers_kept_by(&roots));
+        heap.ordinary_finalizers.swap(0, 1);
+        heap.descriptor_owners.push(roots[0]);
+        assert!(!heap.has_stock_stream_finalizers(&roots));
+        assert!(heap.finalizers_kept_by(&roots));
+        heap.descriptor_owners.clear();
+        let outsider = heap.alloc(Value::List(Vec::new()));
+        heap.take_finalizer(roots[2], false);
+        heap.register_finalizer(outsider);
+        assert!(!heap.has_stock_stream_finalizers(&roots));
+        assert!(!heap.finalizers_kept_by(&roots));
+    }
+
+    #[test]
+    fn finalizer_membership_covers_both_owner_slices_and_duplicates() {
+        let mut heap = Heap::new();
+        let streams = std::array::from_fn(|_| heap.alloc(Value::List(Vec::new())));
+        assert!(heap.finalizers_kept_by(&streams));
+        heap.descriptor_owners
+            .extend([streams[0], streams[0], streams[2]]);
+        heap.register_finalizer(streams[4]);
+        assert!(heap.finalizers_kept_by(&streams));
+
+        let outsider = heap.alloc(Value::List(Vec::new()));
+        heap.descriptor_owners.push(outsider);
+        assert!(!heap.finalizers_kept_by(&streams));
+        heap.descriptor_owners.pop();
+        heap.register_finalizer(outsider);
+        assert!(!heap.finalizers_kept_by(&streams));
+        assert!(heap.finalizers_kept_by(&[outsider, streams[0], streams[2], streams[4], outsider]));
+    }
+
+    #[test]
+    fn finalizer_membership_generator_requires_a_surviving_caller_operand() {
+        let mut heap = Heap::new();
+        let generator = heap.alloc(Value::Generator {
+            owner: FrameOwner::Module(NONE),
+            frame: None,
+            name: NONE,
+            qualname: NONE,
+            lineno: 0,
+            code: NONE,
+            scope: NONE,
+            native: None,
+            offset: Some(0),
+            running: false,
+        });
+        heap.register_finalizer(generator);
+        let caller = heap.execution.frames.len() - 1;
+        heap.enter(NONE, NONE, FrameOwner::Module(NONE));
+        assert!(heap.finalizers_kept_by(&[NONE; 5]));
+        heap.descriptor_owners.extend([NONE, generator, NONE]);
+        assert!(heap.finalizers_kept_by(&[NONE; 5]));
+        heap.execution.frames[caller].live.clear();
+        assert!(!heap.finalizers_kept_by(&[NONE; 5]));
+    }
+
+    #[test]
+    fn finalizer_membership_preserves_frame_binding_fallback() {
+        use super::super::{ffi, stdlib};
+
+        let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let scope = ctx.scope("__main__", None);
+        ctx.heap.execution.current_mut().scope = scope;
+        let owner = ctx.alloc(Value::List(Vec::new()));
+        ctx.heap.register_finalizer(owner);
+        let streams = stdlib::io::rooted_standard_streams(&ctx).unwrap_or([NONE; 5]);
+        let Value::Scope(bindings) = ctx.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        bindings.names_mut().insert("owner".into(), owner);
+        assert!(ctx.heap.finalizers_kept_by(&streams));
+        let Value::Scope(bindings) = ctx.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        bindings.names_mut().shift_remove("owner");
+        assert!(!ctx.heap.finalizers_kept_by(&streams));
+    }
+
+    #[test]
     fn a_bound_owners_field_must_still_retain_the_finalizer() {
         use super::super::{ffi, stdlib};
 
@@ -9982,7 +11125,7 @@ mod tests {
         let Value::Scope(bindings) = ctx.heap.get_mut(scope) else {
             unreachable!()
         };
-        bindings.names.insert("root".into(), root);
+        bindings.names_mut().insert("root".into(), root);
         let Value::Instance { fields, .. } = ctx.heap.get_mut(root) else {
             unreachable!()
         };
@@ -10020,8 +11163,8 @@ mod tests {
         let Value::Scope(bindings) = ctx.heap.get_mut(scope) else {
             unreachable!()
         };
-        bindings.names.insert("owner".into(), owner);
-        bindings.names.insert("writer".into(), writer);
+        bindings.names_mut().insert("owner".into(), owner);
+        bindings.names_mut().insert("writer".into(), writer);
         assert!(
             ctx.heap
                 .frame_keeps_stream_finalizers(input.as_ref(), &[writer])
@@ -10030,8 +11173,8 @@ mod tests {
         let Value::Scope(bindings) = ctx.heap.get_mut(scope) else {
             unreachable!()
         };
-        bindings.names.shift_remove("writer");
-        bindings.names.insert("replacement".into(), owner);
+        bindings.names_mut().shift_remove("writer");
+        bindings.names_mut().insert("replacement".into(), owner);
         assert!(
             !ctx.heap
                 .frame_keeps_stream_finalizers(input.as_ref(), &[writer])
@@ -10040,7 +11183,7 @@ mod tests {
         let Value::Scope(bindings) = ctx.heap.get_mut(scope) else {
             unreachable!()
         };
-        bindings.names.insert("renamed".into(), writer);
+        bindings.names_mut().insert("renamed".into(), writer);
         assert!(
             ctx.heap
                 .frame_keeps_stream_finalizers(input.as_ref(), &[writer])
@@ -10122,7 +11265,7 @@ mod tests {
     fn release_frame(heap: &mut Heap, owner: Id, back: Option<Id>) -> Id {
         let mut scope = Scope::new("release-test".into(), None);
         if owner != NONE {
-            scope.names.insert("owner".into(), owner);
+            scope.names_mut().insert("owner".into(), owner);
         }
         let scope = heap.alloc(Value::Scope(allocator_api2::boxed::Box::new(scope)));
         heap.alloc(Value::PythonFrame {
@@ -10215,7 +11358,7 @@ mod tests {
         let Value::Scope(scope) = heap.get_mut(scope) else {
             unreachable!()
         };
-        scope.names.insert("shared".into(), shared);
+        scope.names_mut().insert("shared".into(), shared);
         release_frame(&mut heap, NONE, Some(middle));
         heap.release_temporaries_since(0);
 

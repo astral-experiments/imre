@@ -223,7 +223,7 @@ impl<'a> Links<'a> {
         let (direct, members) = match value {
             Value::Module { scope, .. } => ([Some(*scope), None], Members::None),
             Value::Scope(scope) => (
-                [scope.namespace, scope.exec_globals.map(|g| g.dict)],
+                [scope.namespace(), scope.exec_globals.map(|g| g.dict)],
                 Members::Scope(scope),
             ),
             Value::Cell(contents) => ([*contents, None], Members::None),
@@ -296,7 +296,7 @@ impl<'a> Links<'a> {
                 Members::None => 0,
                 Members::Sequence(items) => items.len(),
                 Members::Generator(frame) => frame.root_count(),
-                Members::Scope(scope) => scope.names.len() + scope.closure.cells.len(),
+                Members::Scope(scope) => scope.names().len() + scope.closure().cells.len(),
                 Members::Names(names, extra) => names.len() + usize::from(extra.is_some()),
                 Members::Keys(entries) | Members::Values(entries) => entries.len(),
                 Members::Entries(entries) => entries.len() * 2,
@@ -320,13 +320,13 @@ impl<'a> Links<'a> {
             Members::Sequence(items) => items.get(index).copied(),
             Members::Generator(frame) => frame.root_at(index),
             Members::Scope(scope) => {
-                if index < scope.names.len() {
-                    scope.names.get_index(index).map(|(_, id)| *id)
+                if index < scope.names().len() {
+                    scope.names().get_index(index).map(|(_, id)| *id)
                 } else {
                     scope
-                        .closure
+                        .closure()
                         .cells
-                        .get_index(index - scope.names.len())
+                        .get_index(index - scope.names().len())
                         .map(|(_, id)| *id)
                 }
             }
