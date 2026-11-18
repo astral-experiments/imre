@@ -229,6 +229,7 @@ jobs:
       RUST_MIN_STACK: '16777216'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - run: git config --global core.longpaths true
       # The native runtime depends on POSIX process and filesystem APIs.
       - run: cargo test -p imre-compiler --lib --locked
 
