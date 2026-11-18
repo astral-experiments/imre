@@ -4773,7 +4773,8 @@ impl Heap {
     /// immutable input is a sequence of the validated short-text opcode, length, ASCII payload,
     /// and memo opcode. The batch stops before any payload outside the allocation-free 3–8 byte
     /// range. No callback, checkpoint, collector, recoverable error, or arbitrary iterator runs
-    /// while the free head is held locally. Every leaf is rooted and published in source order.
+    /// while the free head is held locally. The caller publishes all non-singleton leaves
+    /// through their owning list before any collection, callback or recoverable error.
     ///
     /// # Safety
     /// All `count` encoded entries beginning at `at` must have been fully validated in this exact
@@ -4804,7 +4805,6 @@ impl Heap {
         let mut free_head = self.free_head;
         let mut popped = 0usize;
         let mut consumed = 0usize;
-        let live = &mut self.execution.current_mut().live;
         while consumed < count {
             // SAFETY: the caller guarantees that each dense entry, including this length byte,
             // was preflighted against this immutable input.
@@ -4844,7 +4844,6 @@ impl Heap {
                 )
             };
             let id = index as Id;
-            live.push(id);
             values.push(id);
             at += length + 3;
             consumed += 1;
@@ -4869,7 +4868,21 @@ impl Heap {
         id
     }
 
-    /// Record byte-short text while performing the existing singleton check. A no-GET decoder
+    /// Build a reserved graph leaf without a separate operand root. Short values retain
+    /// their original rooted path; the caller must publish the owner before any collection,
+    /// callback, checkpoint or recoverable error can occur.
+    pub(super) fn unrooted_unobserved_text(&mut self, text: &str, ascii: bool) -> Id {
+        debug_assert!(!self.allocation_traces.is_tracing());
+        debug_assert_eq!(ascii, text.is_ascii());
+        if text.len() <= 2 {
+            return self.unobserved_text(text, ascii);
+        }
+        self.fill_reserved_text_slot(text.into(), ascii)
+    }
+
+    /// Record byte-short text while performing the existing rooted singleton path. Values
+    /// longer than two bytes are not operand roots; the decoder must publish their owner
+    /// before any collection, callback, checkpoint or recoverable error. A no-GET decoder
     /// uses the flag to distinguish its narrow nonshort producer provenance after decoding.
     pub(super) fn unobserved_text_noting_short(
         &mut self,
@@ -4881,13 +4894,9 @@ impl Heap {
         debug_assert_eq!(ascii, text.is_ascii());
         if text.len() <= 2 {
             *saw_short = true;
-            if let Some(id) = self.short_string(text) {
-                return id;
-            }
+            return self.unobserved_text(text, ascii);
         }
-        let id = self.fill_reserved_text_slot(text.into(), ascii);
-        self.keep(id);
-        id
+        self.fill_reserved_text_slot(text.into(), ascii)
     }
 
     /// Record a decoder result whose non-singleton text children were allocated afresh.
@@ -4901,11 +4910,11 @@ impl Heap {
     }
 
     /// Record a nonempty no-GET decoder list whose distinct exact text leaves
-    /// all have more than two UTF-8 bytes and cannot be short-string singletons.
+    /// all have 3..=255 UTF-8 bytes and cannot be short-string singletons.
     pub(super) fn mark_fresh_nonshort_text_list(&mut self, id: Id) {
         debug_assert!(
             matches!(self.get(id), Value::List(items) if !items.is_empty()
-            && items.iter().all(|&child| matches!(self.get(child), Value::Str(text) if text.len() > 2)))
+            && items.iter().all(|&child| matches!(self.get(child), Value::Str(text) if (3..=255).contains(&text.len()))))
         );
         debug_assert!(self.slot_shapes[id as usize] == SlotShape::Other);
         self.slot_shapes[id as usize] = SlotShape::FreshNonshortTextList;
@@ -8275,6 +8284,50 @@ impl Heap {
         slot.gc_next.set(free_head);
     }
 
+    /// Check once that no certified SHORT_BINUNICODE leaf can own side metadata.
+    /// A live text cursor belongs only to a non-ASCII string of at least 256 bytes;
+    /// standard-stream bindings are indexed by their owning scope, never a string.
+    fn certified_text_side_state_clear(&self) -> bool {
+        if !self.root_trace.flags.is_empty() {
+            return false;
+        }
+        let position = self.text_position.get().slot;
+        if position != NONE
+            && !usize::try_from(position).ok().is_some_and(|index| {
+                self.slot_shapes.get(index) == Some(&SlotShape::ScalarLeaf)
+                    && matches!(self.slots.get(index).and_then(|slot| slot.value.as_ref()), Some(Value::Str(text)) if text.len() >= 256)
+            })
+        {
+            return false;
+        }
+        let scope = self.stream_binding_scope.get();
+        scope == NONE
+            || usize::try_from(scope).ok().is_some_and(|index| {
+                matches!(
+                    self.slots.get(index).and_then(|slot| slot.value.as_ref()),
+                    Some(Value::Scope(_))
+                )
+            })
+    }
+
+    /// Recycle one private immutable text leaf after the aggregate side-state proof.
+    #[inline]
+    fn retire_private_text_leaf(&mut self, id: usize, free_head: usize) {
+        debug_assert!(self.slot_shapes[id].is_scalar_leaf());
+        debug_assert_eq!(self.traces[id].get(), UNMARKED);
+        debug_assert_eq!(self.slots[id].gc_prev.get(), UNMARKED);
+        debug_assert!(!self.slots[id].has_gc_header);
+        debug_assert!(self.slots[id].finalization == Finalization::None);
+        debug_assert!(
+            matches!(self.slots[id].value, Some(Value::Str(ref text)) if (3..=255).contains(&text.len()))
+        );
+        self.slot_shapes[id] = SlotShape::Vacant;
+        self.traces[id].set(UNMARKED);
+        let slot = &mut self.slots[id];
+        slot.value = None;
+        slot.gc_next.set(free_head);
+    }
+
     /// Recycle unmarked slots in a span which can contain unreachable values.
     fn sweep_slots(&mut self, span: Range<usize>) {
         // Vacant slots supply their own free-list links. A sweep can therefore
@@ -8298,8 +8351,8 @@ impl Heap {
     /// trace, finalization, callback or signal dispatch may have touched the
     /// owner or any child. The old binding and all operand roots must have been
     /// removed. The producer guarantees a nonempty exact list containing only
-    /// distinct dynamic exact string slots with UTF-8 byte length greater than
-    /// two; those slots have no GC header/link, trace or finalization state.
+    /// distinct dynamic exact SHORT_BINUNICODE string slots with UTF-8 byte length
+    /// 3..=255; those slots have no GC header/link, trace or finalization state.
     /// No Python observer or collector may run until this method returns.
     /// Failing an owner check changes no slot.
     pub(super) unsafe fn retire_certified_nonshort_text_list(&mut self, id: Id) -> bool {
@@ -8327,15 +8380,24 @@ impl Heap {
         let count = items.len();
         let items = items.as_ptr();
         let mut free_head = self.free_head;
-        for position in (0..count).rev() {
-            // SAFETY: the immediate producer and uninterrupted compiler witness
-            // prove each item is a distinct dynamic nonshort exact string. The
-            // separate item allocation and slot vector remain stable: scalar
-            // retirement cannot allocate, collect, call Python or mutate the
-            // owner, which is retired only after the final pointer read.
-            let child = unsafe { *items.add(position) } as usize;
-            self.retire_verified_text_leaf(child, free_head);
-            free_head = child;
+        if self.certified_text_side_state_clear() {
+            for position in (0..count).rev() {
+                // SAFETY: the immediate producer and uninterrupted compiler witness
+                // prove each item is a distinct private 3..=255-byte exact string.
+                // The aggregate guard excludes every such leaf from side metadata.
+                // No allocation, callback, collection, or owner mutation occurs.
+                let child = unsafe { *items.add(position) } as usize;
+                self.retire_private_text_leaf(child, free_head);
+                free_head = child;
+            }
+        } else {
+            for position in (0..count).rev() {
+                // SAFETY: the same producer and witness prove distinct exact leaves;
+                // the full helper preserves all side-state invalidation on guard miss.
+                let child = unsafe { *items.add(position) } as usize;
+                self.retire_verified_text_leaf(child, free_head);
+                free_head = child;
+            }
         }
         self.free_head = free_head;
         self.free_count += count;
@@ -8570,6 +8632,98 @@ mod tests {
             children[1] as usize
         );
         assert_eq!(heap.slots[children[1] as usize].gc_next.get(), head);
+    }
+
+    #[test]
+    fn private_text_retirement_falls_back_for_leaf_side_metadata() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let (owner, children) = nonshort_text_list(&mut heap, &[("alpha", true), ("bravo", true)]);
+        heap.release_temporaries_since(mark);
+        let child = children[0] as usize;
+        heap.root_trace.flags.resize(heap.slots.len(), 0);
+        heap.root_trace.flags[child] = RootTrace::COVERED | RootTrace::FRONTIER;
+        heap.root_trace.valid = true;
+        let mut position = TextPosition::default();
+        position.slot = children[0];
+        heap.text_position.set(position);
+        heap.cache_standard_stream_bindings(children[0], [NONE; 3]);
+        assert!(!heap.certified_text_side_state_clear());
+        // SAFETY: this isolated producer graph is private and unchanged; injected side
+        // metadata deliberately forces the full invalidation path before any slot is reused.
+        assert!(unsafe { heap.retire_certified_nonshort_text_list(owner) });
+        assert_eq!(heap.root_trace.flags[child], 0);
+        assert!(!heap.root_trace.valid);
+        assert_eq!(heap.text_position.get().slot, NONE);
+        assert_eq!(heap.stream_binding_scope.get(), NONE);
+        assert_eq!(heap.free_head, owner as usize);
+        assert_eq!(
+            heap.slots[owner as usize].gc_next.get(),
+            children[0] as usize
+        );
+    }
+
+    #[test]
+    fn private_text_retirement_preserves_unrelated_legitimate_side_metadata() {
+        let mut heap = Heap::new();
+        let long = heap.alloc(Value::Str("é".repeat(128).into()));
+        let scope = heap.alloc(Value::Scope(allocator_api2::boxed::Box::new(Scope::new(
+            "context".into(),
+            None,
+        ))));
+        let mut position = TextPosition::default();
+        position.slot = long;
+        heap.text_position.set(position);
+        heap.cache_standard_stream_bindings(scope, [NONE; 3]);
+        let mark = heap.temporary_mark();
+        let (owner, children) = nonshort_text_list(&mut heap, &[("alpha", true), ("€", false)]);
+        heap.release_temporaries_since(mark);
+        assert!(heap.certified_text_side_state_clear());
+        // SAFETY: the exact decoder-style leaves are private, distinct, unmarked and
+        // unreachable outside this isolated owner, with no observer during retirement.
+        assert!(unsafe { heap.retire_certified_nonshort_text_list(owner) });
+        assert_eq!(heap.text_position.get().slot, long);
+        assert_eq!(heap.stream_binding_scope.get(), scope);
+        assert_eq!(heap.free_head, owner as usize);
+        assert_eq!(
+            heap.slots[owner as usize].gc_next.get(),
+            children[0] as usize
+        );
+        assert_eq!(
+            heap.slots[children[0] as usize].gc_next.get(),
+            children[1] as usize
+        );
+    }
+
+    #[test]
+    fn unrooted_text_graph_publication_preserves_aliases_cycles_and_singletons() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        heap.reserve_unobserved_texts(3).unwrap();
+        let text = heap.unrooted_unobserved_text("alpha", true);
+        assert!(!heap.execution.current().live[mark..].contains(&text));
+        let short = heap.unrooted_unobserved_text("x", true);
+        assert!(heap.execution.current().live[mark..].contains(&short));
+        let alias = heap.alloc(Value::List(vec![text, text, short]));
+        let unicode = heap.unrooted_unobserved_text("€", false);
+        let cycle = heap.alloc(Value::List(vec![unicode, short]));
+        let Value::List(items) = heap.get_mut(cycle) else {
+            unreachable!()
+        };
+        items.push(cycle);
+        heap.release_temporaries_since(mark);
+        heap.collect([alias, cycle].into_iter());
+        assert!(matches!(heap.get(alias), Value::List(items) if items == &[text, text, short]));
+        assert!(matches!(heap.get(cycle), Value::List(items) if items == &[unicode, short, cycle]));
+        assert!(matches!(heap.get(text), Value::Str(value) if value == "alpha"));
+        assert!(matches!(heap.get(unicode), Value::Str(value) if value == "€"));
+        heap.collect(std::iter::empty());
+        // Prompt collection reclaims the acyclic owner. The self-cycle follows
+        // the ordinary cyclic collector's schedule rather than early retirement.
+        for id in [alias, text] {
+            assert!(heap.slot_shapes[id as usize] == SlotShape::Vacant);
+        }
+        assert!(matches!(heap.get(short), Value::Str(value) if value == "x"));
     }
 
     #[test]
@@ -8814,10 +8968,8 @@ mod tests {
         ];
         assert_eq!(values, expected);
         assert_eq!(values[0], recycled);
-        assert_eq!(
-            batch.execution.current().live[mark..],
-            scalar.execution.current().live[scalar_mark..]
-        );
+        assert!(batch.execution.current().live[mark..].is_empty());
+        assert_eq!(scalar.execution.current().live[scalar_mark..], expected);
         assert_eq!(
             (batch.free_head, batch.free_count),
             (scalar.free_head, scalar.free_count)

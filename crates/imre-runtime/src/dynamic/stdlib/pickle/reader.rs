@@ -326,7 +326,10 @@ fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
     let (pointer, length) = (bytes.as_ptr(), bytes.len());
     // SAFETY: the call operands root this exact immutable bytes object; its Vec
     // backing allocation does not move when heap slots grow. No callback,
-    // collection, signal checkpoint, or mutation runs while decoding.
+    // collection, signal checkpoint, or mutation runs while decoding. All
+    // recoverable failures and vector reservations precede the first leaf;
+    // nonsingleton leaves are published through the rooted result list before
+    // any later operation can observe or collect them.
     let input = unsafe { std::slice::from_raw_parts(pointer, length) };
     let mut saw_short = false;
     if layout.dense_prefix != 0 {
@@ -357,7 +360,7 @@ fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
                 ))
             };
             let top = if layout.has_get {
-                ctx.heap.unobserved_text(text, true)
+                ctx.heap.unrooted_unobserved_text(text, true)
             } else {
                 ctx.heap
                     .unobserved_text_noting_short(text, true, &mut saw_short)
@@ -382,7 +385,7 @@ fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
             let text =
                 unsafe { std::str::from_utf8_unchecked(&input[start..start + item.length()]) };
             if layout.has_get {
-                ctx.heap.unobserved_text(text, item.is_ascii())
+                ctx.heap.unrooted_unobserved_text(text, item.is_ascii())
             } else {
                 ctx.heap
                     .unobserved_text_noting_short(text, item.is_ascii(), &mut saw_short)
