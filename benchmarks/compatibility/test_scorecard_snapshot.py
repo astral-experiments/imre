@@ -11,8 +11,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 import scorecard
+import raw_control
 
 PIN = "8571ca2dbecabf8d7863c369dc776611fd57d8ad"
+FROZEN = "d0b396559a8ffda965cb495063b2967847d116aa"
 
 
 class SnapshotTests(unittest.TestCase):
@@ -32,12 +34,13 @@ class SnapshotTests(unittest.TestCase):
         return {"path": self.locator(path), "sha256": hashlib.sha256(data).hexdigest()}
 
     def receipt(self):
+        pin = self.cohort["imre_revision"]
         r = copy.deepcopy(json.loads((scorecard.HERE / "stdlib/errno.jsonl").read_text().splitlines()[0]))
-        r.update(imre_revision=PIN, launcher_id="errno-launcher", paired=False, omission_reason=None, credit_reason="control pending")
+        r.update(imre_revision=pin, launcher_id="errno-launcher", paired=False, omission_reason=None, credit_reason="control pending")
         stock = r["runs"]["stock"]; path = scorecard.ROOT / stock["evidence"].split("#L")[0]
         stock["evidence_provenance"] = {"kind": "immutable_historical_cpython_3.14.5", "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
-        tools = {"compiler_revision": PIN, "runtime_revision": PIN, "compiler_sha256": "a" * 64, "runtime_sha256": "b" * 64}
-        r["toolchain_evidence"] = self.ref("build.json", {"source_revision": PIN, "clean_source": True, "toolchain": tools, "build_argv": ["cargo", "build", "--release"], "artifacts": {"imre": tools["compiler_sha256"], "runtime.a": tools["runtime_sha256"]}})
+        tools = {"compiler_revision": pin, "runtime_revision": pin, "compiler_sha256": "a" * 64, "runtime_sha256": "b" * 64}
+        r["toolchain_evidence"] = self.ref("build.json", {"source_revision": pin, "clean_source": True, "toolchain": tools, "build_argv": ["cargo", "build", "--release"], "artifacts": {"imre": tools["compiler_sha256"], "runtime.a": tools["runtime_sha256"]}})
         for tier in ("O0", "O3"):
             run = r["runs"][tier]; old, line = run["evidence"].split("#L"); p = self.root / (tier + ".stderr"); p.write_bytes((scorecard.ROOT / old).read_bytes())
             run.update(evidence=self.locator(p) + "#L" + line, toolchain=copy.deepcopy(tools), launcher_id=r["launcher_id"], binary_sha256=("c" if tier == "O0" else "d") * 64, build_argv=["imre", "build", "launcher.py", "--opt-level", tier[1:], "--runtime", "runtime.a"])
@@ -84,16 +87,18 @@ class SnapshotTests(unittest.TestCase):
 
     def test_snapshot_render_never_writes_canonical_views_or_synthesizes_receipts(self):
         canonical = (scorecard.ROOT / "README.md").read_bytes()
-        with patch.object(sys, "argv", ["scorecard.py", "--snapshot", PIN]), patch.object(scorecard, "select_snapshot"), patch("check_omissions.validate"):
+        pin = scorecard.REVISION_959
+        self.cohort["imre_revision"] = pin
+        with patch.object(sys, "argv", ["scorecard.py", "--snapshot", pin]), patch.object(scorecard, "select_snapshot"), patch("check_omissions.validate"):
             with self.assertRaisesRegex(ValueError, "without genuine receipts"): scorecard.main()
             self.assertFalse((self.root / "README.md").exists())
             row = self.receipt(); directory = self.root / "stdlib"; directory.mkdir(); receipt = directory / "errno.jsonl"; receipt.write_text(json.dumps(row) + "\n")
             locator = self.locator(receipt); paths = [receipt, self.root / "O0.stderr", self.root / "O3.stderr"]; files = {self.locator(path):hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
-            (self.root / "activation.json").write_text(json.dumps({"schema":"imre.compatibility.snapshot-activation.v1", "imre_revision":PIN, "families":{"errno":{"adapter":"row-v1", "receipt":locator, "files":files}}}))
+            (self.root / "activation.json").write_text(json.dumps({"schema":"imre.compatibility.snapshot-activation.v1", "imre_revision":pin, "families":{"errno":{"adapter":"row-v1", "receipt":locator, "files":files}}}))
             scorecard.main()
             self.assertIn("0 verified credited pairs", (self.root / "README.md").read_text())
             self.assertTrue((self.root / "docs/stdlib.md").is_file())
-            with patch.object(sys, "argv", ["scorecard.py", "--snapshot", PIN, "--check"]): scorecard.main()
+            with patch.object(sys, "argv", ["scorecard.py", "--snapshot", pin, "--check"]): scorecard.main()
         self.assertEqual((scorecard.ROOT / "README.md").read_bytes(), canonical)
 
     def test_historical_or_fresh_stock_and_exact_original(self):
@@ -170,8 +175,19 @@ class PublishedShardTests(unittest.TestCase):
         scorecard.verify_stdlib_evidence(row)
 
     def test_scoped_genuine_counts(self):
-        fs, _ = scorecard.summary(); expected = {"configparser":(344,339), "fnmatch":(24,24), "pathlib":(6,6), "urllib":(178,174)}
-        self.assertEqual({name:(fs[name]["receipts"],fs[name]["paired"]) for name in expected}, expected)
+        expected = {"configparser":(344,339), "fnmatch":(24,24), "pathlib":(6,6), "urllib":(178,174)}
+        frozen=json.loads(raw_control.git(scorecard.ROOT,"show","--no-textconv",f"{FROZEN}:benchmarks/compatibility/revisions/{PIN}/activation.json"))
+        self.assertEqual(self.activation,frozen)
+        table=raw_control.git(scorecard.ROOT,"show","--no-textconv",f"{FROZEN}:benchmarks/compatibility/revisions/{PIN}/docs/stdlib.md").decode()
+        actual={}
+        for name in expected:
+            locator=self.activation["families"][name]["receipt"]
+            rows=[json.loads(line) for line in raw_control.git(scorecard.ROOT,"show","--no-textconv",f"{FROZEN}:{locator}").splitlines()]
+            actual[name]=(len(rows),sum(row["paired"] for row in rows))
+            columns=next(line.split(" | ") for line in table.splitlines() if line.startswith(f"| `{name}` |"))
+            self.assertEqual(columns[5],str(actual[name][1]))
+            self.assertIn(f"{actual[name][1]} verified",columns[6])
+        self.assertEqual(actual,expected)
 
     def test_missing_or_altered_gate(self):
         gate = self.activation["families"]["pathlib"]["sources"]["gate"]
@@ -256,8 +272,10 @@ class PublishedShardTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "not digest-bound"): self.validate(self.row("pathlib"))
 
     def test_unbound_staged_family_is_pending(self):
-        altered = copy.deepcopy(self.activation); del altered["families"]["fnmatch"]
+        altered = copy.deepcopy(self.activation); altered["families"] = {"fnmatch": altered["families"]["fnmatch"]}
         with patch.object(scorecard, "snapshot_activation", return_value=altered):
+            before, _ = scorecard.summary(); self.assertEqual((before["fnmatch"]["receipts"],before["fnmatch"]["paired"]),(24,24))
+            del altered["families"]["fnmatch"]
             fs, _ = scorecard.summary(); self.assertEqual((fs["fnmatch"]["pending"],fs["fnmatch"]["receipts"],fs["fnmatch"]["paired"]),(24,0,0))
 
 
