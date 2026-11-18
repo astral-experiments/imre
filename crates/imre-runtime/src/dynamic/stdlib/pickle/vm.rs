@@ -485,4 +485,83 @@ mod tests {
         pickle.push(0xff);
         assert!(preflight(&pickle).is_none());
     }
+
+    #[test]
+    fn streamed_protocol2_keeps_opcode_valued_indices_and_payloads_in_their_fields() {
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let mut pickle = vec![PROTO, 2, EMPTY_LIST, BINPUT, 0, MARK];
+        let mut last_index_at = 0;
+        for index in 1u8..=MARK {
+            let value = if index == MARK {
+                i32::from_le_bytes([FRAME, MARK, STOP, 0])
+            } else {
+                1000 + i32::from(index)
+            };
+            pickle.push(BININT);
+            pickle.extend_from_slice(&value.to_le_bytes());
+            pickle.push(BINPUT);
+            last_index_at = pickle.len();
+            pickle.push(index);
+        }
+        pickle.extend_from_slice(&[BINGET, MARK, LONG_BINGET]);
+        pickle.extend_from_slice(&u32::from(MARK).to_le_bytes());
+        pickle.extend_from_slice(&[BINGET, 0, APPENDS, STOP, 0xff]);
+
+        let input = ctx.alloc(Value::Bytes(pickle.clone()));
+        let output = decode(&mut ctx, input, preflight(&pickle).unwrap()).unwrap();
+        let Value::List(items) = ctx.heap.get(output) else {
+            panic!("list")
+        };
+        assert_eq!(items.len(), usize::from(MARK) + 3);
+        assert_eq!(items[usize::from(MARK) - 1], items[usize::from(MARK)]);
+        assert_eq!(items[usize::from(MARK)], items[usize::from(MARK) + 1]);
+        assert_eq!(items[usize::from(MARK) + 2], output);
+        assert!(
+            matches!(ctx.heap.get(items[usize::from(MARK) - 1]), Value::Int(value)
+            if value.as_small() == Some(i64::from(i32::from_le_bytes([FRAME, MARK, STOP, 0]))))
+        );
+
+        pickle[last_index_at] = MARK - 1;
+        assert!(
+            preflight(&pickle).is_none(),
+            "a repeated BINPUT index must fall back"
+        );
+    }
+
+    #[test]
+    fn streamed_frame_bounds_payloads_aliases_and_trailing_bytes() {
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let mut payload = vec![EMPTY_LIST, MEMOIZE, MARK, BINUNICODE];
+        let text = ".(é".as_bytes();
+        payload.extend_from_slice(&(text.len() as u32).to_le_bytes());
+        payload.extend_from_slice(text);
+        payload.extend_from_slice(&[MEMOIZE, BINBYTES]);
+        let bytes = [STOP, FRAME, BINPUT, MARK];
+        payload.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        payload.extend_from_slice(&bytes);
+        payload.extend_from_slice(&[BINGET, 1, APPENDS, STOP]);
+        let mut pickle = vec![PROTO, 5, FRAME];
+        pickle.extend_from_slice(&(payload.len() as u64).to_le_bytes());
+        pickle.extend_from_slice(&payload);
+        pickle.push(0xff); // outside the completed frame and ignored after STOP
+
+        let input = ctx.alloc(Value::Bytes(pickle.clone()));
+        let output = decode(&mut ctx, input, preflight(&pickle).unwrap()).unwrap();
+        let Value::List(items) = ctx.heap.get(output) else {
+            panic!("list")
+        };
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0], items[2]);
+        assert!(matches!(ctx.heap.get(items[0]), Value::Str(value) if value == ".(é"));
+        assert!(matches!(ctx.heap.get(items[1]), Value::Bytes(value) if value == &bytes));
+
+        let mut truncated = pickle.clone();
+        truncated.truncate(11 + payload.len() - 1);
+        assert!(preflight(&truncated).is_none());
+        pickle[3..11].copy_from_slice(&((payload.len() + 1) as u64).to_le_bytes());
+        assert!(
+            preflight(&pickle).is_none(),
+            "STOP must end the declared frame"
+        );
+    }
 }
