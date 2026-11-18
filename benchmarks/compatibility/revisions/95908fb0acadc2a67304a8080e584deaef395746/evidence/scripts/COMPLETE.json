@@ -1,0 +1,75 @@
+{
+  "case_ids": {
+    "ty": [
+      "ty-05"
+    ],
+    "uv10": [
+      "uv-10"
+    ],
+    "uvb": [
+      "uv-26",
+      "uv-29"
+    ]
+  },
+  "compiler_revision": "95908fb0acadc2a67304a8080e584deaef395746",
+  "credit": 0,
+  "exact_wrappers": {
+    "ty-05": {
+      "bwrap_sha256": "573236e5328ac2ebb08f59ae3a9805b4f8d12bdef14be8af4450d5463294985f",
+      "chain": [
+        "supervisor",
+        "/usr/bin/bwrap",
+        "saved_image"
+      ],
+      "smoke_exact_entry_enoent": true,
+      "tmpfs_mask": "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts"
+    },
+    "uv-10": {
+      "bwrap_sha256": "573236e5328ac2ebb08f59ae3a9805b4f8d12bdef14be8af4450d5463294985f",
+      "chain": [
+        "/usr/bin/bwrap",
+        "saved_image"
+      ],
+      "smoke_exact_entry_enoent": true,
+      "tmpfs_mask": "/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts"
+    }
+  },
+  "historical_authority_commit": "880648b620f57905a495eb51fbb4600755ee0c54",
+  "schema": "unified959-script-inbox-complete-v1",
+  "source_sets": {
+    "ty": {
+      "files": 47,
+      "manifest_sha256": "fb68e1570c05233ee6ac9e4c7de4da8c7856aa007c5efdc8211a0b78d14f8038"
+    },
+    "uv10": {
+      "files": 59,
+      "manifest_sha256": "eab810fd8cea7feef7260594e6144fc4ac653b64750bee0877a4686156f49119"
+    },
+    "uvb": {
+      "files": 75,
+      "manifest_sha256": "52fd051dae399b5a6947d1bf9817270cbeeaf18c41b7d8321bc94569be3876fe"
+    }
+  },
+  "trace_limits": [
+    "UV26/29 supplied withdrawal traces are unannotated -y; replay validator must constrain successful relative opens/cwd/dirfd changes or require run-only recapture before strict credit.",
+    "UV26/29 gate receipts record compiler exit1 and absent image without a separate gate syscall trace; score authority must decide whether further gate recapture is necessary."
+  ],
+  "two_build_tuples": {
+    "ruff_a": {
+      "cases": [
+        "uv-10"
+      ],
+      "cli_sha256": "c8d8b748b6070f5b7d3c5692139040195f8506189edf03d8df65472d30a85e22",
+      "runtime_sha256": "e58466bb9d8c2cc8912cdc43cce917f13e9b7b82777f3f84684ad0e813234ee3"
+    },
+    "ruff_b": {
+      "cases": [
+        "uv-26",
+        "uv-29",
+        "ty-05"
+      ],
+      "cli_sha256": "e2d0886948f766332df6370a2e3140a5be5c8b0fc108224ef7242fc38fc58bd4",
+      "runtime_sha256": "33ae5dfef5eff3c1fac5e0a5e19263daa980d7d80a5917979b426e85fa128c5c"
+    }
+  }
+}

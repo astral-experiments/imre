@@ -2116,7 +2116,7 @@ impl CompoundSuites<'_, '_> {
         };
         let (otherwise, falls) = self.block(scope, &loop_.orelse, true)?;
         out.push(Statement::While(condition, body, otherwise));
-        Ok(!disabled || falls)
+        Ok(!disabled || falls && !mandatory_suite_exits(&loop_.orelse))
     }
 
     fn for_loop(
@@ -2542,7 +2542,9 @@ impl<'a> SuitePreparation<'a> {
         if let ast::Stmt::While(loop_) = stmt
             && disabled_while(loop_)
         {
-            return Ok(self.physical_suite(&loop_.orelse, kind, child_selection, suspended));
+            let mut suite = self.physical_suite(&loop_.orelse, kind, child_selection, suspended);
+            suite.falls_through &= !mandatory_suite_exits(&loop_.orelse);
+            return Ok(suite);
         }
         let mut scope = self.source_scope(kind);
         let mut children = CompoundSuites {
@@ -2761,6 +2763,14 @@ impl<'a> SuitePreparation<'a> {
         let mut suites = Vec::new();
         let mut operands = Vec::new();
         for stmt in stmts {
+            // A non-raise transfer has already ended the declaration walk.
+            // Avoid constructing code objects for declarations that cannot bind.
+            if !body.falls_through
+                && body.check_from.is_none()
+                && matches!(stmt, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_))
+            {
+                continue;
+            }
             if let Some(transfer) = statements::loop_transfer(stmt) {
                 body.statements.push(transfer);
                 body.falls_through = false;
@@ -3632,6 +3642,27 @@ impl RegisteredBindings {
 
 fn disabled_while(loop_: &ast::StmtWhile) -> bool {
     matches!(&*loop_.test, ast::Expr::BooleanLiteral(literal) if !literal.value)
+}
+
+/// A disabled loop must take its else suite. Exact literal branches within
+/// that suite can prove that the following declaration cannot be reached.
+fn mandatory_suite_exits(block: &[ast::Stmt]) -> bool {
+    block.iter().any(|stmt| match stmt {
+        ast::Stmt::Return(_) | ast::Stmt::Raise(_) => true,
+        ast::Stmt::If(branch) => {
+            for (test, body) in statements::if_clauses(branch) {
+                match test {
+                    Some(ast::Expr::BooleanLiteral(value)) if !value.value => continue,
+                    Some(ast::Expr::BooleanLiteral(_)) | None => {
+                        return mandatory_suite_exits(body);
+                    }
+                    _ => return false,
+                }
+            }
+            false
+        }
+        _ => false,
+    })
 }
 
 fn class_argument_layout(class: &ast::StmtClassDef) -> ir::PackedArguments {

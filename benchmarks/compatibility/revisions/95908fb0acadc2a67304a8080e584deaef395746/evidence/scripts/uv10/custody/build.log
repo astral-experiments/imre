@@ -1,0 +1,25 @@
+   Compiling psm v0.1.32
+   Compiling imre-ast v0.1.5 (/workspace/scratch/ruff-a-95908f/imre/crates/imre-ast)
+   Compiling liblzma-sys v0.4.9
+   Compiling zstd-sys v2.0.16+zstd.1.5.7
+   Compiling stacker v0.1.25
+   Compiling ruff_python_parser v0.0.15
+   Compiling blake3 v1.8.7
+   Compiling bzip2-sys v0.1.13+1.0.8
+   Compiling ruff_db v0.0.15
+   Compiling ruff_python_codegen v0.0.15
+   Compiling ruff_ranged_value v0.0.15
+   Compiling ty_combine v0.0.15
+   Compiling ty_site_packages v0.0.15
+   Compiling ty_vendored v0.0.15
+   Compiling ty_module_resolver v0.0.15
+   Compiling ty_python_core v0.0.15
+   Compiling ruff_python_importer v0.0.15
+   Compiling imre-regex v0.1.5 (/workspace/scratch/ruff-a-95908f/imre/crates/imre-regex)
+   Compiling imre-compiler v0.1.5 (/workspace/scratch/ruff-a-95908f/imre/crates/imre-compiler)
+   Compiling ty_python_semantic v0.0.15
+   Compiling zstd-safe v7.2.4
+   Compiling imre-runtime v0.1.5 (/workspace/scratch/ruff-a-95908f/imre/crates/imre-runtime)
+   Compiling liblzma v0.4.9
+    Finished `release` profile [optimized + debuginfo] target(s) in 5m 15s
+2026-11-17T23:01:01Z

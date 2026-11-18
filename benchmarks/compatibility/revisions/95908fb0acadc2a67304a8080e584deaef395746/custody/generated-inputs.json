@@ -1,0 +1,107 @@
+{
+  "schema": "imre.compatibility.retrospective-generated-inputs.v1",
+  "compiler_revision": "95908fb0acadc2a67304a8080e584deaef395746",
+  "review_scope": "Independent read-only post-capture audit of protected donor target outputs; timestamp differences and preexisting Ruff-b Unicode outputs do not prove per-build regeneration.",
+  "donors": [
+    {
+      "lane": "ruff-a",
+      "thread_id": "6afc785b-eea0-8191-bdd0-36ee364e10ea",
+      "compiler_sha256": "c8d8b748b6070f5b7d3c5692139040195f8506189edf03d8df65472d30a85e22",
+      "runtime_sha256": "e58466bb9d8c2cc8912cdc43cce917f13e9b7b82777f3f84684ad0e813234ee3",
+      "inputs": [
+        {
+          "path": "/workspace/imre/target/release/build/imre-compiler-75360ea7104a41b4/out/imre-stdlib-sources.rs",
+          "bytes": 1589,
+          "sha256": "156717f241dcc8f6bfd6e844c9a3870f2be1618c6e0cfa5627156d2d91b518ae",
+          "mtime_ns": 1794956179998690300
+        },
+        {
+          "path": "/workspace/imre/target/release/build/imre-compiler-75360ea7104a41b4/out/imre-stdlib.zip",
+          "bytes": 1185282,
+          "sha256": "ef1b55f206247c0cc64956870aeed854ac048a657673ec0cf3592cb65a512383",
+          "mtime_ns": 1794956179998690300
+        },
+        {
+          "path": "/workspace/imre/target/release/build/imre-runtime-ae5221875d77539c/out/unicode_alnum.rs",
+          "bytes": 17272,
+          "sha256": "295d83f8d4c2b9e88f35272690fdbc9e4806eb59db881a643576447faa981b86",
+          "mtime_ns": 1794956181126681000
+        },
+        {
+          "path": "/workspace/imre/target/release/build/imre-runtime-ae5221875d77539c/out/unicode_alpha.rs",
+          "bytes": 15160,
+          "sha256": "4289270c4a2f17643dc0371545c78eee96de58343a9b7c741ba5ae73d85e713e",
+          "mtime_ns": 1794956181126681000
+        },
+        {
+          "path": "/workspace/imre/target/release/build/imre-runtime-ae5221875d77539c/out/unicode_general_categories.rs",
+          "bytes": 71259,
+          "sha256": "936a9b0060cb0515e366fa47e036120bd73eafbbb5a5344bf1aff07fc371345d",
+          "mtime_ns": 1794956181138680800
+        },
+        {
+          "path": "/workspace/imre/target/release/build/imre-runtime-ae5221875d77539c/out/unicode_identifier_continue.rs",
+          "bytes": 17902,
+          "sha256": "0090a2f826d1522312ca8779687e706e3618dd71ed60c6a189a35b08c50882b5",
+          "mtime_ns": 1794956181126681000
+        },
+        {
+          "path": "/workspace/imre/target/release/build/imre-runtime-ae5221875d77539c/out/unicode_identifier_start.rs",
+          "bytes": 15336,
+          "sha256": "5e36437619ac7312d99a27c7fd9319fd66c2caf46d32ec765a3e344398b9ee13",
+          "mtime_ns": 1794956181126681000
+        }
+      ]
+    },
+    {
+      "lane": "ruff-b",
+      "thread_id": "6afc7862-ea40-8191-bf7e-1ecda97070ea",
+      "compiler_sha256": "e2d0886948f766332df6370a2e3140a5be5c8b0fc108224ef7242fc38fc58bd4",
+      "runtime_sha256": "33ae5dfef5eff3c1fac5e0a5e19263daa980d7d80a5917979b426e85fa128c5c",
+      "inputs": [
+        {
+          "path": "/workspace/imre/target/release/build/imre-compiler-75360ea7104a41b4/out/imre-stdlib-sources.rs",
+          "bytes": 1589,
+          "sha256": "156717f241dcc8f6bfd6e844c9a3870f2be1618c6e0cfa5627156d2d91b518ae",
+          "mtime_ns": 1794956242294974000
+        },
+        {
+          "path": "/workspace/imre/target/release/build/imre-compiler-75360ea7104a41b4/out/imre-stdlib.zip",
+          "bytes": 1185282,
+          "sha256": "ef1b55f206247c0cc64956870aeed854ac048a657673ec0cf3592cb65a512383",
+          "mtime_ns": 1794956242294974000
+        },
+        {
+          "path": "/workspace/imre/target/release/build/imre-runtime-ae5221875d77539c/out/unicode_alnum.rs",
+          "bytes": 17272,
+          "sha256": "295d83f8d4c2b9e88f35272690fdbc9e4806eb59db881a643576447faa981b86",
+          "mtime_ns": 1794930898035874800
+        },
+        {
+          "path": "/workspace/imre/target/release/build/imre-runtime-ae5221875d77539c/out/unicode_alpha.rs",
+          "bytes": 15160,
+          "sha256": "4289270c4a2f17643dc0371545c78eee96de58343a9b7c741ba5ae73d85e713e",
+          "mtime_ns": 1794930898038217700
+        },
+        {
+          "path": "/workspace/imre/target/release/build/imre-runtime-ae5221875d77539c/out/unicode_general_categories.rs",
+          "bytes": 71259,
+          "sha256": "936a9b0060cb0515e366fa47e036120bd73eafbbb5a5344bf1aff07fc371345d",
+          "mtime_ns": 1794930898090988300
+        },
+        {
+          "path": "/workspace/imre/target/release/build/imre-runtime-ae5221875d77539c/out/unicode_identifier_continue.rs",
+          "bytes": 17902,
+          "sha256": "0090a2f826d1522312ca8779687e706e3618dd71ed60c6a189a35b08c50882b5",
+          "mtime_ns": 1794930898038600000
+        },
+        {
+          "path": "/workspace/imre/target/release/build/imre-runtime-ae5221875d77539c/out/unicode_identifier_start.rs",
+          "bytes": 15336,
+          "sha256": "5e36437619ac7312d99a27c7fd9319fd66c2caf46d32ec765a3e344398b9ee13",
+          "mtime_ns": 1794930898038451500
+        }
+      ]
+    }
+  ]
+}

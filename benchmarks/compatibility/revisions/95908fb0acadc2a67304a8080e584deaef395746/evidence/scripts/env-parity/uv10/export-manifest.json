@@ -1,0 +1,54 @@
+{
+  "capture/controller.py": {
+    "bytes": 3179,
+    "sha256": "b62c68aad33584f3805e4e0d1e7b8378f0db0820169b8b11f481de11d93ed886"
+  },
+  "uv-10/O0.json": {
+    "bytes": 2949,
+    "sha256": "97ee1e6926f59e31663c5e87361789252b14c5c4f01d15ec2b60b4db45cb6dec"
+  },
+  "uv-10/O0.stderr": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "uv-10/O0.stdout": {
+    "bytes": 81,
+    "sha256": "d31efa624425fc18e3cc517341d86a253996abc942c7fc3a03ebdb3d36374ec3"
+  },
+  "uv-10/O0.trace": {
+    "bytes": 46143,
+    "sha256": "da3767d0423d9903856285adb26784c97fabd2578f3c663b44f1c3a273080283"
+  },
+  "uv-10/O3.json": {
+    "bytes": 2949,
+    "sha256": "02666e4867a5e346dda0a5fd0b69d922e68b12b1372abce4f894a7987c280cc2"
+  },
+  "uv-10/O3.stderr": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "uv-10/O3.stdout": {
+    "bytes": 81,
+    "sha256": "d31efa624425fc18e3cc517341d86a253996abc942c7fc3a03ebdb3d36374ec3"
+  },
+  "uv-10/O3.trace": {
+    "bytes": 46149,
+    "sha256": "a170f30503e24c93537daaa1d580c23551dbd7ebfbd9e6efb47dd9792694112b"
+  },
+  "uv-10/mask-smoke.json": {
+    "bytes": 1273,
+    "sha256": "7a62eadce28f7a0c2cf74d40d86c6ff6c26a79abb417d6ea2d20b08e021041b2"
+  },
+  "uv-10/mask-smoke.stderr": {
+    "bytes": 146,
+    "sha256": "c0a30962ec27a9d89f557b3dd2298cfc2509fa5ed7dc8646c78ca34524d8cbe8"
+  },
+  "uv-10/mask-smoke.stdout": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "uv-10/mask-smoke.trace": {
+    "bytes": 27449,
+    "sha256": "a5d755f07a7a5463f242d951645f5d1f92e171622bcba7b79ad1f7db47317a43"
+  }
+}

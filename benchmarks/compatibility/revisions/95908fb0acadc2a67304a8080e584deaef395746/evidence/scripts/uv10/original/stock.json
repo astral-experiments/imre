@@ -1,0 +1,97 @@
+{
+  "argv": [
+    "/workspace/ruff-a-cache/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "-B",
+    "scripts/check-trampoline-version-consistency.py"
+  ],
+  "comparison": {
+    "effects_exact": true,
+    "exit_exact": true,
+    "stderr_exact": true,
+    "stdout_exact": true
+  },
+  "cwd": "/workspace/scratch/ruff-a-95908f/uv10-review/work",
+  "effects_path": "/workspace/scratch/ruff-a-95908f/uv10-review/stock.effects.json",
+  "effects_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+  "elapsed_seconds": 0.114,
+  "env": {
+    "IMREFLAGS": "--opt-level 0",
+    "IMRE_CACHE_DIR": "/workspace/scratch/ruff-a-95908f/uv10-review/cache",
+    "LANG": "C.UTF-8",
+    "LC_ALL": "en_US.UTF-8",
+    "PATH": "/workspace/scratch/ruff-a-95908f/uv10-review/bin:/usr/bin:/bin"
+  },
+  "exit_code": 0,
+  "fixture_fidelity": "exact frozen preimages; full fixture effects measured",
+  "postimage_snapshot": {
+    "Cargo.lock": {
+      "mode": "0o600",
+      "sha256": "a81404faf134b0b627fbc50e12f49ef35c4ad3da8386824b2402fa736ea2c414",
+      "size": 200090,
+      "type": "file"
+    },
+    "crates": {
+      "mode": "0o700",
+      "type": "directory"
+    },
+    "crates/uv-trampoline": {
+      "mode": "0o700",
+      "type": "directory"
+    },
+    "crates/uv-trampoline/Cargo.lock": {
+      "mode": "0o600",
+      "sha256": "4e275bdc9483c9fab6a94f6e1d011a472953a76871f7964311f8efc92c5fcda0",
+      "size": 5390,
+      "type": "file"
+    },
+    "scripts": {
+      "mode": "0o700",
+      "type": "directory"
+    },
+    "scripts/check-trampoline-version-consistency.py": {
+      "mode": "0o600",
+      "sha256": "29e5fca6ffdda841f8f12b124a65fed992b1a593523261062ff7c62230b405bf",
+      "size": 1625,
+      "type": "file"
+    }
+  },
+  "preimage_snapshot": {
+    "Cargo.lock": {
+      "mode": "0o600",
+      "sha256": "a81404faf134b0b627fbc50e12f49ef35c4ad3da8386824b2402fa736ea2c414",
+      "size": 200090,
+      "type": "file"
+    },
+    "crates": {
+      "mode": "0o700",
+      "type": "directory"
+    },
+    "crates/uv-trampoline": {
+      "mode": "0o700",
+      "type": "directory"
+    },
+    "crates/uv-trampoline/Cargo.lock": {
+      "mode": "0o600",
+      "sha256": "4e275bdc9483c9fab6a94f6e1d011a472953a76871f7964311f8efc92c5fcda0",
+      "size": 5390,
+      "type": "file"
+    },
+    "scripts": {
+      "mode": "0o700",
+      "type": "directory"
+    },
+    "scripts/check-trampoline-version-consistency.py": {
+      "mode": "0o600",
+      "sha256": "29e5fca6ffdda841f8f12b124a65fed992b1a593523261062ff7c62230b405bf",
+      "size": 1625,
+      "type": "file"
+    }
+  },
+  "spawn_argv": null,
+  "stderr_path": "/workspace/scratch/ruff-a-95908f/uv10-review/stock.stderr",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stdout_path": "/workspace/scratch/ruff-a-95908f/uv10-review/stock.stdout",
+  "stdout_sha256": "d31efa624425fc18e3cc517341d86a253996abc942c7fc3a03ebdb3d36374ec3",
+  "timed_out": false,
+  "timeout_seconds": 35
+}

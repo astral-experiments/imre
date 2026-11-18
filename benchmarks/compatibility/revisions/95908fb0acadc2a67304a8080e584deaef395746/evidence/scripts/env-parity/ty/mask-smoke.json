@@ -1,0 +1,30 @@
+{
+  "argv": [
+    "/usr/bin/strace",
+    "-f",
+    "-v",
+    "-yy",
+    "-qq",
+    "-s",
+    "4096",
+    "-e",
+    "trace=execve,execveat,open,openat,openat2,creat,io_uring_setup,clone,clone3,fork,vfork,rename,renameat,renameat2,newfstatat,statx,wait4,waitid,exit,exit_group,chdir,fchdir,close,close_range,dup,dup2,dup3,fcntl,unshare,mount,umount2,pivot_root,mount_setattr,open_tree,move_mount",
+    "-o",
+    "/workspace/scratch/ty05-959-env-parity-v1/mask-smoke.trace",
+    "/usr/bin/bwrap",
+    "--ro-bind",
+    "/",
+    "/",
+    "--tmpfs",
+    "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts",
+    "--",
+    "/usr/bin/stat",
+    "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts/transform_readme.py"
+  ],
+  "bwrap_sha256": "573236e5328ac2ebb08f59ae3a9805b4f8d12bdef14be8af4450d5463294985f",
+  "exit_code": 1,
+  "parent_source_exists_after": true,
+  "stderr": "stat: cannot statx '/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts/transform_readme.py': No such file or directory\n",
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "trace_sha256": "1753bb5903fdf0f8e990921fa2ef81f9e833bf68784e707fa80e7593ebd88a9b"
+}

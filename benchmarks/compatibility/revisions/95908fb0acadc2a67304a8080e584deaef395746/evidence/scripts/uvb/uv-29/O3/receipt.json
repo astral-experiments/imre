@@ -1,0 +1,117 @@
+{
+  "build": {
+    "argv": [
+      "/workspace/scratch/imre-95908-transferred-v1/product/imre",
+      "build",
+      "/workspace/uv-b-959-replay-v1/uv-29/O3/work/scripts/transform_readme.py",
+      "--module-root",
+      "/workspace/uv-b-959-replay-v1/uv-29/O3/work",
+      "--no-cache",
+      "--opt-level",
+      "3",
+      "--runtime",
+      "/workspace/scratch/imre-95908-transferred-v1/product/libimre_runtime.a",
+      "--clang",
+      "/workspace/scratch/imre-95908-transferred-v1/product/imre-toolchain/bin/clang",
+      "-o",
+      "/workspace/uv-b-959-replay-v1/uv-29/O3/saved.exe"
+    ],
+    "cwd": "/workspace/uv-b-959-replay-v1/uv-29/O3/work",
+    "elapsed_seconds": 71.75,
+    "environment": {
+      "HOME": "/workspace/uv-b-959-replay-v1/uv-29/O3/home",
+      "LC_ALL": "C.UTF-8",
+      "NO_COLOR": "1",
+      "PATH": "/usr/bin:/bin",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONHASHSEED": "0",
+      "PYTHONNOUSERSITE": "1",
+      "TZ": "UTC"
+    },
+    "exit_code": 0,
+    "image_exists": true,
+    "image_sha256": "af57804b8b0c4e62f89aea77a5c22933c9a66d6ab4660142d1abfe620dd16f2d",
+    "stderr_sha256": "e943b7c8947ff5a0283ae8529ada36b2b4da14dc7af5121753792852c9050642",
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "timed_out": false
+  },
+  "comparison": {
+    "dimensions": {
+      "effects": true,
+      "exit": true,
+      "stderr": true,
+      "stdout": true
+    },
+    "effects_sha256": "faf27cd05d86446c13a6201bfb1904631c348a59c33f4f60d9578958be56b653",
+    "exact": true
+  },
+  "original_normalized_invocation": {
+    "argv": [
+      "$PYTHON",
+      "-B",
+      "scripts/transform_readme.py",
+      "--target",
+      "pypi"
+    ],
+    "cwd": "$WORK",
+    "env": {
+      "HOME": "$TASK_HOME",
+      "LC_ALL": "C.UTF-8",
+      "NO_COLOR": "1",
+      "PATH": "/usr/bin:/bin",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONHASHSEED": "0",
+      "PYTHONNOUSERSITE": "1",
+      "TZ": "UTC"
+    }
+  },
+  "run": {
+    "argv": [
+      "/usr/bin/strace",
+      "-f",
+      "-qq",
+      "-s",
+      "512",
+      "-e",
+      "trace=execve,execveat,open,openat,openat2,creat,io_uring_setup,clone,clone3,fork,vfork,rename,renameat,renameat2,newfstatat,wait4,exit_group,chdir,fchdir,close,dup,dup2,dup3,fcntl",
+      "-o",
+      "/workspace/uv-b-959-replay-v1/uv-29/O3/trace",
+      "/workspace/practical-d26-scratch-retry/supervisor",
+      "/workspace/uv-b-959-replay-v1/uv-29/O3/work/scripts/transform_readme.py",
+      "/workspace/uv-b-959-replay-v1/uv-29/O3/withdrawn.source",
+      "-",
+      "-",
+      "/workspace/uv-b-959-replay-v1/uv-29/O3/saved.exe",
+      "scripts/transform_readme.py",
+      "--target",
+      "pypi"
+    ],
+    "cwd": "/workspace/uv-b-959-replay-v1/uv-29/O3/work",
+    "elapsed_seconds": 0.29,
+    "environment": {
+      "HOME": "/workspace/uv-b-959-replay-v1/uv-29/O3/home",
+      "LC_ALL": "C.UTF-8",
+      "NO_COLOR": "1",
+      "PATH": "/usr/bin:/bin",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONHASHSEED": "0",
+      "PYTHONNOUSERSITE": "1",
+      "TZ": "UTC"
+    },
+    "exit_code": 0,
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "timed_out": false
+  },
+  "status": "observed_exact",
+  "trace": {
+    "exec_lines": [
+      "23115 execve(\"/workspace/practical-d26-scratch-retry/supervisor\", [\"/workspace/practical-d26-scratch-retry/supervisor\", \"/workspace/uv-b-959-replay-v1/uv-29/O3/work/scripts/transform_readme.py\", \"/workspace/uv-b-959-replay-v1/uv-29/O3/withdrawn.source\", \"-\", \"-\", \"/workspace/uv-b-959-replay-v1/uv-29/O3/saved.exe\", \"scripts/transform_readme.py\", \"--target\", \"pypi\"], 0x7ffedfeadc70 /* 8 vars */) = 0",
+      "23116 execve(\"/workspace/uv-b-959-replay-v1/uv-29/O3/saved.exe\", [\"scripts/transform_readme.py\", \"--target\", \"pypi\"], 0x7fffa3e7d508 /* 8 vars */) = 0"
+    ],
+    "sha256": "38fe0087b606881a2dd635c8533a1b85b863a2be444ba20ff182d1bef567f666",
+    "successful_cwd_or_escape_calls": [],
+    "successful_forbidden_opens": [],
+    "withdrawal_seen": true
+  }
+}
