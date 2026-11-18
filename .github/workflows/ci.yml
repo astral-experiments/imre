@@ -778,43 +778,59 @@ jobs:
             )
           fi
           python3 tests/run_suites_children.py
-          differential_status=0
+          isolated_status=0
+          remaining_log_dir=/tmp/imre-suites-thinlto
           if [[ "$FULL_THINLTO" == true ]]; then
+            isolated_suites=()
+            remaining_suites=()
+            declare -A seen_suites=()
+            for suite in "${suites[@]}"; do
+              seen_suites["$suite"]=1
+              case "$suite" in
+                differential|classes) isolated_suites+=("$suite") ;;
+                *) remaining_suites+=("$suite") ;;
+              esac
+            done
+            if (( ${#suites[@]} != 35 || ${#seen_suites[@]} != 35 || ${#isolated_suites[@]} != 2 || ${#remaining_suites[@]} != 33 )) || [[ "${isolated_suites[*]}" != "differential classes" ]]; then
+              echo "::error::Invalid full ThinLTO suite partition" >&2
+              exit 1
+            fi
+            remaining_log_dir=/tmp/imre-suites-thinlto-remaining
             (
-              differential_budget_status=0
-              differential_link_jobs="$(nproc)" || differential_budget_status=$?
+              isolated_budget_status=0
+              isolated_link_jobs="$(nproc)" || isolated_budget_status=$?
               if [[ -v IMRE_ENCODED_FLAGS ]]; then
-                differential_flag_attributes="${IMRE_ENCODED_FLAGS@a}"
+                isolated_flag_attributes="${IMRE_ENCODED_FLAGS@a}"
               else
-                differential_flag_attributes="${IMREFLAGS@a}"
+                isolated_flag_attributes="${IMREFLAGS@a}"
               fi
-              if (( differential_budget_status != 0 )) || [[ ! "$differential_link_jobs" =~ ^[1-9][0-9]*$ ]]; then
-                differential_budget_status=1
+              if (( isolated_budget_status != 0 )) || [[ ! "$isolated_link_jobs" =~ ^[1-9][0-9]*$ ]]; then
+                isolated_budget_status=1
                 echo "::error::Unable to determine the isolated ThinLTO linker job budget" >&2
-              elif [[ -n "$differential_flag_attributes" && "$differential_flag_attributes" != x ]]; then
-                differential_budget_status=1
+              elif [[ -n "$isolated_flag_attributes" && "$isolated_flag_attributes" != x ]]; then
+                isolated_budget_status=1
                 echo "::error::Active Imre compiler flags have incompatible Bash attributes" >&2
               elif [[ -v IMRE_ENCODED_FLAGS ]]; then
-                differential_separator=$'\x1f'
-                export IMRE_ENCODED_FLAGS="${IMRE_ENCODED_FLAGS}${IMRE_ENCODED_FLAGS:+$differential_separator}-C${differential_separator}link-arg=-Wl,--thinlto-jobs=$differential_link_jobs" || differential_budget_status=1
+                isolated_separator=$'\x1f'
+                export IMRE_ENCODED_FLAGS="${IMRE_ENCODED_FLAGS}${IMRE_ENCODED_FLAGS:+$isolated_separator}-C${isolated_separator}link-arg=-Wl,--thinlto-jobs=$isolated_link_jobs" || isolated_budget_status=1
               else
-                export IMREFLAGS="${IMREFLAGS:+$IMREFLAGS }-C link-arg=-Wl,--thinlto-jobs=$differential_link_jobs" || differential_budget_status=1
+                export IMREFLAGS="${IMREFLAGS:+$IMREFLAGS }-C link-arg=-Wl,--thinlto-jobs=$isolated_link_jobs" || isolated_budget_status=1
               fi
-              differential_suite_status=0
-              python3 tests/run_suites.py --workers 1 --kill-failed-children --log-dir /tmp/imre-suites-thinlto-differential --suites "${suites[0]}" \
-                -- --compiler target/release/imre --runtime target/lto/release/libimre_runtime.a --clang clang-18 --target "$imre_target" --lto-linker "$ci_lld" --opt-levels 3 || differential_suite_status=$?
-              if (( differential_budget_status != 0 || differential_suite_status != 0 )); then
+              isolated_suite_status=0
+              python3 tests/run_suites.py --workers 1 --kill-failed-children --log-dir /tmp/imre-suites-thinlto-isolated --suites "${isolated_suites[@]}" \
+                -- --compiler target/release/imre --runtime target/lto/release/libimre_runtime.a --clang clang-18 --target "$imre_target" --lto-linker "$ci_lld" --opt-levels 3 || isolated_suite_status=$?
+              if (( isolated_budget_status != 0 || isolated_suite_status != 0 )); then
                 exit 1
               fi
-            ) || differential_status=$?
-            suites=("${suites[@]:1}")
+            ) || isolated_status=$?
+            suites=("${remaining_suites[@]}")
           fi
           remaining_status=0
-          python3 tests/run_suites.py --workers 2 --kill-failed-children --log-dir /tmp/imre-suites-thinlto --suites "${suites[@]}" \
+          python3 tests/run_suites.py --workers 2 --kill-failed-children --log-dir "$remaining_log_dir" --suites "${suites[@]}" \
             -- --compiler target/release/imre --runtime target/lto/release/libimre_runtime.a --clang clang-18 --target "$imre_target" --lto-linker "$ci_lld" --opt-levels 3 || remaining_status=$?
           if [[ "$FULL_THINLTO" != true ]]; then
             exit "$remaining_status"
           fi
-          if (( differential_status != 0 || remaining_status != 0 )); then
+          if (( isolated_status != 0 || remaining_status != 0 )); then
             exit 1
           fi
