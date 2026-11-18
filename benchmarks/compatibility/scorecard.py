@@ -965,8 +965,8 @@ def outcome_text(counts, n):
     return ", ".join(f"{counts[k]:,} {labels[k]}" for k in labels if counts[k])
 
 
-def render(view):
-    fs, scripts = summary()
+def render(view, data=None):
+    fs, scripts = summary() if data is None else data
     frozen = {n: r for n, r in fs.items() if r["cohort"] == "frozen"}
     supplemental = {n: r for n, r in fs.items() if r["cohort"] == "supplemental"}
     def totals(rows):
@@ -979,6 +979,7 @@ def render(view):
     if is_snapshot():
         script_observed = sum(all(r["runs"][t]["outcome"] == "pass" for t in TIERS) for r in scripts)
         lines[-1] = f"Scripts: **{len(scripts)} of {expected} original commands have receipts**, **{script_observed} observed intersections**, **{sum(r['paired'] for r in scripts)} verified credited pairs**; **{expected-len(scripts)} not run**."
+        if COHORT["imre_revision"] == REVISION_959: lines[-1] += " " + script_cohort_text(scripts)
     def table(title, rows):
         lines.extend(["", f"#### {title}", "", "| Family | Raw originals | Stock | O0 | O3 | Observed stock/O0/O3 passes | Verified credited pairs | Historical mixed-revision credits |", "| --- | ---: | --- | --- | --- | ---: | --- | ---: |"])
         for name, r in sorted(rows.items()):
@@ -1011,23 +1012,55 @@ def replace_block(text, block):
     return before + block + after
 
 
-def render_root_summary(fs):
-    """Render the explicitly selected snapshot's staged modules for the root README."""
+REVISION_959 = '95908fb0acadc2a67304a8080e584deaef395746'
+SCRIPT_AUTHORITY = '880648b620f57905a495eb51fbb4600755ee0c54'
+
+
+def script_cohort_text(scripts):
+    """Count validated script pairs against the independently public historical cohort."""
+    import raw_control
+    raw_control.public_commit(sys.modules[__name__], SCRIPT_AUTHORITY)
+    raw = raw_control.git(ROOT, 'show', '--no-textconv', f'{SCRIPT_AUTHORITY}:benchmarks/compatibility/historical-scripts/join.jsonl')
+    rows = [json.loads(line) for line in raw.splitlines()]
+    ids = [row['id'] for row in rows]; canonical = set(canonical_originals('script'))
+    require(len(ids) == len(set(ids)) == COHORT['scripts']['expected_commands'] and set(ids) == canonical, 'historical script cohort differs from canonical originals')
+    successes = {row['id'] for row in rows if row['archived_reported_stock_exit'] == 0}
+    verified = [row['id'] for row in scripts if row['paired']]
+    require(len(verified) == len(set(verified)) and set(verified) <= successes, 'verified scripts exceed historical stock-success cohort')
+    return (f"**{len(verified):,} verified / {len(successes):,} historically reported stock-success commands** "
+            f"among **{len(ids):,} original script IDs** ([public historical authority]"
+            f"(https://github.com/astral-experiments/imre/commit/{SCRIPT_AUTHORITY})).")
+
+
+def root_markers(pin):
+    return (f'<!-- compatibility-snapshot-{pin}:start -->', f'<!-- compatibility-snapshot-{pin}:end -->')
+
+
+def render_root_summary(fs, scripts):
+    """Render module pairs and script pairs as distinct measures from one validated summary."""
     require(is_snapshot(), "root summary requires a snapshot")
-    pin = COHORT["imre_revision"]
-    staged = {name: row for name, row in fs.items() if row["receipts"] or row.get("pending")}
-    lines = [ROOT_SUMMARY_START, "### Current compatibility snapshot", "", f"Revision `{pin}` · **{sum(r['receipts'] for r in staged.values()):,} validated receipts**, **{sum(r['paired'] for r in staged.values()):,} verified pairs**.", "", "| Module | Raw originals | Verified pairs / status |", "| --- | ---: | --- |"]
-    for name, row in sorted(staged.items()):
-        status = ((f"{row['paired']:,} verified; " if row['receipts'] else '') + f"pending ({row['pending']:,} staged)") if row.get('pending') else f"{row['paired']:,} verified"
-        lines.append(f"| `{name}` | {row['originals']:,} | {status} |")
-    lines.extend(["", f"[Full revision table](benchmarks/compatibility/revisions/{pin}/docs/stdlib.md)", ROOT_SUMMARY_END])
-    return "\n".join(lines)
+    pin = COHORT['imre_revision']; start, end = root_markers(pin)
+    modules = {name: row for name, row in fs.items() if row['receipts'] or row.get('pending')}
+    lines = [start, '### Compatibility snapshot', '', f'Revision `{pin}`.', '',
+             '| Stdlib module | Verified pairs / raw originals | Status |', '| --- | ---: | --- |']
+    for name, row in sorted(modules.items()):
+        status = f"{row['pending']:,} staged, unverified" if row.get('pending') else 'validated'
+        lines.append(f"| `{name}` | {row['paired']:,} / {row['originals']:,} | {status} |")
+    lines += ['', 'Scripts: ' + script_cohort_text(scripts), '',
+              f'[Full revision table](benchmarks/compatibility/revisions/{pin}/docs/stdlib.md)', end]
+    return '\n'.join(lines)
 
 
 def replace_root_summary(text, block):
-    require(text.count(ROOT_SUMMARY_START) == text.count(ROOT_SUMMARY_END) == 1, "expected exactly one current snapshot block")
-    before, rest = text.split(ROOT_SUMMARY_START); _, after = rest.split(ROOT_SUMMARY_END)
-    return before + block + after
+    start, end = root_markers(COHORT['imre_revision'])
+    require(block.startswith(start+'\n') and block.endswith('\n'+end), 'root summary marker differs from revision')
+    if start in text or end in text:
+        require(text.count(start) == text.count(end) == 1, 'expected exactly one revision snapshot block')
+        before, rest = text.split(start); _, after = rest.split(end)
+        return before + block + after
+    require(text.count(ROOT_SUMMARY_START) == text.count(ROOT_SUMMARY_END) == 1, 'expected frozen historical snapshot block')
+    before, after = text.split(ROOT_SUMMARY_END)
+    return before + ROOT_SUMMARY_END + '\n\n' + block + after
 
 
 def main():
@@ -1049,16 +1082,16 @@ def main():
         require(any(row["receipts"] for row in fs.values()) or scripts, "cannot render a snapshot without genuine receipts")
         outputs = ((DATA_ROOT / "README.md", "readme"), (DATA_ROOT / "docs/stdlib.md", "stdlib"))
         for path, view in outputs:
-            new = render(view) + "\n"
+            new = render(view, (fs, scripts)) + "\n"
             if args.check: require(path.is_file() and path.read_text() == new, f"stale snapshot scorecard: {path.relative_to(ROOT)}")
             else: path.parent.mkdir(parents=True, exist_ok=True); path.write_text(new)
         if args.root_summary:
-            path = ROOT / "README.md"; old = path.read_text(); new = replace_root_summary(old, render_root_summary(fs))
+            path = ROOT / "README.md"; old = path.read_text(); new = replace_root_summary(old, render_root_summary(fs, scripts))
             if args.check: require(old == new, "stale current snapshot summary: README.md")
             else: path.write_text(new)
         return
     for path, view in ((ROOT / "README.md", "readme"), (ROOT / "docs/stdlib.md", "stdlib")):
-        old = path.read_text(); new = replace_block(old, render(view))
+        old = path.read_text(); new = replace_block(old, render(view, (fs, scripts)))
         if args.check: require(old == new, f"stale scorecard: {path.relative_to(ROOT)}")
         else: path.write_text(new)
 
