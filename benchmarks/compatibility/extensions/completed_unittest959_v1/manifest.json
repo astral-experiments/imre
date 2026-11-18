@@ -34,9 +34,13 @@
     "sha256": "02e8924aa17e58de615b5f3e70e1e8ed6b19828b8cbc2c2b567f0a7a97bbc7d8"
   },
   "files": {
+    "benchmarks/compatibility/extensions/completed_unittest959_v1/METHOD.md": "05a0fc55417bc7d144a3ba89e811839886b21031b8577fac350e50dac5c835a2",
     "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/COMPLETE.json": "d52af675171cdc42c1b3a7767d9a76494ec2d1a214e2805ce254e5bbf461afd0",
     "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/dataclasses-959.tar.gz": "02e8924aa17e58de615b5f3e70e1e8ed6b19828b8cbc2c2b567f0a7a97bbc7d8",
-    "benchmarks/compatibility/extensions/completed_unittest959_v1/templates/dataclasses.jsonl": "518d5bd9ea86538d69a7931604d438dda2cdb732a6a364f71a310a828a70f71b"
+    "benchmarks/compatibility/extensions/completed_unittest959_v1/patches/completed-unittest.patch": "4a13f0d9ffa5a397696664795659c186e7deeb24875fb633c86d40f2f0dafe72",
+    "benchmarks/compatibility/extensions/completed_unittest959_v1/policy.json": "f90a9c32758b061bf23c86f1bea160fa205b7a296b0ca9d6849a45d7d84fa22f",
+    "benchmarks/compatibility/extensions/completed_unittest959_v1/templates/dataclasses.jsonl": "518d5bd9ea86538d69a7931604d438dda2cdb732a6a364f71a310a828a70f71b",
+    "benchmarks/compatibility/extensions/completed_unittest959_v1/test_completed.py": "555bdbb274407c6f87cd0bde86d070417f45739c5136fb3a4c8efe91c20947ca"
   },
   "first_blocker": "current shared finite acceptance requires exit 0 and identical whole-suite raw streams; the actual complete native suites exited 1 with genuine tier-specific outcomes",
   "fixture_files": 1639,
@@ -50,6 +54,11 @@
   "observed_originals": 276,
   "observed_pass_intersection": 273,
   "other_originals_not_run": 0,
+  "policy": {
+    "path": "benchmarks/compatibility/extensions/completed_unittest959_v1/policy.json",
+    "sha256": "f90a9c32758b061bf23c86f1bea160fa205b7a296b0ca9d6849a45d7d84fa22f",
+    "status": "unapplied future source patch; independent review required"
+  },
   "predecessor_public_main": "91fee1a5123ed0dad2a20df091c0262356e33e9b",
   "results": {
     "O0": {
