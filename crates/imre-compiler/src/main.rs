@@ -36,7 +36,7 @@ const USAGE: &str = "Usage: imre check SOURCE.py [--module-root DIRECTORY] [--ex
        imre extension-header
        imre build-target [--output-dir DIRECTORY]
        imre wheel PROJECT [--out-dir DIR] [--overlay DIR] [--python PYTHON]
-       imre build SOURCE.py [-o OUTPUT] [BUILD OPTIONS]
+       imre build (SOURCE.py | -m MODULE) [-o OUTPUT] [BUILD OPTIONS]
        imre run SOURCE.py [BUILD OPTIONS] [-- PROGRAM_ARGUMENTS...]
 
 Build options:
@@ -60,6 +60,7 @@ Use --whole-program to optimize all modules together.
 Use --entry-profile FILE to compile selected branches and reject excluded modes at runtime.
 Override the cache location with IMRE_CACHE_DIR or bypass it with --no-cache.
 Run passes arguments after -- to the program.
+Build does not accept program arguments; pass them when running the saved image.
 ThinLTO (--lto-linker) requires explicit --runtime and --target.
 Build and run read IMREFLAGS (whitespace-separated) before command-line options.
 IMRE_ENCODED_FLAGS (ASCII 0x1f-separated) takes precedence over IMREFLAGS.";
@@ -272,7 +273,14 @@ fn run() -> Result<ExitCode, String> {
     let output = match &run_directory {
         Some(directory) => directory.path().join("program"),
         None => output
-            .or_else(|| source_path.file_stem().map(PathBuf::from))
+            .or_else(|| match options.module_entry.as_deref() {
+                Some(name) => name
+                    .rsplit('.')
+                    .next()
+                    .filter(|leaf| !leaf.is_empty())
+                    .map(PathBuf::from),
+                None => source_path.file_stem().map(PathBuf::from),
+            })
             .ok_or("Could not infer an executable name from the source path; pass -o OUTPUT.")?,
     };
     #[cfg(unix)]
@@ -385,11 +393,11 @@ fn run() -> Result<ExitCode, String> {
                 &link,
             )
         });
-    // Keep explicit extension paths on their ordinary linker path.
-    // Generated module objects are still keyed by their complete LLVM IR.
+    // A saved named entry must establish checked admission on every build. Keep
+    // its object cache, but neither reuse nor publish an executable cache entry.
     let executable_cache = cache
         .as_ref()
-        .filter(|_| options.extension_paths.is_empty());
+        .filter(|_| !options.require_checked_module_entry && options.extension_paths.is_empty());
     if let Some(cache) = &cache {
         if identity(&output)?.starts_with(&cache.root) {
             return Err("output cannot overwrite the executable cache".into());
@@ -548,6 +556,7 @@ fn run() -> Result<ExitCode, String> {
                 dir.path(),
                 cache.as_ref().filter(|_| {
                     stage.is_some()
+                        || options.require_checked_module_entry
                         || sources.relink_site_wheel
                         || !options.extension_paths.is_empty()
                 }),

@@ -1,0 +1,7 @@
+{
+  "bwrap_sha256": "573236e5328ac2ebb08f59ae3a9805b4f8d12bdef14be8af4450d5463294985f",
+  "exit_code": 1,
+  "masked_original_entry": "/workspace/uv-b-959-replay-v1/uv-29/O0/work/scripts/transform_readme.py",
+  "stderr": "stat: cannot statx '/workspace/uv-b-959-replay-v1/uv-29/O0/work/scripts/transform_readme.py': No such file or directory\n",
+  "trace_sha256": "9213dda2ab8434b4e05a38589a8d9c394ecfb21ae0c0dd9ad0acc3b8b9c183da"
+}

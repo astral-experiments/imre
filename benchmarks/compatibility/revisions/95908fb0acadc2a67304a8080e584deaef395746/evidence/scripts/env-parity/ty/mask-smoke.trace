@@ -1,0 +1,175 @@
+41143 execve("/usr/bin/bwrap", ["/usr/bin/bwrap", "--ro-bind", "/", "/", "--tmpfs", "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts", "--", "/usr/bin/stat", "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts/transform_readme.py"], ["PATH=/usr/bin:/bin", "LC_ALL=C.UTF-8"]) = 0
+41143 openat(AT_FDCWD</workspace>, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache>
+41143 close(3</etc/ld.so.cache>)        = 0
+41143 openat(AT_FDCWD</workspace>, "/lib/x86_64-linux-gnu/libselinux.so.1", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libselinux.so.1>
+41143 close(3</usr/lib/x86_64-linux-gnu/libselinux.so.1>) = 0
+41143 openat(AT_FDCWD</workspace>, "/lib/x86_64-linux-gnu/libcap.so.2", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libcap.so.2.75>
+41143 close(3</usr/lib/x86_64-linux-gnu/libcap.so.2.75>) = 0
+41143 openat(AT_FDCWD</workspace>, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libc.so.6>
+41143 close(3</usr/lib/x86_64-linux-gnu/libc.so.6>) = 0
+41143 openat(AT_FDCWD</workspace>, "/lib/x86_64-linux-gnu/libpcre2-8.so.0", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libpcre2-8.so.0.14.0>
+41143 close(3</usr/lib/x86_64-linux-gnu/libpcre2-8.so.0.14.0>) = 0
+41143 openat(AT_FDCWD</workspace>, "/proc/filesystems", O_RDONLY|O_CLOEXEC) = 3</proc/filesystems>
+41143 close(3</proc/filesystems>)       = 0
+41143 openat(AT_FDCWD</workspace>, "/proc/mounts", O_RDONLY|O_CLOEXEC) = 3</proc/41143/mounts>
+41143 close(3</proc/41143/mounts>)      = 0
+41143 openat(AT_FDCWD</workspace>, "/proc/sys/kernel/overflowuid", O_RDONLY|O_CLOEXEC) = 3</proc/sys/kernel/overflowuid>
+41143 close(3</proc/sys/kernel/overflowuid>) = 0
+41143 openat(AT_FDCWD</workspace>, "/proc/sys/kernel/overflowgid", O_RDONLY|O_CLOEXEC) = 3</proc/sys/kernel/overflowgid>
+41143 close(3</proc/sys/kernel/overflowgid>) = 0
+41143 openat(AT_FDCWD</workspace>, "/proc", O_RDONLY|O_PATH) = 3</proc>
+41143 wait4(-1, 0x7ffd04818b70, WNOHANG, NULL) = -1 ECHILD (No child processes)
+41143 clone(child_stack=NULL, flags=CLONE_NEWNS|CLONE_NEWUSER|SIGCHLD) = 41144
+41143 openat(3</proc>, "41144/ns", O_RDONLY|O_PATH) = 5</proc/41144/ns>
+41143 newfstatat(5</proc/41144/ns>, "mnt", {st_dev=makedev(0, 0x4), st_ino=4026532304, st_mode=S_IFREG|0444, st_nlink=1, st_uid=0, st_gid=0, st_blksize=4096, st_blocks=0, st_size=0, st_atime=1794963529 /* 2026-11-17T19:58:49.788531745-0500 */, st_atime_nsec=788531745, st_mtime=1794963529 /* 2026-11-17T19:58:49.788531745-0500 */, st_mtime_nsec=788531745, st_ctime=1794963529 /* 2026-11-17T19:58:49.788531745-0500 */, st_ctime_nsec=788531745}, 0) = 0
+41143 close(5</proc/41144/ns>)          = 0
+41143 close(4<{eventfd-count=0, eventfd-id=14, eventfd-semaphore=0}> <unfinished ...>
+41144 close(4<{eventfd-count=0, eventfd-id=14, eventfd-semaphore=0}> <unfinished ...>
+41143 <... close resumed>)              = 0
+41143 openat(3</proc>, "self/fd", O_RDONLY|O_NOCTTY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY <unfinished ...>
+41144 <... close resumed>)              = 0
+41143 <... openat resumed>)             = 4</proc/41143/fd>
+41143 fcntl(4</proc/41143/fd>, F_GETFL) = 0x18800 (flags O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_DIRECTORY)
+41143 fcntl(4</proc/41143/fd>, F_SETFD, FD_CLOEXEC) = 0
+41143 close(3</proc>)                   = 0
+41143 close(4</proc/41143/fd>)          = 0
+41144 openat(3</proc>, "self", O_RDONLY|O_PATH) = 4</proc/41144>
+41144 openat(4</proc/41144>, "uid_map", O_RDWR|O_CLOEXEC) = 5</proc/41144/uid_map>
+41144 close(5</proc/41144/uid_map>)     = 0
+41144 openat(4</proc/41144>, "setgroups", O_RDWR|O_CLOEXEC) = 5</proc/41144/setgroups>
+41144 close(5</proc/41144/setgroups>)   = 0
+41144 openat(4</proc/41144>, "gid_map", O_RDWR|O_CLOEXEC) = 5</proc/41144/gid_map>
+41144 close(5</proc/41144/gid_map>)     = 0
+41144 close(4</proc/41144>)             = 0
+41144 mount(NULL, "/", NULL, MS_REC|MS_SILENT|MS_SLAVE, NULL) = 0
+41144 mount("tmpfs", "/tmp", "tmpfs", MS_NOSUID|MS_NODEV, NULL) = 0
+41144 chdir("/tmp")                     = 0
+41144 mount("newroot", "newroot", NULL, MS_MGC_VAL|MS_BIND|MS_REC|MS_SILENT, NULL) = 0
+41144 pivot_root("/tmp", "oldroot")     = 0
+41144 chdir("/")                        = 0
+41144 mount("oldroot/proc", "proc", NULL, MS_BIND|MS_REC|MS_SILENT, NULL) = 0
+41144 openat(AT_FDCWD</>, "/oldroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</oldroot>
+41144 openat2(4</oldroot>, "/", {flags=O_RDONLY|O_PATH, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 5</oldroot>
+41144 close(4</oldroot>)                = 0
+41144 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+41144 openat2(4</newroot>, "/", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 6</newroot>
+41144 close(4</newroot>)                = 0
+41144 openat(6</newroot>, ".", O_RDONLY|O_NOFOLLOW|O_CLOEXEC|O_PATH) = 4</newroot>
+41144 mount("/proc/self/fd/5", "/proc/self/fd/4", NULL, MS_BIND|MS_REC|MS_SILENT, NULL) = 0
+41144 openat(3</proc>, "self/mountinfo", O_RDONLY|O_CLOEXEC) = 7</proc/41144/mountinfo>
+41144 close(7</proc/41144/mountinfo>)   = 0
+41144 mount("none", "/newroot", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+41144 mount("none", "/newroot/proc", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+41144 mount("none", "/newroot/dev", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_REMOUNT|MS_BIND|MS_SILENT, NULL) = 0
+41144 mount("none", "/newroot/dev/pts", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+41144 mount("none", "/newroot/dev/shm", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+41144 mount("none", "/newroot/dev/mqueue", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+41144 mount("none", "/newroot/sys", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+41144 mount("none", "/newroot/sys/fs/cgroup", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+41144 mount("none", "/newroot/run", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+41144 mount("none", "/newroot/run/codex-runtime-secrets", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+41144 mount("none", "/newroot/run/codex-ssh", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+41144 mount("none", "/newroot/run/lock", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+41144 close(6</newroot>)                = 0
+41144 close(4</newroot>)                = 0
+41144 close(5</oldroot>)                = 0
+41144 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+41144 openat2(4</newroot>, "/", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 5</newroot>
+41144 close(4</newroot>)                = 0
+41144 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+41144 openat2(4</newroot>, "/workspace", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 6</newroot/workspace>
+41144 close(4</newroot>)                = 0
+41144 close(5</newroot>)                = 0
+41144 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+41144 openat2(4</newroot>, "/workspace/ruff-b-practical-95908", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 5</newroot/workspace/ruff-b-practical-95908>
+41144 close(4</newroot>)                = 0
+41144 close(6</newroot/workspace>)      = 0
+41144 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+41144 openat2(4</newroot>, "/workspace/ruff-b-practical-95908/followup-880648", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 6</newroot/workspace/ruff-b-practical-95908/followup-880648>
+41144 close(4</newroot>)                = 0
+41144 close(5</newroot/workspace/ruff-b-practical-95908>) = 0
+41144 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+41144 openat2(4</newroot>, "/workspace/ruff-b-practical-95908/followup-880648/ty05", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 5</newroot/workspace/ruff-b-practical-95908/followup-880648/ty05>
+41144 close(4</newroot>)                = 0
+41144 close(6</newroot/workspace/ruff-b-practical-95908/followup-880648>) = 0
+41144 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+41144 openat2(4</newroot>, "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 6</newroot/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture>
+41144 close(4</newroot>)                = 0
+41144 close(5</newroot/workspace/ruff-b-practical-95908/followup-880648/ty05>) = 0
+41144 openat(6</newroot/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture>, "scripts", O_RDONLY|O_NOFOLLOW|O_CLOEXEC|O_PATH) = 4</newroot/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts>
+41144 mount("tmpfs", "/proc/self/fd/4", "tmpfs", MS_NOSUID|MS_NODEV, "mode=0755") = 0
+41144 close(6</newroot/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture>) = 0
+41144 close(4</newroot/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts>) = 0
+41144 mount("oldroot", "oldroot", NULL, MS_REC|MS_SILENT|MS_PRIVATE, NULL) = 0
+41144 umount2("oldroot", MNT_DETACH)    = 0
+41144 openat(AT_FDCWD</>, "/", O_RDONLY|O_DIRECTORY) = 4</>
+41144 chdir("/newroot")                 = 0
+41144 pivot_root(".", ".")              = 0
+41144 fchdir(4</>)                      = 0
+41144 umount2(".", MNT_DETACH)          = 0
+41144 chdir("/")                        = 0
+41144 close(4</>)                       = 0
+41144 chdir("/workspace")               = 0
+41144 close(3</proc>)                   = 0
+41144 execve("/usr/bin/stat", ["/usr/bin/stat", "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts/transform_readme.py"], ["PATH=/usr/bin:/bin", "LC_ALL=C.UTF-8", "PWD=/workspace"]) = 0
+41144 openat(AT_FDCWD</workspace>, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache>
+41144 close(3</etc/ld.so.cache>)        = 0
+41144 openat(AT_FDCWD</workspace>, "/lib/x86_64-linux-gnu/libselinux.so.1", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libselinux.so.1>
+41144 close(3</usr/lib/x86_64-linux-gnu/libselinux.so.1>) = 0
+41144 openat(AT_FDCWD</workspace>, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libc.so.6>
+41144 close(3</usr/lib/x86_64-linux-gnu/libc.so.6>) = 0
+41144 openat(AT_FDCWD</workspace>, "/lib/x86_64-linux-gnu/libpcre2-8.so.0", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libpcre2-8.so.0.14.0>
+41144 close(3</usr/lib/x86_64-linux-gnu/libpcre2-8.so.0.14.0>) = 0
+41144 openat(AT_FDCWD</workspace>, "/proc/filesystems", O_RDONLY|O_CLOEXEC) = 3</proc/filesystems>
+41144 close(3</proc/filesystems>)       = 0
+41144 openat(AT_FDCWD</workspace>, "/proc/mounts", O_RDONLY|O_CLOEXEC) = 3</proc/41144/mounts>
+41144 close(3</proc/41144/mounts>)      = 0
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/locale/locale-archive", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41144 openat(AT_FDCWD</workspace>, "/usr/share/locale/locale.alias", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/locale/C.UTF-8/LC_IDENTIFICATION", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/locale/C.utf8/LC_IDENTIFICATION", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_IDENTIFICATION>
+41144 close(3</usr/lib/locale/C.utf8/LC_IDENTIFICATION>) = 0
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache>
+41144 close(3</usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache>) = 0
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/locale/C.UTF-8/LC_MEASUREMENT", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/locale/C.utf8/LC_MEASUREMENT", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_MEASUREMENT>
+41144 close(3</usr/lib/locale/C.utf8/LC_MEASUREMENT>) = 0
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/locale/C.UTF-8/LC_TELEPHONE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/locale/C.utf8/LC_TELEPHONE", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_TELEPHONE>
+41144 close(3</usr/lib/locale/C.utf8/LC_TELEPHONE>) = 0
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/locale/C.UTF-8/LC_ADDRESS", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/locale/C.utf8/LC_ADDRESS", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_ADDRESS>
+41144 close(3</usr/lib/locale/C.utf8/LC_ADDRESS>) = 0
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/locale/C.UTF-8/LC_NAME", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/locale/C.utf8/LC_NAME", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_NAME>
+41144 close(3</usr/lib/locale/C.utf8/LC_NAME>) = 0
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/locale/C.UTF-8/LC_PAPER", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/locale/C.utf8/LC_PAPER", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_PAPER>
+41144 close(3</usr/lib/locale/C.utf8/LC_PAPER>) = 0
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/locale/C.UTF-8/LC_MESSAGES", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/locale/C.utf8/LC_MESSAGES", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_MESSAGES>
+41144 close(3</usr/lib/locale/C.utf8/LC_MESSAGES>) = 0
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/locale/C.utf8/LC_MESSAGES/SYS_LC_MESSAGES", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_MESSAGES/SYS_LC_MESSAGES>
+41144 close(3</usr/lib/locale/C.utf8/LC_MESSAGES/SYS_LC_MESSAGES>) = 0
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/locale/C.UTF-8/LC_MONETARY", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/locale/C.utf8/LC_MONETARY", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_MONETARY>
+41144 close(3</usr/lib/locale/C.utf8/LC_MONETARY>) = 0
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/locale/C.UTF-8/LC_COLLATE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/locale/C.utf8/LC_COLLATE", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_COLLATE>
+41144 close(3</usr/lib/locale/C.utf8/LC_COLLATE>) = 0
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/locale/C.UTF-8/LC_TIME", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/locale/C.utf8/LC_TIME", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_TIME>
+41144 close(3</usr/lib/locale/C.utf8/LC_TIME>) = 0
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/locale/C.UTF-8/LC_NUMERIC", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/locale/C.utf8/LC_NUMERIC", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_NUMERIC>
+41144 close(3</usr/lib/locale/C.utf8/LC_NUMERIC>) = 0
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/locale/C.UTF-8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+41144 openat(AT_FDCWD</workspace>, "/usr/lib/locale/C.utf8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_CTYPE>
+41144 close(3</usr/lib/locale/C.utf8/LC_CTYPE>) = 0
+41144 statx(AT_FDCWD</workspace>, "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts/transform_readme.py", AT_STATX_SYNC_AS_STAT|AT_SYMLINK_NOFOLLOW|AT_NO_AUTOMOUNT, STATX_ALL, 0x7ffe14dc6f30) = -1 ENOENT (No such file or directory)
+41144 fcntl(1<pipe:[216039]>, F_GETFL)  = 0x1 (flags O_WRONLY)
+41144 close(1<pipe:[216039]>)           = 0
+41144 close(2<pipe:[216040]>)           = 0
+41144 exit_group(1)                     = ?
+41143 wait4(-1, [{WIFEXITED(s) && WEXITSTATUS(s) == 1}], WNOHANG, NULL) = 41144
+41143 exit_group(1)                     = ?

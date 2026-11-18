@@ -1,0 +1,192 @@
+{
+  "cohorts": {
+    "finite-959": {
+      "artifacts": {
+        "O0_build_json": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/original/O0.build.json",
+        "O0_build_stderr": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/original/O0.build.stderr",
+        "O0_build_stdout": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/original/O0.build.stdout",
+        "O0_effects_after": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/selected/O0.withdraw.effects.after.json",
+        "O0_effects_before": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/selected/O0.withdraw.effects.before.json",
+        "O0_meta": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/selected/O0.withdraw.json",
+        "O0_stderr": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/selected/stock.stderr",
+        "O0_stdout": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/selected/O0.withdraw.stdout",
+        "O0_trace": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/selected/O0.trace",
+        "O3_build_json": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/original/O3.build.json",
+        "O3_build_stderr": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/original/O3.build.stderr",
+        "O3_build_stdout": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/original/O3.build.stdout",
+        "O3_effects_after": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/selected/O3.withdraw.effects.after.json",
+        "O3_effects_before": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/selected/O3.withdraw.effects.before.json",
+        "O3_meta": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/selected/O3.withdraw.json",
+        "O3_stderr": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/selected/stock.stderr",
+        "O3_stdout": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/selected/O3.withdraw.stdout",
+        "O3_trace": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/selected/O3.trace",
+        "cli_depfile": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/custody/ruff-b/imre.d",
+        "collector": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/run-only-controller.py",
+        "custody_build_log": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/custody/ruff-b/build.log",
+        "custody_setup": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/custody/ruff-b/setup.json",
+        "direct_launcher": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/original/direct.negative.launcher.py",
+        "direct_meta": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/original/direct.gate.json",
+        "direct_stderr": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/original/direct.gate.stderr",
+        "direct_stdout": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/original/direct.gate.stdout",
+        "direct_trace": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/original/direct.gate.trace",
+        "gate_probe_build": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/original-probe-build.raw",
+        "gate_probe_source": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/scripts/uvb-strict/capture/raw_control_probe_sources.c",
+        "generated_witness": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/custody/generated-inputs.json",
+        "imported_launcher": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/original/imported.negative.launcher.py",
+        "imported_meta": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/original/imported.gate.json",
+        "imported_stderr": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/original/imported.gate.stderr",
+        "imported_stdout": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/original/imported.gate.stdout",
+        "imported_trace": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/original/imported.gate.trace",
+        "original_controller": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/original-controller.py",
+        "poison": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/original/imported.poison.py",
+        "policy": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/native-open-policy.json",
+        "positive_launcher": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/launcher.py",
+        "run": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/run.json",
+        "runtime_depfile": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/custody/ruff-b/libimre_runtime.d",
+        "setup": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/setup.json",
+        "stock_effects_after": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/selected/stock.effects.after.json",
+        "stock_effects_before": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/selected/stock.effects.before.json",
+        "stock_meta": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/selected/stock.json",
+        "stock_source": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/stock.source.py",
+        "stock_stderr": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/selected/stock.stderr",
+        "stock_stdout": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/selected/stock.stdout",
+        "transfer": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/custody/ruff-b/transfer-provenance.json",
+        "withdraw_probe_build": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/withdrawal-supervisor-build.json",
+        "withdraw_probe_source": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/fnmatch/withdrawal-supervisor.c"
+      },
+      "gate_probe": "/workspace/scratch/fnmatch-95908-replay-v1/raw-control-probe",
+      "kind": "finite-959",
+      "platform": {
+        "arch": "x86_64",
+        "os": "linux",
+        "release": "6.18.57"
+      },
+      "strict_source_control": "native-content-v1",
+      "withdraw_probe": "/workspace/scratch/fnmatch-95908-replay-v1/correction-v2/raw-control-probe-child-env"
+    }
+  },
+  "family": "fnmatch",
+  "originals": [
+    {
+      "id": "test.test_fnmatch.FilterFalseTestCase.test_case",
+      "launcher_cohort": "finite-959",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_fnmatch.FilterFalseTestCase.test_filterfalse",
+      "launcher_cohort": "finite-959",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_fnmatch.FilterFalseTestCase.test_mix_bytes_str",
+      "launcher_cohort": "finite-959",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_fnmatch.FilterFalseTestCase.test_sep",
+      "launcher_cohort": "finite-959",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_fnmatch.FilterTestCase.test_case",
+      "launcher_cohort": "finite-959",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_fnmatch.FilterTestCase.test_filter",
+      "launcher_cohort": "finite-959",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_fnmatch.FilterTestCase.test_mix_bytes_str",
+      "launcher_cohort": "finite-959",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_fnmatch.FilterTestCase.test_sep",
+      "launcher_cohort": "finite-959",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_fnmatch.FnmatchTestCase.test_bytes",
+      "launcher_cohort": "finite-959",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_fnmatch.FnmatchTestCase.test_case",
+      "launcher_cohort": "finite-959",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_fnmatch.FnmatchTestCase.test_char_set",
+      "launcher_cohort": "finite-959",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_fnmatch.FnmatchTestCase.test_fnmatch",
+      "launcher_cohort": "finite-959",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_fnmatch.FnmatchTestCase.test_fnmatchcase",
+      "launcher_cohort": "finite-959",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_fnmatch.FnmatchTestCase.test_mix_bytes_str",
+      "launcher_cohort": "finite-959",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_fnmatch.FnmatchTestCase.test_range",
+      "launcher_cohort": "finite-959",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_fnmatch.FnmatchTestCase.test_sep",
+      "launcher_cohort": "finite-959",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_fnmatch.FnmatchTestCase.test_sep_in_char_set",
+      "launcher_cohort": "finite-959",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_fnmatch.FnmatchTestCase.test_sep_in_range",
+      "launcher_cohort": "finite-959",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_fnmatch.FnmatchTestCase.test_slow_fnmatch",
+      "launcher_cohort": "finite-959",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_fnmatch.FnmatchTestCase.test_warnings",
+      "launcher_cohort": "finite-959",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_fnmatch.TranslateTestCase.test_star_indices_locations",
+      "launcher_cohort": "finite-959",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_fnmatch.TranslateTestCase.test_translate",
+      "launcher_cohort": "finite-959",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_fnmatch.TranslateTestCase.test_translate_expressions",
+      "launcher_cohort": "finite-959",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_fnmatch.TranslateTestCase.test_translate_wildcards",
+      "launcher_cohort": "finite-959",
+      "occurrence": 1
+    }
+  ],
+  "schema": "imre.compatibility.raw-control.v1"
+}

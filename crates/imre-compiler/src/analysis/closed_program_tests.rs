@@ -47,7 +47,7 @@ fn fallback_call_aliases_and_nested_operands() {
     assert!(
         error.starts_with(&format!(
             "{}:6:13: Imre: expected int, got bool",
-            entry.display()
+            fs::canonicalize(&entry).unwrap().display()
         )),
         "{error}"
     );
