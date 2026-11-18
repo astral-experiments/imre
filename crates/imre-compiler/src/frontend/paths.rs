@@ -126,33 +126,13 @@ impl Checker<'_> {
         }
     }
 
-    pub(super) fn directory_manager(
-        &mut self,
-        intrinsic: Intrinsic,
-        call: &ast::ExprCall,
-    ) -> Result<Expr, String> {
-        let temporary = intrinsic == Intrinsic::TemporaryDirectory;
-        let value = if temporary {
-            self.temporary_directory(call)?
-        } else {
-            self.reject_builtin_keywords(call)?;
-            match call.arguments.args.as_ref() {
-                [] => Expr::none(),
-                [arg] => self.expr(arg)?,
-                _ => {
-                    return Err(error(
-                        self.source,
-                        call,
-                        "nullcontext accepts one path or string value",
-                    ));
-                }
-            }
-        };
+    pub(super) fn directory_manager(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let value = self.temporary_directory(call)?;
         let source = value.ty;
         let domain = self.types.union(&[Type::Str, Type::Path]).unwrap();
         let value = self.coerce(value, self.types.optional(domain), call)?;
         Ok(operation(
-            PathOperation::ContextNew { temporary },
+            PathOperation::ContextNew,
             self.types.directory_context(source),
             vec![value],
         ))
@@ -180,11 +160,17 @@ impl Checker<'_> {
             {
                 Ok(operation(PathOperation::Scripts, Type::Str, Vec::new()))
             }
-            (Intrinsic::OsPathExists, [arg]) => Ok(operation(
-                PathOperation::OsExists,
-                Type::Bool,
-                vec![self.path_argument(arg)?],
-            )),
+            (Intrinsic::OsPathExists, [arg]) => {
+                let value = self.expr(arg)?;
+                if value.ty == Type::PythonObject {
+                    return self.call_import_with_operands(call, vec![value]);
+                }
+                Ok(operation(
+                    PathOperation::OsExists,
+                    Type::Bool,
+                    vec![self.path_text(value, arg)?],
+                ))
+            }
             _ => Err(error(
                 self.source,
                 call,
@@ -1072,5 +1058,34 @@ impl Checker<'_> {
         let (scope, args) = self.held_path_arguments(args);
         let pattern = call.arguments.find_argument_value("pattern", 0).unwrap();
         Ok(scope.finish(self.glob_pattern(&args, args[1].clone(), name == "rglob", pattern)?))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn exists_accepts_an_abspath_from_a_boxed_namespace() {
+        let source = concat!(
+            "import argparse, os.path\n",
+            "def main():\n",
+            "    parser = argparse.ArgumentParser()\n",
+            "    parser.add_argument('file', type=str)\n",
+            "    parser.add_argument('--benchmark', action='append')\n",
+            "    args = parser.parse_args()\n",
+            "    requirements_file = os.path.abspath(args.file)\n",
+            "    return os.path.exists(requirements_file)\n",
+            "main()\n",
+        );
+        crate::check(source).unwrap();
+        crate::check(&source.replace(
+            "    parser.add_argument('--benchmark', action='append')\n",
+            "",
+        ))
+        .unwrap();
+        assert!(
+            crate::check("import os.path\nos.path.exists([1])\n")
+                .unwrap_err()
+                .contains("a filesystem path requires str or pathlib.Path")
+        );
     }
 }

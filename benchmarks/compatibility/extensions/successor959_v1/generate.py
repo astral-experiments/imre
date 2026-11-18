@@ -1,19 +1,23 @@
-"""Produce an inactive candidate receipt from exact sealed finite-run events."""
-from pathlib import Path
+"""Generate only inactive finite receipts; counting requires public activation authority."""
 import json
+from pathlib import Path
 import raw_control
+from extensions.successor959_v1 import authority
 
 
-def finite(api, binding, destination):
-    roles=binding['roles'];source=binding['source'];originals=json.loads((api.ROOT/roles['originals']).read_bytes());observed=[json.loads(x) for x in (api.ROOT/roles['observed']).read_text().splitlines()];run=json.loads((api.ROOT/roles['run']).read_bytes());assessment=json.loads((api.ROOT/roles['assessment']).read_bytes());inventories={tier:raw_control.event_index(api.ROOT/roles[tier+'_stderr'],api.require) for tier in api.TIERS}
-    keys=[(x['id'],x['occurrence']) for x in originals];api.require(len(keys)==len(set(keys))==assessment['observed_originals'] and all(set(index)==set(keys) for index in inventories.values()) and [(x['id'],x['occurrence']) for x in observed]==keys, 'finite sealed original inventory differs')
-    rows=[]
+def finite(api,binding,destination):
+    roles=binding['roles'];delta=binding['identity']
+    def read(role):
+        loc=roles[role]
+        if '!' in loc:
+            arc,member=loc.split('!',1);return authority.archive_members(api,arc,json.dumps(delta['archives'][arc],sort_keys=True))[member]
+        return authority.safe_path(api,loc).read_bytes()
+    originals=json.loads(read('originals'));observed=[json.loads(x) for x in read('observed').splitlines()];assessment=json.loads(read('assessment'));run=json.loads(read('run'));metas={**run['runs'],'stock':json.loads(read('stock_meta')),'O0':json.loads(read('O0_meta'))};inventories={t:{(x['id'],x['occurrence']):x for x in raw_control.parse(read(t+'_stderr'),False)['originals']} for t in api.TIERS};keys=[(x['id'],x['occurrence']) for x in originals]
+    api.require(len(keys)==len(set(keys))==assessment['observed_originals'] and [(x['id'],x['occurrence']) for x in observed]==keys and all(set(i)==set(keys) for i in inventories.values()),'finite original occurrence inventory differs');rows=[]
     for item in originals:
-        key=(item['id'],item['occurrence']);row={'schema':api.SCHEMA,'kind':'stdlib','family':binding['family'],'id':key[0],'occurrence':key[1],'source':source,'imre_revision':assessment['revision'],'platform':dict(api.CANONICAL_COHORT['platform']),'omission_reason':None,'paired':False,'credit_reason':binding['identity_blocker'],'runs':{}}
-        api.canonical_original(row,'stdlib')
+        key=(item['id'],item['occurrence']);row={'schema':api.SCHEMA,'kind':'stdlib','family':binding['family'],'id':key[0],'occurrence':key[1],'source':binding['source'],'imre_revision':assessment['revision'],'platform':dict(api.CANONICAL_COHORT['platform']),'omission_reason':None,'paired':False,'credit_reason':delta['credit_reason'],'runs':{}};api.canonical_original(row,'stdlib')
         for tier in api.TIERS:
-            meta=run['runs'][tier];event=inventories[tier][key];row['runs'][tier]={'outcome':event['outcome'],'argv':meta['argv'],'environment':meta['environment'],'evidence':roles[tier+'_stderr']+'#L'+str(event['line'])}
+            event=inventories[tier][key];meta=metas[tier];row['runs'][tier]={'outcome':event['outcome'],'argv':meta['argv'],'environment':meta['environment'],'evidence':roles[tier+'_stderr']+'#L'+str(event['line'])}
             if tier=='stock':row['runs'][tier].update(version=api.CANONICAL_COHORT['cpython_version'],full_version=assessment['stock_python_version'])
         rows.append(row)
-    destination.parent.mkdir(parents=True,exist_ok=True);destination.write_text(''.join(json.dumps(row,sort_keys=True,separators=(',',':'))+'\n' for row in rows))
-    return rows
+    destination.parent.mkdir(parents=True,exist_ok=True);destination.write_text(''.join(json.dumps(x,sort_keys=True,separators=(',',':'))+'\n' for x in rows));return rows
