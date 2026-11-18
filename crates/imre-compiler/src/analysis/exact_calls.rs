@@ -21,6 +21,10 @@ impl Session {
     /// Check executable first-party calls only when admitting fallback. The ordinary
     /// checker owns Python assignability errors; this pass adds the stricter scalar
     /// representation contract, for example `take(True)` where `take` expects `int`.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the fallback pass borrows the caller's semantic inputs and diagnostic output"
+    )]
     pub(super) fn exact_scalar_calls(
         &self,
         module: usize,
