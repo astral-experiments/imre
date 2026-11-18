@@ -754,6 +754,7 @@ impl<'a> PreparedBody<'a> {
             type_aliases,
             module_annotations: sites.module_annotations.into_body(),
             bundled,
+            profile_constrained: profile_exclusions.is_some(),
             path,
             module_start,
             docs,
@@ -1016,6 +1017,8 @@ struct SourceInfo<'a> {
     namespace_operations: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
     module_annotations: Option<crate::frontend::AnnotationProvider>,
     bundled: bool,
+    /// A constrained module's source bodies contain runtime exclusion traps.
+    profile_constrained: bool,
     path: Cow<'a, Path>,
     module_start: ruff_text_size::TextSize,
     docs: Option<crate::modules::doctest::SealedDocs>,
@@ -1214,7 +1217,9 @@ impl SourceMap<'_> {
                 }
             }
         }
-        let provider = if self.bundled && self.path == Path::new("<imre stdlib>/difflib.py") {
+        let provider = if self.profile_constrained {
+            None
+        } else if self.bundled && self.path == Path::new("<imre stdlib>/difflib.py") {
             match prefix.name {
                 "_calculate_ratio" => Some((None, permanent::DIFFLIB_CALCULATE_RATIO_BODY)),
                 "SequenceMatcher.__init__" => {

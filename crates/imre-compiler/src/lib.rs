@@ -1795,6 +1795,30 @@ print("result", call(b=2, a=1))
     }
 
     #[test]
+    fn entry_profile_exclusions_disable_bundled_source_accelerators() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        let profile = dir.path().join("profile.json");
+        std::fs::write(
+            &path,
+            "from difflib import SequenceMatcher\nprint(SequenceMatcher(None, 'a', 'a').ratio())\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &profile,
+            r#"{"difflib._calculate_ratio":{"length":"False"}}"#,
+        )
+        .unwrap();
+        let options = CompileOptions {
+            entry_profile: Some(profile),
+            ..CompileOptions::default()
+        };
+        let ir = super::compile_file(&path, None, &options).unwrap().llvm_ir;
+        assert!(!ir.contains("call i64 @imre_dyn_difflib_"));
+        assert!(ir.contains("requires length = False"));
+    }
+
+    #[test]
     fn registered_reduction_specializes_multiply_in_its_python_frame() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("paired.py");
