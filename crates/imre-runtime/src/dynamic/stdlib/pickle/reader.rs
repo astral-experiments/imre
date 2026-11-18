@@ -95,6 +95,7 @@ struct Layout {
     texts: usize,
     dense_prefix: usize,
     prefix_extra_memo: usize,
+    all_nonshort: bool,
 }
 
 struct Cursor<'a> {
@@ -149,6 +150,7 @@ fn preflight(data: &[u8]) -> Option<Layout> {
     // ASCII text. Keep that prefix in place even if a later item needs the
     // general grammar; only the remaining pushes need packed descriptors.
     let mut dense_prefix = 0usize;
+    let mut all_nonshort = true;
     while cursor.at < end && data[cursor.at] == SHORT_BINUNICODE {
         let Some(&length) = data.get(cursor.at.checked_add(1)?) else {
             break;
@@ -160,6 +162,7 @@ fn preflight(data: &[u8]) -> Option<Layout> {
         }
         cursor.at = text_end + 1;
         dense_prefix = dense_prefix.checked_add(1)?;
+        all_nonshort &= length > 2;
     }
     let mut items: Vec<Item> = Vec::new();
     items
@@ -183,6 +186,7 @@ fn preflight(data: &[u8]) -> Option<Layout> {
                 items.try_reserve(1).ok()?;
                 items.push(Item::text(offset, length, ascii)?);
                 texts = texts.checked_add(1)?;
+                all_nonshort &= length > 2;
             }
             BINGET | LONG_BINGET => {
                 let index = cursor.get_index(op)?;
@@ -214,6 +218,7 @@ fn preflight(data: &[u8]) -> Option<Layout> {
                     texts,
                     dense_prefix,
                     prefix_extra_memo,
+                    all_nonshort: all_nonshort && texts != 0,
                 });
             }
             _ => return None,
@@ -352,7 +357,11 @@ fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
     }
     let result = ctx.alloc(Value::List(values));
     if !layout.has_get {
-        ctx.heap.mark_fresh_text_list(result);
+        if layout.all_nonshort {
+            ctx.heap.mark_fresh_nonshort_text_list(result);
+        } else {
+            ctx.heap.mark_fresh_text_list(result);
+        }
     }
     if layout.has_get
         && let Value::List(values) = ctx.heap.get_mut(result)
@@ -504,6 +513,43 @@ mod tests {
                     assert!(invalidated.get());
                     assert!(!ctx.heap.is_fresh_text_list(value));
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn nonshort_text_provenance_excludes_empty_short_and_memo_aliases() {
+        fn frame(payload: &[u8]) -> Vec<u8> {
+            let mut bytes = vec![PROTO, 5, FRAME];
+            bytes.extend_from_slice(&(payload.len() as u64).to_le_bytes());
+            bytes.extend_from_slice(payload);
+            bytes
+        }
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        for (payload, narrow, fresh) in [
+            (&b"]\x94(\x8c\x03abc\x94\x8c\x03abc\x94e."[..], true, true),
+            (
+                &b"]\x94(\x8c\x03abc\x94\x8c\x02\xc3\xa9\x94e."[..],
+                false,
+                true,
+            ),
+            (&b"]\x94(\x8c\x03\xe2\x82\xac\x94e."[..], true, true),
+            (&b"]\x94(\x8c\x00\x94e."[..], false, true),
+            (&b"]\x94(e."[..], false, true),
+            (&b"]\x94(\x8c\x03abc\x94h\x01e."[..], false, false),
+        ] {
+            let data = ctx.alloc(Value::Bytes(frame(payload)));
+            let result = attempt_data(&mut ctx, data, false, || {})
+                .unwrap()
+                .unwrap()
+                .value();
+            assert_eq!(ctx.heap.is_fresh_text_list(result), fresh);
+            assert_eq!(ctx.heap.is_fresh_nonshort_text_list(result), narrow);
+            if narrow && payload == b"]\x94(\x8c\x03abc\x94\x8c\x03abc\x94e." {
+                let Value::List(items) = ctx.heap.get(result) else {
+                    unreachable!()
+                };
+                assert_ne!(items[0], items[1]);
             }
         }
     }

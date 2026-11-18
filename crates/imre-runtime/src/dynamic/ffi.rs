@@ -4319,11 +4319,22 @@ unsafe extern "C" fn imre_dyn_replacement_commit(
     }
     if old != NONE && old != value && !live.contains(&old) && ctx.heap.replace_statement_roots(live)
     {
-        // SAFETY: the closed checked region and its per-call witness prove that
-        // no list/non-singleton leaf alias or root remains after this successful
-        // store. Root replacement above removes ordinary operands; every possible
-        // reentrant operation cleared the witness before it could execute Python.
-        let _ = unsafe { ctx.heap.retire_proven_fresh_text_list(old) };
+        if ctx.heap.is_fresh_nonshort_text_list(old) {
+            // SAFETY: only this immediate authenticated no-GET decoder can mint
+            // the old per-call witness and narrow nonshort owner shape. The
+            // compiler's closed region excludes reads/escapes, and its guarded
+            // operations clear the witness before mutation, tracing, collection
+            // (including silent marking), finalization or signal dispatch. The
+            // exact private store succeeded and ordinary operand roots are gone.
+            // The producer therefore still owns every distinct nonshort leaf.
+            // A failed owner check leaves the entire graph for ordinary GC.
+            let _ = unsafe { ctx.heap.retire_certified_nonshort_text_list(old) };
+        } else if ctx.heap.is_fresh_text_list(old) {
+            // SAFETY: the same closed region and per-call witness prove no
+            // list/non-singleton alias or root remains; the checked routine
+            // additionally verifies short-string identity and every child.
+            let _ = unsafe { ctx.heap.retire_proven_fresh_text_list(old) };
+        }
     }
     if fresh == value && ctx.heap.is_fresh_text_list(fresh) {
         *proof = fresh;
@@ -5083,6 +5094,94 @@ mod tests {
         (list, singleton)
     }
 
+    fn nonshort_text_list(ctx: &mut Context, text: &str) -> (Id, Id) {
+        ctx.heap.reserve_unobserved_texts(1).unwrap();
+        let leaf = ctx.heap.unobserved_text(text, text.is_ascii());
+        let list = ctx.alloc(Value::List(vec![leaf]));
+        ctx.heap.mark_fresh_nonshort_text_list(list);
+        (list, leaf)
+    }
+
+    #[test]
+    fn private_replacement_certifies_nonshort_graph_only_with_a_live_witness() {
+        let (mut ctx, scope) = replacement_context();
+        let (old, _) = nonshort_text_list(&mut ctx, "first");
+        let (new, new_leaf) = nonshort_text_list(&mut ctx, "second");
+        ctx.bind_local(scope, "result", old);
+        let (mut proof, mut next) = (old, new);
+        let name = b"result";
+        // SAFETY: the private binding, two independently owned words and exact
+        // distinct nonshort graphs model a successful closed-region replacement.
+        unsafe {
+            imre_dyn_replacement_guard_result_store(
+                &ctx,
+                scope,
+                name.as_ptr(),
+                name.len(),
+                new,
+                &mut proof,
+                &mut next,
+            );
+            let replaced = imre_dyn_replacement_assign_target(
+                &mut ctx,
+                scope,
+                name.as_ptr(),
+                name.len(),
+                new,
+                &mut proof,
+                &mut next,
+            );
+            assert_eq!(replaced, FALSE);
+            imre_dyn_replacement_assignment_target_at(
+                &mut ctx,
+                0,
+                std::ptr::null(),
+                0,
+                replaced,
+                &mut proof,
+                &mut next,
+            );
+            imre_dyn_replacement_commit(
+                &mut ctx,
+                scope,
+                name.as_ptr(),
+                name.len(),
+                new,
+                std::ptr::null(),
+                0,
+                &mut proof,
+                &mut next,
+            );
+        }
+        assert_eq!((proof, next), (new, NONE));
+        assert!(!ctx.heap.is_fresh_text_list(old));
+        assert!(ctx.heap.is_fresh_nonshort_text_list(new));
+
+        // An untrusted effect invalidates the witness before the child can be
+        // mutated. The producer shape alone must never authorize retirement.
+        proof = NONE;
+        *ctx.heap.get_mut(new_leaf) = Value::List(Vec::new());
+        let (third, _) = nonshort_text_list(&mut ctx, "third");
+        ctx.bind_local(scope, "result", third);
+        next = third;
+        // SAFETY: absent old proof means this commit cannot retire the mutated graph.
+        unsafe {
+            imre_dyn_replacement_commit(
+                &mut ctx,
+                scope,
+                name.as_ptr(),
+                name.len(),
+                third,
+                std::ptr::null(),
+                0,
+                &mut proof,
+                &mut next,
+            );
+        }
+        assert!(ctx.heap.is_fresh_nonshort_text_list(new));
+        assert!(matches!(ctx.heap.get(new_leaf), Value::List(_)));
+    }
+
     #[test]
     fn private_replacement_retires_only_the_replaced_fresh_graph() {
         let (mut ctx, scope) = replacement_context();
@@ -5296,7 +5395,7 @@ mod tests {
     #[test]
     fn replacement_checkpoint_rechecks_after_non_ascii_filename_allocation() {
         let (mut ctx, scope) = replacement_context();
-        let (old, _) = fresh_text_list(&mut ctx, "fresh graph retained by local");
+        let (old, _) = nonshort_text_list(&mut ctx, "fresh graph retained by local");
         ctx.bind_local(scope, "result", old);
         ctx.heap.request_collection_after_next_slot_for_test();
         assert!(ctx.heap.replacement_checkpoint_safe(scope));
@@ -5317,6 +5416,7 @@ mod tests {
         }
         assert_eq!(proof, NONE);
         assert!(ctx.heap.is_fresh_text_list(old));
+        assert!(ctx.heap.is_fresh_nonshort_text_list(old));
         assert_eq!(ctx.scope_data(scope).names.get("result"), Some(&old));
     }
 

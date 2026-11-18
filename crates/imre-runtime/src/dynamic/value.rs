@@ -3265,6 +3265,7 @@ enum SlotShape {
     Vacant,
     Other,
     FreshTextList,
+    FreshNonshortTextList,
     ScalarLeaf,
     AsciiStr,
 }
@@ -3276,7 +3277,11 @@ impl SlotShape {
     }
 
     fn may_have_children(self) -> bool {
-        matches!(self, Self::Other | Self::FreshTextList)
+        matches!(self, Self::Other) || self.is_fresh_text_list()
+    }
+
+    fn is_fresh_text_list(self) -> bool {
+        matches!(self, Self::FreshTextList | Self::FreshNonshortTextList)
     }
 
     fn text(value: &str) -> Self {
@@ -4765,12 +4770,31 @@ impl Heap {
         self.slot_shapes[id as usize] = SlotShape::FreshTextList;
     }
 
+    /// Record a nonempty no-GET decoder list whose distinct exact text leaves
+    /// all have more than two UTF-8 bytes and cannot be short-string singletons.
+    pub(super) fn mark_fresh_nonshort_text_list(&mut self, id: Id) {
+        debug_assert!(
+            matches!(self.get(id), Value::List(items) if !items.is_empty()
+            && items.iter().all(|&child| matches!(self.get(child), Value::Str(text) if text.len() > 2)))
+        );
+        debug_assert!(self.slot_shapes[id as usize] == SlotShape::Other);
+        self.slot_shapes[id as usize] = SlotShape::FreshNonshortTextList;
+    }
+
     /// Producer provenance checked when a direct decode returns its per-call witness.
     pub(super) fn is_fresh_text_list(&self, id: Id) -> bool {
         usize::try_from(id)
             .ok()
             .and_then(|index| self.slot_shapes.get(index))
-            == Some(&SlotShape::FreshTextList)
+            .is_some_and(|shape| shape.is_fresh_text_list())
+    }
+
+    /// Distinguish the immediate no-GET nonshort producer from general fresh text.
+    pub(super) fn is_fresh_nonshort_text_list(&self, id: Id) -> bool {
+        usize::try_from(id)
+            .ok()
+            .and_then(|index| self.slot_shapes.get(index))
+            == Some(&SlotShape::FreshNonshortTextList)
     }
 
     /// A compiler-certified source local has no live frame, namespace, cell, or
@@ -5272,7 +5296,7 @@ impl Heap {
         self.invalidate_stream_bindings(target_id);
         if source != target
             && let shape = *self.slot_shapes.get(target_id)?
-            && (shape.is_scalar_leaf() || shape == SlotShape::FreshTextList)
+            && (shape.is_scalar_leaf() || shape.is_fresh_text_list())
         {
             self.slots.get(source as usize)?.value.as_ref()?;
             self.prepare_slot_write(target_id);
@@ -5309,7 +5333,7 @@ impl Heap {
         self.root_trace.changed(index);
         self.invalidate_stream_bindings(index);
         self.generator_owners.reconsider(index);
-        if self.slot_shapes[index] == SlotShape::FreshTextList {
+        if self.slot_shapes[index].is_fresh_text_list() {
             self.slot_shapes[index] = SlotShape::Other;
             return;
         }
@@ -8134,6 +8158,61 @@ impl Heap {
         }
     }
 
+    /// Retire an unchanged nonshort TEXT/no-GET decoder graph after its private
+    /// compiler-certified binding was successfully replaced.
+    ///
+    /// # Safety
+    /// The caller must hold the ownership witness minted by the immediate
+    /// authenticated decoder invocation, not merely the owner shape. Between
+    /// that invocation and this call, no alias, mutable borrow, mark, sweep,
+    /// trace, finalization, callback or signal dispatch may have touched the
+    /// owner or any child. The old binding and all operand roots must have been
+    /// removed. The producer guarantees a nonempty exact list containing only
+    /// distinct dynamic exact string slots with UTF-8 byte length greater than
+    /// two; those slots have no GC header/link, trace or finalization state.
+    /// No Python observer or collector may run until this method returns.
+    /// Failing an owner check changes no slot.
+    pub(super) unsafe fn retire_certified_nonshort_text_list(&mut self, id: Id) -> bool {
+        let Ok(index) = usize::try_from(id) else {
+            return false;
+        };
+        if index < FIRST_DYNAMIC_SLOT
+            || self.full_collection_active()
+            || self.allocation_traces.is_tracing()
+            || self.slot_shapes.get(index) != Some(&SlotShape::FreshNonshortTextList)
+            || self.traces[index].get() != UNMARKED
+        {
+            return false;
+        }
+        let slot = &self.slots[index];
+        if !slot.has_gc_header || slot.finalization != Finalization::None {
+            return false;
+        }
+        let Some(Value::List(items)) = slot.value.as_ref() else {
+            return false;
+        };
+        if items.is_empty() {
+            return false;
+        }
+        let count = items.len();
+        let items = items.as_ptr();
+        let mut free_head = self.free_head;
+        for position in (0..count).rev() {
+            // SAFETY: the immediate producer and uninterrupted compiler witness
+            // prove each item is a distinct dynamic nonshort exact string. The
+            // separate item allocation and slot vector remain stable: scalar
+            // retirement cannot allocate, collect, call Python or mutate the
+            // owner, which is retired only after the final pointer read.
+            let child = unsafe { *items.add(position) } as usize;
+            self.retire_verified_text_leaf(child, free_head);
+            free_head = child;
+        }
+        self.free_head = free_head;
+        self.free_count += count;
+        self.retire_slot(index);
+        true
+    }
+
     /// Retire a decoder-owned exact list and its fresh text leaves without tracing the heap.
     ///
     /// # Safety
@@ -8317,6 +8396,72 @@ mod tests {
         let list = heap.alloc(Value::List(children.clone()));
         heap.mark_fresh_text_list(list);
         (list, children)
+    }
+
+    fn nonshort_text_list(heap: &mut Heap, texts: &[(&str, bool)]) -> (Id, Vec<Id>) {
+        heap.reserve_unobserved_texts(texts.len()).unwrap();
+        let children = texts
+            .iter()
+            .map(|&(text, ascii)| heap.unobserved_text(text, ascii))
+            .collect::<Vec<_>>();
+        let list = heap.alloc(Value::List(children.clone()));
+        heap.mark_fresh_nonshort_text_list(list);
+        (list, children)
+    }
+
+    #[test]
+    fn certified_nonshort_retirement_rejects_owner_without_changing_any_slot() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let (owner, children) = nonshort_text_list(&mut heap, &[("alpha", true), ("€", false)]);
+        heap.release_temporaries_since(mark);
+        let (head, count) = (heap.free_head, heap.free_count);
+        heap.traces[owner as usize].set(END);
+        // SAFETY: the isolated children retain their exact producer invariants;
+        // the deliberately marked owner must reject before any child is touched.
+        assert!(!unsafe { heap.retire_certified_nonshort_text_list(owner) });
+        assert_eq!((heap.free_head, heap.free_count), (head, count));
+        assert!(heap.is_fresh_nonshort_text_list(owner));
+        for &child in &children {
+            assert!(matches!(heap.get(child), Value::Str(_)));
+        }
+        heap.traces[owner as usize].set(UNMARKED);
+        // SAFETY: the producer graph is again unmarked and remains unchanged,
+        // isolated, alias-free and unobservable throughout retirement.
+        assert!(unsafe { heap.retire_certified_nonshort_text_list(owner) });
+        assert_eq!(heap.free_count, count + children.len() + 1);
+        assert_eq!(heap.free_head, owner as usize);
+        assert_eq!(
+            heap.slots[owner as usize].gc_next.get(),
+            children[0] as usize
+        );
+        assert_eq!(
+            heap.slots[children[0] as usize].gc_next.get(),
+            children[1] as usize
+        );
+        assert_eq!(heap.slots[children[1] as usize].gc_next.get(), head);
+    }
+
+    #[test]
+    fn nonshort_owner_traverses_children_and_invalidates_on_mutable_borrow() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let (owner, children) = nonshort_text_list(&mut heap, &[("alpha", true), ("bravo", true)]);
+        heap.release_temporaries_since(mark);
+        heap.collect(std::iter::once(owner));
+        for &child in &children {
+            assert!(matches!(heap.get(child), Value::Str(_)));
+        }
+        let Value::List(items) = heap.get_mut(owner) else {
+            unreachable!()
+        };
+        items.clear();
+        assert!(!heap.is_fresh_text_list(owner));
+        assert!(!heap.is_fresh_nonshort_text_list(owner));
+        heap.collect(std::iter::once(owner));
+        for child in children {
+            assert!(heap.slot_shapes[child as usize] == SlotShape::Vacant);
+        }
     }
 
     #[test]
