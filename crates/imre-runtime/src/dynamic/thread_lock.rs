@@ -105,60 +105,96 @@ pub(super) enum Lock {
     Reentrant(Arc<HandlerLock>),
 }
 
-pub(super) enum NativeWait<'a> {
-    Acquire(Option<Duration>, Id, &'a mut Lock),
+/// An owner-side wait record with owned native backing. The receiver never enters the
+/// parked native closure; it remains available for rooting and post-signal refresh.
+pub(super) enum OwnedWait {
+    Acquire(Option<Deadline>, Id, Lock),
     Join(
         Option<Deadline>,
-        &'a super::thread_worker::Handle,
+        Arc<super::thread_worker::Handle>,
         super::thread_worker::Completion,
     ),
 }
 
-impl NativeWait<'_> {
-    fn wait(&self, limit: Option<Duration>, phase: WaitPhase) -> Result<bool> {
+/// One non-waiting probe. A ready join still needs parked native teardown
+/// before its Python operands can be reaped.
+pub(super) enum WaitStep {
+    Ready,
+    Pending,
+    TimedOut,
+}
+
+impl OwnedWait {
+    pub(super) fn deadline(&self) -> Option<Deadline> {
         match self {
-            Self::Acquire(_, _, lock) => Ok(lock.acquire(true, limit, phase)),
-            Self::Join(_, handle, completion) => handle.wait_for_exit(limit, *completion),
+            Self::Acquire(deadline, ..) | Self::Join(deadline, ..) => *deadline,
         }
     }
 
-    /// Park the calling execution for a native wait and resume it before handling the result.
+    /// Claim an available lock or observe the join condition without a
+    /// condition-variable wait or native join. Probe on the owner's physical
+    /// thread and keep its frame and acquire receiver live until completion.
+    /// A ready acquire has consumed the acquisition; do not probe it again.
+    pub(super) fn poll(&self, phase: WaitPhase) -> WaitStep {
+        let ready = match self {
+            Self::Acquire(_, _, lock) => lock.acquire(false, None, phase),
+            Self::Join(_, handle, completion) => !handle.completion_pending(*completion),
+        };
+        if ready {
+            WaitStep::Ready
+        } else if self.deadline().is_some_and(|end| end.remaining().is_zero()) {
+            WaitStep::TimedOut
+        } else {
+            WaitStep::Pending
+        }
+    }
+
+    /// Use the direct probe first, then park only for a native wait or join teardown.
     ///
     /// # Safety
     /// The caller owns the context and the selected, rooted wait operands.
-    unsafe fn wait_parked(
+    unsafe fn wait_once(
         &self,
         context: *mut Context,
         limit: Option<Duration>,
         phase: WaitPhase,
     ) -> Result<bool> {
-        if limit == Some(Duration::ZERO) {
-            match self {
-                Self::Acquire(..) => return self.wait(limit, phase),
-                Self::Join(_, handle, _) if handle.join_pending() => return Ok(false),
-                Self::Join(..) => {}
-            }
+        match self.poll(phase) {
+            WaitStep::Ready if matches!(self, Self::Acquire(..)) => return Ok(true),
+            WaitStep::TimedOut => return Ok(false),
+            WaitStep::Ready | WaitStep::Pending => {}
         }
-        // SAFETY: the native wait uses its lock or join handle and never borrows the heap.
-        unsafe { super::value::ParkedExecution::wait(context, || self.wait(limit, phase)) }?
+        match self {
+            // SAFETY: only the native lock backing enters the parked closure.
+            Self::Acquire(_, _, lock) => unsafe {
+                super::value::ParkedExecution::wait(context, || lock.acquire(true, limit, phase))
+            },
+            // SAFETY: only the native handle and completion mode enter the parked closure.
+            Self::Join(_, handle, completion) => unsafe {
+                super::value::ParkedExecution::wait(context, || {
+                    handle.wait_for_exit(limit, *completion)
+                })
+            }?,
+        }
     }
 
     /// # Safety
     /// The caller must resume in its own context. An acquire receiver must be live at entry.
-    pub(super) unsafe fn run(mut self, _context: *mut Context) -> Result<bool> {
+    pub(super) unsafe fn run(&mut self, _context: *mut Context) -> Result<bool> {
         #[cfg(unix)]
         if crate::signals::is_main() {
-            let (deadline, root) = match self {
-                Self::Acquire(timeout, receiver, _) => {
-                    // SAFETY: the caller owns the active frame at entry. Only the root's
-                    // index and value cross the native wait.
+            let deadline = self.deadline();
+            let root = match &*self {
+                Self::Acquire(_, receiver, _) => {
+                    // SAFETY: the caller owns the active frame. Its receiver and temporary
+                    // mark remain on the owner side through the native wait.
                     let ctx = unsafe { &mut *_context };
                     ctx.heap.reserve_temporaries(1)?;
                     let mark = ctx.heap.temporary_mark();
-                    ctx.heap.keep(receiver);
-                    (timeout.map(Deadline::after), Some((mark, receiver)))
+                    ctx.heap.keep(*receiver);
+                    Some((mark, *receiver))
                 }
-                Self::Join(deadline, ..) => (deadline, None),
+                Self::Join(..) => None,
             };
             let interval = Duration::from_millis(50);
             let mut phase = WaitPhase::Initial;
@@ -166,14 +202,14 @@ impl NativeWait<'_> {
                 let remaining = deadline.map(Deadline::remaining);
                 let slice = remaining.map_or(interval, |left| left.min(interval));
                 // SAFETY: every outcome restores the interrupted frame, including on timeout.
-                match unsafe { self.wait_parked(_context, Some(slice), phase) } {
+                match unsafe { self.wait_once(_context, Some(slice), phase) } {
                     Ok(true) => break Ok(true),
                     Err(error) => break Err(error),
                     Ok(false) => {}
                 }
                 // An expired join returns immediately. A lock wait interrupted during
                 // a positive slice dispatches first, then probes the lock once more.
-                if matches!(self, Self::Join(..))
+                if matches!(&*self, Self::Join(..))
                     && deadline.is_some_and(|end| end.remaining().is_zero())
                 {
                     break Ok(false);
@@ -186,16 +222,16 @@ impl NativeWait<'_> {
                     if let Err(error) = unsafe { Context::dispatch_pending_calls(_context) } {
                         break Err(error);
                     }
-                    if let Self::Acquire(_, receiver, lock) = &mut self {
+                    if let Self::Acquire(_, receiver, lock) = &mut *self {
                         // A returning signal handler may have reset the lock in a forked child.
                         // SAFETY: dispatch returned to the rooted receiver's frame. Clone
                         // its current backing before the next native wait.
-                        **lock = Lock::backing(unsafe { &*_context }, *receiver);
+                        *lock = Lock::backing(unsafe { &*_context }, *receiver);
                     }
                     phase = WaitPhase::Interrupted;
                     continue;
                 }
-                if matches!(self, Self::Acquire(..)) && remaining == Some(slice) {
+                if matches!(&*self, Self::Acquire(..)) && remaining == Some(slice) {
                     break Ok(false);
                 }
                 phase = WaitPhase::Parked;
@@ -208,12 +244,9 @@ impl NativeWait<'_> {
             }
             return result;
         }
-        let limit = match &self {
-            Self::Acquire(timeout, ..) => *timeout,
-            Self::Join(deadline, ..) => deadline.map(Deadline::remaining),
-        };
+        let limit = self.deadline().map(Deadline::remaining);
         // SAFETY: the worker owns its execution until the native operation returns.
-        unsafe { self.wait_parked(_context, limit, WaitPhase::Initial) }
+        unsafe { self.wait_once(_context, limit, WaitPhase::Initial) }
     }
 }
 
@@ -297,7 +330,7 @@ impl Acquire {
     /// collection, while the selected receiver is still live.
     pub(super) unsafe fn run_registered(self, context: *mut Context) -> Result<Id> {
         // SAFETY: conversion has finished. Only the native backing crosses a blocking wait.
-        let mut lock = Lock::backing(unsafe { &*context }, self.receiver);
+        let lock = Lock::backing(unsafe { &*context }, self.receiver);
         if !self.blocking {
             return Ok(boolean(lock.acquire(
                 self.blocking,
@@ -305,10 +338,10 @@ impl Acquire {
                 WaitPhase::Initial,
             )));
         }
+        let mut wait = OwnedWait::Acquire(self.timeout.map(Deadline::after), self.receiver, lock);
         // SAFETY: the receiver is live at entry. The interruptible wait keeps it rooted
         // through signal handlers that can replace its backing.
-        unsafe { NativeWait::Acquire(self.timeout, self.receiver, &mut lock).run(context) }
-            .map(boolean)
+        unsafe { wait.run(context) }.map(boolean)
     }
 }
 

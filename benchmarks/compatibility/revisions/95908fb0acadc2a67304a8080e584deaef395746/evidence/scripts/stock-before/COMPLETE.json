@@ -1,0 +1,13 @@
+{
+  "archive_sha256": "d592c858d1a143d934b2611b9a1f16a6568906b1037cf49471b7a9393a2f68c6",
+  "authority": "880648b620f57905a495eb51fbb4600755ee0c54",
+  "cases": [
+    "uv-26",
+    "uv-29"
+  ],
+  "compiler_revision": "95908fb0acadc2a67304a8080e584deaef395746",
+  "credit": 0,
+  "manifest_sha256": "6799c598eb64e5d013a550bd0c468d0407972a465727266c1658f11c56c998e2",
+  "schema": "imre.compatibility.unified959-fresh-stock.v1",
+  "stock_observations": "fresh CPython 3.14.5; separate from historical 72 authority"
+}

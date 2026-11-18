@@ -1,0 +1,115 @@
+{
+  "build": {
+    "argv": [
+      "/workspace/scratch/imre-95908-transferred-v1/product/imre",
+      "build",
+      "/workspace/uv-b-959-replay-v1/uv-26/O3/work/scripts/reverse-changelog.py",
+      "--module-root",
+      "/workspace/uv-b-959-replay-v1/uv-26/O3/work",
+      "--no-cache",
+      "--opt-level",
+      "3",
+      "--runtime",
+      "/workspace/scratch/imre-95908-transferred-v1/product/libimre_runtime.a",
+      "--clang",
+      "/workspace/scratch/imre-95908-transferred-v1/product/imre-toolchain/bin/clang",
+      "-o",
+      "/workspace/uv-b-959-replay-v1/uv-26/O3/saved.exe"
+    ],
+    "cwd": "/workspace/uv-b-959-replay-v1/uv-26/O3/work",
+    "elapsed_seconds": 69.85,
+    "environment": {
+      "HOME": "/workspace/uv-b-959-replay-v1/uv-26/O3/home",
+      "LC_ALL": "C.UTF-8",
+      "NO_COLOR": "1",
+      "PATH": "/usr/bin:/bin",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONHASHSEED": "0",
+      "PYTHONNOUSERSITE": "1",
+      "TZ": "UTC"
+    },
+    "exit_code": 0,
+    "image_exists": true,
+    "image_sha256": "67039409afbe17c9e7e58752ec2836176687b985d36840b0411c1e262e1b8b05",
+    "stderr_sha256": "96b6f67d64aef47a7c7e9925f90eb27f060a3dee19823b7ceb22a4e9c8d2a073",
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "timed_out": false
+  },
+  "comparison": {
+    "dimensions": {
+      "effects": true,
+      "exit": true,
+      "stderr": true,
+      "stdout": true
+    },
+    "effects_sha256": "f0ea6f2f84bbf905af44bf4f2e54b75a8a22d3c945f23bec3e93bdce52244448",
+    "exact": true
+  },
+  "original_normalized_invocation": {
+    "argv": [
+      "$PYTHON",
+      "-B",
+      "scripts/reverse-changelog.py",
+      "CHANGELOG.md"
+    ],
+    "cwd": "$WORK",
+    "env": {
+      "HOME": "$TASK_HOME",
+      "LC_ALL": "C.UTF-8",
+      "NO_COLOR": "1",
+      "PATH": "/usr/bin:/bin",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONHASHSEED": "0",
+      "PYTHONNOUSERSITE": "1",
+      "TZ": "UTC"
+    }
+  },
+  "run": {
+    "argv": [
+      "/usr/bin/strace",
+      "-f",
+      "-qq",
+      "-s",
+      "512",
+      "-e",
+      "trace=execve,execveat,open,openat,openat2,creat,io_uring_setup,clone,clone3,fork,vfork,rename,renameat,renameat2,newfstatat,wait4,exit_group,chdir,fchdir,close,dup,dup2,dup3,fcntl",
+      "-o",
+      "/workspace/uv-b-959-replay-v1/uv-26/O3/trace",
+      "/workspace/practical-d26-scratch-retry/supervisor",
+      "/workspace/uv-b-959-replay-v1/uv-26/O3/work/scripts/reverse-changelog.py",
+      "/workspace/uv-b-959-replay-v1/uv-26/O3/withdrawn.source",
+      "-",
+      "-",
+      "/workspace/uv-b-959-replay-v1/uv-26/O3/saved.exe",
+      "scripts/reverse-changelog.py",
+      "CHANGELOG.md"
+    ],
+    "cwd": "/workspace/uv-b-959-replay-v1/uv-26/O3/work",
+    "elapsed_seconds": 0.04,
+    "environment": {
+      "HOME": "/workspace/uv-b-959-replay-v1/uv-26/O3/home",
+      "LC_ALL": "C.UTF-8",
+      "NO_COLOR": "1",
+      "PATH": "/usr/bin:/bin",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONHASHSEED": "0",
+      "PYTHONNOUSERSITE": "1",
+      "TZ": "UTC"
+    },
+    "exit_code": 0,
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stdout_sha256": "5992edbea4f36e88eff092b8acafada4f192a2f557e1336c53b1bd5ce5a6385a",
+    "timed_out": false
+  },
+  "status": "observed_exact",
+  "trace": {
+    "exec_lines": [
+      "22501 execve(\"/workspace/practical-d26-scratch-retry/supervisor\", [\"/workspace/practical-d26-scratch-retry/supervisor\", \"/workspace/uv-b-959-replay-v1/uv-26/O3/work/scripts/reverse-changelog.py\", \"/workspace/uv-b-959-replay-v1/uv-26/O3/withdrawn.source\", \"-\", \"-\", \"/workspace/uv-b-959-replay-v1/uv-26/O3/saved.exe\", \"scripts/reverse-changelog.py\", \"CHANGELOG.md\"], 0x7ffd5de6ced8 /* 8 vars */) = 0",
+      "22502 execve(\"/workspace/uv-b-959-replay-v1/uv-26/O3/saved.exe\", [\"scripts/reverse-changelog.py\", \"CHANGELOG.md\"], 0x7ffd933b1710 /* 8 vars */) = 0"
+    ],
+    "sha256": "4b863c4eeabac0978bce3fd2561e0e067f5c6228a9b448a9b00cfe347cd1b37b",
+    "successful_cwd_or_escape_calls": [],
+    "successful_forbidden_opens": [],
+    "withdrawal_seen": true
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "actual_image_environment": {
+    "HOME": "/workspace/scratch/uvb-959-env-parity-v1/uv-29/O3/home",
+    "LC_ALL": "C.UTF-8",
+    "NO_COLOR": "1",
+    "PATH": "/usr/bin:/bin",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONHASHSEED": "0",
+    "PYTHONNOUSERSITE": "1",
+    "TZ": "UTC"
+  },
+  "argv": [
+    "/workspace/practical-d26-scratch-retry/supervisor",
+    "/workspace/scratch/uvb-959-env-parity-v1/uv-29/O3/work/scripts/transform_readme.py",
+    "/workspace/scratch/uvb-959-env-parity-v1/uv-29/O3/withdrawn.source",
+    "-",
+    "-",
+    "/usr/bin/bwrap",
+    "/usr/bin/bwrap",
+    "--ro-bind",
+    "/",
+    "/",
+    "--tmpfs",
+    "/workspace/uv-b-959-replay-v1/uv-29/O3/work/scripts",
+    "--bind",
+    "/workspace/scratch/uvb-959-env-parity-v1/uv-29/O3/work",
+    "/workspace/scratch/uvb-959-env-parity-v1/uv-29/O3/work",
+    "--chdir",
+    "/workspace/scratch/uvb-959-env-parity-v1/uv-29/O3/work",
+    "--die-with-parent",
+    "--",
+    "/usr/bin/env",
+    "-u",
+    "PWD",
+    "--argv0=scripts/transform_readme.py",
+    "/workspace/uv-b-959-replay-v1/uv-29/O3/saved.exe",
+    "--target",
+    "pypi"
+  ],
+  "bwrap_sha256": "573236e5328ac2ebb08f59ae3a9805b4f8d12bdef14be8af4450d5463294985f",
+  "controller_sha256": "9a869218021020cbc2f3904510935e765a602f3a359731a0d2b4e0e60d44ce0c",
+  "cwd": "/workspace/scratch/uvb-959-env-parity-v1/uv-29/O3/work",
+  "effects_sha256": "faf27cd05d86446c13a6201bfb1904631c348a59c33f4f60d9578958be56b653",
+  "env_trampoline_sha256": "eb1c64bbc9908afcdf8cb48524f17112d8dd76a249f80dee2f01da14747b3b6e",
+  "environment": {
+    "HOME": "/workspace/scratch/uvb-959-env-parity-v1/uv-29/O3/home",
+    "LC_ALL": "C.UTF-8",
+    "NO_COLOR": "1",
+    "PATH": "/usr/bin:/bin",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONHASHSEED": "0",
+    "PYTHONNOUSERSITE": "1",
+    "TZ": "UTC"
+  },
+  "exit_code": 0,
+  "image_sha256": "af57804b8b0c4e62f89aea77a5c22933c9a66d6ab4660142d1abfe620dd16f2d",
+  "masked_original_entry": "/workspace/uv-b-959-replay-v1/uv-29/O3/work/scripts/transform_readme.py",
+  "preimages": {
+    "README.md": {
+      "bytes": 9859,
+      "sha256": "57a84a5a635f30e3a26541ebc16ca690944a7750f05713b1af92d3170b58f704"
+    },
+    "pyproject.toml": {
+      "bytes": 7093,
+      "sha256": "4092f71e82353cb21e783343b3771758eb5ee9153be62e079022e82aa6d4dc08"
+    },
+    "scripts/transform_readme.py": {
+      "bytes": 4577,
+      "sha256": "5e2667b59cd363c887fbcae04d14db51e12995a053478e7c40ce50e506d3fcdc"
+    }
+  },
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "supervisor_sha256": "36cce31bde9b0e1e7847d20d4a0821b2b509dca186d0b7c0231bb3e5fb14c88a",
+  "trace_bytes": 87270,
+  "trace_sha256": "0a645793f26a4e21b4f754ac43158161b6dfaffd42dc2b6b2543bcc4e0af0739"
+}

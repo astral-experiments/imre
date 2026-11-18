@@ -188,6 +188,18 @@ def canonical_originals(kind):
     return originals
 
 
+@lru_cache(maxsize=1)
+def canonical_script_shards():
+    result = {}
+    for shard in CANONICAL_COHORT['scripts']['shards']:
+        for line in (HERE/'scripts'/(shard+'.jsonl')).read_text().splitlines():
+            id = json.loads(line)['id']
+            require(id not in result, 'duplicate canonical script ID')
+            result[id] = shard
+    require(len(result) == CANONICAL_COHORT['scripts']['expected_commands'], 'canonical script inventory differs')
+    return result
+
+
 def canonical_original(r, kind):
     key = (r.get("family"), r["id"], r.get("occurrence")) if kind == "stdlib" else r["id"]
     original = canonical_originals(kind).get(key)
@@ -614,12 +626,15 @@ def validate_snapshot_record(r, kind, eligible, check):
     omission = r.get("omission_reason")
     if omission:
         check(kind == "stdlib" and r.get("policy_omission") == accepted_policy_locator(r) and r.get("policy_omission") is not None, "snapshot omission is not an accepted canonical policy omission")
-    entry = activation_entry(r.get("family")) if kind == "stdlib" else None
+    entry = activation_entry(r.get("family")) if kind == "stdlib" else activation_entry(canonical_script_shards().get(r['id']), 'script')
+    if COHORT['imre_revision'] == '95908fb0acadc2a67304a8080e584deaef395746' and (kind == 'script' or r.get('family') == 'fnmatch'):
+        import script_control
+        script_control.require_paired_authority(sys.modules[__name__],r,entry)
     if entry and kind == "stdlib":
         import raw_control
         if COHORT["imre_revision"] == raw_control.SOURCE_PIN and r["family"] in raw_control.SOURCE_FAMILIES:
             raw_control.source_stage_authority(sys.modules[__name__], r["family"], raw_control.sha(json.dumps(entry, sort_keys=True).encode()))
-    if entry and entry.get("adapter") != "row-v1":
+    if entry and kind == 'stdlib' and entry.get("adapter") != "row-v1":
         validate_activated_family_record(r, eligible, check, entry)
         return
     native = [r["runs"][tier] for tier in ("O0", "O3")]
@@ -648,6 +663,10 @@ def validate_snapshot_record(r, kind, eligible, check):
     if r.get("launcher_control"):
         control_passed = validate_launcher_control(r)
         check(control_passed or not omission, "failed launcher control cannot be an accepted policy omission")
+    if entry and kind == 'script' and entry.get('adapter') != 'row-v1':
+        import script_control
+        check(entry.get('adapter') == 'script-control-v1', 'unknown script snapshot adapter')
+        return script_control.validate_record(sys.modules[__name__], r, eligible, check, entry)
     check(type(r.get("paired")) is bool, "paired must be boolean")
     if r["paired"]: check(False, "row-v1 credited pairs are unsupported until raw saved-image proof has a validated schema")
     elif eligible: check(isinstance(r.get("credit_reason"), str) and bool(r["credit_reason"]), "uncredited observed intersection needs a credit reason")
@@ -841,7 +860,7 @@ def verify_stdlib_evidence(r):
             require(raw_path.suffix not in {".results"} or run.get("raw_evidence"), f"{r['id']}: derived results require a raw evidence reference")
 
 
-def activated_stdlib_path(staged, entry):
+def activated_subset_path(staged, entry, kind):
     """Select a full shard or an explicitly separated verified subset."""
     if not entry.get('staged_receipt'):
         require(entry.get('receipt') == staged.relative_to(ROOT).as_posix(), f"activated shard path differs: {staged}")
@@ -849,15 +868,20 @@ def activated_stdlib_path(staged, entry):
     locator = staged.relative_to(ROOT).as_posix()
     require(entry.get('staged_receipt') == locator, f"staged shard path differs: {staged}")
     checked_file(staged, binding_digest(entry, locator))
-    verified = DATA_ROOT / 'verified' / 'stdlib' / staged.name
+    verified = DATA_ROOT / 'verified' / ('stdlib' if kind == 'stdlib' else 'scripts') / staged.name
     require(entry.get('receipt') == verified.relative_to(ROOT).as_posix() and verified.is_file() and verified.resolve().is_relative_to(DATA_ROOT.resolve()), f"verified subset path differs: {verified}")
     originals = {}
     for line in staged.read_text().splitlines():
-        row = json.loads(line); key = (row.get('id'), row.get('occurrence'))
-        require(row.get('family') == staged.stem and isinstance(key[0], str) and type(key[1]) is int and key not in originals, f"invalid or duplicate staged original: {staged}")
-        canonical_original(row, 'stdlib')
+        row = json.loads(line); key = (row.get('id'), row.get('occurrence')) if kind == 'stdlib' else row.get('id')
+        valid = row.get('family') == staged.stem and isinstance(key[0],str) and type(key[1]) is int if kind == 'stdlib' else isinstance(key,str) and canonical_script_shards().get(key)==staged.stem
+        require(valid and key not in originals, f"invalid or duplicate staged original: {staged}")
+        canonical_original(row, kind)
         originals[key] = row
     return verified, originals
+
+
+def activated_stdlib_path(staged, entry):
+    return activated_subset_path(staged,entry,'stdlib')
 
 
 def load_records(kind, names, frozen_scripts=None):
@@ -870,7 +894,7 @@ def load_records(kind, names, frozen_scripts=None):
             require(staged.resolve().is_relative_to(DATA_ROOT.resolve()), f"receipt file escapes snapshot: {staged}")
             entry = activation_entry(staged.stem, kind)
             if entry is None: continue
-            if kind == 'stdlib': path, originals = activated_stdlib_path(staged, entry)
+            path, originals = activated_subset_path(staged, entry, kind)
             validate_receipt_binding(path, entry)
         if kind == "script": require(path.stem in COHORT["scripts"]["shards"], f"unrecognized script shard: {path}")
         for line_num, line in enumerate(path.read_text().splitlines(), 1):
@@ -878,8 +902,9 @@ def load_records(kind, names, frozen_scripts=None):
             except (ValueError, TypeError, KeyError) as e: raise ValueError(f"{path.relative_to(ROOT)}:{line_num}: {e}") from e
             if is_snapshot() and kind == "stdlib": require(r.get("family") == path.stem, f"receipt family differs from activated shard: {path}")
             if originals is not None:
-                original = originals.get((r['id'], r['occurrence']))
-                require(original is not None and all(r.get(k) == original.get(k) for k in ('source','platform','imre_revision','kind','family','id','occurrence')), f"verified original identity differs from staged shard: {r['id']}")
+                original = originals.get((r['id'],r['occurrence']) if kind == 'stdlib' else r['id'])
+                fields=('source','platform','imre_revision','kind','family','id','occurrence') if kind=='stdlib' else ('source','platform','imre_revision','kind','id','normalized_invocation')
+                require(original is not None and all(r.get(k) == original.get(k) for k in fields), f"verified original identity differs from staged shard: {r['id']}")
             key = (r.get("family"), r["id"], r.get("occurrence")) if kind == "stdlib" else r["id"]
             require(key not in seen, f"duplicate {kind} receipt: {key}")
             seen.add(key)
@@ -940,8 +965,8 @@ def outcome_text(counts, n):
     return ", ".join(f"{counts[k]:,} {labels[k]}" for k in labels if counts[k])
 
 
-def render(view):
-    fs, scripts = summary()
+def render(view, data=None):
+    fs, scripts = summary() if data is None else data
     frozen = {n: r for n, r in fs.items() if r["cohort"] == "frozen"}
     supplemental = {n: r for n, r in fs.items() if r["cohort"] == "supplemental"}
     def totals(rows):
@@ -954,6 +979,7 @@ def render(view):
     if is_snapshot():
         script_observed = sum(all(r["runs"][t]["outcome"] == "pass" for t in TIERS) for r in scripts)
         lines[-1] = f"Scripts: **{len(scripts)} of {expected} original commands have receipts**, **{script_observed} observed intersections**, **{sum(r['paired'] for r in scripts)} verified credited pairs**; **{expected-len(scripts)} not run**."
+        if COHORT["imre_revision"] == REVISION_959: lines[-1] += " " + script_cohort_text(scripts)
     def table(title, rows):
         lines.extend(["", f"#### {title}", "", "| Family | Raw originals | Stock | O0 | O3 | Observed stock/O0/O3 passes | Verified credited pairs | Historical mixed-revision credits |", "| --- | ---: | --- | --- | --- | ---: | --- | ---: |"])
         for name, r in sorted(rows.items()):
@@ -986,23 +1012,55 @@ def replace_block(text, block):
     return before + block + after
 
 
-def render_root_summary(fs):
-    """Render the explicitly selected snapshot's staged modules for the root README."""
+REVISION_959 = '95908fb0acadc2a67304a8080e584deaef395746'
+SCRIPT_AUTHORITY = '880648b620f57905a495eb51fbb4600755ee0c54'
+
+
+def script_cohort_text(scripts):
+    """Count validated script pairs against the independently public historical cohort."""
+    import raw_control
+    raw_control.public_commit(sys.modules[__name__], SCRIPT_AUTHORITY)
+    raw = raw_control.git(ROOT, 'show', '--no-textconv', f'{SCRIPT_AUTHORITY}:benchmarks/compatibility/historical-scripts/join.jsonl')
+    rows = [json.loads(line) for line in raw.splitlines()]
+    ids = [row['id'] for row in rows]; canonical = set(canonical_originals('script'))
+    require(len(ids) == len(set(ids)) == COHORT['scripts']['expected_commands'] and set(ids) == canonical, 'historical script cohort differs from canonical originals')
+    successes = {row['id'] for row in rows if row['archived_reported_stock_exit'] == 0}
+    verified = [row['id'] for row in scripts if row['paired']]
+    require(len(verified) == len(set(verified)) and set(verified) <= successes, 'verified scripts exceed historical stock-success cohort')
+    return (f"**{len(verified):,} verified / {len(successes):,} historically reported stock-success commands** "
+            f"among **{len(ids):,} original script IDs** ([public historical authority]"
+            f"(https://github.com/astral-experiments/imre/commit/{SCRIPT_AUTHORITY})).")
+
+
+def root_markers(pin):
+    return (f'<!-- compatibility-snapshot-{pin}:start -->', f'<!-- compatibility-snapshot-{pin}:end -->')
+
+
+def render_root_summary(fs, scripts):
+    """Render module pairs and script pairs as distinct measures from one validated summary."""
     require(is_snapshot(), "root summary requires a snapshot")
-    pin = COHORT["imre_revision"]
-    staged = {name: row for name, row in fs.items() if row["receipts"] or row.get("pending")}
-    lines = [ROOT_SUMMARY_START, "### Current compatibility snapshot", "", f"Revision `{pin}` · **{sum(r['receipts'] for r in staged.values()):,} validated receipts**, **{sum(r['paired'] for r in staged.values()):,} verified pairs**.", "", "| Module | Raw originals | Verified pairs / status |", "| --- | ---: | --- |"]
-    for name, row in sorted(staged.items()):
-        status = ((f"{row['paired']:,} verified; " if row['receipts'] else '') + f"pending ({row['pending']:,} staged)") if row.get('pending') else f"{row['paired']:,} verified"
-        lines.append(f"| `{name}` | {row['originals']:,} | {status} |")
-    lines.extend(["", f"[Full revision table](benchmarks/compatibility/revisions/{pin}/docs/stdlib.md)", ROOT_SUMMARY_END])
-    return "\n".join(lines)
+    pin = COHORT['imre_revision']; start, end = root_markers(pin)
+    modules = {name: row for name, row in fs.items() if row['receipts'] or row.get('pending')}
+    lines = [start, '### Compatibility snapshot', '', f'Revision `{pin}`.', '',
+             '| Stdlib module | Verified pairs / raw originals | Status |', '| --- | ---: | --- |']
+    for name, row in sorted(modules.items()):
+        status = f"{row['pending']:,} staged, unverified" if row.get('pending') else 'validated'
+        lines.append(f"| `{name}` | {row['paired']:,} / {row['originals']:,} | {status} |")
+    lines += ['', 'Scripts: ' + script_cohort_text(scripts), '',
+              f'[Full revision table](benchmarks/compatibility/revisions/{pin}/docs/stdlib.md)', end]
+    return '\n'.join(lines)
 
 
 def replace_root_summary(text, block):
-    require(text.count(ROOT_SUMMARY_START) == text.count(ROOT_SUMMARY_END) == 1, "expected exactly one current snapshot block")
-    before, rest = text.split(ROOT_SUMMARY_START); _, after = rest.split(ROOT_SUMMARY_END)
-    return before + block + after
+    start, end = root_markers(COHORT['imre_revision'])
+    require(block.startswith(start+'\n') and block.endswith('\n'+end), 'root summary marker differs from revision')
+    if start in text or end in text:
+        require(text.count(start) == text.count(end) == 1, 'expected exactly one revision snapshot block')
+        before, rest = text.split(start); _, after = rest.split(end)
+        return before + block + after
+    require(text.count(ROOT_SUMMARY_START) == text.count(ROOT_SUMMARY_END) == 1, 'expected frozen historical snapshot block')
+    before, after = text.split(ROOT_SUMMARY_END)
+    return before + ROOT_SUMMARY_END + '\n\n' + block + after
 
 
 def main():
@@ -1013,6 +1071,8 @@ def main():
     args = p.parse_args()
     if args.root_summary and not args.snapshot: p.error("--root-summary requires --snapshot")
     if args.root_summary and args.validate: p.error("--root-summary cannot be combined with --validate")
+    if args.snapshot == '8571ca2dbecabf8d7863c369dc776611fd57d8ad':
+        p.error('857 is frozen; verify it only at public checkout d0b396559a8ffda965cb495063b2967847d116aa (see benchmarks/compatibility/README.md)')
     if args.snapshot: select_snapshot(args.snapshot)
     fs, scripts = summary()
     from check_omissions import validate as validate_omissions
@@ -1022,16 +1082,16 @@ def main():
         require(any(row["receipts"] for row in fs.values()) or scripts, "cannot render a snapshot without genuine receipts")
         outputs = ((DATA_ROOT / "README.md", "readme"), (DATA_ROOT / "docs/stdlib.md", "stdlib"))
         for path, view in outputs:
-            new = render(view) + "\n"
+            new = render(view, (fs, scripts)) + "\n"
             if args.check: require(path.is_file() and path.read_text() == new, f"stale snapshot scorecard: {path.relative_to(ROOT)}")
             else: path.parent.mkdir(parents=True, exist_ok=True); path.write_text(new)
         if args.root_summary:
-            path = ROOT / "README.md"; old = path.read_text(); new = replace_root_summary(old, render_root_summary(fs))
+            path = ROOT / "README.md"; old = path.read_text(); new = replace_root_summary(old, render_root_summary(fs, scripts))
             if args.check: require(old == new, "stale current snapshot summary: README.md")
             else: path.write_text(new)
         return
     for path, view in ((ROOT / "README.md", "readme"), (ROOT / "docs/stdlib.md", "stdlib")):
-        old = path.read_text(); new = replace_block(old, render(view))
+        old = path.read_text(); new = replace_block(old, render(view, (fs, scripts)))
         if args.check: require(old == new, f"stale scorecard: {path.relative_to(ROOT)}")
         else: path.write_text(new)
 

@@ -10,6 +10,7 @@ from _imre_importlib import (
     compile_file as _compile_file,
     compile_filename as _compile_filename,
     get_code as _registered_code,
+    get_code_optional as _optional_registered_code,
     get_source_data as _registered_source_data,
     loader_fields as _loader_fields,
     path_stats as _path_stats,
@@ -215,8 +216,8 @@ def _compile_source(compiler, data, path, _optimize, registration=None):
     if registration is not None:
         loader, fullname, read_name = registration
         if type(read_name) is str and type(filename) is str and read_name == filename:
-            code = _registered_code(loader, filename, fullname, _file_data, _source_compiler)
-            if code is not None:
+            code = _optional_registered_code(loader, filename, fullname, _file_data, _source_compiler)
+            if code is not None and code is not True:
                 return code
     return _compile_file(compiler, data, filename, dont_inherit=True)
 
@@ -254,6 +255,15 @@ class SourceLoader(_LoaderBasics):
             return self.source_to_code(data, path)
         if issubclass(type(self), SourceFileLoader) and _uses_builtin_compile(_source_compiler):
             code = _registered_code(self, path, fullname, _file_data, _source_compiler)
+            # Native resolution returns Code, True (authenticate bytes), or None (custom).
+            # A trusted miss raises natively and cannot reach the custom fallback.
+            if code is True:
+                data = self.get_data(path)
+                if not _uses_builtin_compile(_source_compiler):
+                    return self.source_to_code(data, path)
+                code = _registered_code(self, path, fullname, _file_data, _source_compiler, data)
+                if code is None:
+                    return self.source_to_code(data, path)
             if code is not None:
                 return code
         data = self.get_data(path)
@@ -962,7 +972,7 @@ class FileFinder:
 
 """Combine registered native modules with the filesystem entry that contains them."""
 from _imre_importlib import (
-    _installed_source_members, _installed_stdlib, registered_path, registered_path_spec,
+    _installed_stdlib, registered_path, registered_path_spec,
 )
 
 
@@ -977,16 +987,14 @@ def _installed_source_spec(fullname, registry_path, target):
     parts = fullname.split('.')
     if not all(part.isidentifier() for part in parts):
         return None
-    member = '/'.join(parts)
-    if (member + '.py' not in _installed_source_members
-            and member + '/__init__.py' not in _installed_source_members):
-        return None
     parent = parts[:-1]
     if registry_path != _path_join('<imre stdlib>', *parent):
         return None
-    if _installed_stdlib is not None and _path_isfile(_installed_stdlib):
+    if _installed_stdlib is not None:
+        from _imre_zipimport import linked_archive
         entry = _path_join(_installed_stdlib, *parent)
-        return _registered_path_finder.find_spec(fullname, [entry], target)
+        if linked_archive(entry) is not None:
+            return _registered_path_finder.find_spec(fullname, [entry], target)
     return None
 
 

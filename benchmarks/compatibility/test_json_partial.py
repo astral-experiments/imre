@@ -3,7 +3,9 @@ import copy, hashlib, json, tempfile, unittest
 from pathlib import Path
 from unittest.mock import patch
 import scorecard
+import raw_control
 PIN = '8571ca2dbecabf8d7863c369dc776611fd57d8ad'
+FROZEN = 'd0b396559a8ffda965cb495063b2967847d116aa'
 SNAP = scorecard.HERE / 'revisions' / PIN
 L = lambda p: p.relative_to(scorecard.ROOT).as_posix()
 H = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
@@ -37,11 +39,15 @@ class PartialJsonTests(unittest.TestCase):
         return scorecard.validate_record(r, 'stdlib', scorecard.families())
 
     def test_real_partial_activation_counts_only_verified_subset(self):
-        fs, _ = scorecard.summary()
-        j = fs['json']
-        self.assertEqual(j['receipts'], len(self.verified))
-        self.assertEqual(j['paired'], len(self.verified))
-        self.assertEqual(j['pending'], 216 - len(self.verified))
+        for locator in (self.entry['receipt'], self.entry['staged_receipt']):
+            frozen = raw_control.git(scorecard.ROOT, 'show', '--no-textconv', f'{FROZEN}:{locator}')
+            self.assertEqual((scorecard.ROOT / locator).read_bytes(), frozen)
+        table = raw_control.git(scorecard.ROOT, 'show', '--no-textconv', f'{FROZEN}:benchmarks/compatibility/revisions/{PIN}/docs/stdlib.md').decode()
+        columns = next(line.split(' | ') for line in table.splitlines() if line.startswith('| `json` |'))
+        self.assertEqual(columns[1], '216')
+        self.assertEqual(columns[5], str(len(self.verified)))
+        self.assertEqual(columns[6], f'{len(self.verified)} verified; {216 - len(self.verified)} staged, unverified')
+        self.assertTrue(all(row['paired'] for row in self.verified))
         self.assertEqual(len(self.staged), 216)
         self.assertEqual(sum(('.test_tool.' in r['id'] and r['runs']['O0']['outcome'] == 'timeout' for r in self.staged)), 34)
         self.assertEqual(sum((r['runs']['O0']['outcome'] == 'timeout' for r in self.staged)), 36)

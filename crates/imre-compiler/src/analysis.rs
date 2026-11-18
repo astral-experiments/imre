@@ -18,7 +18,7 @@ mod shipped_exports;
 mod tuple_displays;
 
 use std::cell::Cell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
@@ -160,6 +160,14 @@ pub(crate) enum AnnotationClass {
         location: String,
         source: Option<ruff_db::files::FileRange>,
     },
+}
+
+/// Genuine importer and source executor identities resolved at a selected provider use.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RegisteredImportFunction {
+    ImportModule,
+    BuiltinImport,
+    BuiltinExec,
 }
 
 /// A project database shared by ty's checks and Ruff's cached parser.
@@ -1575,7 +1583,9 @@ impl Session {
         let mut selected_providers = HashMap::new();
         for (id, source) in sources.clone() {
             if source.has_open_execution && source.is_original_sdk_source() {
-                selected_providers.entry(source.name).or_insert(self.files[id]);
+                selected_providers
+                    .entry(source.name)
+                    .or_insert(self.files[id]);
             }
         }
         let selected_provider = |owner: &str| selected_providers.get(owner).copied();
@@ -1620,6 +1630,43 @@ impl Session {
         })
     }
 
+    /// Refresh the scratch checker's search paths only after the resolver selects a provider.
+    /// The same session and seeded files remain in use; roots retain the collector's order.
+    pub(crate) fn registered_provider_roots(&mut self, roots: &[PathBuf]) -> Result<(), String> {
+        if self.extension_roots.as_slice() == roots {
+            return Ok(());
+        }
+        let project = SystemPathBuf::from(
+            self.root
+                .to_str()
+                .ok_or("module paths must be valid UTF-8")?,
+        );
+        let mut paths = vec![project.clone()];
+        for root in roots {
+            let root = root.to_str().ok_or("extension paths must be valid UTF-8")?;
+            self.db
+                .system
+                .fs()
+                .create_directory_all(root)
+                .map_err(|e| e.to_string())?;
+            paths.push(SystemPathBuf::from(root));
+        }
+        paths.push(project.join("imre/.stdlib-stubs"));
+        self.db.settings.search_paths = ty_module_resolver::SearchPathSettings::new(paths)
+            .to_search_paths(
+                &self.db.system,
+                &self.db.vendored,
+                &ty_module_resolver::FallibleStrategy,
+            )
+            .map_err(|e| e.to_string())?;
+        self.db
+            .settings
+            .search_paths
+            .try_register_static_roots(&self.db);
+        self.extension_roots = roots.to_vec();
+        Ok(())
+    }
+
     /// Make the actual selected provider visible before resolving candidate callees.
     /// Sync parent directories too: an earlier level may have looked up a missing package.
     pub(crate) fn seed(&mut self, path: &Path, source: &str) -> Result<(), String> {
@@ -1644,6 +1691,16 @@ impl Session {
         }
         File::sync_path(&mut self.db, origin);
         Ok(())
+    }
+
+    /// Exclude imports that the existing type checker proves unreachable in a selected provider.
+    pub(crate) fn registered_unreachable(&self, file: File, range: TextRange) -> bool {
+        ty_python_semantic::types::ide_support::unreachable_ranges(
+            &self.db,
+            self.db.program_file(file),
+        )
+        .iter()
+        .any(|dead| dead.range.contains_range(range))
     }
 
     pub(crate) fn selected_file(
@@ -2928,7 +2985,12 @@ impl Session {
 
     /// Resolve a module alias at the expression that reads it.
     pub(crate) fn module_name_at(&self, module: usize, expression: &Expr) -> Option<&str> {
-        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
+        self.module_name_in_file(self.files[module], expression)
+    }
+
+    /// Resolve the module type at a use in an indexed file.
+    fn module_name_in_file(&self, file: File, expression: &Expr) -> Option<&str> {
+        let model = SemanticModel::new(&self.db, self.db.program_file(file));
         let ty_python_semantic::types::Type::ModuleLiteral(owner) =
             expression.inferred_type(&model)?
         else {
@@ -2940,6 +3002,56 @@ impl Session {
     pub(crate) fn is_stdlib_module(&self, module: usize, expression: &Expr, name: &str) -> bool {
         self.hint_reads.set(self.hint_reads.get() + 1);
         self.module_name_at(module, expression) == Some(name)
+    }
+
+    /// Resolve a module expression in a selected provider's indexed file.
+    pub(crate) fn registered_module_is(&self, file: File, expression: &Expr, name: &str) -> bool {
+        self.module_name_in_file(file, expression) == Some(name)
+    }
+
+    /// Collect cheap importer/executor alias spellings from this selected file's indexed bindings.
+    /// A spelling is only a site prefilter; it confers no semantic identity.
+    pub(crate) fn registered_import_aliases(&self, file: File) -> HashSet<String> {
+        use ty_python_core::definition::DefinitionKind;
+        let index = ty_python_core::semantic_index(&self.db, self.db.program_file(file));
+        let parsed = self.parsed(file);
+        let mut aliases = HashSet::new();
+        for scope in index.scope_ids() {
+            for (_, definition, _) in index
+                .use_def_map(scope.file_scope_id(&self.db))
+                .definitions_with_usage()
+            {
+                let DefinitionKind::ImportFrom(import) = definition.kind(&self.db) else {
+                    continue;
+                };
+                let alias = import.alias(&parsed);
+                if matches!(alias.name.as_str(), "import_module" | "__import__" | "exec") {
+                    aliases.insert(alias.asname.as_ref().unwrap_or(&alias.name).to_string());
+                }
+            }
+        }
+        aliases
+    }
+
+    /// Select an importer or executor by its exact resolved vendored definition at this use.
+    pub(crate) fn registered_import_function(
+        &self,
+        file: File,
+        expression: &Expr,
+    ) -> Option<RegisteredImportFunction> {
+        let model = SemanticModel::new(&self.db, self.db.program_file(file));
+        let ty = expression.inferred_type(&model)?;
+        if is_stdlib_function_type(&model, ty, "importlib", "import_module") {
+            Some(RegisteredImportFunction::ImportModule)
+        } else if is_stdlib_function_type(&model, ty, "builtins", "__import__") {
+            Some(RegisteredImportFunction::BuiltinImport)
+        } else if execution::ExecutionIntrinsic::resolve(&model, expression)
+            == Some(execution::ExecutionIntrinsic::Exec)
+        {
+            Some(RegisteredImportFunction::BuiltinExec)
+        } else {
+            None
+        }
     }
 
     /// Only the stdlib function can add a literal dependency, even if a local shares its spelling.

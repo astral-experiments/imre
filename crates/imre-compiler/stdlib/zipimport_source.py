@@ -16,7 +16,7 @@ class zipimporter(_ZipResourceLoader):
     def invalidate_caches(self):
         """Invalidate the cached directory of this importer's archive."""
         _invalidate(self.archive)
-        self._linked_enabled = self._has_linked and not _exists(self.archive)
+        self._linked_enabled = self._has_linked
 
     def _member(self, fullname):
         if self._linked_enabled:

@@ -1,0 +1,2 @@
+ Compiling /workspace/uv-b-959-replay-v1/uv-29/direct-control/direct.py (-O0)
+/workspace/uv-b-959-replay-v1/uv-29/direct-control/direct.py:1:15: Imre: expected int, got bool; annotations are enforced contracts
