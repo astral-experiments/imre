@@ -3232,11 +3232,31 @@ unsafe extern "C" fn imre_dyn_replacement_positional_call_at(
     proof: *mut Id,
     next: *mut Id,
 ) -> Id {
+    // SAFETY: the two proof words are independent compiler-owned storage.
+    unsafe { next.write(NONE) };
+    // Classification reads only immutable native function/code metadata. On a
+    // pending error do not inspect the callable: the ordinary ABI must handle it.
+    // No user code or heap allocation can run before the classified target is used.
+    let target = {
+        // SAFETY: the generated caller owns the live context for this synchronous call.
+        let context = unsafe { &*ctx };
+        if context.heap.execution.pending.is_none() && count == 1 {
+            context.direct_pickle_call_target(callable)
+        } else {
+            None
+        }
+    };
+    let Some((pickle_scope, kwdefaults)) = target else {
+        // SAFETY: clear the old receipt before the ordinary binder, callbacks,
+        // pending-error landing, or signal dispatch can expose the prior binding.
+        unsafe {
+            proof.write(NONE);
+            return imre_dyn_positional_call_at(ctx, callable, values, count, mark, span, scope);
+        }
+    };
     let direct = std::cell::Cell::new(false);
     let fresh_text = std::cell::Cell::new(false);
     let effect = std::cell::Cell::new(false);
-    // SAFETY: the two proof words are independent compiler-owned storage.
-    unsafe { next.write(NONE) };
     // SAFETY: the linked call owns this active context and marked positional operands.
     let result = unsafe {
         scoped_call_checked(
@@ -3249,7 +3269,13 @@ unsafe extern "C" fn imre_dyn_replacement_positional_call_at(
                 if ctx.heap.private_replacement_frame(scope)
                     && let [data] = args
                 {
-                    match ctx.try_direct_pickle_call(callable, *data, || proof.write(NONE)) {
+                    match stdlib::pickle::try_classified_direct_loads(
+                        ctx,
+                        pickle_scope,
+                        kwdefaults,
+                        *data,
+                        || proof.write(NONE),
+                    ) {
                         Ok(Some(stdlib::pickle::DirectLoad::FreshText(value))) => {
                             direct.set(true);
                             fresh_text.set(true);
@@ -5161,6 +5187,54 @@ mod tests {
         assert_eq!(proof, NONE);
         assert_eq!(item, data);
         assert!(ctx.heap.is_fresh_text_list(old));
+    }
+
+    #[test]
+    fn replacement_generic_error_and_pending_landing_clear_both_words() {
+        let (mut ctx, scope) = replacement_context();
+        let (old, _) = fresh_text_list(&mut ctx, "previous witnessed result");
+        ctx.bind_local(scope, "result", old);
+        let callable = ctx.builtin("len");
+        let argument = ctx.int(42);
+        let mark = ctx.heap.temporary_mark();
+        let (mut proof, mut next) = (old, old);
+        // SAFETY: the test owns the synchronous context, rooted argument and words.
+        let result = unsafe {
+            imre_dyn_replacement_positional_call_at(
+                &mut ctx,
+                callable,
+                &argument,
+                1,
+                mark,
+                std::ptr::null(),
+                scope,
+                &mut proof,
+                &mut next,
+            )
+        };
+        assert_eq!(result, NONE);
+        assert!(ctx.heap.execution.pending.is_some());
+        assert_eq!((proof, next), (NONE, NONE));
+        assert_eq!(ctx.scope_data(scope).names.get("result"), Some(&old));
+
+        (proof, next) = (old, old);
+        // SAFETY: all operands remain valid; the pending-error path must clear the
+        // words and delegate to the ordinary call landing without invoking len again.
+        let result = unsafe {
+            imre_dyn_replacement_positional_call_at(
+                &mut ctx,
+                callable,
+                &argument,
+                1,
+                mark,
+                std::ptr::null(),
+                scope,
+                &mut proof,
+                &mut next,
+            )
+        };
+        assert_eq!(result, NONE);
+        assert_eq!((proof, next), (NONE, NONE));
     }
 
     #[test]
