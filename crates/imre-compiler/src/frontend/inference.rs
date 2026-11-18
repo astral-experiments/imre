@@ -3052,7 +3052,7 @@ run(True, [1])
             );
             let error = crate::check(&source).unwrap_err();
             assert!(
-                error.contains("expected main.Left, got main.Right"),
+                error.contains("expected __main__.Left, got __main__.Right"),
                 "{error}"
             );
         }
@@ -3080,7 +3080,7 @@ run(True, [1])
         );
         let error = crate::check(&incompatible).unwrap_err();
         assert!(
-            error.contains("expected main.Left, got main.Right"),
+            error.contains("expected __main__.Left, got __main__.Right"),
             "{error}"
         );
         crate::check(
