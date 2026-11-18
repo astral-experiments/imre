@@ -325,7 +325,22 @@ fn attempt(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     let Some(data) = ctx.scope_name(scope, "data") else {
         return Ok(None);
     };
-    attempt_data(ctx, data, false)
+    attempt_data(ctx, data, false, || {}).map(|result| result.map(DirectLoad::value))
+}
+
+/// Identify the immediate decoder that produced this invocation's result.
+/// Only the text reader without memo GETs can certify fresh, distinct leaves.
+pub(in crate::dynamic) enum DirectLoad {
+    FreshText(Id),
+    Other(Id),
+}
+
+impl DirectLoad {
+    fn value(self) -> Id {
+        match self {
+            Self::FreshText(value) | Self::Other(value) => value,
+        }
+    }
 }
 
 /// Try a positional call to the authenticated bundled `pickle.loads` body
@@ -336,6 +351,18 @@ pub(in crate::dynamic) fn try_direct_loads(
     kwdefaults: Id,
     data: Id,
 ) -> Result<Option<Id>> {
+    try_classified_direct_loads(ctx, scope, kwdefaults, data, || {})
+        .map(|result| result.map(DirectLoad::value))
+}
+
+/// Invalidate a caller's ownership receipt before decoding a memo alias or VM stream.
+pub(in crate::dynamic) fn try_classified_direct_loads(
+    ctx: &mut Context,
+    scope: Id,
+    kwdefaults: Id,
+    data: Id,
+    before_nonfresh: impl FnOnce(),
+) -> Result<Option<DirectLoad>> {
     let root = ctx.root_scope(scope);
     let globals = ctx.scope_data(root);
     if globals.module != "pickle"
@@ -344,10 +371,15 @@ pub(in crate::dynamic) fn try_direct_loads(
     {
         return Ok(None);
     }
-    attempt_data(ctx, data, true)
+    attempt_data(ctx, data, true, before_nonfresh)
 }
 
-fn attempt_data(ctx: &mut Context, data: Id, direct: bool) -> Result<Option<Id>> {
+fn attempt_data(
+    ctx: &mut Context,
+    data: Id,
+    direct: bool,
+    before_nonfresh: impl FnOnce(),
+) -> Result<Option<DirectLoad>> {
     let Value::Bytes(bytes) = ctx.heap.get(data) else {
         return Ok(None);
     };
@@ -370,8 +402,19 @@ fn attempt_data(ctx: &mut Context, data: Id, direct: bool) -> Result<Option<Id>>
         ctx.check_call_depth(0)?;
     }
     match (layout, vm) {
-        (Some(layout), _) => decode(ctx, data, layout).map(Some),
-        (_, Some(layout)) => super::vm::decode(ctx, data, layout).map(Some),
+        (Some(layout), _) if !layout.has_get => decode(ctx, data, layout)
+            .map(DirectLoad::FreshText)
+            .map(Some),
+        (Some(layout), _) => {
+            before_nonfresh();
+            decode(ctx, data, layout).map(DirectLoad::Other).map(Some)
+        }
+        (_, Some(layout)) => {
+            before_nonfresh();
+            super::vm::decode(ctx, data, layout)
+                .map(DirectLoad::Other)
+                .map(Some)
+        }
         _ => Ok(None),
     }
 }
@@ -379,6 +422,40 @@ fn attempt_data(ctx: &mut Context, data: Id, direct: bool) -> Result<Option<Id>>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn direct_receipt_is_minted_only_for_the_immediate_text_reader_without_gets() {
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        for (bytes, fresh) in [
+            (
+                &b"\x80\x05\x95\x11\0\0\0\0\0\0\0]\x94(\x8c\x03abc\x94\x8c\x03def\x94e."[..],
+                true,
+            ),
+            (
+                &b"\x80\x05\x95\x0d\0\0\0\0\0\0\0]\x94(\x8c\x03abc\x94h\x01e."[..],
+                false,
+            ),
+            (&b"\x80\x05\x95\x06\0\0\0\0\0\0\0]\x94K\x01a."[..], false),
+        ] {
+            let data = ctx.alloc(Value::Bytes(bytes.to_vec()));
+            let invalidated = std::cell::Cell::new(false);
+            let result = attempt_data(&mut ctx, data, false, || invalidated.set(true))
+                .unwrap()
+                .unwrap();
+            match result {
+                DirectLoad::FreshText(value) => {
+                    assert!(fresh);
+                    assert!(!invalidated.get());
+                    assert!(ctx.heap.is_fresh_text_list(value));
+                }
+                DirectLoad::Other(value) => {
+                    assert!(!fresh);
+                    assert!(invalidated.get());
+                    assert!(!ctx.heap.is_fresh_text_list(value));
+                }
+            }
+        }
+    }
 
     #[test]
     fn preflight_accepts_dense_memo_and_rejects_sparse_or_incomplete_streams() {

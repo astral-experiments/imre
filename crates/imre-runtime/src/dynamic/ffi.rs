@@ -3206,6 +3206,7 @@ unsafe extern "C" fn imre_dyn_replacement_positional_call_at(
     next: *mut Id,
 ) -> Id {
     let direct = std::cell::Cell::new(false);
+    let fresh_text = std::cell::Cell::new(false);
     let effect = std::cell::Cell::new(false);
     // SAFETY: the two proof words are independent compiler-owned storage.
     unsafe { next.write(NONE) };
@@ -3221,8 +3222,13 @@ unsafe extern "C" fn imre_dyn_replacement_positional_call_at(
                 if ctx.heap.private_replacement_frame(scope)
                     && let [data] = args
                 {
-                    match ctx.try_direct_pickle_call(callable, *data) {
-                        Ok(Some(value)) => {
+                    match ctx.try_direct_pickle_call(callable, *data, || proof.write(NONE)) {
+                        Ok(Some(stdlib::pickle::DirectLoad::FreshText(value))) => {
+                            direct.set(true);
+                            fresh_text.set(true);
+                            return Ok(calls::RegisteredCall::Returned(value));
+                        }
+                        Ok(Some(stdlib::pickle::DirectLoad::Other(value))) => {
                             direct.set(true);
                             return Ok(calls::RegisteredCall::Returned(value));
                         }
@@ -3262,7 +3268,7 @@ unsafe extern "C" fn imre_dyn_replacement_positional_call_at(
     let context = unsafe { &*ctx };
     if context.heap.execution.pending.is_some() {
         unsafe { proof.write(NONE) };
-    } else if direct.get()
+    } else if fresh_text.get()
         && !effect.get()
         && context.heap.private_replacement_frame(scope)
         && context.heap.is_fresh_text_list(result)
