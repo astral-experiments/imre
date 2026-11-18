@@ -5,8 +5,8 @@
 mod copy_range;
 mod credentials;
 pub(crate) use credentials::{
-    credential_id, getegid, geteuid, getgid, getgroups, getuid, max_groups, setgroups, setregid,
-    setreuid,
+    credential_id, getegid, geteuid, getgid, getgroups, getuid, max_groups, setegid, seteuid,
+    setgid, setgroups, setregid, setreuid, setuid,
 };
 #[cfg(target_os = "linux")]
 pub(crate) use credentials::{getresgid, getresuid, setresgid, setresuid};
