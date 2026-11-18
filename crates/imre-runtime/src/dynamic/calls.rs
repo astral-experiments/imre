@@ -267,6 +267,8 @@ fn method_arguments(receiver: Id, args: Cow<'_, [Id]>) -> Result<Vec<Id>> {
 
 pub(super) enum RegisteredCall {
     Returned(Id),
+    /// An unscoped operator.call packet; its native wrapper qualifies callback errors.
+    OperatorCall { callable: Id, args: Vec<Id>, kwargs: Box<[(String, Id)]> },
     /// The caller's marked operands stay rooted while native dispatch can reenter Python.
     Other {
         callable: Id,
@@ -401,6 +403,30 @@ impl RegisteredCall {
     pub(super) unsafe fn run(self, context: *mut Context) -> Result<Id> {
         match self {
             Self::Returned(value) => Ok(value),
+            Self::OperatorCall { callable, args, kwargs } => {
+                let kwargs = kwargs.into_vec();
+                // Preserve Other's native-label copy before Operation::Call copies its operands.
+                let _native_name = {
+                    let ctx = unsafe { &*context };
+                    let Value::Native(name) = ctx.heap.get(callable) else { unreachable!("registered operator.call") };
+                    copy_label(name)?
+                };
+                let result = (|| {
+                    let args = copy_ids(&args)?;
+                    let prepared = {
+                        let ctx = unsafe { &mut *context };
+                        let (target, args) = ctx.operator_call_target(args)?;
+                        let scope = ctx.heap.current_scope();
+                        ctx.prepare_call_in_scope(scope, target, args.into(), kwargs.to_vec())
+                    }?;
+                    // SAFETY: preparation ended; the registered caller still roots the packet.
+                    unsafe { prepared.run(context) }
+                })();
+                result.map_err(|error| {
+                    // SAFETY: callback preparation/execution returned before error qualification.
+                    stdlib::io::qualify_error(unsafe { &mut *context }, error, None)
+                })
+            }
             Self::Other {
                 callable,
                 args,
@@ -8866,6 +8892,13 @@ impl Context {
                     break;
                 }
                 Value::Native(ref name) => {
+                    if name == "operator.call" {
+                        return Ok(RegisteredCall::OperatorCall {
+                            callable,
+                            args: owned_ids(args)?,
+                            kwargs: kwargs.into_boxed_slice(),
+                        });
+                    }
                     if stdlib::hashlib::UpdateHash::native_class(name).is_some()
                         && let Some(update) =
                             stdlib::hashlib::UpdateHash::prepare(self, callable, &args, &kwargs)
