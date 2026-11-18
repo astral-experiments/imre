@@ -703,6 +703,7 @@ fn object_fallback(
         || graph
             .as_ref()
             .is_some_and(|g| g.needs_object_runtime.get() || g.traceback_objects);
+    let fallback_identity = std::cell::Cell::new(None);
     let check_returns = |graph: Option<&mut modules::SourceGraph>,
                          entry_requests_objects: bool,
                          registrations: Option<&dynamic::RegisteredSources<'_>>|
@@ -755,7 +756,7 @@ fn object_fallback(
                 analysis::FallbackCalls::None
             };
             let check = |session: &mut analysis::Session| {
-                session.check_fallback_contracts(
+                let result = session.check_fallback_contracts(
                     skipped.as_deref(),
                     &overloads,
                     checked_calls,
@@ -767,7 +768,9 @@ fn object_fallback(
                     }),
                     checked_file.then_some(&graph.modules),
                     replaced.is_none().then_some(refusal.as_ref()).flatten(),
-                )
+                );
+                fallback_identity.set(session.first_fallback_argument());
+                result
             };
             if incremental || replaced.is_some() {
                 check(&mut graph.session.copy_for_diagnostics(None, replaced)?)?;
@@ -781,17 +784,34 @@ fn object_fallback(
     let check = |mut checked_graph: Option<&mut modules::SourceGraph>,
                  entry_requests_objects,
                  registered: Option<dynamic::RegisteredSources<'_>>| {
-        // A lowering refusal does not prove the original first-party scalar stores.
-        if let Some(graph) = checked_graph.as_deref()
+        // A fixed argument report can replace ty's rendering of the same sole operand.
+        // Let the fallback checker retain that diagnostic only when its first error has
+        // the same checked module and operand; independent or ordered errors keep priority.
+        let fallback_argument = checked_graph
+            .as_deref()
+            .and_then(|graph| graph.source_contract.as_ref()?.fallback_argument(graph));
+        if fallback_argument.is_none()
+            && let Some(graph) = checked_graph.as_deref()
             && let Some(contract) = &graph.source_contract
         {
             contract.original(graph).clone()?;
         }
-        check_returns(
+        let fallback = check_returns(
             checked_graph.as_deref_mut(),
             entry_requests_objects,
             registered.as_ref(),
-        )?;
+        );
+        if let Some(argument) = fallback_argument {
+            if fallback.is_err() && fallback_identity.get() == Some(argument) {
+                return fallback;
+            }
+            if let Some(graph) = checked_graph.as_deref()
+                && let Some(contract) = &graph.source_contract
+            {
+                contract.original(graph).clone()?;
+            }
+        }
+        fallback?;
         if let Some(mut registered) = registered {
             let layouts = analysis::check_registered_project(
                 registered.root,
@@ -1334,13 +1354,16 @@ fn checked_lower_with(
                 &graph.inputs,
             )
             .and_then(|owner| {
-                owner.closed_program_errors_with_entry(
+                owner.closed_program_errors_with_reporting(
                     &graph.modules,
                     skipped,
                     &overloads,
                     native,
                     None,
-                    Some((entry_filename.0, &entry_filename.1)),
+                    analysis::SourceDiagnostics {
+                        entry_filename: Some((entry_filename.0, &entry_filename.1)),
+                        ..Default::default()
+                    },
                 )
             });
         // An inapplicable object representation cannot replace a native source or ABI
