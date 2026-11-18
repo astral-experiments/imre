@@ -2510,9 +2510,9 @@ fn registered_entry(
     entry: &ir::Function,
     operations: EntryOperations,
 ) -> StdResult<Option<crate::CheckedProgram>, Diagnostic> {
-    // Native text is UTF-8. A possible lone surrogate has priority over a
-    // registered initializer or another operation in this graph.
-    if operations.orders_strings && operations.creates_character {
+    // Native text is UTF-8. Any chr() result that may be a lone surrogate
+    // requires Python object storage, even if it is never ordered.
+    if operations.creates_character {
         let mut code_points = Vec::new();
         for function in functions.iter().chain([entry]) {
             ir::walk_expressions(&function.body, &mut |expr| {
@@ -2528,11 +2528,14 @@ fn registered_entry(
                 .is_none_or(|range| range.min <= 0xdfff && range.max >= 0xd800)
         }) {
             graph.needs_object_runtime.set(true);
-            return Err(Diagnostic::plain(
-                " Imre: ordering strings from chr() with possible surrogate values requires native Python object operations".to_owned(),
-            )
-            .with_path(&graph.modules[graph.entry].path)
-            .classified(Kind::ScopedObject));
+            let reason = if operations.orders_strings {
+                " Imre: ordering strings from chr() with possible surrogate values requires native Python object operations"
+            } else {
+                " Imre: chr() with possible surrogate values requires native Python object operations"
+            };
+            return Err(Diagnostic::plain(reason.to_owned())
+                .with_path(&graph.modules[graph.entry].path)
+                .classified(Kind::ScopedObject));
         }
     }
     if graph.registered_startup
