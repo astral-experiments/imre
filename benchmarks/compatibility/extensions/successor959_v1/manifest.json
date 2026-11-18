@@ -3,21 +3,26 @@
     "stdlib": {
       "json": {
         "adapter": "raw-control-v2",
-        "binding": "benchmarks/compatibility/extensions/successor959_v1/bindings/json.input.json",
+        "binding": "benchmarks/compatibility/extensions/successor959_v1/bindings/json.identity.json",
         "receipt": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/verified/successor-v1/stdlib/json.jsonl",
-        "staged_receipt": "benchmarks/compatibility/extensions/successor959_v1/templates/stdlib/json.jsonl"
+        "staged_receipt": "benchmarks/compatibility/extensions/successor959_v1/templates/stdlib/json.identity.jsonl"
       }
     }
   },
   "evidence_status": {
-    "json": "30 observed passing occurrences; strict credit blocked by missing independently authenticated executable/tool path identities"
+    "json": "30 fresh stock/O0 and joined O3 observations; zero credit until a separate public activation"
   },
   "files": {
     "benchmarks/compatibility/extensions/successor959_v1/DESIGN.md": "e3089546ea43b646755ddd304a8df62e2c5c0e9a8a535a85660cf54bf8779bb3",
     "benchmarks/compatibility/extensions/successor959_v1/__init__.py": "2cfffed82fd1476b705330c3695edec33928e3910a98d80d6a76c8102d711eb5",
-    "benchmarks/compatibility/extensions/successor959_v1/authority.py": "cca76bf959b9e950052b18bd505b9f387053b0e9cfba552497b58e0ad6c07463",
+    "benchmarks/compatibility/extensions/successor959_v1/authority.py": "10d53687bb0e43bec4c77ea895be90e2fae13b1db9038faa532efa1483704e18",
+    "benchmarks/compatibility/extensions/successor959_v1/bindings/json.identity.json": "6c7c667189ab45b02bf264ab3f0a95e2c2a3c4dfc6171951c5a9a96a48d12987",
     "benchmarks/compatibility/extensions/successor959_v1/bindings/json.input.json": "62bbfdc6858ea51f49235bb667486794555c91d2f75f3356e76b79fc5033c21d",
-    "benchmarks/compatibility/extensions/successor959_v1/check_stage.py": "2856bcf55e1e42018d615170426cf6e6b108cc0d2ed86299df675775e96a3941",
+    "benchmarks/compatibility/extensions/successor959_v1/check_stage.py": "ddbb7ca60d5fe80c8700fd5ad352cff5d55947eaf87aec0ae139a1f56d725b0f",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/held-stock/COMPLETE.json": "47eee407121c63e35af4a5b6736167a37542c79f7609970165be84b518b81912",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/held-stock/json959-held-stock-v1.tar.gz": "88728eff6ed6a02c52de34aa32b6999c679f5262846a0fd751a4553348a524d0",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/identity/COMPLETE.json": "f261eed5bbf4e86f911b2a1fcf84bdb81519a779f6c1a06449fbc4fcef66c1e6",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/identity/json-959-identity-evidence-v1.tar.gz": "8b1e8c1cc6456a5e20d1021ce8057f3045d09726f4106fc5bddf5b80a03672ff",
     "benchmarks/compatibility/extensions/successor959_v1/evidence/json/assessment.json": "fa010dd280e6bc0e1ccab91432b44d5c201607d176e9fab8d9a7b7a5cefcdd13",
     "benchmarks/compatibility/extensions/successor959_v1/evidence/json/controller.py": "7bf597a897abc8170733bed00536adb6b97cb2477549ae30b7a1bc3c2c13cde5",
     "benchmarks/compatibility/extensions/successor959_v1/evidence/json/fixtures/Lib/test/test_json/test_decode.py": "7905c620f00c028e1b28ea27656b66d14584fa809206d3eb996fac5dbee2546c",
@@ -89,13 +94,14 @@
     "benchmarks/compatibility/extensions/successor959_v1/evidence/json/run.json": "9e866d6e77c9a824c969031d9d692bc0c8cb8a5c384f8c008f60862f99cd4fa3",
     "benchmarks/compatibility/extensions/successor959_v1/evidence/json/selected-evidence-v1.json": "8b792a4a655706afdc346b10b74227800a08751d6edf3ee1716552c29334f893",
     "benchmarks/compatibility/extensions/successor959_v1/evidence/sealed/json-decode-959-selected-v1.tar.gz": "fae5b50a20c65bb58f960fc230491469b8e7266e6ff53f25e39305b4b72fe91b",
-    "benchmarks/compatibility/extensions/successor959_v1/generate.py": "bf1151e8866dba210cbe2b05a51209d272b6f74f6031a8c997d6c78fddc6f842",
-    "benchmarks/compatibility/extensions/successor959_v1/patches/validators.patch": "2bef8f9cf24111a04eb33bd98ec0f42baa2e4646c13ff497aacd4bc267019029",
+    "benchmarks/compatibility/extensions/successor959_v1/generate.py": "aab068f21341c506003d6d589f4e76d709a4ddee13fd7a5173f60093a334e043",
+    "benchmarks/compatibility/extensions/successor959_v1/patches/validators.patch": "c5b055f38461e4d35156e2a2e368a2ba544ddf8e074b751bc8fd2eb8812decff",
+    "benchmarks/compatibility/extensions/successor959_v1/templates/stdlib/json.identity.jsonl": "4305b1adf68a9f136a00711e7f00f723ad52464a06a9efe758002b2a5c09ff34",
     "benchmarks/compatibility/extensions/successor959_v1/templates/stdlib/json.jsonl": "26431dc508c2bf06dee85016726526066d178065e23263460fff9126d9db2c1f"
   },
   "imre_revision": "95908fb0acadc2a67304a8080e584deaef395746",
   "inputs": {
-    "stdlib/json": "benchmarks/compatibility/extensions/successor959_v1/bindings/json.input.json"
+    "stdlib/json": "benchmarks/compatibility/extensions/successor959_v1/bindings/json.identity.json"
   },
   "patches": [
     {
@@ -104,13 +110,13 @@
           "old_git_blob": "a9f8cd25c26d16f3f7925bec5fae3e7ce901b1f9",
           "old_sha256": "24fc1f25516cc6da3d6648505af55fae2b22ddf22188bc5877b8950a7c46130e",
           "path": "benchmarks/compatibility/scorecard.py",
-          "post_sha256": "66c69e60099b89ec19b5e8301df25f920b453ab1bb6d7924815c3585d7643ef1"
+          "post_sha256": "c382ffd9d63af849ff0c97bfd8f47e48c8a9d1e0a8286cc694d28b570f002669"
         },
         {
           "old_git_blob": "dc53f7068385ec0a7840310f087570fa9a7c6a73",
           "old_sha256": "9edb18699cd0a2a30dc51db20ab668a3e81e1cd36209e0ec82af767678cbfcbb",
           "path": "benchmarks/compatibility/raw_control.py",
-          "post_sha256": "b4a43319ec80bd3ed88cc2c9015076bbd928b1d32f9475dabe7c51777c9e160f"
+          "post_sha256": "78354de5034807f8cc374672c5f823eb341b822f6f0240e19459045964721d65"
         },
         {
           "old_git_blob": "f26b024fe2dd80e61e6f2aa7a7fc0eae2e0aa4c5",
@@ -126,7 +132,7 @@
         }
       ],
       "path": "benchmarks/compatibility/extensions/successor959_v1/patches/validators.patch",
-      "sha256": "2bef8f9cf24111a04eb33bd98ec0f42baa2e4646c13ff497aacd4bc267019029"
+      "sha256": "c5b055f38461e4d35156e2a2e368a2ba544ddf8e074b751bc8fd2eb8812decff"
     }
   ],
   "predecessor": {
@@ -134,6 +140,12 @@
     "git_blob": "936fdf2ded35588b6e3fcb5c22d9e234b12b5aab",
     "manifest": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/controls/unified-source-stage.json",
     "sha256": "d885e272968c9e831bead7b80e1757c70fbe215d4e979a8851e7c658e824e5b2"
+  },
+  "predecessor_stage": {
+    "commit": "f1788f4337076e2a9cb8a004d601303ec1088d55",
+    "git_blob": "e80b9bd77366bdf787b1039baffdc47655cb463b",
+    "manifest": "benchmarks/compatibility/extensions/successor959_v1/manifest.json",
+    "sha256": "aac52bf31c07ef5758cc32b05b0962dc08b7e3b518198971770e9fc41376c47b"
   },
   "prior_activation": {
     "commit": "7c41f0b1456582d754a0182af2ecb823b314e2ed",
