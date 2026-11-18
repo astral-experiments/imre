@@ -145,9 +145,8 @@ fn dense_text_is_ascii(bytes: &[u8]) -> bool {
     bits & 0x80 == 0
 }
 
-/// Validate the accepted grammar and UTF-8 before publishing Python objects;
-/// retain only packed positions into the immutable input, not copies of text.
-fn preflight(data: &[u8]) -> Option<Layout> {
+/// Validate the framed exact-list prolog shared by the text and primitive readers.
+fn list_cursor(data: &[u8]) -> Option<Cursor<'_>> {
     if data.get(..3)? != [PROTO, 4, FRAME] && data.get(..3)? != [PROTO, 5, FRAME] {
         return None;
     }
@@ -160,6 +159,19 @@ fn preflight(data: &[u8]) -> Option<Layout> {
     if cursor.byte()? != EMPTY_LIST || cursor.byte()? != MEMOIZE || cursor.byte()? != MARK {
         return None;
     }
+    Some(cursor)
+}
+
+#[cfg(test)]
+fn preflight(data: &[u8]) -> Option<Layout> {
+    preflight_text(list_cursor(data)?)
+}
+
+/// Validate text and memo pushes before publishing Python objects; retain only
+/// packed positions into the immutable input, not copies of text.
+fn preflight_text(mut cursor: Cursor<'_>) -> Option<Layout> {
+    let data = cursor.data;
+    let end = cursor.end;
     // The frame itself encodes offsets and lengths for a run of memoized
     // ASCII text. Keep that prefix in place even if a later item needs the
     // general grammar; only the remaining pushes need packed descriptors.
@@ -489,8 +501,19 @@ fn attempt_data(
     if !unobserved(ctx) {
         return Ok(None);
     }
-    let layout = preflight(bytes);
-    let vm = if layout.is_none() {
+    let mut primitive = None;
+    let layout = match list_cursor(bytes) {
+        Some(cursor)
+            if cursor.at < cursor.end
+                && super::primitive_list::starts(cursor.data.get(cursor.at).copied()) =>
+        {
+            primitive = super::primitive_list::preflight(bytes, cursor.at, cursor.end);
+            None
+        }
+        Some(cursor) => preflight_text(cursor),
+        None => None,
+    };
+    let vm = if layout.is_none() && primitive.is_none() {
         super::vm::preflight(bytes)
     } else {
         None
@@ -499,18 +522,24 @@ fn attempt_data(
     if crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Acquire) {
         return Ok(None);
     }
-    if direct && (layout.is_some() || vm.is_some()) {
+    if direct && (layout.is_some() || primitive.is_some() || vm.is_some()) {
         ctx.check_call_depth(0)?;
     }
-    match (layout, vm) {
-        (Some(layout), _) if !layout.has_get => decode(ctx, data, layout)
+    match (layout, primitive, vm) {
+        (Some(layout), _, _) if !layout.has_get => decode(ctx, data, layout)
             .map(DirectLoad::FreshText)
             .map(Some),
-        (Some(layout), _) => {
+        (Some(layout), _, _) => {
             before_nonfresh();
             decode(ctx, data, layout).map(DirectLoad::Other).map(Some)
         }
-        (_, Some(layout)) => {
+        (_, Some(layout), _) => {
+            before_nonfresh();
+            super::primitive_list::decode(ctx, data, layout)
+                .map(DirectLoad::Other)
+                .map(Some)
+        }
+        (_, _, Some(layout)) => {
             before_nonfresh();
             super::vm::decode(ctx, data, layout)
                 .map(DirectLoad::Other)
@@ -562,6 +591,23 @@ mod tests {
     }
 
     #[test]
+    fn framed_list_dispatch_does_not_consume_a_scalar_outside_the_frame() {
+        let bytes = b"\x80\x05\x95\x03\0\0\0\0\0\0\0]\x94(N";
+        let cursor = list_cursor(bytes).unwrap();
+        assert_eq!(cursor.at, cursor.end);
+        assert!(preflight(bytes).is_none());
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let data = ctx.alloc(Value::Bytes(bytes.to_vec()));
+        let invalidated = std::cell::Cell::new(false);
+        assert!(
+            attempt_data(&mut ctx, data, false, || invalidated.set(true))
+                .unwrap()
+                .is_none()
+        );
+        assert!(!invalidated.get());
+    }
+
+    #[test]
     fn direct_receipt_is_minted_only_for_the_immediate_text_reader_without_gets() {
         let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
         for (bytes, fresh) in [
@@ -574,6 +620,7 @@ mod tests {
                 false,
             ),
             (&b"\x80\x05\x95\x06\0\0\0\0\0\0\0]\x94K\x01a."[..], false),
+            (&b"\x80\x05\x95\x08\0\0\0\0\0\0\0]\x94(NK\x01e."[..], false),
         ] {
             let data = ctx.alloc(Value::Bytes(bytes.to_vec()));
             let invalidated = std::cell::Cell::new(false);

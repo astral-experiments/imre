@@ -2,6 +2,7 @@ use super::super::value::{DictViewKind, ELLIPSIS, NOT_IMPLEMENTED, NativeModuleS
 use super::{Context, Error, Id, NONE, Result, Value};
 use std::collections::HashMap;
 mod encoding;
+mod primitive_list;
 mod reader;
 mod vm;
 pub(in crate::dynamic) use reader::{DirectLoad, try_classified_direct_loads, try_direct_loads};
