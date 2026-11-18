@@ -719,7 +719,11 @@ pub(crate) fn check_registered_project<'a>(
             _ => None,
         });
     let capacity = sources.len();
-    let sources = sources.filter(|source| !source.uses_typeshed_interface());
+    let saved_graph =
+        checked.is_some_and(|graph| graph.modules[graph.entry].saved_source_contract());
+    let sources = sources.filter(|source| {
+        !source.uses_typeshed_interface() && !(saved_graph && source.is_original_bundled_provider())
+    });
     if sources.clone().next().is_none() {
         return requested_class.map_or(Ok(None), |(_, report, ..)| Err(report.to_string()));
     }
@@ -819,6 +823,14 @@ pub(crate) fn check_registered_project<'a>(
                 }),
             ));
         }
+    }
+
+    if let Some(graph) = checked.filter(|graph| graph.modules[graph.entry].saved_source_contract())
+    {
+        return Err(format!(
+            "cannot save module {:?}: selected registrations do not match its original checked source graph",
+            graph.modules[graph.entry].name
+        ));
     }
 
     let mut session = Session::with_storage(
