@@ -941,7 +941,7 @@ impl Checker<'_> {
                 .graph
                 .logging_definition("StreamHandler")
                 .and_then(|def| self.classes.declarations.ids.get(&def))
-                .is_some_and(|&base| self.classes.declarations.subclass(self.graph, id, base))
+                .is_some_and(|&base| self.classes.declarations.subclass(id, base))
             {
                 return Err(self.object_builtin_error("StreamHandler.__repr__", at));
             } else {

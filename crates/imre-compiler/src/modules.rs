@@ -3326,7 +3326,6 @@ pub(crate) struct SourceGraph {
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_builtin_len: bool,
     reachable: Option<Arc<reachability::Reachable>>,
-    required_library: Option<(ModuleId, reachability::Reachable)>,
     pub(crate) inputs: crate::SourceInputs,
     zip_files: Vec<(PathBuf, PathBuf, String)>,
     pub(crate) session: Session,
@@ -3556,12 +3555,6 @@ impl SourceGraph {
         })
     }
 
-    pub(crate) fn is_abstract_context_manager(&self, definition: DefinitionId) -> bool {
-        let source = &self.modules[definition.module];
-        source.is_bundled(CONTEXTLIB_ABSTRACT)
-            && source.export("AbstractContextManager") == Some(Binding::Definition(definition))
-    }
-
     /// Resolve an implicit call or class reference in its selected bundled module.
     pub(crate) fn bundled_definition(&self, owner: &str, name: &str) -> Option<DefinitionId> {
         let module = &self.modules[*self.by_name.get(owner)?];
@@ -3683,7 +3676,7 @@ impl SourceGraph {
 
     pub(crate) fn include_key_reprs(&mut self, owners: &HashSet<DefinitionId>) {
         self.reachable = Some(Arc::new(reachability::Reachable::collect_with_reprs(
-            self, false, owners,
+            self, owners,
         )));
         self.refresh_traceback_objects();
     }
@@ -3691,7 +3684,7 @@ impl SourceGraph {
     fn refresh_traceback_objects(&mut self) {
         if self.handled_tracebacks {
             self.traceback_objects = self.reachable.as_ref().map_or_else(
-                || reachability::Reachable::collect(self, false).traceback_objects,
+                || reachability::Reachable::collect(self).traceback_objects,
                 |roots| roots.traceback_objects,
             );
         }
@@ -3701,23 +3694,15 @@ impl SourceGraph {
         self.reachable.is_some()
     }
 
-    fn required_definitions(&self, module: ModuleId) -> Option<&reachability::Reachable> {
-        if let Some((library, roots)) = &self.required_library
-            && *library == module
-        {
-            return Some(roots);
-        }
-        self.reachable.as_deref()
-    }
-
     /// Object namespaces can publish a function even when the fixed entry has no reference to it.
     pub(crate) fn entry_may_call(&self) -> impl Fn(&DefinitionId) -> bool + '_ {
-        let entry = std::cell::LazyCell::new(|| reachability::Reachable::collect(self, false));
+        let entry = std::cell::LazyCell::new(|| reachability::Reachable::collect(self));
         move |id| {
             self.needs_object_runtime.get()
                 || self.modules[id.module].registered_namespace
                 || self
-                    .required_definitions(id.module)
+                    .reachable
+                    .as_deref()
                     .unwrap_or_else(|| &entry)
                     .definitions
                     .contains(id)
@@ -3730,7 +3715,8 @@ impl SourceGraph {
                 .checked_declaration
                 .is_none_or(|selected| selected == definition.statement)
             && self
-                .required_definitions(definition.module)
+                .reachable
+                .as_deref()
                 .is_none_or(|r| r.definitions.contains(&definition))
     }
 
@@ -3747,7 +3733,8 @@ impl SourceGraph {
     }
 
     pub(crate) fn includes_method(&self, module: ModuleId, method: &ast::StmtFunctionDef) -> bool {
-        self.required_definitions(module)
+        self.reachable
+            .as_deref()
             .is_none_or(|r| r.methods.contains(&(module, method.start())))
     }
 
@@ -3945,10 +3932,6 @@ impl SourceGraph {
         &self,
     ) -> (Option<Vec<Vec<TextRange>>>, Vec<Vec<CheckedDiagnostic>>) {
         let mut skipped = self.reachable.as_ref().map(|r| r.skipped.clone());
-        if let Some((library, roots)) = &self.required_library {
-            skipped.get_or_insert_with(|| vec![Vec::new(); self.modules.len()])[*library]
-                .extend_from_slice(&roots.skipped[*library]);
-        }
         let mut overloads = self.checked_diagnostics.borrow().clone();
         for &(id, range) in &self.checked_builtin_imports {
             overloads[id].push(CheckedDiagnostic::BuiltinImport(range));
@@ -4613,7 +4596,19 @@ impl SourceGraph {
                     Some(&self.session),
                 ),
                 Binding::IntrinsicModule(target) => {
-                    stdlib_attribute(&self.modules, module, target, attribute).ok()
+                    match stdlib_attribute(&self.modules, module, target, attribute) {
+                        Ok(binding) => Some(binding),
+                        Err(StdlibMiss::Sealed) => None,
+                        Err(StdlibMiss::Unclaimed) => {
+                            let owner = self.session.module_name_at(module, &attribute.value)?;
+                            (IntrinsicModule::named(owner) == Some(target))
+                                .then(|| {
+                                    self.session
+                                        .shipped_declaration(owner, attribute.attr.as_str())
+                                })
+                                .flatten()
+                        }
+                    }
                 }
                 _ => None,
             },
@@ -4788,8 +4783,6 @@ fn resolve_binding_in(
 
 pub(crate) const LOGGING_CLASSES: &str = "__imre_logging_classes__";
 const LOGGING_HANDLER_CLASSES: &str = "__imre_logging_handler_classes__";
-pub(crate) const CONTEXTLIB_ABSTRACT: &str = "__imre_contextlib_abstract__";
-const CONTEXTLIB_EXIT_STACK: &str = "__imre_contextlib_exit_stack__";
 const METADATA_VERSION: &str = "__imre_metadata_version__";
 const INSPECT_FUNCTIONS: &str = "__imre_inspect_functions__";
 const TEMPFILE_SPOOL: &str = "__imre_tempfile_spool__";
@@ -4843,8 +4836,6 @@ fn stdlib_symbol(
         return Ok(binding);
     }
     let implementation = match module {
-        IntrinsicModule::Contextlib if name == "AbstractContextManager" => CONTEXTLIB_ABSTRACT,
-        IntrinsicModule::Contextlib if name == "ExitStack" => CONTEXTLIB_EXIT_STACK,
         IntrinsicModule::ImportlibMetadata if name == "version" => METADATA_VERSION,
         IntrinsicModule::Tempfile if name == "SpooledTemporaryFile" => TEMPFILE_SPOOL,
         IntrinsicModule::Logging => (!name.starts_with('_'))
@@ -4868,7 +4859,7 @@ fn stdlib_symbol(
     source.export(name).filter(|b| {
             matches!(b, Binding::Definition(d) if d.module == id &&
                 matches!((module, &source.parsed.syntax().body[d.statement]),
-                    (IntrinsicModule::Calendar | IntrinsicModule::Fractions | IntrinsicModule::Contextlib, ast::Stmt::ClassDef(_))
+                    (IntrinsicModule::Calendar | IntrinsicModule::Fractions, ast::Stmt::ClassDef(_))
                     | (IntrinsicModule::ImportlibMetadata, ast::Stmt::FunctionDef(_))
                     | (IntrinsicModule::Tempfile, ast::Stmt::ClassDef(_))
                     | (IntrinsicModule::Logging, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_))
@@ -5311,7 +5302,6 @@ impl<'a> Loader<'a> {
                 .unwrap_or_default(),
             mutable_builtin_len: false,
             reachable: None,
-            required_library: None,
             entry_filename,
             inputs: self.inputs,
             zip_files: self.zip_files,
@@ -5330,16 +5320,7 @@ impl<'a> Loader<'a> {
             .collect::<Vec<_>>();
         graph.session.set_profile_exclusions(exclusions);
         if reachable_only {
-            graph.reachable = Some(Arc::new(reachability::Reachable::collect(&graph, false)));
-        } else if let Some(library) = graph
-            .modules
-            .iter()
-            .position(|m| m.is_bundled(CONTEXTLIB_EXIT_STACK))
-        {
-            // A sealed library can own higher-order methods that require object dispatch.
-            // Strict builds still visit even an uncalled first-party function using them.
-            graph.required_library =
-                Some((library, reachability::Reachable::collect(&graph, true)));
+            graph.reachable = Some(Arc::new(reachability::Reachable::collect(&graph)));
         }
         graph.empty_keywords = empty_keywords::EmptyKeywords::collect(&graph);
         graph.refresh_traceback_objects();
@@ -6552,27 +6533,6 @@ impl<'a> Loader<'a> {
             .then_some((
                 CALENDAR_CLASSES,
                 include_str!("../stdlib/calendar_grid_typed.py"),
-            )),
-            (module == Some(IntrinsicModule::Contextlib)
-                && imports.is_none_or(|names| {
-                    names
-                        .iter()
-                        .any(|a| a.name.as_str() == "AbstractContextManager")
-                }))
-            .then_some((CONTEXTLIB_ABSTRACT, include_str!("../stdlib/contextlib.py"))),
-            (module == Some(IntrinsicModule::Contextlib)
-                && imports
-                    .is_none_or(|names| names.iter().any(|a| a.name.as_str() == "ExitStack")))
-            .then_some((
-                CONTEXTLIB_EXIT_STACK,
-                concat!(
-                    // The typed layout uses one inheritance chain for the two stack bases.
-                    "from contextlib import AbstractContextManager\n",
-                    "class _BaseExitStack(AbstractContextManager):\n",
-                    include_str!("../stdlib/contextlib_exitstack_base.inc"),
-                    "\n",
-                    include_str!("../stdlib/contextlib_exitstack.py")
-                ),
             )),
             (module == Some(IntrinsicModule::Tempfile)
                 && imports.is_none_or(|names| {

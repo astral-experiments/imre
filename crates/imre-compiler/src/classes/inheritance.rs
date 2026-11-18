@@ -55,8 +55,10 @@ pub(super) fn resolve<'syntax>(
                 }
                 let origin = match argument {
                     ast::Expr::Subscript(subscript)
-                        if matches!(graph.resolve(definition.module, &subscript.value),
-                        Some(Binding::Definition(id)) if graph.is_abstract_context_manager(id)) =>
+                        if matches!(
+                            graph.resolve(definition.module, &subscript.value),
+                            Some(Binding::RegisteredClass(_))
+                        ) =>
                     {
                         &*subscript.value
                     }
