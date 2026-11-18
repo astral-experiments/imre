@@ -16,7 +16,7 @@ __unittest = True
 
 
 class SkipTest(Exception):
-    pass
+    __module__ = "unittest.case"
 
 
 def _shorten(text: str, begin: int, end: int) -> str:

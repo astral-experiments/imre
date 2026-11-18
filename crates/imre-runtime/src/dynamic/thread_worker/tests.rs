@@ -1093,7 +1093,10 @@ fn owned_wait_validation_poll_consumes_once_and_respects_deadline() {
         NONE,
         Lock::Primitive(Arc::clone(&gate)),
     );
-    assert!(matches!(expired.poll(WaitPhase::Initial), WaitStep::TimedOut));
+    assert!(matches!(
+        expired.poll(WaitPhase::Initial),
+        WaitStep::TimedOut
+    ));
     assert!(gate.release().is_ok());
     assert!(matches!(expired.poll(WaitPhase::Initial), WaitStep::Ready));
     assert!(gate.locked());
@@ -1114,10 +1117,18 @@ fn owned_wait_validation_public_acquire_timeout_wake_and_race() {
     let release = ctx.lookup_attr(receiver, "release").unwrap();
     assert_eq!(ctx.call(acquire, vec![], vec![]).unwrap(), boolean(true));
     let zero = ctx.int(0);
-    assert_eq!(ctx.call(acquire, vec![boolean(true), zero], vec![]).unwrap(), boolean(false));
+    assert_eq!(
+        ctx.call(acquire, vec![boolean(true), zero], vec![])
+            .unwrap(),
+        boolean(false)
+    );
     let short = ctx.alloc(Value::Float(0.02));
     let started = Instant::now();
-    assert_eq!(ctx.call(acquire, vec![boolean(true), short], vec![]).unwrap(), boolean(false));
+    assert_eq!(
+        ctx.call(acquire, vec![boolean(true), short], vec![])
+            .unwrap(),
+        boolean(false)
+    );
     assert!(started.elapsed() >= Duration::from_millis(10));
     assert!(started.elapsed() < Duration::from_secs(2));
     thread::scope(|scope| {
@@ -1140,7 +1151,11 @@ fn owned_wait_validation_public_acquire_timeout_wake_and_race() {
             let gate = Arc::clone(&gate);
             scope.spawn(move || assert!(gate.release().is_ok()));
             let limit = ctx.alloc(Value::Float(1.0));
-            assert_eq!(ctx.call(acquire, vec![boolean(true), limit], vec![]).unwrap(), boolean(true));
+            assert_eq!(
+                ctx.call(acquire, vec![boolean(true), limit], vec![])
+                    .unwrap(),
+                boolean(true)
+            );
         });
         assert_eq!(ctx.call(release, vec![], vec![]).unwrap(), NONE);
     }
