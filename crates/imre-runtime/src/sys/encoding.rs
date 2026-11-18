@@ -381,7 +381,7 @@ mod tests {
             #[cfg(target_vendor = "apple")]
             for (name, _) in cases {
                 let expected: String = name.to_bytes().iter().copied().map(char::from).collect();
-                assert_eq!(decode_locale(name).unwrap(), expected);
+                assert_eq!(decode_locale(name).ok().unwrap(), expected);
             }
             #[cfg(not(target_vendor = "apple"))]
             check();
