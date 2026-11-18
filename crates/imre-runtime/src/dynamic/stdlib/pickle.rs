@@ -3,6 +3,8 @@ use super::{Context, Error, Id, NONE, Result, Value};
 use std::collections::HashMap;
 mod encoding;
 mod reader;
+mod vm;
+pub(in crate::dynamic) use reader::{DirectLoad, try_classified_direct_loads, try_direct_loads};
 
 /// The accelerator keeps the original dictionaries and observes their in-place edits.
 fn registry(ctx: &mut Context, module: Id, owner: &str, name: &str) -> Result<Id> {

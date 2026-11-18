@@ -34,6 +34,11 @@ impl Context {
 
     /// A Python call expression checks for delivery after the callee's native work completes.
     pub(super) fn check_call_return(&mut self, result: Id) -> Result<Id> {
+        self.check_call_return_before(result, || {})
+    }
+
+    /// Invalidate a caller-local ownership proof before any claimed signal dispatch.
+    fn check_call_return_before(&mut self, result: Id, before: impl FnOnce()) -> Result<Id> {
         #[cfg(unix)]
         if crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed)
             && crate::signals::is_main()
@@ -41,8 +46,10 @@ impl Context {
             // A Python handler can delete the last other reference and force collection.
             self.heap.keep(result);
             // SAFETY: the caller retained the result on this thread's active frame.
-            unsafe { Self::dispatch_pending_calls(self)? };
+            unsafe { Self::dispatch_pending_calls_before(self, before)? };
         }
+        #[cfg(not(unix))]
+        let _ = before;
         Ok(result)
     }
 
@@ -1688,6 +1695,33 @@ pub(super) fn finish_at(ctx: &mut Context, result: Result<Id>, span: Option<&[u3
     }
 }
 
+/// Clear compiler-owned proof words before an error can materialize its source frame.
+fn replacement_finish(
+    ctx: &mut Context,
+    result: Result<Id>,
+    span: Option<&[u32; 4]>,
+    mut before_error: impl FnMut(),
+) -> Id {
+    let result = result.and_then(|id| {
+        ctx.heap.reserve_temporaries(1)?;
+        Ok(id)
+    });
+    if result.is_err() {
+        before_error();
+    }
+    match result {
+        Ok(id) => {
+            ctx.heap.keep(id);
+            id
+        }
+        Err(mut error) => {
+            ctx.record_exception_frame(&mut error, span);
+            ctx.heap.execution.pending = Some(error);
+            NONE
+        }
+    }
+}
+
 /// Snapshot a fixed pair before either read-only unpacking target is assigned.
 ///
 /// # Safety
@@ -1772,6 +1806,65 @@ pub(super) unsafe extern "C" fn imre_dyn_pull_item(
             ctx.heap.release_unbound_finalizers();
         }
         0
+    }
+}
+
+/// Preserve a replacement witness only across an exact, non-reentrant range step.
+///
+/// # Safety
+/// The generated caller owns the context, cursor, output word and private proof word.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn imre_dyn_replacement_pull_item(
+    ctx: *mut Context,
+    iter: Id,
+    item: *mut Id,
+    has_else: bool,
+    scope: Id,
+    proof: *mut Id,
+) -> i32 {
+    // SAFETY: the generated caller provides an independent writable proof word.
+    let proof = unsafe { &mut *proof };
+    // SAFETY: the caller owns this active context until the pull returns.
+    let context = unsafe { &*ctx };
+    if *proof != NONE
+        && (has_else
+            || !context.heap.private_replacement_frame(scope)
+            || !matches!(context.heap.get(iter), Value::RangeIterator(_)))
+    {
+        *proof = NONE;
+    }
+    // SAFETY: the generated caller owns the active context and writable item slot.
+    let context = unsafe { &mut *ctx };
+    if context.heap.execution.pending.is_some() {
+        *proof = NONE;
+        return 0;
+    }
+    let next = match context.heap.get(iter) {
+        Value::Iterator { .. } => context.next_builtin_sequence_item(iter),
+        _ => context.next_item(iter),
+    };
+    match next {
+        Ok(Some(value)) => {
+            let value = replacement_finish(context, Ok(value), None, || *proof = NONE);
+            if context.heap.execution.pending.is_some() {
+                0
+            } else {
+                // SAFETY: generated code supplied the rooted loop output slot.
+                unsafe { item.write(value) };
+                1
+            }
+        }
+        Ok(None) => {
+            *proof = NONE;
+            if has_else {
+                context.heap.release_unbound_finalizers();
+            }
+            0
+        }
+        Err(error) => {
+            replacement_finish(context, Err(error), None, || *proof = NONE);
+            0
+        }
     }
 }
 
@@ -2339,6 +2432,105 @@ pub(super) unsafe extern "C" fn imre_dyn_lookup_local(
     unsafe { imre_dyn_lookup(ctx, scope, name, len) }
 }
 
+impl Context {
+    /// Prove that the next ordinary name lookup cannot call a Python mapping.
+    fn replacement_lookup_is_scalar(&self, scope: Id, name: &str, local: bool) -> bool {
+        if !self.heap.private_replacement_frame(scope) {
+            return false;
+        }
+        let frame = self.scope_data(scope);
+        if frame.names.contains_key(name) {
+            return true;
+        }
+        if local || frame.closure.declared.contains(name) {
+            return false;
+        }
+        let Some(parent) = frame.parent else {
+            return false;
+        };
+        let root = self.scope_data(parent);
+        root.parent.is_none()
+            && !root.in_class_body
+            && root.exec_locals.is_none()
+            && !root.closure.cells.contains_key(name)
+            && self
+                .scalar_scope_name(parent, name)
+                .is_some_and(|binding| binding.is_some())
+    }
+}
+
+/// Perform the ordinary lookup after invalidating any proof before mapping or error effects.
+///
+/// # Safety
+/// The generated caller owns the context and proof word; `name` links `len` UTF-8 bytes.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn imre_dyn_replacement_lookup(
+    ctx: *mut Context,
+    scope: Id,
+    name: *const u8,
+    len: usize,
+    local: bool,
+    proof: *mut Id,
+) -> Id {
+    // SAFETY: all pointers follow this compiler-only ABI, and identifiers are UTF-8.
+    let (ctx, name, proof) = unsafe {
+        (
+            &mut *ctx,
+            std::str::from_utf8_unchecked(slice::from_raw_parts(name, len)),
+            &mut *proof,
+        )
+    };
+    if *proof != NONE && !ctx.replacement_lookup_is_scalar(scope, name, local) {
+        *proof = NONE;
+    }
+    if ctx.heap.execution.pending.is_some() {
+        *proof = NONE;
+        return NONE;
+    }
+    if local
+        && ctx.scope_data(scope).namespace.is_none()
+        && let Some(value) = ctx.scope_name(scope, name)
+    {
+        ctx.heap.take_call_position();
+        return replacement_finish(ctx, Ok(value), None, || *proof = NONE);
+    }
+    let mut result = ctx.lookup(scope, name);
+    finish_operand_position(ctx, &mut result, None);
+    replacement_finish(ctx, result, None, || *proof = NONE)
+}
+
+/// Invalidate before replacing a loop target that could own or expose arbitrary Python state.
+///
+/// # Safety
+/// The generated caller owns the context and proof word; `name` links `len` UTF-8 bytes.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn imre_dyn_replacement_guard_item_store(
+    ctx: *const Context,
+    scope: Id,
+    name: *const u8,
+    len: usize,
+    proof: *mut Id,
+) {
+    // SAFETY: all pointers follow this compiler-only ABI, and identifiers are UTF-8.
+    let (ctx, name, proof) = unsafe {
+        (
+            &*ctx,
+            std::str::from_utf8_unchecked(slice::from_raw_parts(name, len)),
+            &mut *proof,
+        )
+    };
+    if *proof != NONE
+        && (!ctx.heap.private_replacement_frame(scope)
+            || ctx
+                .scope_data(scope)
+                .names
+                .get(name)
+                .is_some_and(|&old| !matches!(ctx.heap.get(old), Value::Int(_))))
+    {
+        *proof = NONE;
+    }
+}
+
 /// Store a linked identifier and report whether its previous owner needs releasing.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_assign_target(
@@ -2358,6 +2550,110 @@ pub(super) unsafe extern "C" fn imre_dyn_assign_target(
         .and_then(|name| ctx.store_source_name(scope, name, value))
         .map(flag);
     finish(ctx, result)
+}
+
+/// Store a source binding, invalidating before a failure materializes its frame.
+///
+/// # Safety
+/// The compiler supplies a live context, linked UTF-8 name and independent proof words.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn imre_dyn_replacement_assign_target(
+    ctx: *mut Context,
+    scope: Id,
+    name: *const u8,
+    len: usize,
+    value: Id,
+    proof: *mut Id,
+    next: *mut Id,
+) -> Id {
+    // SAFETY: the compiler owns the context and writable words and links a UTF-8 name.
+    let (ctx, name, proof, next) = unsafe {
+        (
+            &mut *ctx,
+            std::str::from_utf8_unchecked(slice::from_raw_parts(name, len)),
+            &mut *proof,
+            &mut *next,
+        )
+    };
+    if ctx.heap.execution.pending.is_some() {
+        *proof = NONE;
+        *next = NONE;
+        return NONE;
+    }
+    let result = if ctx.proven_private_text_binding(scope, name, value, *proof) {
+        // The closed compiler region keeps the witnessed TEXT/noGET graph private:
+        // neither this exact list nor any of its non-singleton immutable text leaves
+        // can have acquired a finalizer or weak edge since the producer returned.
+        // The binding already exists, so this is the same infallible names-table write
+        // and scope mutation bookkeeping used by bind_local, without scanning the graph.
+        let Value::Scope(frame) = ctx.heap.get_mut(scope) else {
+            unreachable!("private replacement scope")
+        };
+        *frame.names.get_mut(name).expect("witnessed binding") = value;
+        Ok(FALSE)
+    } else {
+        ctx.store_source_name(scope, name, value).map(flag)
+    };
+    replacement_finish(ctx, result, None, || {
+        *proof = NONE;
+        *next = NONE;
+    })
+}
+
+/// Check a private result store before it can release a prior arbitrary binding.
+///
+/// # Safety
+/// The compiler supplies independent proof/next words and a linked UTF-8 identifier.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn imre_dyn_replacement_guard_result_store(
+    ctx: *const Context,
+    scope: Id,
+    name: *const u8,
+    len: usize,
+    value: Id,
+    proof: *mut Id,
+    next: *mut Id,
+) {
+    // SAFETY: these pointers follow the compiler-only source-store ABI.
+    let (ctx, name, proof, next) = unsafe {
+        (
+            &*ctx,
+            std::str::from_utf8_unchecked(slice::from_raw_parts(name, len)),
+            &mut *proof,
+            &mut *next,
+        )
+    };
+    let proven = ctx.proven_private_text_binding(scope, name, value, *proof);
+    if !proven
+        && (!ctx.heap.private_replacement_frame(scope)
+            || ctx.heap.has_weak_values
+            || ctx.replacing_finalizer(scope, name, value))
+    {
+        *proof = NONE;
+        *next = NONE;
+        return;
+    }
+    if *proof != NONE
+        && (ctx.scope_data(scope).names.get(name) != Some(proof)
+            || !ctx.heap.is_fresh_text_list(*proof))
+    {
+        *proof = NONE;
+    }
+    if *next != value || !ctx.heap.is_fresh_text_list(*next) {
+        *next = NONE;
+    }
+}
+
+impl Context {
+    /// Recognize the old private TEXT/noGET result while its per-call compiler witness lives.
+    fn proven_private_text_binding(&self, scope: Id, name: &str, value: Id, proof: Id) -> bool {
+        proof != NONE
+            && proof != value
+            && !self.heap.has_weak_values
+            && self.heap.private_replacement_frame(scope)
+            && self.scope_data(scope).names.get(name) == Some(&proof)
+            && self.heap.is_fresh_text_list(proof)
+    }
 }
 
 /// Clear a named handler through its ordinary observable store, release and deletion.
@@ -2917,6 +3213,158 @@ pub(super) unsafe extern "C" fn imre_dyn_positional_call_at(
     }
 }
 
+/// Run the initial source call normally and record only whether its already
+/// evaluated callable was the authenticated pickle body. No result witness is minted.
+///
+/// # Safety
+/// The compiler supplies the ordinary positional-call operands and a writable,
+/// independent caller-local boolean for this synchronous invocation.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn imre_dyn_replacement_initial_call_at(
+    ctx: *mut Context,
+    callable: Id,
+    values: *const Id,
+    count: usize,
+    mark: usize,
+    span: *const [u32; 4],
+    scope: Id,
+    eligible: *mut bool,
+) -> Id {
+    let admitted = {
+        // SAFETY: the compiler owns the live context until this synchronous call returns.
+        let context = unsafe { &*ctx };
+        context.heap.execution.pending.is_none()
+            && count == 1
+            && context.direct_pickle_call_target(callable).is_some()
+    };
+    // SAFETY: the compiler owns the independent boolean and the ordinary call
+    // operands; the immutable context borrow ended before entering the callee.
+    unsafe {
+        eligible.write(admitted);
+        imre_dyn_positional_call_at(ctx, callable, values, count, mark, span, scope)
+    }
+}
+
+/// Execute one authenticated direct pickle invocation and return a witness for
+/// that invocation only. A miss clears the old witness before the generic binder
+/// or source fallback can run; nested calls therefore cannot mint this receipt.
+///
+/// # Safety
+/// The compiler supplies the ordinary call operands and two independent, writable
+/// caller-local proof words that remain valid until this synchronous call returns.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn imre_dyn_replacement_positional_call_at(
+    ctx: *mut Context,
+    callable: Id,
+    values: *const Id,
+    count: usize,
+    mark: usize,
+    span: *const [u32; 4],
+    scope: Id,
+    proof: *mut Id,
+    next: *mut Id,
+) -> Id {
+    // SAFETY: the two proof words are independent compiler-owned storage.
+    unsafe { next.write(NONE) };
+    // Classification reads only immutable native function/code metadata. On a
+    // pending error do not inspect the callable: the ordinary ABI must handle it.
+    // No user code or heap allocation can run before the classified target is used.
+    let target = {
+        // SAFETY: the generated caller owns the live context for this synchronous call.
+        let context = unsafe { &*ctx };
+        if context.heap.execution.pending.is_none() && count == 1 {
+            context.direct_pickle_call_target(callable)
+        } else {
+            None
+        }
+    };
+    let Some((pickle_scope, kwdefaults)) = target else {
+        // SAFETY: clear the old receipt before the ordinary binder, callbacks,
+        // pending-error landing, or signal dispatch can expose the prior binding.
+        unsafe {
+            proof.write(NONE);
+            return imre_dyn_positional_call_at(ctx, callable, values, count, mark, span, scope);
+        }
+    };
+    let direct = std::cell::Cell::new(false);
+    let fresh_text = std::cell::Cell::new(false);
+    let effect = std::cell::Cell::new(false);
+    // SAFETY: the linked call owns this active context and marked positional operands.
+    let result = unsafe {
+        scoped_call_checked(
+            ctx,
+            span.as_ref(),
+            mark,
+            callable,
+            |ctx| {
+                let args = live_handles(values, count);
+                if ctx.heap.private_replacement_frame(scope)
+                    && let [data] = args
+                {
+                    match stdlib::pickle::try_classified_direct_loads(
+                        ctx,
+                        pickle_scope,
+                        kwdefaults,
+                        *data,
+                        || proof.write(NONE),
+                    ) {
+                        Ok(Some(stdlib::pickle::DirectLoad::FreshText(value))) => {
+                            direct.set(true);
+                            fresh_text.set(true);
+                            return Ok(calls::RegisteredCall::Returned(value));
+                        }
+                        Ok(Some(stdlib::pickle::DirectLoad::Other(value))) => {
+                            direct.set(true);
+                            return Ok(calls::RegisteredCall::Returned(value));
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            proof.write(NONE);
+                            return Err(error);
+                        }
+                    }
+                }
+                proof.write(NONE);
+                ctx.prepare_call_in_scope(scope, callable, args.into(), Vec::new())
+            },
+            |ctx, mark, value| {
+                if direct.get()
+                    && (!ctx.heap.private_replacement_frame(scope)
+                        || (ctx.heap.tracks_finalizers() && !ctx.can_skip_finalizer_sweep(mark)))
+                {
+                    proof.write(NONE);
+                    effect.set(true);
+                }
+                ctx.finish_call_operands(mark, value);
+            },
+            |ctx, value| {
+                ctx.check_call_return_before(value, || {
+                    proof.write(NONE);
+                    effect.set(true);
+                })
+            },
+            || {
+                proof.write(NONE);
+                next.write(NONE);
+            },
+        )
+    };
+    // SAFETY: the generated caller still owns the active context and both words.
+    let context = unsafe { &*ctx };
+    if context.heap.execution.pending.is_some() {
+        // SAFETY: the generated caller keeps the independent proof word writable.
+        unsafe { proof.write(NONE) };
+    } else if fresh_text.get()
+        && !effect.get()
+        && context.heap.private_replacement_frame(scope)
+        && context.heap.is_fresh_text_list(result)
+    {
+        // SAFETY: the generated caller keeps the independent next word writable.
+        unsafe { next.write(result) };
+    }
+    result
+}
+
 /// Call with positional values followed by values for statically named keywords.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_keyword_call_at(
@@ -3003,23 +3451,58 @@ unsafe fn scoped_call(
     prepare: impl FnOnce(&mut Context) -> Result<calls::RegisteredCall>,
     release: impl FnOnce(&mut Context, usize, Id),
 ) -> Id {
+    // SAFETY: forwarding preserves the marked caller operands and context ownership.
+    unsafe {
+        scoped_call_checked(
+            context,
+            span,
+            mark,
+            callable,
+            prepare,
+            release,
+            Context::check_call_return,
+            || {},
+        )
+    }
+}
+
+/// Call with a caller-specific return-dispatch observer. Preparation must clear
+/// any ownership proof before returning a call that can execute arbitrary code.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the native call operands and each effect boundary require independent hooks"
+)]
+unsafe fn scoped_call_checked(
+    context: *mut Context,
+    span: Option<&[u32; 4]>,
+    mark: usize,
+    callable: Id,
+    prepare: impl FnOnce(&mut Context) -> Result<calls::RegisteredCall>,
+    release: impl FnOnce(&mut Context, usize, Id),
+    check: impl FnOnce(&mut Context, Id) -> Result<Id>,
+    mut before_error: impl FnMut(),
+) -> Id {
     // SAFETY: restrict preparation's borrow to its own phase of the call.
     let ctx = unsafe { &mut *context };
     if ctx.heap.execution.pending.is_some() {
+        before_error();
         ctx.heap.set_call_position(None);
         return NONE;
     }
     let call = OperandCall::prepare(ctx, mark, callable, prepare);
     // SAFETY: the generated caller owns the marked operands throughout the call.
-    let mut result = call.and_then(|call| unsafe { call.run(context, release) });
+    let mut result = call.and_then(|call| unsafe { call.run_checked(context, release, check) });
     // SAFETY: execution has returned to the generated caller.
     let ctx = unsafe { &mut *context };
+    if result.is_err() {
+        before_error();
+    }
     // Ordinary traceback nodes also own the saved call range, including when the
     // emitter supplied no highlight for the traceback printer.
     finish_operand_position(ctx, &mut result, Some(value::TracebackAnchor::Call));
     match result {
         Ok(id) if id != NONE && ctx.heap.keeps_single_operand(mark, id) => id,
-        result => finish_at(ctx, result, span),
+        result => replacement_finish(ctx, result, span, before_error),
     }
 }
 
@@ -3064,6 +3547,19 @@ impl OperandCall {
         context: *mut Context,
         release: impl FnOnce(&mut Context, usize, Id),
     ) -> Result<Id> {
+        // SAFETY: forwarding retains this call's marked operands and active context.
+        unsafe { self.run_checked(context, release, Context::check_call_return) }
+    }
+
+    /// # Safety
+    /// This thread owns the prepared context; `check` runs only after the callee
+    /// and operand release have returned to that context.
+    unsafe fn run_checked(
+        self,
+        context: *mut Context,
+        release: impl FnOnce(&mut Context, usize, Id),
+        check: impl FnOnce(&mut Context, Id) -> Result<Id>,
+    ) -> Result<Id> {
         // SAFETY: the owner has resumed with the prepared activation still rooted.
         let value = unsafe { self.call.run(context) }?;
         // SAFETY: the call returned to the marked caller on this thread.
@@ -3074,7 +3570,7 @@ impl OperandCall {
         } else {
             release(ctx, self.mark, value);
         }
-        ctx.check_call_return(value)
+        check(ctx, value)
     }
 }
 
@@ -3758,6 +4254,93 @@ pub(super) unsafe extern "C" fn imre_dyn_assignment_target_at(
     }
 }
 
+/// Preserve proof words only when the source assignment cannot run release callbacks.
+///
+/// # Safety
+/// The caller owns the live root slice and two independent writable proof words.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn imre_dyn_replacement_assignment_target_at(
+    ctx: *mut Context,
+    mark: usize,
+    live: *const Id,
+    len: usize,
+    replaced: Id,
+    proof: *mut Id,
+    next: *mut Id,
+) {
+    if replaced == TRUE {
+        // SAFETY: the compiler supplies two separate writable words.
+        unsafe {
+            proof.write(NONE);
+            next.write(NONE)
+        };
+    }
+    // SAFETY: the ordinary source-release operation uses this same root slice.
+    unsafe { imre_dyn_assignment_target_at(ctx, mark, live, len, replaced) };
+}
+
+/// Complete a compiler-certified private binding replacement, after the ordinary
+/// source store and release have succeeded. The old word is cleared before recycling.
+///
+/// # Safety
+/// The compiler has proved that the function contains no read, copy, capture or
+/// escape of this result except its terminal return; its producer-to-rebind path
+/// contains only the guarded operations emitted for the closed region. `live`
+/// contains only its private cursor/item/flag roots, and proof words are independent.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn imre_dyn_replacement_commit(
+    ctx: *mut Context,
+    scope: Id,
+    name: *const u8,
+    len: usize,
+    value: Id,
+    live: *const Id,
+    count: usize,
+    proof: *mut Id,
+    next: *mut Id,
+) {
+    // SAFETY: the generated caller owns the context, linked name and root/proof words.
+    let (ctx, name, live, proof, next) = unsafe {
+        (
+            &mut *ctx,
+            std::str::from_utf8_unchecked(slice::from_raw_parts(name, len)),
+            live_handles(live, count),
+            &mut *proof,
+            &mut *next,
+        )
+    };
+    let old = std::mem::replace(proof, NONE);
+    let fresh = std::mem::replace(next, NONE);
+    if ctx.heap.execution.pending.is_some()
+        || !ctx.heap.private_replacement_frame(scope)
+        || ctx.scope_data(scope).names.get(name) != Some(&value)
+    {
+        return;
+    }
+    if old != NONE && old != value && !live.contains(&old) && ctx.heap.replace_statement_roots(live)
+    {
+        if ctx.heap.is_fresh_nonshort_text_list(old) {
+            // SAFETY: only this immediate authenticated no-GET decoder can mint
+            // the old per-call witness and narrow nonshort owner shape. The
+            // compiler's closed region excludes reads/escapes, and its guarded
+            // operations clear the witness before mutation, tracing, collection
+            // (including silent marking), finalization or signal dispatch. The
+            // exact private store succeeded and ordinary operand roots are gone.
+            // The producer therefore still owns every distinct nonshort leaf.
+            // A failed owner check leaves the entire graph for ordinary GC.
+            let _ = unsafe { ctx.heap.retire_certified_nonshort_text_list(old) };
+        } else if ctx.heap.is_fresh_text_list(old) {
+            // SAFETY: the same closed region and per-call witness prove no
+            // list/non-singleton alias or root remains; the checked routine
+            // additionally verifies short-string identity and every child.
+            let _ = unsafe { ctx.heap.retire_proven_fresh_text_list(old) };
+        }
+    }
+    if fresh == value && ctx.heap.is_fresh_text_list(fresh) {
+        *proof = fresh;
+    }
+}
+
 /// Expose a compound statement's full instruction position during its implicit calls.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_definition_position(
@@ -3847,7 +4430,79 @@ pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
     }
 }
 
+/// Publish a source checkpoint while a closed replacement region owns a witness.
+/// Collection/finalization invalidates before the checkpoint; a racing signal
+/// invalidates after dispatch is claimed and before any Python observer runs.
+///
+/// # Safety
+/// The compiler supplies its active scope, live roots, linked file and private proof word.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn imre_dyn_replacement_statement(
+    ctx: *mut Context,
+    scope: Id,
+    live: *const Id,
+    len: usize,
+    file: *const c_char,
+    line: u32,
+    caught: Id,
+    proof: *mut Id,
+) {
+    // SAFETY: generated code owns the active context, roots and proof word.
+    let (ctx, live) = unsafe { (&mut *ctx, live_handles(live, len)) };
+    // SAFETY: the independent compiler-local proof word is writable throughout the checkpoint.
+    if unsafe { *proof } != NONE && !ctx.replacement_checkpoint_safe(scope) {
+        // SAFETY: the same proof word remains writable until this checkpoint returns.
+        unsafe { proof.write(NONE) };
+    }
+    // SAFETY: file and roots have the ordinary native statement lifetime. The
+    // closure runs before, and cannot be retained by, the signal dispatcher.
+    let result = unsafe {
+        ctx.native_statement_before(
+            live,
+            file,
+            line,
+            caught,
+            |ctx| {
+                if *proof != NONE && !ctx.replacement_checkpoint_safe(scope) {
+                    proof.write(NONE);
+                }
+            },
+            || proof.write(NONE),
+        )
+    };
+    if let Err(error) = result {
+        // SAFETY: the generated caller still owns the independent proof word.
+        unsafe { proof.write(NONE) };
+        finish(ctx, Err(error));
+    }
+}
+
 impl Context {
+    /// Prove that publishing the next statement cannot expose the private binding.
+    /// Unlike the call-finish guard, this proof must survive replacement of the
+    /// current operand roots, so only finalizers pinned by the actual sys bindings
+    /// are accepted.
+    fn replacement_checkpoint_safe(&self, scope: Id) -> bool {
+        if !self.heap.replacement_checkpoint_safe(scope) {
+            return false;
+        }
+        if !self.heap.tracks_finalizers() {
+            return true;
+        }
+        let Some(system) = self.threads.system_module else {
+            return false;
+        };
+        let Value::Module { scope, .. } = *self.heap.get(system) else {
+            return false;
+        };
+        let [stdin, stdout, stderr] = ["__stdin__", "__stdout__", "__stderr__"]
+            .map(|name| self.scope_name(scope, name).unwrap_or(NONE));
+        let [input, buffer, raw] =
+            super::stdlib::io::text_descriptor_chain(&self.heap, stdin).unwrap_or([NONE; 3]);
+        self.heap
+            .finalizers_within(&[input, buffer, raw, stdout, stderr])
+    }
+
     /// Publish a native statement. Its caller records a failure once at the frame boundary.
     pub(super) unsafe fn native_statement(
         &mut self,
@@ -3855,6 +4510,23 @@ impl Context {
         file: *const c_char,
         line: u32,
         caught: Id,
+    ) -> Result<()> {
+        // SAFETY: forwarding preserves the active frame and native filename lifetime.
+        unsafe { self.native_statement_before(live, file, line, caught, |_| {}, || {}) }
+    }
+
+    /// Publish the ordinary checkpoint, invalidating before a claimed signal dispatch.
+    ///
+    /// # Safety
+    /// The context, roots and native filename obey `native_statement`'s ABI.
+    unsafe fn native_statement_before(
+        &mut self,
+        live: &[Id],
+        file: *const c_char,
+        line: u32,
+        caught: Id,
+        before_checkpoint: impl FnOnce(&Context),
+        before: impl FnOnce(),
     ) -> Result<()> {
         let file = if file.is_null() {
             // A shared initializer executes under the Code of this particular registration.
@@ -3869,6 +4541,9 @@ impl Context {
             // SAFETY: a supplied filename is a static native string.
             unsafe { self.native_filename_label(file) }?
         };
+        // Filename decoding can allocate and request collection. Revalidate only
+        // after that work, immediately before checkpoint may run a collector.
+        before_checkpoint(self);
         self.checkpoint(
             live,
             value::Location {
@@ -3881,8 +4556,10 @@ impl Context {
         #[cfg(unix)]
         // SAFETY: the statement has published this frame and its live operands.
         unsafe {
-            Self::dispatch_pending_calls(self)?
+            Self::dispatch_pending_calls_before(self, before)?
         };
+        #[cfg(not(unix))]
+        let _ = before;
         Ok(())
     }
 
@@ -4398,6 +5075,375 @@ impl Context {
 mod tests {
     use super::*;
     use std::rc::{Rc, Weak};
+
+    fn replacement_context() -> (Context, Id) {
+        let mut ctx = new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let root = ctx.scope("test", None);
+        let scope = ctx.scope("test", Some(root));
+        ctx.heap
+            .enter(scope, NONE, value::FrameOwner::Function(NONE));
+        (ctx, scope)
+    }
+
+    fn fresh_text_list(ctx: &mut Context, text: &str) -> (Id, Id) {
+        ctx.heap.reserve_unobserved_texts(2).unwrap();
+        let singleton = ctx.heap.unobserved_text("é", false);
+        let leaf = ctx.heap.unobserved_text(text, text.is_ascii());
+        let list = ctx.alloc(Value::List(vec![singleton, leaf]));
+        ctx.heap.mark_fresh_text_list(list);
+        (list, singleton)
+    }
+
+    fn nonshort_text_list(ctx: &mut Context, text: &str) -> (Id, Id) {
+        ctx.heap.reserve_unobserved_texts(1).unwrap();
+        let leaf = ctx.heap.unobserved_text(text, text.is_ascii());
+        let list = ctx.alloc(Value::List(vec![leaf]));
+        ctx.heap.mark_fresh_nonshort_text_list(list);
+        (list, leaf)
+    }
+
+    #[test]
+    fn private_replacement_certifies_nonshort_graph_only_with_a_live_witness() {
+        let (mut ctx, scope) = replacement_context();
+        let (old, _) = nonshort_text_list(&mut ctx, "first");
+        let (new, new_leaf) = nonshort_text_list(&mut ctx, "second");
+        ctx.bind_local(scope, "result", old);
+        let (mut proof, mut next) = (old, new);
+        let name = b"result";
+        // SAFETY: the private binding, two independently owned words and exact
+        // distinct nonshort graphs model a successful closed-region replacement.
+        unsafe {
+            imre_dyn_replacement_guard_result_store(
+                &ctx,
+                scope,
+                name.as_ptr(),
+                name.len(),
+                new,
+                &mut proof,
+                &mut next,
+            );
+            let replaced = imre_dyn_replacement_assign_target(
+                &mut ctx,
+                scope,
+                name.as_ptr(),
+                name.len(),
+                new,
+                &mut proof,
+                &mut next,
+            );
+            assert_eq!(replaced, FALSE);
+            imre_dyn_replacement_assignment_target_at(
+                &mut ctx,
+                0,
+                std::ptr::null(),
+                0,
+                replaced,
+                &mut proof,
+                &mut next,
+            );
+            imre_dyn_replacement_commit(
+                &mut ctx,
+                scope,
+                name.as_ptr(),
+                name.len(),
+                new,
+                std::ptr::null(),
+                0,
+                &mut proof,
+                &mut next,
+            );
+        }
+        assert_eq!((proof, next), (new, NONE));
+        assert!(!ctx.heap.is_fresh_text_list(old));
+        assert!(ctx.heap.is_fresh_nonshort_text_list(new));
+
+        // An untrusted effect invalidates the witness before the child can be
+        // mutated. The producer shape alone must never authorize retirement.
+        proof = NONE;
+        *ctx.heap.get_mut(new_leaf) = Value::List(Vec::new());
+        let (third, _) = nonshort_text_list(&mut ctx, "third");
+        ctx.bind_local(scope, "result", third);
+        next = third;
+        // SAFETY: absent old proof means this commit cannot retire the mutated graph.
+        unsafe {
+            imre_dyn_replacement_commit(
+                &mut ctx,
+                scope,
+                name.as_ptr(),
+                name.len(),
+                third,
+                std::ptr::null(),
+                0,
+                &mut proof,
+                &mut next,
+            );
+        }
+        assert!(ctx.heap.is_fresh_nonshort_text_list(new));
+        assert!(matches!(ctx.heap.get(new_leaf), Value::List(_)));
+    }
+
+    #[test]
+    fn private_replacement_retires_only_the_replaced_fresh_graph() {
+        let (mut ctx, scope) = replacement_context();
+        let (old, singleton) = fresh_text_list(&mut ctx, "first fresh leaf");
+        let (new, same_singleton) = fresh_text_list(&mut ctx, "second fresh leaf");
+        assert_eq!(singleton, same_singleton);
+        ctx.bind_local(scope, "result", old);
+        let (mut proof, mut next) = (old, new);
+        let name = b"result";
+        // SAFETY: this test constructs the same private source scope, distinct
+        // witness words and alias-free producer graph as the closed compiler region.
+        unsafe {
+            imre_dyn_replacement_guard_result_store(
+                &ctx,
+                scope,
+                name.as_ptr(),
+                name.len(),
+                new,
+                &mut proof,
+                &mut next,
+            );
+            let replaced = imre_dyn_replacement_assign_target(
+                &mut ctx,
+                scope,
+                name.as_ptr(),
+                name.len(),
+                new,
+                &mut proof,
+                &mut next,
+            );
+            assert_eq!(replaced, FALSE);
+            imre_dyn_replacement_assignment_target_at(
+                &mut ctx,
+                0,
+                std::ptr::null(),
+                0,
+                replaced,
+                &mut proof,
+                &mut next,
+            );
+            imre_dyn_replacement_commit(
+                &mut ctx,
+                scope,
+                name.as_ptr(),
+                name.len(),
+                new,
+                std::ptr::null(),
+                0,
+                &mut proof,
+                &mut next,
+            );
+        }
+        assert_eq!(proof, new);
+        assert_eq!(next, NONE);
+        assert!(!ctx.heap.is_fresh_text_list(old));
+        assert!(ctx.heap.is_fresh_text_list(new));
+        assert!(matches!(ctx.heap.get(singleton), Value::Str(text) if text == "é"));
+    }
+
+    #[test]
+    fn unwitnessed_producer_shape_does_not_skip_finalizer_checks() {
+        let (mut ctx, scope) = replacement_context();
+        let (old, _) = fresh_text_list(&mut ctx, "original leaf");
+        let Value::List(items) = ctx.heap.get(old) else {
+            unreachable!()
+        };
+        let child = items[1];
+        *ctx.heap.get_mut(child) = Value::List(Vec::new());
+        ctx.heap.register_finalizer(child);
+        assert!(ctx.heap.is_fresh_text_list(old));
+        ctx.bind_local(scope, "result", old);
+        let (new, _) = fresh_text_list(&mut ctx, "replacement leaf");
+        let (mut proof, mut next) = (NONE, new);
+        let name = b"result";
+        assert!(ctx.replacing_finalizer(scope, "result", new));
+        // SAFETY: the test owns the private scope and independent compiler words;
+        // the absent witness must force the ordinary finalizer-sensitive path.
+        unsafe {
+            imre_dyn_replacement_guard_result_store(
+                &ctx,
+                scope,
+                name.as_ptr(),
+                name.len(),
+                new,
+                &mut proof,
+                &mut next,
+            );
+        }
+        assert_eq!((proof, next), (NONE, NONE));
+    }
+
+    #[test]
+    fn replacement_miss_and_non_range_pull_invalidate_before_fallback() {
+        let (mut ctx, scope) = replacement_context();
+        let (old, _) = fresh_text_list(&mut ctx, "fresh leaf");
+        ctx.bind_local(scope, "result", old);
+        let data = ctx.alloc(Value::Bytes(vec![1, 2, 3]));
+        let callable = ctx.builtin("len");
+        let mut proof = old;
+        let mut next = old;
+        let mark = ctx.heap.temporary_mark();
+        // SAFETY: the test owns the synchronous call context, positional input and words.
+        let result = unsafe {
+            imre_dyn_replacement_positional_call_at(
+                &mut ctx,
+                callable,
+                &data,
+                1,
+                mark,
+                std::ptr::null(),
+                scope,
+                &mut proof,
+                &mut next,
+            )
+        };
+        assert_eq!(proof, NONE);
+        assert_eq!(next, NONE);
+        assert!(matches!(ctx.heap.get(result), Value::Int(value) if value.as_small() == Some(3)));
+
+        let sequence = ctx.alloc(Value::List(vec![data]));
+        let iter = ctx.alloc(Value::Iterator {
+            kind: "list_iterator",
+            sequence: Some(sequence),
+            offset: 0,
+            reverse: false,
+            context: None,
+        });
+        proof = old;
+        let mut item = NONE;
+        // SAFETY: the test owns the context, cursor and two output words.
+        let _ = unsafe {
+            imre_dyn_replacement_pull_item(&mut ctx, iter, &mut item, false, scope, &mut proof)
+        };
+        assert_eq!(proof, NONE);
+        assert_eq!(item, data);
+        assert!(ctx.heap.is_fresh_text_list(old));
+    }
+
+    #[test]
+    fn initial_generic_call_uses_ordinary_dispatch_without_admission() {
+        let (mut ctx, scope) = replacement_context();
+        let callable = ctx.builtin("len");
+        let argument = ctx.alloc(Value::Bytes(vec![1, 2, 3]));
+        let mark = ctx.heap.temporary_mark();
+        let mut eligible = true;
+        // SAFETY: the test owns the live argument, active context and admission word.
+        let result = unsafe {
+            imre_dyn_replacement_initial_call_at(
+                &mut ctx,
+                callable,
+                &argument,
+                1,
+                mark,
+                std::ptr::null(),
+                scope,
+                &mut eligible,
+            )
+        };
+        assert!(!eligible);
+        assert!(matches!(ctx.heap.get(result), Value::Int(n) if n.as_small() == Some(3)));
+    }
+
+    #[test]
+    fn replacement_generic_error_and_pending_landing_clear_both_words() {
+        let (mut ctx, scope) = replacement_context();
+        let (old, _) = fresh_text_list(&mut ctx, "previous witnessed result");
+        ctx.bind_local(scope, "result", old);
+        let callable = ctx.builtin("len");
+        let argument = ctx.int(42);
+        let mark = ctx.heap.temporary_mark();
+        let (mut proof, mut next) = (old, old);
+        // SAFETY: the test owns the synchronous context, rooted argument and words.
+        let result = unsafe {
+            imre_dyn_replacement_positional_call_at(
+                &mut ctx,
+                callable,
+                &argument,
+                1,
+                mark,
+                std::ptr::null(),
+                scope,
+                &mut proof,
+                &mut next,
+            )
+        };
+        assert_eq!(result, NONE);
+        assert!(ctx.heap.execution.pending.is_some());
+        assert_eq!((proof, next), (NONE, NONE));
+        assert_eq!(ctx.scope_data(scope).names.get("result"), Some(&old));
+
+        (proof, next) = (old, old);
+        // SAFETY: all operands remain valid; the pending-error path must clear the
+        // words and delegate to the ordinary call landing without invoking len again.
+        let result = unsafe {
+            imre_dyn_replacement_positional_call_at(
+                &mut ctx,
+                callable,
+                &argument,
+                1,
+                mark,
+                std::ptr::null(),
+                scope,
+                &mut proof,
+                &mut next,
+            )
+        };
+        assert_eq!(result, NONE);
+        assert_eq!((proof, next), (NONE, NONE));
+    }
+
+    #[test]
+    fn replacement_checkpoint_rechecks_after_non_ascii_filename_allocation() {
+        let (mut ctx, scope) = replacement_context();
+        let (old, _) = nonshort_text_list(&mut ctx, "fresh graph retained by local");
+        ctx.bind_local(scope, "result", old);
+        ctx.heap.request_collection_after_next_slot_for_test();
+        assert!(ctx.heap.replacement_checkpoint_safe(scope));
+        let file = std::ffi::CString::new("uncached-réplacement-threshold.py").unwrap();
+        let mut proof = old;
+        // SAFETY: this test owns the active private frame, filename and proof word.
+        unsafe {
+            imre_dyn_replacement_statement(
+                &mut ctx,
+                scope,
+                std::ptr::null(),
+                0,
+                file.as_ptr(),
+                1,
+                NONE,
+                &mut proof,
+            );
+        }
+        assert_eq!(proof, NONE);
+        assert!(ctx.heap.is_fresh_text_list(old));
+        assert!(ctx.heap.is_fresh_nonshort_text_list(old));
+        assert_eq!(ctx.scope_data(scope).names.get("result"), Some(&old));
+    }
+
+    #[test]
+    fn replacement_checkpoint_accepts_only_finalizers_pinned_by_sys_streams() {
+        let (mut ctx, scope) = replacement_context();
+        let system_scope = ctx.scope("sys", None);
+        let system = ctx.alloc(Value::Module {
+            name: "sys".into(),
+            scope: system_scope,
+            origin: None,
+            initializing: false,
+            module_state: None,
+            module_slots: None,
+            constructor: None,
+        });
+        ctx.threads.system_module = Some(system);
+        let owner = ctx.text("ordinary finalizer owner");
+        ctx.heap.register_finalizer(owner);
+        assert!(!ctx.replacement_checkpoint_safe(scope));
+        ctx.bind_local(system_scope, "__stdout__", owner);
+        assert!(ctx.replacement_checkpoint_safe(scope));
+        ctx.bind_local(system_scope, "__stdout__", NONE);
+        assert!(!ctx.replacement_checkpoint_safe(scope));
+        ctx.heap.disarm_finalizer(owner);
+        assert!(ctx.replacement_checkpoint_safe(scope));
+    }
 
     #[test]
     fn taking_an_integer_roots_only_a_new_handle() {

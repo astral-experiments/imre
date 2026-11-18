@@ -93,6 +93,8 @@ struct Layout {
     memo: usize,
     has_get: bool,
     texts: usize,
+    dense_prefix: usize,
+    prefix_extra_memo: usize,
 }
 
 struct Cursor<'a> {
@@ -128,6 +130,21 @@ impl<'a> Cursor<'a> {
     }
 }
 
+/// Classify a bounded short payload directly; retain the general slice routine for every other size.
+#[inline]
+fn dense_text_is_ascii(bytes: &[u8]) -> bool {
+    let bits = match bytes {
+        [a, b, c] => *a | *b | *c,
+        [a, b, c, d] => *a | *b | *c | *d,
+        [a, b, c, d, e] => *a | *b | *c | *d | *e,
+        [a, b, c, d, e, f] => *a | *b | *c | *d | *e | *f,
+        [a, b, c, d, e, f, g] => *a | *b | *c | *d | *e | *f | *g,
+        [a, b, c, d, e, f, g, h] => *a | *b | *c | *d | *e | *f | *g | *h,
+        _ => return bytes.is_ascii(),
+    };
+    bits & 0x80 == 0
+}
+
 /// Validate the accepted grammar and UTF-8 before publishing Python objects;
 /// retain only packed positions into the immutable input, not copies of text.
 fn preflight(data: &[u8]) -> Option<Layout> {
@@ -143,13 +160,33 @@ fn preflight(data: &[u8]) -> Option<Layout> {
     if cursor.byte()? != EMPTY_LIST || cursor.byte()? != MEMOIZE || cursor.byte()? != MARK {
         return None;
     }
+    // The frame itself encodes offsets and lengths for a run of memoized
+    // ASCII text. Keep that prefix in place even if a later item needs the
+    // general grammar; only the remaining pushes need packed descriptors.
+    let mut dense_prefix = 0usize;
+    while cursor.at < end && data[cursor.at] == SHORT_BINUNICODE {
+        let Some(&length) = data.get(cursor.at.checked_add(1)?) else {
+            break;
+        };
+        let start = cursor.at.checked_add(2)?;
+        let text_end = start.checked_add(usize::from(length))?;
+        if text_end >= end
+            || data[text_end] != MEMOIZE
+            || !dense_text_is_ascii(&data[start..text_end])
+        {
+            break;
+        }
+        cursor.at = text_end + 1;
+        dense_prefix = dense_prefix.checked_add(1)?;
+    }
     let mut items: Vec<Item> = Vec::new();
     items
-        .try_reserve((end.saturating_sub(14) / 8).min(1024))
+        .try_reserve((end.saturating_sub(cursor.at) / 8).min(1024))
         .ok()?;
-    let mut memo = 1usize;
+    let mut memo = dense_prefix.checked_add(1)?;
     let mut has_get = false;
-    let mut texts = 0usize;
+    let mut texts = dense_prefix;
+    let mut prefix_extra_memo = 0usize;
     loop {
         let op = cursor.byte()?;
         match op {
@@ -175,7 +212,13 @@ fn preflight(data: &[u8]) -> Option<Layout> {
                 has_get = true;
             }
             MEMOIZE => {
-                items.last_mut()?.memoize()?;
+                if let Some(item) = items.last_mut() {
+                    item.memoize()?;
+                } else if dense_prefix != 0 && (prefix_extra_memo as u64) < Item::MAX_MEMO - 1 {
+                    prefix_extra_memo += 1;
+                } else {
+                    return None;
+                }
                 memo = memo.checked_add(1)?;
             }
             APPENDS => {
@@ -187,6 +230,8 @@ fn preflight(data: &[u8]) -> Option<Layout> {
                     memo,
                     has_get,
                     texts,
+                    dense_prefix,
+                    prefix_extra_memo,
                 });
             }
             _ => return None,
@@ -247,18 +292,17 @@ fn unobserved(ctx: &Context) -> bool {
 }
 
 fn options(ctx: &Context, scope: Id) -> bool {
-    let Some(fix_imports) = ctx.scope_name(scope, "fix_imports") else {
-        return false;
-    };
-    if !matches!(ctx.heap.get(fix_imports), Value::Bool(_))
-        || ctx.scope_name(scope, "buffers") != Some(NONE)
-    {
-        return false;
-    }
-    ["encoding", "errors"].iter().all(|name| {
-        ctx.scope_name(scope, name)
-            .is_some_and(|id| matches!(ctx.heap.get(id), Value::Str(text) if !text.contains('\0')))
-    })
+    valid_options(ctx, |name| ctx.scope_name(scope, name))
+}
+
+fn valid_options(ctx: &Context, option: impl Fn(&str) -> Option<Id>) -> bool {
+    option("fix_imports").is_some_and(|id| matches!(ctx.heap.get(id), Value::Bool(_)))
+        && option("buffers") == Some(NONE)
+        && ["encoding", "errors"].iter().all(|name| {
+            option(name).is_some_and(
+                |id| matches!(ctx.heap.get(id), Value::Str(text) if !text.contains('\0')),
+            )
+        })
 }
 
 /// Build from validated input offsets. A memo vector is needed only if the
@@ -266,7 +310,7 @@ fn options(ctx: &Context, scope: Id) -> bool {
 fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
     let mut values = Vec::new();
     values
-        .try_reserve_exact(layout.items.len())
+        .try_reserve_exact(layout.dense_prefix + layout.items.len())
         .map_err(|_| crate::Error::memory_error())?;
     let mut memo = Vec::new();
     if layout.has_get {
@@ -280,10 +324,54 @@ fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
         unreachable!()
     };
     let (pointer, length) = (bytes.as_ptr(), bytes.len());
-    // SAFETY: the source frame roots this exact immutable bytes object; its Vec
+    // SAFETY: the call operands root this exact immutable bytes object; its Vec
     // backing allocation does not move when heap slots grow. No callback,
     // collection, signal checkpoint, or mutation runs while decoding.
     let input = unsafe { std::slice::from_raw_parts(pointer, length) };
+    let mut saw_short = false;
+    if layout.dense_prefix != 0 {
+        let mut at = 14usize;
+        let mut first = 0usize;
+        if !layout.has_get {
+            // SAFETY: dense preflight validated each exact ASCII entry against this rooted,
+            // immutable byte input. Both output IDs and heap slots/operand roots were reserved
+            // before the first leaf. The batch stops before a short or longer payload.
+            (at, first) = unsafe {
+                ctx.heap.append_reserved_dense_ascii_texts(
+                    input,
+                    at,
+                    layout.dense_prefix,
+                    &mut values,
+                )
+            };
+        }
+        for position in first..layout.dense_prefix {
+            // SAFETY: dense preflight validated the complete frame, its short
+            // text lengths and ASCII contents. The rooted bytes cannot change.
+            let length = usize::from(unsafe { *input.get_unchecked(at + 1) });
+            // SAFETY: the same preflight established this exact text range.
+            let text = unsafe {
+                std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                    input.as_ptr().add(at + 2),
+                    length,
+                ))
+            };
+            let top = if layout.has_get {
+                ctx.heap.unobserved_text(text, true)
+            } else {
+                ctx.heap
+                    .unobserved_text_noting_short(text, true, &mut saw_short)
+            };
+            values.push(top);
+            if layout.has_get {
+                memo.push(top);
+                if position + 1 == layout.dense_prefix {
+                    memo.extend(std::iter::repeat_n(top, layout.prefix_extra_memo));
+                }
+            }
+            at += length + 3;
+        }
+    }
     for item in layout.items {
         let top = if item.is_get() {
             memo[item.index()]
@@ -293,7 +381,12 @@ fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
             // immutable input has not changed. CompactString copies into its slot.
             let text =
                 unsafe { std::str::from_utf8_unchecked(&input[start..start + item.length()]) };
-            ctx.heap.unobserved_text(text, item.is_ascii())
+            if layout.has_get {
+                ctx.heap.unobserved_text(text, item.is_ascii())
+            } else {
+                ctx.heap
+                    .unobserved_text_noting_short(text, item.is_ascii(), &mut saw_short)
+            }
         };
         values.push(top);
         if layout.has_get {
@@ -301,6 +394,13 @@ fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
         }
     }
     let result = ctx.alloc(Value::List(values));
+    if !layout.has_get {
+        if layout.texts != 0 && !saw_short {
+            ctx.heap.mark_fresh_nonshort_text_list(result);
+        } else {
+            ctx.heap.mark_fresh_text_list(result);
+        }
+    }
     if layout.has_get
         && let Value::List(values) = ctx.heap.get_mut(result)
     {
@@ -323,6 +423,61 @@ fn attempt(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     let Some(data) = ctx.scope_name(scope, "data") else {
         return Ok(None);
     };
+    attempt_data(ctx, data, false, || {}).map(|result| result.map(DirectLoad::value))
+}
+
+/// Identify the immediate decoder that produced this invocation's result.
+/// Only the text reader without memo GETs can certify fresh, distinct leaves.
+pub(in crate::dynamic) enum DirectLoad {
+    FreshText(Id),
+    Other(Id),
+}
+
+impl DirectLoad {
+    fn value(self) -> Id {
+        match self {
+            Self::FreshText(value) | Self::Other(value) => value,
+        }
+    }
+}
+
+/// Try a positional call to the authenticated bundled `pickle.loads` body
+/// before allocating and binding an otherwise unobservable Python frame.
+pub(in crate::dynamic) fn try_direct_loads(
+    ctx: &mut Context,
+    scope: Id,
+    kwdefaults: Id,
+    data: Id,
+) -> Result<Option<Id>> {
+    try_classified_direct_loads(ctx, scope, kwdefaults, data, || {})
+        .map(|result| result.map(DirectLoad::value))
+}
+
+/// Invalidate a caller's ownership receipt before decoding a memo alias or VM stream.
+pub(in crate::dynamic) fn try_classified_direct_loads(
+    ctx: &mut Context,
+    scope: Id,
+    kwdefaults: Id,
+    data: Id,
+    before_nonfresh: impl FnOnce(),
+) -> Result<Option<DirectLoad>> {
+    let root = ctx.root_scope(scope);
+    let globals = ctx.scope_data(root);
+    if globals.module != "pickle"
+        || globals.exec_globals.is_some()
+        || !valid_options(ctx, |name| ctx.dict_named_item(kwdefaults, name))
+    {
+        return Ok(None);
+    }
+    attempt_data(ctx, data, true, before_nonfresh)
+}
+
+fn attempt_data(
+    ctx: &mut Context,
+    data: Id,
+    direct: bool,
+    before_nonfresh: impl FnOnce(),
+) -> Result<Option<DirectLoad>> {
     let Value::Bytes(bytes) = ctx.heap.get(data) else {
         return Ok(None);
     };
@@ -331,19 +486,181 @@ fn attempt(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     if !unobserved(ctx) {
         return Ok(None);
     }
-    let Some(layout) = preflight(bytes) else {
-        return Ok(None);
+    let layout = preflight(bytes);
+    let vm = if layout.is_none() {
+        super::vm::preflight(bytes)
+    } else {
+        None
     };
     #[cfg(unix)]
     if crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Acquire) {
         return Ok(None);
     }
-    decode(ctx, data, layout).map(Some)
+    if direct && (layout.is_some() || vm.is_some()) {
+        ctx.check_call_depth(0)?;
+    }
+    match (layout, vm) {
+        (Some(layout), _) if !layout.has_get => decode(ctx, data, layout)
+            .map(DirectLoad::FreshText)
+            .map(Some),
+        (Some(layout), _) => {
+            before_nonfresh();
+            decode(ctx, data, layout).map(DirectLoad::Other).map(Some)
+        }
+        (_, Some(layout)) => {
+            before_nonfresh();
+            super::vm::decode(ctx, data, layout)
+                .map(DirectLoad::Other)
+                .map(Some)
+        }
+        _ => Ok(None),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bounded_dense_ascii_checks_every_payload_byte_and_falls_back_at_boundaries() {
+        for length in 0..=10 {
+            let mut bytes = vec![b'a'; length];
+            assert!(dense_text_is_ascii(&bytes));
+            for position in 0..length {
+                bytes[position] = 0x80;
+                assert!(
+                    !dense_text_is_ascii(&bytes),
+                    "length {length}, byte {position}"
+                );
+                bytes[position] = b'a';
+            }
+        }
+    }
+
+    #[test]
+    fn bounded_dense_ascii_hands_non_ascii_and_truncation_to_general_preflight() {
+        fn frame(payload: &[u8]) -> Vec<u8> {
+            let mut data = vec![PROTO, 5, FRAME];
+            data.extend_from_slice(&(payload.len() as u64).to_le_bytes());
+            data.extend_from_slice(payload);
+            data
+        }
+        let unicode_tail =
+            frame(b"]\x94(\x8c\x03abc\x94\x8c\x03\xe2\x82\xac\x94\x8c\x08abcdefgh\x94e.");
+        let layout = preflight(&unicode_tail).unwrap();
+        assert_eq!(layout.dense_prefix, 1);
+        assert_eq!(layout.items.len(), 2);
+        assert!(!layout.items[0].is_ascii());
+        assert!(layout.items[1].is_ascii());
+        let invalid = frame(b"]\x94(\x8c\x03\x80aa\x94e.");
+        assert!(preflight(&invalid).is_none());
+        let truncated = frame(b"]\x94(\x8c\x08abcdefg");
+        assert!(preflight(&truncated).is_none());
+    }
+
+    #[test]
+    fn direct_receipt_is_minted_only_for_the_immediate_text_reader_without_gets() {
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        for (bytes, fresh) in [
+            (
+                &b"\x80\x05\x95\x11\0\0\0\0\0\0\0]\x94(\x8c\x03abc\x94\x8c\x03def\x94e."[..],
+                true,
+            ),
+            (
+                &b"\x80\x05\x95\x0d\0\0\0\0\0\0\0]\x94(\x8c\x03abc\x94h\x01e."[..],
+                false,
+            ),
+            (&b"\x80\x05\x95\x06\0\0\0\0\0\0\0]\x94K\x01a."[..], false),
+        ] {
+            let data = ctx.alloc(Value::Bytes(bytes.to_vec()));
+            let invalidated = std::cell::Cell::new(false);
+            let result = attempt_data(&mut ctx, data, false, || invalidated.set(true))
+                .unwrap()
+                .unwrap();
+            match result {
+                DirectLoad::FreshText(value) => {
+                    assert!(fresh);
+                    assert!(!invalidated.get());
+                    assert!(ctx.heap.is_fresh_text_list(value));
+                }
+                DirectLoad::Other(value) => {
+                    assert!(!fresh);
+                    assert!(invalidated.get());
+                    assert!(!ctx.heap.is_fresh_text_list(value));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn nonshort_text_provenance_excludes_empty_short_and_memo_aliases() {
+        fn frame(payload: &[u8]) -> Vec<u8> {
+            let mut bytes = vec![PROTO, 5, FRAME];
+            bytes.extend_from_slice(&(payload.len() as u64).to_le_bytes());
+            bytes.extend_from_slice(payload);
+            bytes
+        }
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        for (payload, narrow, fresh) in [
+            (&b"]\x94(\x8c\x03abc\x94\x8c\x03abc\x94e."[..], true, true),
+            (
+                &b"]\x94(\x8c\x03abc\x94\x8c\x02\xc3\xa9\x94e."[..],
+                false,
+                true,
+            ),
+            (&b"]\x94(\x8c\x03\xe2\x82\xac\x94e."[..], true, true),
+            (&b"]\x94(\x8c\x00\x94e."[..], false, true),
+            (&b"]\x94(e."[..], false, true),
+            (&b"]\x94(\x8c\x03abc\x94h\x01e."[..], false, false),
+        ] {
+            let data = ctx.alloc(Value::Bytes(frame(payload)));
+            let result = attempt_data(&mut ctx, data, false, || {})
+                .unwrap()
+                .unwrap()
+                .value();
+            assert_eq!(ctx.heap.is_fresh_text_list(result), fresh);
+            assert_eq!(ctx.heap.is_fresh_nonshort_text_list(result), narrow);
+            if narrow && payload == b"]\x94(\x8c\x03abc\x94\x8c\x03abc\x94e." {
+                let Value::List(items) = ctx.heap.get(result) else {
+                    unreachable!()
+                };
+                assert_ne!(items[0], items[1]);
+            }
+        }
+    }
+
+    #[test]
+    fn dense_batch_flushes_before_final_short_and_preserves_distinct_leaves() {
+        let mut payload = vec![EMPTY_LIST, MEMOIZE, MARK];
+        for _ in 0..99 {
+            payload.extend_from_slice(b"\x8c\x05equal\x94");
+        }
+        payload.extend_from_slice(b"\x8c\x01x\x94e.");
+        let mut bytes = vec![PROTO, 5, FRAME];
+        bytes.extend_from_slice(&(payload.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(&payload);
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let data = ctx.alloc(Value::Bytes(bytes));
+        let result = attempt_data(&mut ctx, data, false, || {})
+            .unwrap()
+            .unwrap()
+            .value();
+        assert!(ctx.heap.is_fresh_text_list(result));
+        assert!(!ctx.heap.is_fresh_nonshort_text_list(result));
+        let Value::List(values) = ctx.heap.get(result) else {
+            unreachable!()
+        };
+        assert_eq!(values.len(), 100);
+        assert!(values[..99].windows(2).all(|pair| pair[0] != pair[1]));
+        assert!(
+            values[..99]
+                .iter()
+                .all(|&id| matches!(ctx.heap.get(id), Value::Str(s) if s == "equal"))
+        );
+        let short = values[99];
+        assert!(matches!(ctx.heap.get(short), Value::Str(s) if s == "x"));
+        assert_eq!(short, ctx.heap.unobserved_text("x", true));
+    }
 
     #[test]
     fn preflight_accepts_dense_memo_and_rejects_sparse_or_incomplete_streams() {
@@ -372,12 +689,56 @@ mod tests {
             STOP,
         ];
         let layout = preflight(&good).unwrap();
-        assert_eq!((layout.items.len(), layout.memo), (2, 2));
+        assert_eq!(
+            (layout.dense_prefix + layout.items.len(), layout.memo),
+            (2, 2)
+        );
         assert!(layout.has_get);
-        assert!(layout.items[1].is_get());
+        assert!(layout.items[0].is_get());
         assert!(preflight(&good[..good.len() - 1]).is_none());
         let mut sparse = good;
         sparse[14] = b'q'; // BINPUT is intentionally unsupported.
         assert!(preflight(&sparse).is_none());
+    }
+
+    #[test]
+    fn dense_ascii_scan_validates_the_whole_frame_before_decoding() {
+        fn frame(payload: &[u8]) -> Vec<u8> {
+            let mut data = vec![PROTO, 5, FRAME];
+            data.extend_from_slice(&(payload.len() as u64).to_le_bytes());
+            data.extend_from_slice(payload);
+            data
+        }
+        let bytes = frame(b"]\x94(\x8c\x03abc\x94\x8c\x00\x94e.");
+        let layout = preflight(&bytes).unwrap();
+        assert_eq!(layout.dense_prefix, 2);
+        assert_eq!((layout.texts, layout.memo), (2, 3));
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let data = ctx.alloc(Value::Bytes(bytes.clone()));
+        let result = decode(&mut ctx, data, layout).unwrap();
+        let Value::List(values) = ctx.heap.get(result) else {
+            panic!("not a list")
+        };
+        assert!(matches!(ctx.heap.get(values[0]), Value::Str(value) if value == "abc"));
+        assert!(matches!(ctx.heap.get(values[1]), Value::Str(value) if value.is_empty()));
+
+        let unicode = frame(b"]\x94(\x8c\x02\xc3\xa9\x94e.");
+        assert_eq!(preflight(&unicode).unwrap().dense_prefix, 0);
+        let alias = frame(b"]\x94(\x8c\x03abc\x94h\x01e.");
+        let layout = preflight(&alias).unwrap();
+        assert_eq!(layout.dense_prefix, 1);
+        assert!(layout.has_get);
+        let repeated = frame(b"]\x94(\x8c\x03abc\x94\x94h\x02e.");
+        let layout = preflight(&repeated).unwrap();
+        assert_eq!(layout.prefix_extra_memo, 1);
+        let data = ctx.alloc(Value::Bytes(repeated));
+        let result = decode(&mut ctx, data, layout).unwrap();
+        let Value::List(values) = ctx.heap.get(result) else {
+            panic!("not a list")
+        };
+        assert_eq!(values[0], values[1]);
+        assert!(preflight(&bytes[..bytes.len() - 1]).is_none());
+        let no_memo = frame(b"]\x94(\x8c\x03abce.");
+        assert_eq!(preflight(&no_memo).unwrap().dense_prefix, 0);
     }
 }
