@@ -1,0 +1,2 @@
+ Compiling /workspace/scratch/ruff-a-95908f/uv10-review/controls/direct.py (-O3)
+/workspace/scratch/ruff-a-95908f/uv10-review/controls/direct.py:5:14: Imre: expected int, got bool; annotations are enforced contracts

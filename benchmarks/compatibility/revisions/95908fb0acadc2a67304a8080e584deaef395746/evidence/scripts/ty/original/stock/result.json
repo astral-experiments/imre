@@ -1,0 +1,78 @@
+{
+  "exit_code": 0,
+  "timed_out": false,
+  "elapsed_seconds": 0.241,
+  "exec_events": [
+    {
+      "pid": 36274,
+      "syscall": "execve",
+      "path": "/workspace/.toolchains/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+      "argv": [
+        "/workspace/.toolchains/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts/transform_readme.py"
+      ],
+      "path_executable": true,
+      "allowed": true
+    }
+  ],
+  "argv": [
+    "/workspace/.toolchains/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts/transform_readme.py"
+  ],
+  "cwd": "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture",
+  "environment": {
+    "LC_ALL": "C.UTF-8",
+    "TZ": "UTC",
+    "PYTHONHASHSEED": "0",
+    "PYTHONNOUSERSITE": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "NO_COLOR": "1",
+    "PATH": "/usr/local/bin:/usr/bin:/bin",
+    "HOME": "/workspace/ruff-b-practical-95908/followup-880648/ty05/launch",
+    "RAYON_NUM_THREADS": "2"
+  },
+  "before": {
+    "README.md": {
+      "sha256": "8da93511cec1298648c345618960559c7dec67504b9132c1b9aee9a841e9fe08",
+      "size": 5610,
+      "mode": "0o600",
+      "type": "file"
+    },
+    "dist-workspace.toml": {
+      "sha256": "02d617fb6e1ee474d3b0f52e4350d816ec5fdc78ec892fc9df78345ac756e0eb",
+      "size": 3758,
+      "mode": "0o600",
+      "type": "file"
+    },
+    "scripts/transform_readme.py": {
+      "sha256": "d6a13d50218b55e3b73587974e8357b9bc68b7c364d8bb10d04708fec5e2d64f",
+      "size": 2641,
+      "mode": "0o600",
+      "type": "file"
+    }
+  },
+  "after": {
+    "README.md": {
+      "sha256": "8d6a1835e193986c470a85ced817c3f5469227af7a61215a255aa56ef3057829",
+      "size": 5755,
+      "mode": "0o600",
+      "type": "file"
+    },
+    "dist-workspace.toml": {
+      "sha256": "02d617fb6e1ee474d3b0f52e4350d816ec5fdc78ec892fc9df78345ac756e0eb",
+      "size": 3758,
+      "mode": "0o600",
+      "type": "file"
+    },
+    "scripts/transform_readme.py": {
+      "sha256": "d6a13d50218b55e3b73587974e8357b9bc68b7c364d8bb10d04708fec5e2d64f",
+      "size": 2641,
+      "mode": "0o600",
+      "type": "file"
+    }
+  },
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "effects_manifest": "{\"README.md\":{\"after\":{\"bytes\":5755,\"sha256\":\"8d6a1835e193986c470a85ced817c3f5469227af7a61215a255aa56ef3057829\"},\"before\":{\"bytes\":5610,\"sha256\":\"8da93511cec1298648c345618960559c7dec67504b9132c1b9aee9a841e9fe08\"}}}",
+  "effects_sha256": "57128fff7793fa3839a64d60d2bb067286031e5a6d891ef4771fadaf56c27a3b"
+}

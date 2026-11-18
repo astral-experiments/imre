@@ -1,0 +1,21 @@
+{
+  "commit": "4f4dafbe58cc097aa6c637b05c8e1c47eb0771ce",
+  "purpose": "shared supervisor source/build identity only; no prospective workload outcomes or score",
+  "assets": {
+    "source.c": {
+      "public_path": "benchmarks/supplemental/practical_workloads/native_replay/supervisor.c",
+      "git_blob": "4c2db820dc105678e1eb31f3f2d5dda9616aabff",
+      "sha256": "26625b22872021736e0014cc2b3135dda70b5bf372563311a76e6102f1b654b3"
+    },
+    "commands.json": {
+      "public_path": "benchmarks/supplemental/practical_workloads/native_d26_v3/evidence/identity/commands.json",
+      "git_blob": "b4d434fe0c5d1e94858a089ffd3f4e11651c699c",
+      "sha256": "668b87de2a84d3756a435c3bced51e66b27f9fd9f74450479485bdb678e8592e"
+    },
+    "artifacts.sha256": {
+      "public_path": "benchmarks/supplemental/practical_workloads/native_d26_v3/evidence/identity/artifacts.sha256",
+      "git_blob": "5fbba2b9bdb5df4c7e29af6e5cc9f9cf295dccba",
+      "sha256": "ceafa0a7da1c1b1694f81229055380fc97e16f60ee8b04f505b1f094ce30e0bd"
+    }
+  }
+}

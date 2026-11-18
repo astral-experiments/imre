@@ -1,0 +1,2 @@
+ Compiling /workspace/uv-b-959-replay-v1/uv-29/import-control/work/scripts/transform_readme.py (-O3)
+/workspace/uv-b-959-replay-v1/uv-29/import-control/work/architecture_control.py:1:15: Imre: expected int, got bool; annotations are enforced contracts

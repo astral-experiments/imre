@@ -52,6 +52,90 @@ def finite_archive(path, source):
         output.writestr('sample/alias.py', 'status: int = True\n')
 
 
+def saved_application(compiler, runtime, root, clang=None):
+    """Check selected named application imports on the entry and a separate PYTHONPATH root."""
+    cwd, search = root / 'saved-cwd', root / 'saved-search'
+    cwd.mkdir()
+    (search / 'named_package').mkdir(parents=True)
+    (search / 'named_package' / '__init__.py').write_text('')
+    (search / 'named_package' / '__main__.py').write_text(
+        "import keyword, typing, abc, enum\nprint(keyword.iskeyword('for'))\n")
+    dependency = search / 'named_dependency.py'
+    dependency.write_text('status: int = 42\n')
+    env = dict(os.environ, PYTHONPATH=str(search.resolve()), PYTHONDONTWRITEBYTECODE='1',
+               PYTHONNOUSERSITE='1')
+    command = [str(compiler), 'build', '-m', 'named_package', '--quiet', '--no-cache',
+               '--opt-level', '0', '--runtime', str(runtime)]
+    if clang:
+        command += ['--clang', str(clang)]
+
+    def build(image, environment):
+        return subprocess.run(command + ['-o', str(image)], cwd=cwd, env=environment,
+                              capture_output=True, text=True, timeout=180)
+
+    def rejects(path, environment, image):
+        poison = build(image, environment)
+        assert poison.returncode != 0 and not image.exists(), poison
+        assert f'{path}:1:15:' in poison.stderr and 'expected int, got bool' in poison.stderr, poison
+
+    mixed_image = root / 'mixed-provider-image'
+    mixed = build(mixed_image, env)
+    assert mixed.returncode == 0 and mixed_image.exists(), mixed
+    result = subprocess.run([mixed_image], cwd=cwd, env=env, capture_output=True, text=True,
+                            timeout=20)
+    assert (result.returncode, result.stdout, result.stderr) == (0, 'True\n', ''), result
+    changed_typing = search / 'typing.py'
+    changed_typing.write_text('status: int = True\n')
+    rejects(changed_typing, env, root / 'changed-typing-rejected')
+    changed_typing.unlink()
+    (search / 'named_package' / '__main__.py').write_text(
+        'import named_dependency\nprint(named_dependency.status)\n')
+
+    image = root / 'saved-image'
+    clean = build(image, env)
+    assert clean.returncode == 0 and image.exists(), clean
+    result = subprocess.run([image], cwd=cwd, env=env, capture_output=True, text=True,
+                            timeout=20)
+    assert (result.returncode, result.stdout, result.stderr) == (0, '42\n', ''), result
+
+    dependency.write_text('status: int = True\n')
+    rejects(dependency, env, root / 'same-root-rejected')
+    dependency.unlink()
+    cross_search = root / 'saved-cross-search'
+    cross_search.mkdir()
+    cross_dependency = cross_search / 'named_dependency.py'
+    cross_dependency.write_text('status: int = True\n')
+    cross_env = dict(env, PYTHONPATH=os.pathsep.join((str(search.resolve()), str(cross_search.resolve()))))
+    rejects(cross_dependency, cross_env, root / 'cross-root-rejected')
+
+    clean_search = root / 'saved-clean-search'
+    clean_search.mkdir()
+    (clean_search / 'named_dependency.py').write_text('status: int = 42\n')
+    shadow_env = dict(env, PYTHONPATH=os.pathsep.join(
+        (str(search.resolve()), str(clean_search.resolve()), str(cross_search.resolve()))))
+    shadow_image = root / 'shadow-image'
+    shadow = build(shadow_image, shadow_env)
+    assert shadow.returncode == 0 and shadow_image.exists(), shadow
+    result = subprocess.run([shadow_image], cwd=cwd, env=shadow_env, capture_output=True,
+                            text=True, timeout=20)
+    assert (result.returncode, result.stdout, result.stderr) == (0, '42\n', ''), result
+
+    marker = root / 'shadow-executed'
+    cross_dependency.write_text(f"open({str(marker)!r}, 'w').write('executed')\nstatus: int = True\n")
+    (search / 'named_package' / '__main__.py').write_text(
+        f"import sys\nsys.path.insert(0, {str(cross_search)!r})\nimport named_dependency\n")
+    changed_image = root / 'changed-path-image'
+    changed = build(changed_image, shadow_env)
+    if changed.returncode:
+        assert changed.stderr and not changed_image.exists(), changed
+    else:
+        result = subprocess.run([changed_image], cwd=cwd, env=shadow_env, capture_output=True,
+                                text=True, timeout=20)
+        assert result.returncode != 0 and 'no compiled Python body' in result.stderr, result
+    assert not marker.exists()
+
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--compiler', type=Path, required=True)
@@ -165,6 +249,8 @@ def main():
         (inner / '__main__.py').write_text('print("project main")\n')
         result = run('project-shadow')
         assert (result.returncode, result.stdout, result.stderr) == (0, 'project init\nproject inner\nproject main\n', ''), result
+        saved_application(launcher, runtime, root,
+                          toolchain / 'bin' / 'clang' if toolchain.is_dir() else None)
     print('checked archive entry, dead import, namespace, precedence, resource, miss, and poison controls passed')
 
 

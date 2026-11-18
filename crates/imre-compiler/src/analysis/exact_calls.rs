@@ -84,6 +84,94 @@ impl Calls<'_, '_> {
                 .any(|error| error.range.is_some_and(|r| expr.range().contains_range(r)))
     }
 
+    /// Follow only stable first-party calls whose body cannot supply a value. The
+    /// annotation of a function which always raises can still be `int`, so ty's
+    /// expression type alone does not establish that a later operand is reached.
+    fn cannot_return(&self, expr: &Expr) -> bool {
+        self.cannot_return_in(&self.model, expr, &mut Vec::new())
+    }
+
+    fn cannot_return_in(
+        &self,
+        model: &SemanticModel<'_>,
+        expr: &Expr,
+        active: &mut Vec<(usize, TextSize)>,
+    ) -> bool {
+        if expr.inferred_type(model) == Some(Type::Never) {
+            return true;
+        }
+        let Expr::Call(call) = expr else {
+            return false;
+        };
+        if self.cannot_return_in(model, &call.func, active)
+            || imre_ast::evaluated_arguments(&call.arguments)
+                .any(|arg| self.cannot_return_in(model, arg.value(), active))
+        {
+            return true;
+        }
+        // An arbitrary argument can replace the function's code or global
+        // binding before invocation. Literal arguments cannot run such a hook.
+        if !imre_ast::evaluated_arguments(&call.arguments)
+            .all(|arg| !arg.is_variadic() && arg.value().is_literal_expr())
+        {
+            return false;
+        }
+        let db = &self.session.db;
+        let Some(name) = call.func.as_name_expr() else {
+            return false;
+        };
+        let Some(definition) =
+            resolved_name_definition(model, name, ImportAliasResolution::ResolveAliases)
+        else {
+            return false;
+        };
+        if self
+            .declarations
+            .call_shapes(db)
+            .binary_search(&definition)
+            .is_err()
+            || !matches!(call.func.inferred_type(model), Some(callee @ Type::FunctionLiteral(_)) if matches!(callee.definition(db, &model.program_environment()), Some(TypeDefinition::Function(selected)) if selected == definition))
+            || changed_module_binding(db, model, call, name, definition)
+            || self
+                .declarations
+                .program_files(db)
+                .iter()
+                .any(|&file| function_layout_writes(db, file).contains(&definition))
+        {
+            return false;
+        }
+        let DefinitionKind::Function(function) = definition.kind(db) else {
+            return false;
+        };
+        let owner = definition.file(db);
+        let Some(module) = self.session.files.iter().position(|&file| file == owner) else {
+            return false;
+        };
+        let parsed = self.session.parsed(owner);
+        let function = function.node(&parsed);
+        if self.session.nonreturning_function(module, function) {
+            return true;
+        }
+        if self.session.call_may_return_implicitly(module, function) {
+            return false;
+        }
+        let [Stmt::Return(returned)] = function.body.as_slice() else {
+            return false;
+        };
+        let Some(value) = returned.value.as_deref() else {
+            return false;
+        };
+        let key = (module, function.start());
+        if active.contains(&key) {
+            return false;
+        }
+        active.push(key);
+        let owner_model = SemanticModel::new(db, db.program_file(owner));
+        let result = self.cannot_return_in(&owner_model, value, active);
+        active.pop();
+        result
+    }
+
     /// Return whether the call has a uniquely selected, fully bound source convention.
     /// Supplied operands are visited and checked in the shared binder's evaluation order.
     fn check_call(&mut self, call: &ExprCall) -> bool {
@@ -136,12 +224,12 @@ impl Calls<'_, '_> {
             if self.failed(value, before) {
                 return true;
             }
+            if self.cannot_return(value) {
+                return true;
+            }
             let Some(actual) = value.inferred_type(&self.model) else {
                 continue;
             };
-            if actual == Type::Never {
-                return true;
-            }
             let Some(annotation) = parameter.parameter.annotation.as_deref() else {
                 continue;
             };
@@ -179,9 +267,21 @@ impl<'ast> Visitor<'ast> for Calls<'_, '_> {
         if self.excluded(expr) {
             return;
         }
-        if let Expr::Call(call) = expr
-            && self.check_call(call)
-        {
+        if let Expr::Call(call) = expr {
+            if self.check_call(call) {
+                return;
+            }
+            self.visit_expr(&call.func);
+            if self.cannot_return(&call.func) {
+                return;
+            }
+            for argument in imre_ast::evaluated_arguments(&call.arguments) {
+                let value = argument.value();
+                self.visit_expr(value);
+                if self.cannot_return(value) {
+                    break;
+                }
+            }
             return;
         }
         visitor::walk_expr(self, expr);

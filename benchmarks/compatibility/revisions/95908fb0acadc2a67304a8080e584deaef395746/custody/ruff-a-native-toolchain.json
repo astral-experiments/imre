@@ -1,0 +1,57 @@
+{
+  "artifacts": {
+    "/workspace/imre/target/release/imre": "c8d8b748b6070f5b7d3c5692139040195f8506189edf03d8df65472d30a85e22",
+    "/workspace/imre/target/release/imre-toolchain/bin/clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+    "/workspace/imre/target/release/imre.d": "ffbdabd0a494a7a26d9abbfa09dcb916784400d24fc8f32e32bd1c40d900e01f",
+    "/workspace/imre/target/release/libimre_runtime.a": "e58466bb9d8c2cc8912cdc43cce917f13e9b7b82777f3f84684ad0e813234ee3",
+    "/workspace/imre/target/release/libimre_runtime.d": "c91a883b4a1b852260db9364da0895172137f3bdd560f2ccf1a367d850723768",
+    "/workspace/ruff-a-cache/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+  },
+  "build_argv": [
+    "/workspace/imre/target/release/imre",
+    "build",
+    "scripts/check-trampoline-version-consistency.py",
+    "--opt-level",
+    "0",
+    "--runtime",
+    "/workspace/imre/target/release/libimre_runtime.a",
+    "--clang",
+    "/workspace/imre/target/release/imre-toolchain/bin/clang",
+    "-o",
+    "/workspace/scratch/ruff-a-95908f/uv10-review/build/uv10-O0"
+  ],
+  "build_argv_scope": "recorded native O0 image build",
+  "build_log_sha256": "1ab43a2224644ef174b090e9d9e673d29388280a1f13954c9f1891ce64db6758",
+  "cargo_build_argv": [
+    "cargo",
+    "build",
+    "--offline",
+    "--release",
+    "--locked",
+    "-p",
+    "imre-compiler",
+    "-p",
+    "imre-runtime"
+  ],
+  "cargo_build_environment": {
+    "CARGO_HOME": "/workspace/.toolchains/cargo",
+    "CARGO_TARGET_DIR": "/workspace/imre/target",
+    "CC": "/usr/bin/cc",
+    "PATH": "/workspace/.toolchains/cargo/bin:$PATH",
+    "RUSTUP_HOME": "/workspace/.toolchains/rustup"
+  },
+  "cargo_transcript": {
+    "evidence_kind": "retrospectively-retrieved-original-cloud-command",
+    "path": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/evidence/scripts/uv10/custody/retrospective-cloud-transcript.json",
+    "sha256": "d264e027edf743c00d4151fa8c93d1a18dd3dd1048c2d31b2822bc219493420a"
+  },
+  "clean_source": true,
+  "source_anchor_sha256": "695f0518f14d4d4f0bc5df825f0e49b5e9de37b4f9788978c09b6a7fa556bf72",
+  "source_revision": "95908fb0acadc2a67304a8080e584deaef395746",
+  "toolchain": {
+    "compiler_revision": "95908fb0acadc2a67304a8080e584deaef395746",
+    "compiler_sha256": "c8d8b748b6070f5b7d3c5692139040195f8506189edf03d8df65472d30a85e22",
+    "runtime_revision": "95908fb0acadc2a67304a8080e584deaef395746",
+    "runtime_sha256": "e58466bb9d8c2cc8912cdc43cce917f13e9b7b82777f3f84684ad0e813234ee3"
+  }
+}

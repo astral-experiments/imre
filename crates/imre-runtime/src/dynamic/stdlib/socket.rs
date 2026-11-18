@@ -2,7 +2,7 @@
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod message;
 use super::{Context, Error, Id, NONE, Result, Value, argument, option};
-use crate::dynamic::calls::RegisteredCall;
+use crate::dynamic::calls::{RegisteredCall, ScopeExit, ScopedCall};
 use crate::dynamic::value::NativeModuleState;
 use crate::objects::socket as native;
 use std::time::Duration;
@@ -195,6 +195,33 @@ pub(in crate::dynamic) fn prepare_descriptor(
             addr,
             errno_result: name == "connect_ex",
         }));
+    }
+    if name == "_sendfile_write" {
+        let (owner, send, data, session) = match *args {
+            [owner, send, data] => (owner, send, data, NONE),
+            [owner, send, data, session] => (owner, send, data, session),
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    "_sendfile_write requires a receiver, data and optional TLS session after its owner",
+                ));
+            }
+        };
+        check_args(name, args, kwargs, 4, &[])?;
+        if sendfile_write_for(ctx, receiver).is_some_and(|(_, active)| active != session) {
+            return Err(changed_transport());
+        }
+        let identity = sendfile_identity(ctx, owner)?;
+        return Ok(ScopedCall::register(
+            ScopeExit::SendfileWrite {
+                receiver,
+                identity,
+                session,
+            },
+            send,
+            vec![data],
+            Vec::new(),
+        ));
     }
     let socket = socket.clone();
     call_method(ctx, name, receiver, socket, args, kwargs).map(RegisteredCall::Returned)
@@ -1818,6 +1845,28 @@ fn sendfile_write_for(ctx: &Context, receiver: Id) -> Option<(native::SendfileId
         })
 }
 
+/// Install the execution-local transfer guard while retaining the exact original socket
+/// backing through callback preparation, execution, and guard removal.
+pub(in crate::dynamic) fn enter_sendfile_write(
+    ctx: &mut Context,
+    receiver: Id,
+    identity: native::SendfileIdentity,
+    session: Id,
+) -> Result<crate::ObjectOwner> {
+    let socket = registered_socket(ctx, receiver).clone();
+    native::check_sendfile_owner(&socket, native::fd(&socket), &identity)?;
+    ctx.heap
+        .execution
+        .sendfile_writes
+        .try_reserve(1)
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    ctx.heap
+        .execution
+        .sendfile_writes
+        .push((receiver, identity, session));
+    Ok(socket)
+}
+
 fn changed_transport() -> Error {
     crate::objects::errno_error(std::io::Error::from_raw_os_error(libc::EBADF)).into()
 }
@@ -2019,36 +2068,6 @@ fn call_method(
             let identity = native::sendfile_identity(&s, raw)?;
             Ok(ctx.alloc(Value::Bytes(identity.to_vec())))
         };
-    }
-    if method == "_sendfile_write" {
-        let (owner, send, data, session) = match *args {
-            [owner, send, data] => (owner, send, data, NONE),
-            [owner, send, data, session] => (owner, send, data, session),
-            _ => {
-                return Err(Error::new(
-                    "TypeError",
-                    "_sendfile_write requires a receiver, data and optional TLS session after its owner",
-                ));
-            }
-        };
-        check_args(method, args, kwargs, 4, &[])?;
-        if sendfile_write_for(ctx, receiver).is_some_and(|(_, active)| active != session) {
-            return Err(changed_transport());
-        }
-        let identity = sendfile_identity(ctx, owner)?;
-        native::check_sendfile_owner(&s, native::fd(&s), &identity)?;
-        ctx.heap
-            .execution
-            .sendfile_writes
-            .try_reserve(1)
-            .map_err(|_| Error::new("MemoryError", ""))?;
-        ctx.heap
-            .execution
-            .sendfile_writes
-            .push((receiver, identity, session));
-        let result = ctx.call(send, vec![data], Vec::new());
-        ctx.heap.execution.sendfile_writes.pop();
-        return result;
     }
     if method == "_check_sendfile_owner" {
         let owner = super::super::builtins::one_positional_arg(method, args, kwargs)?;
@@ -2303,10 +2322,39 @@ mod tests {
         let callback = ctx
             .define_function(code, globals, name, NONE, name, NONE, NONE, false)
             .unwrap();
+        let call = ctx
+            .prepare_call(
+                write,
+                vec![owner, callback, data, session].into(),
+                Vec::new(),
+            )
+            .unwrap();
+        assert!(matches!(&call, RegisteredCall::Scoped(_)));
+        assert!(std::mem::size_of::<ScopedCall>() <= std::mem::size_of::<Connect>());
+        assert!(ctx.heap.execution.sendfile_writes.is_empty());
+        // SAFETY: this test owns the preparing context and its live callback operands.
+        let value = unsafe { call.run(&raw mut ctx) }.unwrap();
+        assert_eq!(value, ctx.int(3));
+        assert!(ctx.heap.execution.sendfile_writes.is_empty());
+        let explicit = ctx.alloc(Value::Context(Default::default()));
+        let run = ctx.lookup_attr(explicit, "run").unwrap();
         let value = ctx
-            .call(write, vec![owner, callback, data, session], Vec::new())
+            .call(run, vec![write, owner, callback, data, session], Vec::new())
             .unwrap();
         assert_eq!(value, ctx.int(3));
+        assert!(ctx.heap.execution.contexts.is_empty());
+        assert!(ctx.heap.execution.sendfile_writes.is_empty());
+        assert_eq!(
+            ctx.call(
+                run,
+                vec![write, owner, callback, scalar, session],
+                Vec::new()
+            )
+            .unwrap_err()
+            .kind,
+            "TypeError"
+        );
+        assert!(ctx.heap.execution.contexts.is_empty());
         assert!(ctx.heap.execution.sendfile_writes.is_empty());
         let Value::Bytes(bytes) = ctx.heap.get(owner) else {
             unreachable!()

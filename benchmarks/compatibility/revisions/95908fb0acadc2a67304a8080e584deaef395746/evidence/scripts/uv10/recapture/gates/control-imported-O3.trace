@@ -1,0 +1,47 @@
+26942 execve("/workspace/scratch/uv10-959-mask-recapture-v1/gates/gate-probe", ["/workspace/scratch/uv10-959-mask-recapture-v1/gates/gate-probe", "gate", "/workspace/scratch/uv10-959-mask-recapture-v1/gates/control-imported-O3.exe", "/workspace/scratch/ruff-a-95908f/matched-release/imre", "build", "/workspace/scratch/ruff-a-95908f/uv10-review/controls/imported.py", "--module-root", "/workspace/scratch/ruff-a-95908f/uv10-review/controls", "--opt-level", "3", "--runtime", "/workspace/scratch/ruff-a-95908f/matched-release/libimre_runtime.a", "--clang", "/workspace/imre/target/release/imre-toolchain/bin/clang", "-o", "/workspace/scratch/uv10-959-mask-recapture-v1/gates/control-imported-O3.exe"], 0x7ffd72f996b0 /* 3 vars */) = 0
+26942 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review>, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache>
+26942 close(3</etc/ld.so.cache>)        = 0
+26942 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review>, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libc.so.6>
+26942 close(3</usr/lib/x86_64-linux-gnu/libc.so.6>) = 0
+26942 newfstatat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review>, "/workspace/scratch/uv10-959-mask-recapture-v1/gates/control-imported-O3.exe", 0x7ffe45740a40, 0) = -1 ENOENT (No such file or directory)
+26942 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7f209f9a1a10) = 26943
+26942 wait4(26943,  <unfinished ...>
+26943 execve("/workspace/scratch/ruff-a-95908f/matched-release/imre", ["/workspace/scratch/ruff-a-95908f/matched-release/imre", "build", "/workspace/scratch/ruff-a-95908f/uv10-review/controls/imported.py", "--module-root", "/workspace/scratch/ruff-a-95908f/uv10-review/controls", "--opt-level", "3", "--runtime", "/workspace/scratch/ruff-a-95908f/matched-release/libimre_runtime.a", "--clang", "/workspace/imre/target/release/imre-toolchain/bin/clang", "-o", "/workspace/scratch/uv10-959-mask-recapture-v1/gates/control-imported-O3.exe"], 0x7ffe45742d90 /* 3 vars */) = 0
+26943 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review>, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache>
+26943 close(3</etc/ld.so.cache>)        = 0
+26943 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review>, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libgcc_s.so.1>
+26943 close(3</usr/lib/x86_64-linux-gnu/libgcc_s.so.1>) = 0
+26943 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review>, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libm.so.6>
+26943 close(3</usr/lib/x86_64-linux-gnu/libm.so.6>) = 0
+26943 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review>, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libc.so.6>
+26943 close(3</usr/lib/x86_64-linux-gnu/libc.so.6>) = 0
+26943 fcntl(0</dev/null<char 1:3>>, F_GETFD) = 0
+26943 fcntl(1<pipe:[95299]>, F_GETFD)   = 0
+26943 fcntl(2<pipe:[95300]>, F_GETFD)   = 0
+26943 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review>, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3</proc/26943/maps>
+26943 close(3</proc/26943/maps>)        = 0
+26943 openat2(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review>, "/workspace/scratch/ruff-a-95908f/uv10-review/controls/imported.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3</workspace/scratch/ruff-a-95908f/uv10-review/controls/imported.py>
+26943 close(3</workspace/scratch/ruff-a-95908f/uv10-review/controls/imported.py>) = 0
+26943 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review>, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3</proc/26943/cgroup>
+26943 close(3</proc/26943/cgroup>)      = 0
+26943 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review>, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3</sys/fs/cgroup/cpu.max>
+26943 close(3</sys/fs/cgroup/cpu.max>)  = 0
+26943 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review>, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3</proc/26943/cgroup>
+26943 close(3</proc/26943/cgroup>)      = 0
+26943 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review>, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3</sys/fs/cgroup/cpu.max>
+26943 close(3</sys/fs/cgroup/cpu.max>)  = 0
+26943 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review>, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3</proc/26943/cgroup>
+26943 close(3</proc/26943/cgroup>)      = 0
+26943 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review>, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3</sys/fs/cgroup/cpu.max>
+26943 close(3</sys/fs/cgroup/cpu.max>)  = 0
+26943 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review>, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3</proc/26943/maps>
+26943 close(3</proc/26943/maps>)        = 0
+26943 openat2(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review>, "/workspace/scratch/ruff-a-95908f/uv10-review/controls/uv10_subject.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3</workspace/scratch/ruff-a-95908f/uv10-review/controls/uv10_subject.py>
+26943 close(3</workspace/scratch/ruff-a-95908f/uv10-review/controls/uv10_subject.py>) = 0
+26943 openat2(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review>, "/workspace/scratch/ruff-a-95908f/uv10-review/controls/bad_status.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3</workspace/scratch/ruff-a-95908f/uv10-review/controls/bad_status.py>
+26943 close(3</workspace/scratch/ruff-a-95908f/uv10-review/controls/bad_status.py>) = 0
+26943 exit_group(1)                     = ?
+26942 <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 1}], 0, NULL) = 26943
+26942 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=26943, si_uid=1000, si_status=1, si_utime=1 /* 0.01 s */, si_stime=1 /* 0.01 s */} ---
+26942 newfstatat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review>, "/workspace/scratch/uv10-959-mask-recapture-v1/gates/control-imported-O3.exe", 0x7ffe45740a40, 0) = -1 ENOENT (No such file or directory)
+26942 exit_group(0)                     = ?
