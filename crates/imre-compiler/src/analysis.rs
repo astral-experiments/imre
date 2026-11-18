@@ -2809,16 +2809,7 @@ impl Session {
         if !tokens.iter().any(|token| token.kind() == TokenKind::Global) {
             return Default::default();
         }
-        let index =
-            ty_python_core::semantic_index(&self.db, self.db.program_file(self.files[module]));
-        index
-            .scope_ids()
-            .map(|scope| scope.file_scope_id(&self.db))
-            .filter(|scope| !scope.is_global())
-            .flat_map(|scope| index.place_table(scope).symbols())
-            .filter(|symbol| symbol.is_global() && symbol.is_bound())
-            .map(|symbol| symbol.name().to_string())
-            .collect()
+        nested_global_bindings(&self.db, self.files[module]).clone()
     }
 
     /// An unused declaration in a top-level function cannot change a closure's binding.
@@ -4627,6 +4618,29 @@ fn function_layout_writes<'db>(
         }
     }
     functions
+}
+
+/// Names a deferred source scope can replace through an explicit global store.
+#[salsa::tracked(returns(ref))]
+fn nested_global_bindings(db: &dyn Db, file: File) -> HashSet<String> {
+    let source = db.program_file(file);
+    let parsed = ruff_db::parsed::parsed_module(db, source.python_file(db)).load(db);
+    if !parsed
+        .tokens()
+        .iter()
+        .any(|token| token.kind() == TokenKind::Global)
+    {
+        return HashSet::new();
+    }
+    let index = ty_python_core::semantic_index(db, source);
+    index
+        .scope_ids()
+        .map(|scope| scope.file_scope_id(db))
+        .filter(|scope| !scope.is_global())
+        .flat_map(|scope| index.place_table(scope).symbols())
+        .filter(|symbol| symbol.is_global() && symbol.is_bound())
+        .map(|symbol| symbol.name().to_string())
+        .collect()
 }
 
 /// Follow an imported name only when it has one source definition.
