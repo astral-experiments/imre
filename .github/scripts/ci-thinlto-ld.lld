@@ -1,9 +1,9 @@
 #!/bin/sh
-# Only the full suite runs up to four linkers concurrently. The smoke suite
+# Only the full suite runs up to two linkers concurrently. The smoke suite
 # has one linker and can use the runner's full CPU budget.
 linkers=1
 if [ "${FULL_THINLTO:-false}" = true ]; then
-    linkers=4
+    linkers=2
 fi
 jobs=$(( $(nproc) / linkers ))
 if [ "$jobs" -lt 1 ]; then
