@@ -3741,6 +3741,12 @@ fn annotation_with_aliases(
                 return Ok(ty);
             }
         }
+        Some(Binding::RegisteredClass(_)) => {
+            return Err(
+                invalid("registered class requires its compiled object representation")
+                    .classified(Kind::ScopedObject),
+            );
+        }
         Some(Binding::Intrinsic(Intrinsic::SelfType)) => {
             return owner
                 .map(|id| classes.instance(id))
@@ -3817,7 +3823,12 @@ fn annotation_with_aliases(
         ast::Expr::Name(name) => builtin_annotation(name.id.as_str())
             .ok_or_else(|| invalid("unsupported exact type annotation")),
         ast::Expr::NoneLiteral(_) => Ok(Type::None),
-        ast::Expr::Subscript(value) if matches!(graph.resolve_type(module, &value.value), Some(Binding::Definition(id)) if graph.is_abstract_context_manager(id)) => {
+        ast::Expr::Subscript(value)
+            if matches!(
+                graph.resolve_type(module, &value.value),
+                Some(Binding::RegisteredClass(_))
+            ) =>
+        {
             nested(&value.value)
         }
         ast::Expr::Subscript(value)
@@ -5218,10 +5229,9 @@ impl<'a> Checker<'a> {
             return self.coerce(literals::view(value, string), expected, node);
         }
         let exception_upcast = match (value.ty, expected) {
-            (Type::NamedException(child), Type::NamedException(parent)) => self
-                .classes
-                .declarations
-                .subclass(self.graph, child, parent),
+            (Type::NamedException(child), Type::NamedException(parent)) => {
+                self.classes.declarations.subclass(child, parent)
+            }
             (
                 Type::ImportException | Type::TimeoutExpired | Type::NamedException(_),
                 Type::Exception,
@@ -14864,26 +14874,8 @@ impl<'a> Checker<'a> {
                 && let (Some(child), Some(parent)) =
                     (self.class_reference(child), self.class_reference(parent))
             {
-                let result = self
-                    .classes
-                    .declarations
-                    .subclass(self.graph, child, parent);
+                let result = self.classes.declarations.subclass(child, parent);
                 return Ok(Expr::boolean(result));
-            }
-            if let [child, parent] = call.arguments.args.as_ref()
-                && call.arguments.keywords.is_empty()
-                && let Some(Binding::Definition(parent)) = self.resolve(parent)
-                && self.graph.is_abstract_context_manager(parent)
-                && let Some(local) = self.local_class(child)?
-            {
-                let nominal = local.base.is_some_and(|base| {
-                    let classes = &self.classes.declarations;
-                    classes.subclass(self.graph, base, classes.ids[&parent])
-                });
-                let protocol = ["__enter__", "__exit__"]
-                    .iter()
-                    .all(|name| local.attributes.get(*name) == Some(&Some(true)));
-                return Ok(Expr::boolean(nominal || protocol));
             }
             if let Some(answer) = self.mapping_issubclass(call)? {
                 return Ok(answer);

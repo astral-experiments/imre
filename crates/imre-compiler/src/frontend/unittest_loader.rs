@@ -188,11 +188,7 @@ impl Checker<'_> {
                         "native loadTestsFromTestCase requires a resolved class",
                     )
                 })?;
-            if self
-                .classes
-                .declarations
-                .subclass(self.graph, base, suite_class)
-            {
+            if self.classes.declarations.subclass(base, suite_class) {
                 return Ok(Some(calls::type_error(suite_ty, vec![receiver.clone()],
                     "Test cases should not be derived from TestSuite. Maybe you meant to derive from TestCase?".into())));
             }

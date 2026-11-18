@@ -103,7 +103,18 @@ def write_import_registries_data(project: Path) -> None:
     replacements = {
         "        scope = {}\n": "",
         "            exec(direct.get_code(name), scope)\n": (
-            "            assert direct.get_code(name).co_filename == filename\n"
+            "            if sys.implementation.name == 'imre':\n"
+            "                try:\n"
+            "                    direct.get_code(name)\n"
+            "                except ImportError as exc:\n"
+            "                    assert type(exc) is ImportError\n"
+            "                    assert exc.name == name and exc.path == filename\n"
+            "                    assert 'no matching linked code' in str(exc)\n"
+            "                    assert 'Declare and import the qualified module' in str(exc)\n"
+            "                else:\n"
+            "                    raise AssertionError('fresh unlinked source unexpectedly compiled')\n"
+            "            else:\n"
+            "                assert direct.get_code(name).co_filename == filename\n"
             "            assert direct.get_data(filename) == b'answer = 42\\n'\n"
         ),
         "        assert scope['answer'] == 42 and name not in sys.modules\n":
@@ -112,8 +123,11 @@ def write_import_registries_data(project: Path) -> None:
             "        if sys.implementation.name == 'imre':\n"
             "            try:\n"
             "                __import__(name)\n"
-            "            except NotImplementedError as exc:\n"
-            "                assert str(exc) == f'no compiled Python body for <module> ({filename}:1)'\n"
+            "            except ImportError as exc:\n"
+            "                assert type(exc) is ImportError\n"
+            "                assert exc.name == name and exc.path == filename\n"
+            "                assert 'no matching linked code' in str(exc)\n"
+            "                assert 'Declare and import the qualified module' in str(exc)\n"
             "            else:\n"
             "                raise AssertionError('fresh unlinked module unexpectedly imported')\n"
             "        else:\n"
