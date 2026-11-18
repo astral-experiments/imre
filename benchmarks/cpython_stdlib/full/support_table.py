@@ -13,7 +13,8 @@ sys.path.insert(0, str(HERE))
 from inventory import inventory
 from native_report import rollup
 sys.path.insert(0, str(HERE.parents[1] / "compatibility"))
-from scorecard import render as render_scorecard
+import scorecard
+import source_stage_pins
 
 ROOT = HERE.parents[2]
 PAGE = ROOT / "docs" / "stdlib.md"
@@ -54,6 +55,8 @@ def measurements(name, rows):
 
 
 def render(compiler):
+    if getattr(source_stage_pins, "REVISION_959_SUCCESSOR", None) is not None:
+        scorecard.select_snapshot(scorecard.REVISION_959)
     groups = inventory()
     names = sorted(name for group in groups.values() for name in group)
     registered = sys.stdlib_module_names
@@ -84,7 +87,7 @@ def render(compiler):
     lines = [
         "# Standard library support",
         "",
-        render_scorecard("stdlib"),
+        scorecard.render("stdlib", primary=True),
         "",
         "The six accepted [argparse bytecode omissions](stdlib-omissions.md#argparse) remain in the 1,893-original denominator. "
         "Their revision-independent [policy ledger](../benchmarks/cpython_stdlib/full/argparse/accepted-omissions-linux.tsv) "

@@ -415,6 +415,7 @@ impl RegisteredCall {
                 let kwargs = kwargs.into_vec();
                 // Preserve Other's native-label copy before Operation::Call copies its operands.
                 let _native_name = {
+                    // SAFETY: this thread owns the executing context and the call roots callable.
                     let ctx = unsafe { &*context };
                     let Value::Native(name) = ctx.heap.get(callable) else {
                         unreachable!("registered operator.call")
@@ -424,6 +425,7 @@ impl RegisteredCall {
                 let result = (|| {
                     let args = copy_ids(&args)?;
                     let prepared = {
+                        // SAFETY: the shared borrow ended; this thread still exclusively owns the context.
                         let ctx = unsafe { &mut *context };
                         let (target, args) = ctx.operator_call_target(args)?;
                         let scope = ctx.heap.current_scope();
