@@ -27,7 +27,7 @@ on:
         type: boolean
         default: false
       native_shard:
-        description: Select a native validation group or verify the public Ruff source graph
+        description: Select a native validation group or focused public source check
         type: choice
         default: standard
         options:
@@ -37,6 +37,7 @@ on:
           - integration
           - programs
           - public-ruff-graph
+          - unittest-fixture
       full_thinlto:
         description: Run all ThinLTO suites instead of the linking smoke test
         type: boolean
@@ -70,8 +71,16 @@ jobs:
           FULL_ASAN: ${{ inputs.full_asan || false }}
         run: bash .github/scripts/ci-scope.sh
 
+  unittest-fixture-request:
+    if: github.event_name == 'workflow_dispatch' && inputs.native_shard == 'unittest-fixture' && !inputs.unittest_source
+    runs-on: ubuntu-24.04
+    steps:
+      - run: |
+          echo 'unittest-fixture requires an exact unittest_source commit.' >&2
+          exit 1
+
   unittest-source:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.unittest_source != '' && (!inputs.native_shard || inputs.native_shard == 'standard') }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.unittest_source != '' && (!inputs.native_shard || inputs.native_shard == 'standard' || inputs.native_shard == 'unittest-fixture') }}
     # Use Imre's repository ID so a rename keeps the verified Namespace profile.
     runs-on: &linux-x64 >-
       ${{ github.repository_id == '1423429334' && 'namespace-profile-ubuntu-24-04-16' ||
@@ -115,7 +124,12 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18
       - run: cargo build -p imre-compiler -p imre-runtime --release --locked --features imre-compiler/verify-ir -j 2
         working-directory: unittest-source
+      - name: Run the original unittest fixture driver
+        if: ${{ inputs.native_shard == 'unittest-fixture' }}
+        working-directory: unittest-source
+        run: python3 tests/unittest_main.py --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18
       - name: Verify the selected suite at O0 and O3 in both compiler modes
+        if: ${{ inputs.native_shard != 'unittest-fixture' }}
         id: evidence
         working-directory: unittest-source
         run: |
@@ -314,7 +328,7 @@ jobs:
           if-no-files-found: error
 
   check:
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.native_shard != 'public-ruff-graph' && ((!inputs.sys_source && !inputs.unittest_source) || (inputs.native_shard && inputs.native_shard != 'standard')))
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.native_shard != 'public-ruff-graph' && inputs.native_shard != 'unittest-fixture' && ((!inputs.sys_source && !inputs.unittest_source) || (inputs.native_shard && inputs.native_shard != 'standard')))
     runs-on: *linux-x64
     timeout-minutes: 120
     env: &wheel-env
