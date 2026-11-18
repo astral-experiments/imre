@@ -1,0 +1,22 @@
+{
+  "status": "retrospective helper build record; not an Imre or target build",
+  "source": "/workspace/scratch/fnmatch-95908-replay-v1/correction-v2/raw_control_probe_child_env.c",
+  "source_sha256": "5e850ab6d1c977d4dae2a4949e7221b518fade280af57b25ff0f3dcc21ceaf3d",
+  "base_source": "/workspace/scratch/fnmatch-95908-replay-v1/custody/raw_control_probe_sources.c",
+  "base_source_sha256": "fa57a3d90c735b76210df621af5e32619afb282729922246da93c836d9437cd2",
+  "compiler": "/usr/bin/cc",
+  "compiler_version": "cc (Debian 14.2.0-19) 14.2.0",
+  "argv": [
+    "/usr/bin/cc",
+    "-O2",
+    "/workspace/scratch/fnmatch-95908-replay-v1/correction-v2/raw_control_probe_child_env.c",
+    "-o",
+    "/workspace/scratch/fnmatch-95908-replay-v1/correction-v2/raw-control-probe-child-env"
+  ],
+  "build_environment_override": {
+    "TMPDIR": "/workspace/scratch/fnmatch-95908-replay-v1/correction-v2"
+  },
+  "executable": "/workspace/scratch/fnmatch-95908-replay-v1/correction-v2/raw-control-probe-child-env",
+  "executable_sha256": "1e8c802ae42dd768fef9a88cb316321276c9bbd6ed534cd00ebf3e44d943cf7a",
+  "change": "unset exactly IMRE_WITHDRAW_LAUNCHER and IMRE_WITHDRAW_ARCHIVE in forked child immediately before execv; parent retains restoration data"
+}

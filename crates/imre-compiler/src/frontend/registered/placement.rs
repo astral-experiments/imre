@@ -22,7 +22,9 @@ mod tests {
                 1
             );
         }
-        let start = TextSize::try_from(text.find("def probe").unwrap()).unwrap();
+        let start =
+            TextSize::try_from(graph.modules[graph.entry].source.find("def probe").unwrap())
+                .unwrap();
         let functions = graph.registered_functions();
         let frame = &functions[&graph.entry][&start];
         let mut comparisons = 0;

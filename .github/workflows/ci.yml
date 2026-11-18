@@ -192,6 +192,8 @@ jobs:
       ${{ (github.repository == 'viarius-experiments/imre' || github.repository == 'astral-sh/imre') &&
           'namespace-profile-windows-2022-x86-64-16x32' || 'windows-2022' }}
     timeout-minutes: 45
+    env:
+      RUST_MIN_STACK: '16777216'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       # The native runtime depends on POSIX process and filesystem APIs.
