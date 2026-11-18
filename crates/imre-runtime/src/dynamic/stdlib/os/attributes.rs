@@ -24,7 +24,8 @@ descriptor_functions! {
         "write" | "close" | "closerange" | "get_blocking" | "set_blocking" | "get_inheritable" |
         "set_inheritable" | "link" | "symlink");
     #[cfg(unix)]
-    ("getpgid" | "setpgid" | "setgroups" | "setregid" | "setreuid" | "_exit" |
+    ("getpgid" | "setpgid" | "setgroups" | "setuid" | "seteuid" | "setgid" | "setegid" |
+        "setregid" | "setreuid" | "_exit" |
         "device_encoding" | "fchdir" | "fsync" | "pread" | "pwrite" | "readinto" | "kill" |
         "getppid" | "waitstatus_to_exitcode" | "execv" | "times" | "WIFSTOPPED");
     #[cfg(target_os = "linux")]
