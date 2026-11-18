@@ -1,0 +1,34 @@
+{
+  "credit": 0,
+  "files": {
+    "capture.json": {
+      "bytes": 3722,
+      "sha256": "2b4dc0d1652110f5c2612b79cb25e1c2cd0757638ef6cd9ab2ff9b3ebdde1602"
+    },
+    "cleanup.json": {
+      "bytes": 354,
+      "sha256": "aeaddd56a8139c1a4488cf6380c499ad05f2a162aa708881f1ddc75e6235aa10"
+    },
+    "join.json": {
+      "bytes": 246,
+      "sha256": "2e462b6bcb11bc506f4dd8e44fb5275d74687ad3a06c881fa330ea04e0d946e9"
+    },
+    "skeleton.json": {
+      "bytes": 2296,
+      "sha256": "486259aebe6ebdefa6f46603bd97781bf9760abec1f72ca33a77c2f7cf44fef4"
+    },
+    "source-state.json": {
+      "bytes": 371926,
+      "sha256": "e889b42699c359a249d28139e24f42273fcc34319ea86d2a24e7cf62c7ae6615"
+    },
+    "stderr": {
+      "bytes": 134148,
+      "sha256": "19e5a6f861f754e01a44c0cfa8ca1931a1ea5f159ca2339749dd8fe9cccd2b6c"
+    },
+    "stdout": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "schema": "imre.compatibility.finite-sidecar-seal.v1"
+}

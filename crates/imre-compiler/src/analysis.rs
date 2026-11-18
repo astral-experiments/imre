@@ -205,13 +205,13 @@ impl SourceContract {
             Self::Checked(result) => result,
             Self::Pending { native, result } => result.get_or_init(|| {
                 let (skipped, overloads) = graph.diagnostic_scopes();
-                graph.session.closed_program_errors(
+                let roots = graph.session.closed_file_roots(
                     &graph.modules,
                     skipped.as_deref(),
                     &overloads,
-                    Some(native),
                     Some(&graph.registered_source_errors.borrow()),
-                )
+                );
+                graph.session.closed_program_errors(&roots, Some(native))
             }),
         }
     }
@@ -246,6 +246,29 @@ impl ClosedSource for (PathBuf, bool, Option<(usize, &Path)>) {
     fn checked_source(&self, _: usize) -> Option<(usize, &Path)> {
         self.2
     }
+}
+
+/// Roles contributed by one checked file, independent of whether it emits diagnostics.
+#[derive(Clone, Copy)]
+struct ClosedFileRole {
+    supplies_declarations: bool,
+    /// Includes first-party stubs, which can own declared result scopes.
+    first_party: bool,
+    /// First-party executable source contributes call shapes and program writes.
+    program: bool,
+}
+
+/// One file in the ordered closed-checker view. Only `original` refers to a
+/// physical checked module; all checking and declaration ownership use `file`.
+#[derive(Clone, Copy)]
+pub(crate) struct ClosedFileRoot<'a> {
+    file: File,
+    role: ClosedFileRole,
+    diagnostic_path: Option<&'a Path>,
+    original: Option<(usize, &'a Path)>,
+    skipped: &'a [TextRange],
+    overloads: &'a [CheckedDiagnostic],
+    body_checked: bool,
 }
 
 /// The selected source checker and its physical registration-to-file mapping.
@@ -932,7 +955,8 @@ pub(crate) fn check_registered_project<'a>(
     let winners = (first_winner..).zip(sources);
     session.check_registered_execution(
         || {
-            session.closed_program_errors(&paths, None, &[], refusal, None)?;
+            let roots = session.closed_file_roots(&paths, None, &[], None);
+            session.closed_program_errors(&roots, refusal)?;
             if let Some((graph, report, owner, class)) = requested_class {
                 session
                     .check_selected_class_return(graph, owner, class, winners.clone())
@@ -3922,14 +3946,13 @@ impl Session {
     /// name a single declared function there, even when its callee type is Never.
     fn dormant_call_errors(
         &self,
-        module: usize,
+        file: File,
         path: &Path,
         declarations: DeclaredSignatures<'_>,
         errors: &mut Vec<(TextSize, String)>,
     ) {
         use ty_python_semantic::types::ide_support::unreachable_ranges;
         let db = &self.db;
-        let file = self.files[module];
         let source = db.program_file(file);
         let ranges = unreachable_ranges(db, source);
         if ranges.is_empty() {
@@ -4004,7 +4027,7 @@ impl Session {
     /// Unreachable, type-checking-only, and excluded source spans do not execute stores.
     fn exact_scalar_stores(
         &self,
-        module: usize,
+        file: File,
         path: &Path,
         skipped: &[TextRange],
         checked: &[CheckedDiagnostic],
@@ -4013,7 +4036,6 @@ impl Session {
         use ty_python_core::{definition::DefinitionKind, scope::NodeWithScopeKind};
 
         let db = &self.db;
-        let file = self.files[module];
         let source = db.program_file(file);
         let index = ty_python_core::semantic_index(db, source);
         let parsed = self.parsed(file);
@@ -4079,18 +4101,51 @@ impl Session {
         }
     }
 
+    /// Project physical source slots into the explicit file roles and diagnostic masks.
+    /// Keep slot order and duplicates: original diagnostic matching uses the first owner.
+    pub(crate) fn closed_file_roots<'a>(
+        &self,
+        modules: &'a [impl ClosedSource],
+        skipped: Option<&'a [Vec<TextRange>]>,
+        overloads: &'a [Vec<CheckedDiagnostic>],
+        checked_bodies: Option<&crate::modules::RegisteredSourceErrors>,
+    ) -> Vec<ClosedFileRoot<'a>> {
+        assert_eq!(modules.len(), self.files.len());
+        modules
+            .iter()
+            .zip(&self.files)
+            .enumerate()
+            .map(|(id, (module, &file))| {
+                let project = module.project_path();
+                let diagnostic_path =
+                    project.filter(|path| path.extension().is_none_or(|ext| ext != "pyi"));
+                ClosedFileRoot {
+                    file,
+                    role: ClosedFileRole {
+                        supplies_declarations: module.supplies_declarations(),
+                        first_party: project.is_some(),
+                        program: diagnostic_path.is_some(),
+                    },
+                    diagnostic_path,
+                    original: module.checked_source(id),
+                    skipped: skipped.map_or(&[], |ranges| ranges[id].as_slice()),
+                    overloads: overloads.get(id).map_or(&[], Vec::as_slice),
+                    body_checked: checked_bodies
+                        .and_then(|bodies| bodies.get(&id))
+                        .is_some_and(Vec::is_empty),
+                }
+            })
+            .collect()
+    }
+
     pub(crate) fn closed_program_errors(
         &self,
-        modules: &[impl ClosedSource],
-        skipped: Option<&[Vec<TextRange>]>,
-        overloads: &[Vec<CheckedDiagnostic>],
+        roots: &[ClosedFileRoot<'_>],
         native: Option<&crate::frontend::phase::Diagnostic>,
-        checked_bodies: Option<&crate::modules::RegisteredSourceErrors>,
     ) -> Result<(), String> {
         use ty_python_core::definition::DefinitionKind;
 
-        assert_eq!(modules.len(), self.files.len());
-        if !modules.iter().any(|module| module.project_path().is_some()) {
+        if !roots.iter().any(|root| root.role.first_party) {
             return Ok(());
         }
         let mut written_return = None;
@@ -4099,14 +4154,12 @@ impl Session {
         let mut parameters = Vec::new();
         let mut result_scopes: HashMap<File, Vec<FileScopeId>> = HashMap::new();
         let mut class_files = Vec::new();
-        for (id, (module, &file)) in modules.iter().zip(&self.files).enumerate() {
-            let program_source = module
-                .project_path()
-                .is_some_and(|path| path.extension().is_none_or(|ext| ext != "pyi"));
-            if program_source {
+        for root in roots {
+            let file = root.file;
+            if root.role.program {
                 program_files.push(file);
             }
-            if !module.supplies_declarations() {
+            if !root.role.supplies_declarations {
                 continue;
             }
             let source = self.db.program_file(file);
@@ -4127,20 +4180,18 @@ impl Session {
                     let function = function.node(&parsed);
                     // A generator's annotation describes the iterator, including a separate
                     // completion value. Leave that contract with the generator checker.
-                    if module.project_path().is_some()
+                    if root.role.first_party
                         && let Some(annotation) = function.returns.as_deref()
                         && !scope.file_scope_id(&self.db).is_generator_function(index)
                     {
                         let scope = scope.file_scope_id(&self.db);
                         result_scopes.entry(file).or_default().push(scope);
                         if written_return.is_none()
-                            && let Some((module, path)) = module.checked_source(id)
+                            && let Some((module, path)) = root.original
                             && path.extension().is_none_or(|ext| ext != "pyi")
                             && let Some((operand, report)) = native
                                 .and_then(|r| r.declared_return(module, path, annotation.range()))
-                            && !skipped.is_some_and(|ranges| {
-                                ranges[id].iter().any(|r| r.contains_range(operand))
-                            })
+                            && !root.skipped.iter().any(|r| r.contains_range(operand))
                             && !index.is_in_type_checking_block(scope, operand)
                             && dormant_operand(index, scope, operand, || {
                                 excluded.iter().any(|r| r.range.contains_range(operand))
@@ -4157,7 +4208,7 @@ impl Session {
                             .filter(|p| p.annotation().is_some())
                             .map(|p| (file, p.range())),
                     );
-                    if program_source
+                    if root.role.program
                         && function.decorator_list.is_empty()
                         && function.type_params.is_none()
                         && (function.returns.is_some() || parameters.len() != parameter_start)
@@ -4182,19 +4233,12 @@ impl Session {
             call_shapes,
             program_files,
         );
-        let project_files =
-            modules
-                .iter()
-                .zip(&self.files)
-                .enumerate()
-                .filter_map(|(id, (module, &file))| {
-                    let path = module.project_path()?;
-                    path.extension()
-                        .is_none_or(|ext| ext != "pyi")
-                        .then_some((id, file, path))
-                });
+        let project_files = roots
+            .iter()
+            .filter_map(|root| root.diagnostic_path.map(|path| (root, path)));
         let mut errors = Vec::new();
-        for (index, file, path) in project_files.clone() {
+        for (root, path) in project_files.clone() {
+            let file = root.file;
             if !has_signatures {
                 let index = ty_python_core::semantic_index(&self.db, self.db.program_file(file));
                 if !index.scope_ids().any(|scope| {
@@ -4209,32 +4253,23 @@ impl Session {
                 }
             }
             let mut dormant = Vec::new();
-            self.exact_scalar_stores(
-                index,
-                path,
-                skipped.map_or(&[], |ranges| ranges[index].as_slice()),
-                overloads.get(index).map_or(&[], Vec::as_slice),
-                &mut dormant,
-            );
+            self.exact_scalar_stores(file, path, root.skipped, root.overloads, &mut dormant);
             if !declarations.parameters(&self.db).is_empty() {
-                self.dormant_call_errors(index, path, declarations, &mut dormant);
+                self.dormant_call_errors(file, path, declarations, &mut dormant);
             }
             // The default body check covers ty's declaration rules on the same bindings.
-            let clean = checked_bodies
-                .and_then(|bodies| bodies.get(&index))
-                .is_some_and(Vec::is_empty);
             let checked = CheckedFile::new(
                 &self.db,
                 file,
-                skipped.map_or(&[][..], |ranges| ranges[index].as_slice()),
-                overloads.get(index).map_or(&[][..], Vec::as_slice),
+                root.skipped,
+                root.overloads,
                 FileChecks::DeclaredSignatures,
                 true,
                 self.explicit_check,
                 Some(declarations),
                 result_scopes.get(&file).map_or(&[][..], Vec::as_slice),
             );
-            let ty_errors = if clean {
+            let ty_errors = if root.body_checked {
                 &[][..]
             } else {
                 file_errors(&self.db, checked).as_slice()
@@ -4243,11 +4278,11 @@ impl Session {
             let returns = result_scopes.get(&file).map_or(&[][..], Vec::as_slice);
             if !declarations.parameters(&self.db).is_empty() || !returns.is_empty() {
                 self.exact_scalar_calls(
-                    index,
+                    file,
                     path,
                     declarations,
                     returns,
-                    skipped.map_or(&[], |ranges| ranges[index].as_slice()),
+                    root.skipped,
                     ty_errors,
                     &mut exact_calls,
                 );
@@ -4275,8 +4310,11 @@ impl Session {
                 }) {
                     errors.push(message);
                 }
-                let original =
-                    native.and_then(|report| self.original_operand(error, modules, index, report));
+                let original = native.and_then(|report| {
+                    let (owner, _) = error.declaration?;
+                    let declaration = roots.iter().find(|root| root.file == owner)?.original;
+                    Self::matching_original_operand(error, declaration, root.original, report)
+                });
                 errors.push(original.map_or_else(|| error.rendered.clone(), ToString::to_string));
             }
             errors.extend(dormant.map(|(_, message, _)| message));
@@ -4285,23 +4323,17 @@ impl Session {
             return Err(errors.join("\n"));
         }
         for report in native.into_iter().flat_map(|native| native.reports()) {
-            let selected = modules
-                .iter()
-                .enumerate()
-                .filter_map(|(id, module)| module.checked_source(id));
+            let selected = roots.iter().filter_map(|root| root.original);
             report.check_declared_operand(selected)?;
         }
         if let Some(report) = written_return {
             return Err(report.to_string());
         }
-        for (id, file, _) in project_files {
+        for (root, _) in project_files {
+            let file = root.file;
             if let Some(scopes) = result_scopes.get(&file)
-                && let Some(error) = dormant_returns(
-                    &self.db,
-                    file,
-                    scopes.clone(),
-                    skipped.map_or_else(Vec::new, |ranges| ranges[id].clone()),
-                )
+                && let Some(error) =
+                    dormant_returns(&self.db, file, scopes.clone(), root.skipped.to_vec())
             {
                 return Err(error.clone());
             }
@@ -4317,10 +4349,25 @@ impl Session {
         index: usize,
         report: &'a crate::frontend::phase::Diagnostic,
     ) -> Option<&'a crate::frontend::phase::Diagnostic> {
-        let (owner, annotation) = error.declaration?;
+        let (owner, _) = error.declaration?;
         let owner = self.files.iter().position(|&file| file == owner)?;
-        let (declaration, _) = modules[owner].checked_source(owner)?;
-        let (_, path) = modules[index].checked_source(index)?;
+        Self::matching_original_operand(
+            error,
+            modules[owner].checked_source(owner),
+            modules[index].checked_source(index),
+            report,
+        )
+    }
+
+    fn matching_original_operand<'a>(
+        error: &CheckedError,
+        declaration: Option<(usize, &Path)>,
+        operand: Option<(usize, &Path)>,
+        report: &'a crate::frontend::phase::Diagnostic,
+    ) -> Option<&'a crate::frontend::phase::Diagnostic> {
+        let (_, annotation) = error.declaration?;
+        let (declaration, _) = declaration?;
+        let (_, path) = operand?;
         report.matching_declared_operand(path, error.range?, declaration, annotation)
     }
 

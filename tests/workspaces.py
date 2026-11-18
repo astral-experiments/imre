@@ -20,12 +20,12 @@ import files
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "workspaces"
 IMPORTS = "from pathlib import Path\nfrom tempfile import TemporaryDirectory\n"
 REJECTED = {
+    "nullcontext_dormant_poison": "from contextlib import nullcontext\ndef dormant():\n    status: int = True",
+    "nullcontext_wrong_instance": "from contextlib import nullcontext\ndef consume(value: nullcontext[int]): pass\nconsume(True)",
     "cleanup_option_bad_call": (
         "def size(count: int) -> int:\n    return count\n"
         "with TemporaryDirectory(delete=True):\n    size('bad')"
     ),
-    "nullcontext_integer": "from contextlib import nullcontext\nwith nullcontext(1):\n    pass",
-    "nullcontext_two_args": "from contextlib import nullcontext\nwith nullcontext('a', 'b'):\n    pass",
     "async_temporary_directory": "async def f() -> None:\n    async with TemporaryDirectory():\n        pass",
     "async_shadowed_nullcontext": (
         "from contextlib import nullcontext\n"

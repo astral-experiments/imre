@@ -1,0 +1,11 @@
+{
+  "schema": "imre.compatibility.959-successor-supplements.v1",
+  "files": [
+    {
+      "name": "json-959-identity-evidence-v1.tar.gz",
+      "bytes": 102961,
+      "sha256": "8b1e8c1cc6456a5e20d1021ce8057f3045d09726f4106fc5bddf5b80a03672ff"
+    }
+  ],
+  "credit": 0
+}
