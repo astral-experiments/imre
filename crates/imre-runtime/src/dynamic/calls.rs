@@ -10038,8 +10038,9 @@ impl Context {
         // Root the scope, packed arguments, keyword names, and returning value.
         self.heap
             .reserve_temporaries(kwargs.len().saturating_add(4))?;
-        let module = copy_label(&self.scope_data(scope).module)?;
-        let local = allocator_api2::boxed::Box::try_new(Scope::new(module, Some(scope)))
+        let module = crate::Str::try_new(self.scope_data(scope).module.as_str())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        let local = allocator_api2::boxed::Box::try_new(Scope::with_module(module, Some(scope)))
             .map_err(|_| Error::new("MemoryError", ""))?;
         let local = self.alloc(Value::Scope(local));
         let sig = self.parsed_parameters(code)?;
@@ -11320,6 +11321,53 @@ mod tests {
         );
         // SAFETY: this test owns the context and the prepared native activation.
         assert_eq!(unsafe { call.run(&raw mut ctx) }.unwrap(), value);
+    }
+
+    unsafe extern "C" fn return_none(_: *mut Context, _: Id) -> Id {
+        NONE
+    }
+
+    #[test]
+    fn function_activations_preserve_inline_and_long_module_labels() {
+        let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        for module in ["__main__", "package.with_a_very_long_unicode_module_name_λ"] {
+            let parent = ctx.scope(module, None);
+            let name = ctx.text("noop");
+            let parameters = ctx.text(r#"{"positional":[]}"#);
+            let filename = ctx.text("scope_test.py");
+            let code = ctx.prelinked_code(
+                value::Body::Native(return_none, NONE),
+                parent,
+                name,
+                parameters,
+                (name, NONE),
+                (filename, 1),
+            );
+            let module_name = ctx.root_module_name(parent);
+            let function = ctx.function_with_closure(
+                code,
+                (parent, module_name),
+                super::super::source_code::FunctionClosure::Cells(&[]),
+                (name, name),
+                NONE,
+                NONE,
+            );
+            let call = ctx
+                .prepare_function_call(
+                    function,
+                    FunctionArguments::Written([].as_slice().into(), Vec::new(), None),
+                )
+                .unwrap();
+            let frame = ctx.scope_data(ctx.heap.current_scope());
+            assert_eq!(frame.parent, Some(parent));
+            assert_eq!(frame.module.as_str(), module);
+            assert_eq!(
+                frame.module.is_heap_allocated(),
+                module.len() > size_of::<String>()
+            );
+            // SAFETY: this test owns the context and its prepared native activation.
+            assert_eq!(unsafe { call.run(&raw mut ctx) }.unwrap(), NONE);
+        }
     }
 
     #[test]

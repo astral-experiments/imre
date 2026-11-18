@@ -1259,7 +1259,7 @@ pub(super) struct Scope {
     pub exec_globals: Option<ExecGlobals>,
     pub exec_locals: Option<Id>,
     pub parent: Option<Id>,
-    pub module: String,
+    pub module: crate::Str,
 }
 
 impl Scope {
@@ -1268,6 +1268,11 @@ impl Scope {
     }
 
     pub(super) fn new(module: String, parent: Option<Id>) -> Self {
+        Self::with_module(module.into(), parent)
+    }
+
+    /// Construct a lexical scope with an already owned, compact module label.
+    pub(super) fn with_module(module: crate::Str, parent: Option<Id>) -> Self {
         Self {
             in_class_body: false,
             enum_namespace: None,
