@@ -17113,6 +17113,7 @@ impl<'a> Checker<'a> {
         if !gzip && args.find_argument_value("opener", 7).is_some() {
             return Err(self.object_builtin_error("open with opener", call));
         }
+        let mut checked_path = None;
         // The typed BinaryIO ABI carries neither raw write results nor a buffer size.
         if !gzip
             && args.len() == 3
@@ -17122,18 +17123,23 @@ impl<'a> Checker<'a> {
             && paths::is_raw_binary_mode(mode.value.to_str())
             && (matches!(mode.value.to_str(), "wb" | "bw" | "ab" | "ba" | "xb" | "bx")
                 || matches!(size, ast::Expr::NumberLiteral(size) if matches!(&size.value, ast::Number::Int(n) if n.as_i64() == Some(0))))
-            && self.expr(path)?.ty == Type::Str
         {
-            return Err(self.object_builtin_error("binary open with buffering", call));
+            let value = self.expr(path)?;
+            if value.ty == Type::Str {
+                return Err(self.object_builtin_error("binary open with buffering", call));
+            }
+            checked_path = Some(value);
         }
-        let mut checked_path = None;
         if !gzip
             && let Some(ast::Expr::StringLiteral(mode)) = args.find_argument_value("mode", 1)
             && paths::is_update_mode(mode.value.to_str())
             && paths::has_open_arguments(args)
             && let Some(path) = args.find_argument_value("file", 0)
         {
-            let value = self.expr(path)?;
+            let value = match checked_path.take() {
+                Some(value) => value,
+                None => self.expr(path)?,
+            };
             if matches!(
                 value.ty,
                 Type::Str | Type::Bytes | Type::Path | Type::PurePath(_)
@@ -17170,9 +17176,15 @@ impl<'a> Checker<'a> {
                 ));
             }
         };
-        let path = match checked_path {
-            Some(value) => self.path_text(value, path)?,
-            None => self.path_argument(path)?,
+        let value = match checked_path {
+            Some(value) => value,
+            None => self.expr(path)?,
+        };
+        let boxed = !gzip && value.ty == Type::PythonObject;
+        let path = if boxed {
+            value
+        } else {
+            self.path_text(value, path)?
         };
         let (ty, mut builtin) = match (gzip, mode) {
             (true, "rt") => (Type::TextIO, Builtin::GzipOpen),
@@ -17193,6 +17205,9 @@ impl<'a> Checker<'a> {
             })?,
         };
         let mut args = vec![path];
+        if boxed && let Some(mode) = call.arguments.args.get(1) {
+            args.push(self.expr(mode)?);
+        }
         if ty == Type::BinaryIO {
             self.reject_builtin_keywords(call)?;
         } else if gzip {
@@ -17219,6 +17234,9 @@ impl<'a> Checker<'a> {
                     }
                     Some("newline") if !newline => {
                         builtin = self.text_newline(&keyword.value, builtin)?;
+                        if boxed {
+                            args.push(self.expr(&keyword.value)?);
+                        }
                         newline = true;
                     }
                     _ => {
@@ -17230,6 +17248,11 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+        }
+        if boxed {
+            // Keep the written callable, argument layout, and boxed stream in the
+            // same checked call that the registered frame will consume.
+            return self.call_import_with_operands(call, args);
         }
         Ok(Expr {
             ty,
@@ -17449,6 +17472,45 @@ print(get_indent("  source"))
             let error = super::lower(&graph).err().expect("invalid fixed open");
             assert!(error.contains(expected), "{source}: {error}");
         }
+    }
+
+    #[test]
+    fn boxed_open_places_the_original_callable_and_stream() {
+        use crate::frontend::fixed_body_source::FixedAttribute;
+        use crate::ir::{ExprKind, Type};
+        use crate::modules::SourceGraph;
+
+        for (import, written) in [
+            ("", "open(args.file)"),
+            (
+                "from builtins import open as selected\n",
+                "selected(args.file, 'r', encoding='utf-8', newline='')",
+            ),
+            ("import builtins\n", "builtins.open(args.file)"),
+        ] {
+            let source = format!(
+                "import argparse\n{import}def options() -> argparse.Namespace:\n    parser = argparse.ArgumentParser()\n    parser.add_argument('file', type=str)\n    parser.add_argument('--benchmark', action='append')\n    return parser.parse_args()\ndef main():\n    args = options()\n    with {written} as f:\n        for line in f: print(line.rstrip())\nmain()\n"
+            );
+            let mut graph = SourceGraph::single(&source).unwrap();
+            crate::checked_lower(&mut graph).unwrap();
+            let (functions, _) = graph.take_registered_functions();
+            let boxed = functions[&graph.entry].values().any(|body| {
+                body.fixed_attributes.as_deref().is_some_and(|attributes| {
+                    attributes.iter().any(|(range, attribute)| {
+                        &source[*range] == written
+                            && matches!(attribute, FixedAttribute::CallValue { checked, placed: true }
+                                if checked.call.ty == Type::PythonObject
+                                    && matches!(&checked.call.kind, ExprKind::Invoke { .. }))
+                    })
+                })
+            });
+            assert!(boxed, "{written}");
+        }
+        assert!(
+            crate::check("open([1])\n")
+                .unwrap_err()
+                .contains("a filesystem path requires str or pathlib.Path")
+        );
     }
 
     #[test]
