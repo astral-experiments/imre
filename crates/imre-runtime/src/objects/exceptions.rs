@@ -8,7 +8,7 @@
 use crate::StrOwner;
 mod arguments;
 mod imports;
-pub(crate) use imports::keyword_suggestion;
+pub(crate) use imports::{import_suggestion, keyword_suggestion};
 pub(super) use imports::{imre_exception_field_repr, type_name as word_type_name};
 mod tree;
 pub(super) use tree::append_tree_entries;
@@ -2914,7 +2914,7 @@ mod tests {
             assert!(!name.is_null());
             // SAFETY: creation transfers one string owner. The manager acquires its own reference.
             let (name, manager) = unsafe {
-                let manager = imre_directory_context_new(name as usize, 1);
+                let manager = imre_directory_context_new(name as usize);
                 (
                     StrOwner::from_raw(name),
                     crate::ObjectOwner::from_raw(manager),
