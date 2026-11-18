@@ -312,10 +312,7 @@ impl<'a> Visitor<'a> for References<'_> {
             if name == "getTestCaseNames" {
                 self.found.attributes.insert("_getTestCaseNames".into());
             }
-            if matches!(
-                name.as_str(),
-                "assertEqual" | "assertListEqual" | "assertRaises"
-            ) {
+            if matches!(name.as_str(), "assertListEqual" | "assertRaises") {
                 self.found.attributes.insert(format!("_bound_{name}"));
             }
             if name == "assertIsInstance" {
@@ -617,7 +614,7 @@ impl Reachable {
                 found.instance_attributes.len(),
             );
             if case_base.is_some_and(|base| found.definitions.contains(&base))
-                && found.attributes.contains("_bound_assertEqual")
+                && found.attributes.contains("assertEqual")
             {
                 found
                     .definitions
