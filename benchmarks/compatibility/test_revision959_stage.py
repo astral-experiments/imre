@@ -311,3 +311,12 @@ class ScriptReboundTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'effect mapping'):self.stock_semantics()
 
 if __name__=='__main__':unittest.main()
+
+
+class SuccessorAuthorityTests(unittest.TestCase):
+    def test_successor_needs_independent_public_pin(self):
+        from extensions.successor959_v1 import authority as successor
+        import source_stage_pins
+        if getattr(source_stage_pins,'REVISION_959_SUCCESSOR',None) is None:
+            with self.assertRaisesRegex(ValueError,'separately reviewed public'):successor.fixed_pin(scorecard)
+        else:self.assertEqual(successor.fixed_pin(scorecard)['manifest'],successor.MANIFEST)
