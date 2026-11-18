@@ -958,9 +958,7 @@ pub(crate) fn read_path_bytes_interruptible(path: &str) -> Result<Option<Bytes>>
             let length = spare.len().min(maximum);
             match super::os::try_read_spare(file.as_raw_fd(), &mut spare[..length]) {
                 Ok(None) => {
-                    if let Err(error) = super::stdlib::check_interrupt() {
-                        return Err(error);
-                    }
+                    super::stdlib::check_interrupt()?;
                 }
                 Ok(Some(0)) => return Ok(Some(bytes)),
                 Ok(Some(count)) => {
