@@ -1,0 +1,20 @@
+{
+  "after": {
+    "cli": "e2d0886948f766332df6370a2e3140a5be5c8b0fc108224ef7242fc38fc58bd4",
+    "fixture_equal": true,
+    "fixture_files": 1639,
+    "fixture_manifest_sha256": "89ab898b9ab7ca9f23ad3928f81e288b91e0c3b09e02e9bc0784619e36315860",
+    "images": {
+      "O0": "3dc0a328f2b13d0213b351c9be52af8451092ef4da12ceb9a039e9ce5d0292a9",
+      "O3": "b41597b5aee5dac9eb6ce2da97f3a27bf0dff48ed0758b75007b59346004a5bd"
+    },
+    "launcher": "7ab1bc2219ad6e62ef5daedda3eca9f80b662d9abc58ea46d669389c88e746d8",
+    "original_source": "725ec19fa8c47f91b7aed7a8f2b1f3e74e6454647efd11e9a3e0e29245605af0",
+    "probe": "a4686257bc9fda18820da4a774e2b4d3340eb216082615e2bc9be5012a00f9b9",
+    "runtime": "33ae5dfef5eff3c1fac5e0a5e19263daa980d7d80a5917979b426e85fa128c5c",
+    "stock": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+  },
+  "baseline_sha256": "aa924455a000955f61dae8f7e9929343c304d425911847e58639b95488772146",
+  "controller_sha256": "1cd57080ff1b163292a1a853a63648550c529a5c8b6a9f5655c1aed51f8a4269",
+  "schema": "imre.compatibility.post-custody.v1"
+}
