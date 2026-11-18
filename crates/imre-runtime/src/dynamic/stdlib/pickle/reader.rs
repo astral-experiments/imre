@@ -38,12 +38,55 @@ pub(in crate::dynamic) unsafe extern "C" fn imre_dyn_pickle_loads(
     }
 }
 
+/// One validated stack push. The low 32 bits are either an input-byte offset
+/// or a memo index, bits 32..40 hold a short string length, and bits 40..63
+/// count subsequent MEMOIZE operations. The top bit distinguishes memo gets.
 #[derive(Clone, Copy)]
+struct Item(u64);
+
+impl Item {
+    const GET: u64 = 1 << 63;
+    const MEMO: u64 = 1 << 40;
+    const MAX_MEMO: u64 = (1 << 23) - 1;
+
+    fn text(offset: usize, length: u8) -> Option<Self> {
+        Some(Self(
+            u64::from(u32::try_from(offset).ok()?) | (u64::from(length) << 32),
+        ))
+    }
+
+    fn get(index: usize) -> Option<Self> {
+        Some(Self(Self::GET | u64::from(u32::try_from(index).ok()?)))
+    }
+
+    fn memoize(&mut self) -> Option<()> {
+        if self.memo_count() as u64 == Self::MAX_MEMO {
+            return None;
+        }
+        self.0 += Self::MEMO;
+        Some(())
+    }
+
+    fn memo_count(self) -> usize {
+        ((self.0 >> 40) & Self::MAX_MEMO) as usize
+    }
+
+    fn index(self) -> usize {
+        self.0 as u32 as usize
+    }
+    fn length(self) -> usize {
+        ((self.0 >> 32) & 0xff) as usize
+    }
+    fn is_get(self) -> bool {
+        self.0 & Self::GET != 0
+    }
+}
+
 struct Layout {
-    end: usize,
-    items: usize,
+    items: Vec<Item>,
     memo: usize,
     used: u16,
+    has_get: bool,
 }
 
 const HANDLERS: &[(u8, u32)] = &[
@@ -60,10 +103,19 @@ const HANDLERS: &[(u8, u32)] = &[
 ];
 
 fn flag(op: u8) -> Option<u16> {
-    HANDLERS
-        .iter()
-        .position(|&(key, _)| key == op)
-        .map(|index| 1 << index)
+    Some(match op {
+        PROTO => 1 << 0,
+        FRAME => 1 << 1,
+        EMPTY_LIST => 1 << 2,
+        MEMOIZE => 1 << 3,
+        MARK => 1 << 4,
+        SHORT_BINUNICODE => 1 << 5,
+        APPENDS => 1 << 6,
+        STOP => 1 << 7,
+        BINGET => 1 << 8,
+        LONG_BINGET => 1 << 9,
+        _ => return None,
+    })
 }
 
 struct Cursor<'a> {
@@ -87,11 +139,6 @@ impl<'a> Cursor<'a> {
         Some(self.take(1)?[0])
     }
 
-    fn short_text(&mut self) -> Option<&'a str> {
-        let length = usize::from(self.byte()?);
-        std::str::from_utf8(self.take(length)?).ok()
-    }
-
     fn get_index(&mut self, op: u8) -> Option<usize> {
         match op {
             BINGET => Some(usize::from(self.byte()?)),
@@ -104,14 +151,15 @@ impl<'a> Cursor<'a> {
     }
 }
 
-/// Validate the entire accepted grammar before allocating or publishing Python objects.
+/// Validate the accepted grammar and UTF-8 before publishing Python objects;
+/// retain only packed positions into the immutable input, not copies of text.
 fn preflight(data: &[u8]) -> Option<Layout> {
     if data.get(..3)? != [PROTO, 4, FRAME] && data.get(..3)? != [PROTO, 5, FRAME] {
         return None;
     }
     let size = u64::from_le_bytes(data.get(3..11)?.try_into().ok()?);
     let end = 11usize.checked_add(usize::try_from(size).ok()?)?;
-    if end > data.len() {
+    if end > data.len() || end > u32::MAX as usize {
         return None;
     }
     let mut cursor = Cursor { data, at: 11, end };
@@ -119,36 +167,46 @@ fn preflight(data: &[u8]) -> Option<Layout> {
         return None;
     }
     let mut used = flag(PROTO)? | flag(FRAME)? | flag(EMPTY_LIST)? | flag(MEMOIZE)? | flag(MARK)?;
-    let mut items = 0usize;
+    let mut items: Vec<Item> = Vec::new();
+    items
+        .try_reserve((end.saturating_sub(14) / 8).min(1024))
+        .ok()?;
     let mut memo = 1usize;
-    let mut top = false;
+    let mut has_get = false;
     loop {
         let op = cursor.byte()?;
         used |= flag(op)?;
         match op {
             SHORT_BINUNICODE => {
-                cursor.short_text()?;
-                items = items.checked_add(1)?;
-                top = true;
+                let length = cursor.byte()?;
+                let offset = cursor.at;
+                std::str::from_utf8(cursor.take(usize::from(length))?).ok()?;
+                items.try_reserve(1).ok()?;
+                items.push(Item::text(offset, length)?);
             }
             BINGET | LONG_BINGET => {
-                if cursor.get_index(op)? >= memo {
+                let index = cursor.get_index(op)?;
+                if index >= memo {
                     return None;
                 }
-                items = items.checked_add(1)?;
-                top = true;
+                items.try_reserve(1).ok()?;
+                items.push(Item::get(index)?);
+                has_get = true;
             }
-            MEMOIZE if top => memo = memo.checked_add(1)?,
+            MEMOIZE => {
+                items.last_mut()?.memoize()?;
+                memo = memo.checked_add(1)?;
+            }
             APPENDS => {
                 if cursor.byte()? != STOP || cursor.at != end {
                     return None;
                 }
                 used |= flag(STOP)?;
                 return Some(Layout {
-                    end,
                     items,
                     memo,
                     used,
+                    has_get,
                 });
             }
             _ => return None,
@@ -469,63 +527,50 @@ fn options(ctx: &Context, scope: Id) -> bool {
     })
 }
 
-/// Decode only after preflight has proved that every operation is callback-free.
+/// Build from validated input offsets. A memo vector is needed only if the
+/// pickle actually retrieves memoized objects.
 fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
     let mut values = Vec::new();
     values
-        .try_reserve_exact(layout.items)
+        .try_reserve_exact(layout.items.len())
         .map_err(|_| crate::Error::memory_error())?;
     let mut memo = Vec::new();
-    memo.try_reserve_exact(layout.memo)
-        .map_err(|_| crate::Error::memory_error())?;
+    if layout.has_get {
+        memo.try_reserve_exact(layout.memo)
+            .map_err(|_| crate::Error::memory_error())?;
+        memo.push(NONE); // placeholder for the result list itself
+    }
     ctx.heap
-        .reserve_temporaries(layout.items.saturating_add(1))?;
+        .reserve_temporaries(layout.items.len().saturating_add(1))?;
     let mark = ctx.heap.temporary_mark();
-    // NONE denotes the not-yet-allocated result list; the grammar cannot push None.
-    memo.push(NONE);
-    let mut top = NONE;
-    let mut at = 14usize; // PROTO, FRAME, EMPTY_LIST, MEMOIZE, MARK
-    loop {
-        let (op, next, text, index) = {
-            let Value::Bytes(bytes) = ctx.heap.get(data) else {
-                unreachable!()
-            };
-            let mut cursor = Cursor {
-                data: bytes,
-                at,
-                end: layout.end,
-            };
-            let op = cursor.byte().expect("preflight opcode");
-            let mut text = None;
-            let mut index = None;
-            match op {
-                SHORT_BINUNICODE => {
-                    text = Some(cursor.short_text().expect("preflight text").to_owned())
-                }
-                BINGET | LONG_BINGET => {
-                    index = Some(cursor.get_index(op).expect("preflight memo index"))
-                }
-                _ => {}
-            }
-            (op, cursor.at, text, index)
+    let Value::Bytes(bytes) = ctx.heap.get(data) else {
+        unreachable!()
+    };
+    let (pointer, length) = (bytes.as_ptr(), bytes.len());
+    // SAFETY: the source frame roots this exact immutable bytes object; its Vec
+    // backing allocation does not move when heap slots grow. No callback,
+    // collection, signal checkpoint, or mutation runs while decoding.
+    let input = unsafe { std::slice::from_raw_parts(pointer, length) };
+    for item in layout.items {
+        let top = if item.is_get() {
+            memo[item.index()]
+        } else {
+            let start = item.index();
+            // SAFETY: preflight checked both the range and UTF-8, and the rooted
+            // immutable input has not changed. CompactString copies into its slot.
+            let text =
+                unsafe { std::str::from_utf8_unchecked(&input[start..start + item.length()]) };
+            ctx.text(text)
         };
-        at = next;
-        match op {
-            SHORT_BINUNICODE => {
-                top = ctx.text(text.expect("text opcode"));
-                values.push(top);
-            }
-            BINGET | LONG_BINGET => {
-                top = memo[index.expect("get opcode")];
-                values.push(top);
-            }
-            MEMOIZE => memo.push(top),
-            APPENDS => break,
-            _ => unreachable!("preflight grammar"),
+        values.push(top);
+        if layout.has_get {
+            memo.extend(std::iter::repeat_n(top, item.memo_count()));
         }
     }
     let result = ctx.alloc(Value::List(values));
-    if let Value::List(values) = ctx.heap.get_mut(result) {
+    if layout.has_get
+        && let Value::List(values) = ctx.heap.get_mut(result)
+    {
         for item in values {
             if *item == NONE {
                 *item = result;
@@ -548,12 +593,18 @@ fn attempt(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     let Value::Bytes(bytes) = ctx.heap.get(data) else {
         return Ok(None);
     };
+    // Reject observers before scanning or allocating a descriptor vector. No
+    // Python callback can alter the environment while preflight runs.
     if !unobserved(ctx) {
         return Ok(None);
     }
     let Some(layout) = preflight(bytes) else {
         return Ok(None);
     };
+    #[cfg(unix)]
+    if crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Acquire) {
+        return Ok(None);
+    }
     if !environment(ctx, root, layout.used) {
         return Ok(None);
     }
@@ -591,7 +642,9 @@ mod tests {
             STOP,
         ];
         let layout = preflight(&good).unwrap();
-        assert_eq!((layout.items, layout.memo), (2, 2));
+        assert_eq!((layout.items.len(), layout.memo), (2, 2));
+        assert!(layout.has_get);
+        assert!(layout.items[1].is_get());
         assert!(preflight(&good[..good.len() - 1]).is_none());
         let mut sparse = good;
         sparse[14] = b'q'; // BINPUT is intentionally unsupported.
