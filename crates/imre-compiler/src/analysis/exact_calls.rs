@@ -154,8 +154,10 @@ impl Calls<'_, '_> {
             || changed_module_binding(db, model, call, name, definition)
             || nested_global_bindings(db, model.file()).contains(name.id.as_str())
             || self.declarations.program_files(db).iter().any(|&file| {
+                let escapes = escaped_functions(db, file);
                 function_layout_writes(db, file).contains(&definition)
-                    || escaped_functions(db, file).contains(&definition)
+                    || escapes.unresolved_code_write
+                    || escapes.functions.contains(&definition)
             })
         {
             return false;
@@ -358,17 +360,55 @@ impl<'ast> Visitor<'ast> for Calls<'_, '_> {
 
 /// Functions exposed as values can have their code replaced through an alias,
 /// container, or callback. Direct named calls do not expose the function object.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct FunctionEscapes<'db> {
+    functions: HashSet<Definition<'db>>,
+    unresolved_code_write: bool,
+}
+
 #[salsa::tracked(returns(ref))]
-fn escaped_functions<'db>(db: &'db dyn Db, file: File) -> HashSet<Definition<'db>> {
+fn escaped_functions<'db>(db: &'db dyn Db, file: File) -> FunctionEscapes<'db> {
     struct Escapes<'db> {
         model: SemanticModel<'db>,
-        functions: HashSet<Definition<'db>>,
+        facts: FunctionEscapes<'db>,
+    }
+    impl Escapes<'_> {
+        fn code_write(&mut self, receiver: &Expr) {
+            let db = self.model.db();
+            let env = self.model.program_environment();
+            match receiver.inferred_type(&self.model) {
+                Some(ty @ Type::FunctionLiteral(_)) => {
+                    if let Some(TypeDefinition::Function(definition)) = ty.definition(db, &env) {
+                        self.facts.functions.insert(definition);
+                    } else {
+                        self.facts.unresolved_code_write = true;
+                    }
+                }
+                Some(ty @ Type::NominalInstance(_))
+                    if !ty.is_assignable_to(
+                        db,
+                        &env,
+                        ty_python_semantic::types::KnownClass::FunctionType.to_instance(db, &env),
+                    ) => {}
+                _ => self.facts.unresolved_code_write = true,
+            }
+        }
     }
     impl<'ast> Visitor<'ast> for Escapes<'_> {
         fn visit_annotation(&mut self, _: &'ast Expr) {}
         fn visit_type_params(&mut self, _: &'ast TypeParams) {}
         fn visit_expr(&mut self, expr: &'ast Expr) {
             if let Expr::Call(call) = expr {
+                if let [receiver, name, ..] = call.arguments.args.as_ref()
+                    && name
+                        .as_string_literal_expr()
+                        .is_some_and(|literal| literal.value.to_str() == "__code__")
+                    && call.func.inferred_type(&self.model).is_some_and(|ty| {
+                        super::is_stdlib_function_type(&self.model, ty, "builtins", "setattr")
+                    })
+                {
+                    self.code_write(receiver);
+                }
                 if !call.func.is_name_expr() {
                     self.visit_expr(&call.func);
                 }
@@ -377,8 +417,14 @@ fn escaped_functions<'db>(db: &'db dyn Db, file: File) -> HashSet<Definition<'db
                 }
                 return;
             }
-            // Reading a function's code/defaults is passive; a direct store is
-            // already tracked by function_layout_writes.
+            if let Expr::Attribute(attribute) = expr
+                && attribute.ctx == ruff_python_ast::ExprContext::Store
+                && attribute.attr.as_str() == "__code__"
+            {
+                self.code_write(&attribute.value);
+                return;
+            }
+            // Reading a function's code/defaults is passive.
             if let Expr::Attribute(attribute) = expr
                 && attribute.value.is_name_expr()
                 && matches!(
@@ -393,7 +439,7 @@ fn escaped_functions<'db>(db: &'db dyn Db, file: File) -> HashSet<Definition<'db
                 && let Some(TypeDefinition::Function(definition)) =
                     ty.definition(self.model.db(), &self.model.program_environment())
             {
-                self.functions.insert(definition);
+                self.facts.functions.insert(definition);
             }
             visitor::walk_expr(self, expr);
         }
@@ -402,10 +448,13 @@ fn escaped_functions<'db>(db: &'db dyn Db, file: File) -> HashSet<Definition<'db
     let parsed = ruff_db::parsed::parsed_module(db, source.python_file(db)).load(db);
     let mut escapes = Escapes {
         model: SemanticModel::new(db, source),
-        functions: HashSet::new(),
+        facts: FunctionEscapes {
+            functions: HashSet::new(),
+            unresolved_code_write: false,
+        },
     };
     escapes.visit_body(parsed.suite());
-    escapes.functions
+    escapes.facts
 }
 
 #[cfg(test)]
@@ -419,6 +468,7 @@ mod tests {
             "die.__code__ = replacement.__code__\n",
             "alias = die\nalias.__code__ = replacement.__code__\n",
             "aliases = [die]\naliases[0].__code__ = replacement.__code__\n",
+            "alias = globals()['die']\nalias.__code__ = replacement.__code__\n",
             "setattr(die, '__code__', replacement.__code__)\n",
             "def mutate():\n    global die\n    die = replacement\nmutate()\n",
         ] {
