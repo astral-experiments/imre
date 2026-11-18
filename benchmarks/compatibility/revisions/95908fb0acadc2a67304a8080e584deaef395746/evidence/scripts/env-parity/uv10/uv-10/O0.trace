@@ -1,0 +1,245 @@
+27120 execve("/usr/bin/bwrap", ["/usr/bin/bwrap", "--ro-bind", "/", "/", "--tmpfs", "/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts", "--chdir", "/workspace/scratch/ruff-a-95908f/uv10-review/work", "--die-with-parent", "--", "/usr/bin/env", "-u", "PWD", "/workspace/scratch/ruff-a-95908f/uv10-review/build/uv10-O0"], ["IMREFLAGS=--opt-level 0", "IMRE_CACHE_DIR=/workspace/scratch/ruff-a-95908f/uv10-review/cache", "LANG=C.UTF-8", "LC_ALL=en_US.UTF-8", "PATH=/workspace/scratch/ruff-a-95908f/uv10-review/bin:/usr/bin:/bin"]) = 0
+27120 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache>
+27120 close(3</etc/ld.so.cache>)        = 0
+27120 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/lib/x86_64-linux-gnu/libselinux.so.1", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libselinux.so.1>
+27120 close(3</usr/lib/x86_64-linux-gnu/libselinux.so.1>) = 0
+27120 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/lib/x86_64-linux-gnu/libcap.so.2", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libcap.so.2.75>
+27120 close(3</usr/lib/x86_64-linux-gnu/libcap.so.2.75>) = 0
+27120 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libc.so.6>
+27120 close(3</usr/lib/x86_64-linux-gnu/libc.so.6>) = 0
+27120 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/lib/x86_64-linux-gnu/libpcre2-8.so.0", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libpcre2-8.so.0.14.0>
+27120 close(3</usr/lib/x86_64-linux-gnu/libpcre2-8.so.0.14.0>) = 0
+27120 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/proc/filesystems", O_RDONLY|O_CLOEXEC) = 3</proc/filesystems>
+27120 close(3</proc/filesystems>)       = 0
+27120 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/proc/mounts", O_RDONLY|O_CLOEXEC) = 3</proc/27120/mounts>
+27120 close(3</proc/27120/mounts>)      = 0
+27120 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/proc/sys/kernel/overflowuid", O_RDONLY|O_CLOEXEC) = 3</proc/sys/kernel/overflowuid>
+27120 close(3</proc/sys/kernel/overflowuid>) = 0
+27120 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/proc/sys/kernel/overflowgid", O_RDONLY|O_CLOEXEC) = 3</proc/sys/kernel/overflowgid>
+27120 close(3</proc/sys/kernel/overflowgid>) = 0
+27120 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/proc", O_RDONLY|O_PATH) = 3</proc>
+27120 wait4(-1, 0x7ffe6547c700, WNOHANG, NULL) = -1 ECHILD (No child processes)
+27120 clone(child_stack=NULL, flags=CLONE_NEWNS|CLONE_NEWUSER|SIGCHLD) = 27121
+27120 openat(3</proc>, "27121/ns", O_RDONLY|O_PATH) = 5</proc/27121/ns>
+27120 newfstatat(5</proc/27121/ns>, "mnt", {st_dev=makedev(0, 0x4), st_ino=4026532301, st_mode=S_IFREG|0444, st_nlink=1, st_uid=0, st_gid=0, st_blksize=4096, st_blocks=0, st_size=0, st_atime=1794963605 /* 2026-11-17T20:00:05.666568641-0500 */, st_atime_nsec=666568641, st_mtime=1794963605 /* 2026-11-17T20:00:05.666568641-0500 */, st_mtime_nsec=666568641, st_ctime=1794963605 /* 2026-11-17T20:00:05.666568641-0500 */, st_ctime_nsec=666568641}, 0) = 0
+27120 close(5</proc/27121/ns>)          = 0
+27120 close(4<{eventfd-count=0, eventfd-id=14, eventfd-semaphore=0}> <unfinished ...>
+27121 close(4<{eventfd-count=0, eventfd-id=14, eventfd-semaphore=0}> <unfinished ...>
+27120 <... close resumed>)              = 0
+27120 openat(3</proc>, "self/fd", O_RDONLY|O_NOCTTY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY <unfinished ...>
+27121 <... close resumed>)              = 0
+27120 <... openat resumed>)             = 4</proc/27120/fd>
+27120 fcntl(4</proc/27120/fd>, F_GETFL) = 0x18800 (flags O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_DIRECTORY)
+27120 fcntl(4</proc/27120/fd>, F_SETFD, FD_CLOEXEC) = 0
+27120 close(3</proc>)                   = 0
+27120 close(4</proc/27120/fd>)          = 0
+27121 openat(3</proc>, "self", O_RDONLY|O_PATH) = 4</proc/27121>
+27121 openat(4</proc/27121>, "uid_map", O_RDWR|O_CLOEXEC) = 5</proc/27121/uid_map>
+27121 close(5</proc/27121/uid_map>)     = 0
+27121 openat(4</proc/27121>, "setgroups", O_RDWR|O_CLOEXEC) = 5</proc/27121/setgroups>
+27121 close(5</proc/27121/setgroups>)   = 0
+27121 openat(4</proc/27121>, "gid_map", O_RDWR|O_CLOEXEC) = 5</proc/27121/gid_map>
+27121 close(5</proc/27121/gid_map>)     = 0
+27121 close(4</proc/27121>)             = 0
+27121 mount(NULL, "/", NULL, MS_REC|MS_SILENT|MS_SLAVE, NULL) = 0
+27121 mount("tmpfs", "/tmp", "tmpfs", MS_NOSUID|MS_NODEV, NULL) = 0
+27121 chdir("/tmp")                     = 0
+27121 mount("newroot", "newroot", NULL, MS_MGC_VAL|MS_BIND|MS_REC|MS_SILENT, NULL) = 0
+27121 pivot_root("/tmp", "oldroot")     = 0
+27121 chdir("/")                        = 0
+27121 mount("oldroot/proc", "proc", NULL, MS_BIND|MS_REC|MS_SILENT, NULL) = 0
+27121 openat(AT_FDCWD</>, "/oldroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</oldroot>
+27121 openat2(4</oldroot>, "/", {flags=O_RDONLY|O_PATH, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 5</oldroot>
+27121 close(4</oldroot>)                = 0
+27121 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+27121 openat2(4</newroot>, "/", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 6</newroot>
+27121 close(4</newroot>)                = 0
+27121 openat(6</newroot>, ".", O_RDONLY|O_NOFOLLOW|O_CLOEXEC|O_PATH) = 4</newroot>
+27121 mount("/proc/self/fd/5", "/proc/self/fd/4", NULL, MS_BIND|MS_REC|MS_SILENT, NULL) = 0
+27121 openat(3</proc>, "self/mountinfo", O_RDONLY|O_CLOEXEC) = 7</proc/27121/mountinfo>
+27121 close(7</proc/27121/mountinfo>)   = 0
+27121 mount("none", "/newroot", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+27121 mount("none", "/newroot/proc", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+27121 mount("none", "/newroot/dev", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_REMOUNT|MS_BIND|MS_SILENT, NULL) = 0
+27121 mount("none", "/newroot/dev/pts", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+27121 mount("none", "/newroot/dev/shm", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+27121 mount("none", "/newroot/dev/mqueue", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+27121 mount("none", "/newroot/sys", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+27121 mount("none", "/newroot/sys/fs/cgroup", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+27121 mount("none", "/newroot/run", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+27121 mount("none", "/newroot/run/codex-runtime-secrets", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+27121 mount("none", "/newroot/run/codex-ssh", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+27121 mount("none", "/newroot/run/lock", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+27121 close(6</newroot>)                = 0
+27121 close(4</newroot>)                = 0
+27121 close(5</oldroot>)                = 0
+27121 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+27121 openat2(4</newroot>, "/", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 5</newroot>
+27121 close(4</newroot>)                = 0
+27121 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+27121 openat2(4</newroot>, "/workspace", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 6</newroot/workspace>
+27121 close(4</newroot>)                = 0
+27121 close(5</newroot>)                = 0
+27121 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+27121 openat2(4</newroot>, "/workspace/scratch", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 5</newroot/workspace/scratch>
+27121 close(4</newroot>)                = 0
+27121 close(6</newroot/workspace>)      = 0
+27121 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+27121 openat2(4</newroot>, "/workspace/scratch/ruff-a-95908f", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 6</newroot/workspace/scratch/ruff-a-95908f>
+27121 close(4</newroot>)                = 0
+27121 close(5</newroot/workspace/scratch>) = 0
+27121 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+27121 openat2(4</newroot>, "/workspace/scratch/ruff-a-95908f/uv10-review", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 5</newroot/workspace/scratch/ruff-a-95908f/uv10-review>
+27121 close(4</newroot>)                = 0
+27121 close(6</newroot/workspace/scratch/ruff-a-95908f>) = 0
+27121 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+27121 openat2(4</newroot>, "/workspace/scratch/ruff-a-95908f/uv10-review/work", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 6</newroot/workspace/scratch/ruff-a-95908f/uv10-review/work>
+27121 close(4</newroot>)                = 0
+27121 close(5</newroot/workspace/scratch/ruff-a-95908f/uv10-review>) = 0
+27121 openat(6</newroot/workspace/scratch/ruff-a-95908f/uv10-review/work>, "scripts", O_RDONLY|O_NOFOLLOW|O_CLOEXEC|O_PATH) = 4</newroot/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts>
+27121 mount("tmpfs", "/proc/self/fd/4", "tmpfs", MS_NOSUID|MS_NODEV, "mode=0755") = 0
+27121 close(6</newroot/workspace/scratch/ruff-a-95908f/uv10-review/work>) = 0
+27121 close(4</newroot/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts>) = 0
+27121 mount("oldroot", "oldroot", NULL, MS_REC|MS_SILENT|MS_PRIVATE, NULL) = 0
+27121 umount2("oldroot", MNT_DETACH)    = 0
+27121 openat(AT_FDCWD</>, "/", O_RDONLY|O_DIRECTORY) = 4</>
+27121 chdir("/newroot")                 = 0
+27121 pivot_root(".", ".")              = 0
+27121 fchdir(4</>)                      = 0
+27121 umount2(".", MNT_DETACH)          = 0
+27121 chdir("/")                        = 0
+27121 close(4</>)                       = 0
+27121 chdir("/workspace/scratch/ruff-a-95908f/uv10-review/work") = 0
+27121 close(3</proc>)                   = 0
+27121 execve("/usr/bin/env", ["/usr/bin/env", "-u", "PWD", "/workspace/scratch/ruff-a-95908f/uv10-review/build/uv10-O0"], ["IMREFLAGS=--opt-level 0", "IMRE_CACHE_DIR=/workspace/scratch/ruff-a-95908f/uv10-review/cache", "LANG=C.UTF-8", "LC_ALL=en_US.UTF-8", "PATH=/workspace/scratch/ruff-a-95908f/uv10-review/bin:/usr/bin:/bin", "PWD=/workspace/scratch/ruff-a-95908f/uv10-review/work"]) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache>
+27121 close(3</etc/ld.so.cache>)        = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libc.so.6>
+27121 close(3</usr/lib/x86_64-linux-gnu/libc.so.6>) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/locale-archive", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/share/locale/locale.alias", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.UTF-8/LC_IDENTIFICATION", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.utf8/LC_IDENTIFICATION", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/en_US.utf8/LC_IDENTIFICATION>
+27121 close(3</usr/lib/locale/en_US.utf8/LC_IDENTIFICATION>) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache>
+27121 close(3</usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache>) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.UTF-8/LC_MEASUREMENT", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.utf8/LC_MEASUREMENT", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/chr_US/LC_MEASUREMENT>
+27121 close(3</usr/lib/locale/chr_US/LC_MEASUREMENT>) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.UTF-8/LC_TELEPHONE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.utf8/LC_TELEPHONE", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/chr_US/LC_TELEPHONE>
+27121 close(3</usr/lib/locale/chr_US/LC_TELEPHONE>) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.UTF-8/LC_ADDRESS", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.utf8/LC_ADDRESS", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/en_US.utf8/LC_ADDRESS>
+27121 close(3</usr/lib/locale/en_US.utf8/LC_ADDRESS>) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.UTF-8/LC_NAME", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.utf8/LC_NAME", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/bi_VU/LC_NAME>
+27121 close(3</usr/lib/locale/bi_VU/LC_NAME>) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.UTF-8/LC_PAPER", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.utf8/LC_PAPER", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/chr_US/LC_PAPER>
+27121 close(3</usr/lib/locale/chr_US/LC_PAPER>) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.UTF-8/LC_MESSAGES", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.utf8/LC_MESSAGES", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/en_US.utf8/LC_MESSAGES>
+27121 close(3</usr/lib/locale/en_US.utf8/LC_MESSAGES>) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.utf8/LC_MESSAGES/SYS_LC_MESSAGES", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/en_AG/LC_MESSAGES/SYS_LC_MESSAGES>
+27121 close(3</usr/lib/locale/en_AG/LC_MESSAGES/SYS_LC_MESSAGES>) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.UTF-8/LC_MONETARY", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.utf8/LC_MONETARY", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/chr_US/LC_MONETARY>
+27121 close(3</usr/lib/locale/chr_US/LC_MONETARY>) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.UTF-8/LC_COLLATE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.utf8/LC_COLLATE", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/aa_DJ.utf8/LC_COLLATE>
+27121 close(3</usr/lib/locale/aa_DJ.utf8/LC_COLLATE>) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.UTF-8/LC_TIME", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.utf8/LC_TIME", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/en_US.utf8/LC_TIME>
+27121 close(3</usr/lib/locale/en_US.utf8/LC_TIME>) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.UTF-8/LC_NUMERIC", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.utf8/LC_NUMERIC", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/aa_ET/LC_NUMERIC>
+27121 close(3</usr/lib/locale/aa_ET/LC_NUMERIC>) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.UTF-8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.utf8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/aa_DJ.utf8/LC_CTYPE>
+27121 close(3</usr/lib/locale/aa_DJ.utf8/LC_CTYPE>) = 0
+27121 execve("/workspace/scratch/ruff-a-95908f/uv10-review/build/uv10-O0", ["/workspace/scratch/ruff-a-95908f/uv10-review/build/uv10-O0"], ["IMREFLAGS=--opt-level 0", "IMRE_CACHE_DIR=/workspace/scratch/ruff-a-95908f/uv10-review/cache", "LANG=C.UTF-8", "LC_ALL=en_US.UTF-8", "PATH=/workspace/scratch/ruff-a-95908f/uv10-review/bin:/usr/bin:/bin"]) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache>
+27121 close(3</etc/ld.so.cache>)        = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libm.so.6>
+27121 close(3</usr/lib/x86_64-linux-gnu/libm.so.6>) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libgcc_s.so.1>
+27121 close(3</usr/lib/x86_64-linux-gnu/libgcc_s.so.1>) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libc.so.6>
+27121 close(3</usr/lib/x86_64-linux-gnu/libc.so.6>) = 0
+27121 close(3<UNIX-STREAM:[94493]>)     = 0
+27121 close(3<UNIX-STREAM:[94494]>)     = 0
+27121 newfstatat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/etc/nsswitch.conf", {st_dev=makedev(0, 0x1b), st_ino=9223372036854777009, st_mode=S_IFREG|0644, st_nlink=1, st_uid=65534, st_gid=65534, st_blksize=4096, st_blocks=8, st_size=494, st_atime=1777320562 /* 2026-04-27T16:09:22-0400 */, st_atime_nsec=0, st_mtime=1777320562 /* 2026-04-27T16:09:22-0400 */, st_mtime_nsec=0, st_ctime=1777320562 /* 2026-04-27T16:09:22-0400 */, st_ctime_nsec=0}, 0) = 0
+27121 newfstatat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/", {st_dev=makedev(0, 0x1b), st_ino=1310721, st_mode=S_IFDIR|0755, st_nlink=1, st_uid=65534, st_gid=65534, st_blksize=4096, st_blocks=8, st_size=4096, st_atime=1794930782 /* 2026-11-17T10:53:02.510029846-0500 */, st_atime_nsec=510029846, st_mtime=1794930782 /* 2026-11-17T10:53:02.510029846-0500 */, st_mtime_nsec=510029846, st_ctime=1794930794 /* 2026-11-17T10:53:14.647879357-0500 */, st_ctime_nsec=647879357}, 0) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/etc/nsswitch.conf", O_RDONLY|O_CLOEXEC) = 3</etc/nsswitch.conf>
+27121 close(3</etc/nsswitch.conf>)      = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/etc/passwd", O_RDONLY|O_CLOEXEC) = 3</etc/passwd>
+27121 close(3</etc/passwd>)             = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/locale-archive", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/share/locale/locale.alias", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.UTF-8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/locale/en_US.utf8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/aa_DJ.utf8/LC_CTYPE>
+27121 close(3</usr/lib/locale/aa_DJ.utf8/LC_CTYPE>) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache>
+27121 close(3</usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache>) = 0
+27121 statx(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/pyvenv.cfg", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7fff57fd7ca0) = -1 ENOENT (No such file or directory)
+27121 statx(0</dev/null<char 1:3>>, NULL, AT_STATX_SYNC_AS_STAT, STATX_ALL, NULL) = -1 EFAULT (Bad address)
+27121 statx(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/build/pyvenv.cfg", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7fff57fd7ca0) = -1 ENOENT (No such file or directory)
+27121 statx(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/bin/python3", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7fff57fd7ea0) = -1 ENOENT (No such file or directory)
+27121 statx(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/usr/bin/python3", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_TYPE|STATX_MODE|STATX_NLINK|STATX_UID|STATX_GID|STATX_MTIME|STATX_CTIME|STATX_INO|STATX_SIZE|STATX_BLOCKS|STATX_MNT_ID, stx_blksize=4096, stx_attributes=STATX_ATTR_IMMUTABLE|STATX_ATTR_DAX, stx_nlink=1, stx_uid=65534, stx_gid=65534, stx_mode=S_IFREG|0755, stx_ino=9223372036855077990, stx_size=6832784, stx_blocks=13352, stx_attributes_mask=STATX_ATTR_COMPRESSED|STATX_ATTR_IMMUTABLE|STATX_ATTR_APPEND|STATX_ATTR_AUTOMOUNT|STATX_ATTR_MOUNT_ROOT|STATX_ATTR_DAX, stx_ctime={tv_sec=1786363619, tv_nsec=0} /* 2026-08-10T08:06:59-0400 */, stx_mtime={tv_sec=1786363619, tv_nsec=0} /* 2026-08-10T08:06:59-0400 */, stx_rdev_major=0, stx_rdev_minor=0, stx_dev_major=0, stx_dev_minor=27, stx_mnt_id=0x7a}) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3</proc/27121/maps>
+27121 close(3</proc/27121/maps>)        = 0
+27121 fcntl(1<pipe:[96355]>, F_GETFD)   = 0
+27121 fcntl(2<pipe:[96356]>, F_GETFD)   = 0
+27121 statx(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_blksize=4096, stx_attributes=STATX_ATTR_MOUNT_ROOT, stx_nlink=2, stx_uid=1000, stx_gid=1000, stx_mode=S_IFDIR|0755, stx_ino=1, stx_size=40, stx_blocks=0, stx_attributes_mask=STATX_ATTR_IMMUTABLE|STATX_ATTR_APPEND|STATX_ATTR_NODUMP|STATX_ATTR_AUTOMOUNT|STATX_ATTR_MOUNT_ROOT|STATX_ATTR_DAX, stx_atime={tv_sec=1794963605, tv_nsec=674568546} /* 2026-11-17T20:00:05.674568546-0500 */, stx_btime={tv_sec=1794963605, tv_nsec=674568546} /* 2026-11-17T20:00:05.674568546-0500 */, stx_ctime={tv_sec=1794963605, tv_nsec=674568546} /* 2026-11-17T20:00:05.674568546-0500 */, stx_mtime={tv_sec=1794963605, tv_nsec=674568546} /* 2026-11-17T20:00:05.674568546-0500 */, stx_rdev_major=0, stx_rdev_minor=0, stx_dev_major=0, stx_dev_minor=40, stx_mnt_id=0x86}) = 0
+27121 statx(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_blksize=4096, stx_attributes=STATX_ATTR_MOUNT_ROOT, stx_nlink=2, stx_uid=1000, stx_gid=1000, stx_mode=S_IFDIR|0755, stx_ino=1, stx_size=40, stx_blocks=0, stx_attributes_mask=STATX_ATTR_IMMUTABLE|STATX_ATTR_APPEND|STATX_ATTR_NODUMP|STATX_ATTR_AUTOMOUNT|STATX_ATTR_MOUNT_ROOT|STATX_ATTR_DAX, stx_atime={tv_sec=1794963605, tv_nsec=674568546} /* 2026-11-17T20:00:05.674568546-0500 */, stx_btime={tv_sec=1794963605, tv_nsec=674568546} /* 2026-11-17T20:00:05.674568546-0500 */, stx_ctime={tv_sec=1794963605, tv_nsec=674568546} /* 2026-11-17T20:00:05.674568546-0500 */, stx_mtime={tv_sec=1794963605, tv_nsec=674568546} /* 2026-11-17T20:00:05.674568546-0500 */, stx_rdev_major=0, stx_rdev_minor=0, stx_dev_major=0, stx_dev_minor=40, stx_mnt_id=0x86}) = 0
+27121 newfstatat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_atime_nsec=674568546, st_mtime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_mtime_nsec=674568546, st_ctime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_ctime_nsec=674568546}, 0) = 0
+27121 open("/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3</workspace/scratch/ruff-a-95908f/uv10-review/work/scripts>
+27121 close(3</workspace/scratch/ruff-a-95908f/uv10-review/work/scripts>) = 0
+27121 newfstatat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963605 /* 2026-11-17T20:00:05.694568310-0500 */, st_atime_nsec=694568310, st_mtime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_mtime_nsec=674568546, st_ctime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_ctime_nsec=674568546}, 0) = 0
+27121 statx(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/build/uv10-O0/<imre stdlib>/tomllib", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7fff57fcf980) = -1 ENOTDIR (Not a directory)
+27121 statx(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/build/uv10-O0/<imre stdlib>", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7fff57fcf980) = -1 ENOTDIR (Not a directory)
+27121 statx(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/build/uv10-O0", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_blksize=4096, stx_attributes=0, stx_nlink=1, stx_uid=1000, stx_gid=1000, stx_mode=S_IFREG|0700, stx_ino=657659, stx_size=177909776, stx_blocks=347496, stx_attributes_mask=STATX_ATTR_COMPRESSED|STATX_ATTR_IMMUTABLE|STATX_ATTR_APPEND|STATX_ATTR_NODUMP|STATX_ATTR_ENCRYPTED|STATX_ATTR_AUTOMOUNT|STATX_ATTR_MOUNT_ROOT|STATX_ATTR_VERITY|STATX_ATTR_DAX, stx_atime={tv_sec=1794959897, tv_nsec=66656850} /* 2026-11-17T18:58:17.066656850-0500 */, stx_btime={tv_sec=1794959895, tv_nsec=130679797} /* 2026-11-17T18:58:15.130679797-0500 */, stx_ctime={tv_sec=1794959896, tv_nsec=990241682} /* 2026-11-17T18:58:16.990241682-0500 */, stx_mtime={tv_sec=1794959896, tv_nsec=986657798} /* 2026-11-17T18:58:16.986657798-0500 */, stx_rdev_major=0, stx_rdev_minor=0, stx_dev_major=0, stx_dev_minor=27, stx_mnt_id=0x7a}) = 0
+27121 statx(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/build/uv10-O0", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_blksize=4096, stx_attributes=0, stx_nlink=1, stx_uid=1000, stx_gid=1000, stx_mode=S_IFREG|0700, stx_ino=657659, stx_size=177909776, stx_blocks=347496, stx_attributes_mask=STATX_ATTR_COMPRESSED|STATX_ATTR_IMMUTABLE|STATX_ATTR_APPEND|STATX_ATTR_NODUMP|STATX_ATTR_ENCRYPTED|STATX_ATTR_AUTOMOUNT|STATX_ATTR_MOUNT_ROOT|STATX_ATTR_VERITY|STATX_ATTR_DAX, stx_atime={tv_sec=1794959897, tv_nsec=66656850} /* 2026-11-17T18:58:17.066656850-0500 */, stx_btime={tv_sec=1794959895, tv_nsec=130679797} /* 2026-11-17T18:58:15.130679797-0500 */, stx_ctime={tv_sec=1794959896, tv_nsec=990241682} /* 2026-11-17T18:58:16.990241682-0500 */, stx_mtime={tv_sec=1794959896, tv_nsec=986657798} /* 2026-11-17T18:58:16.986657798-0500 */, stx_rdev_major=0, stx_rdev_minor=0, stx_dev_major=0, stx_dev_minor=27, stx_mnt_id=0x7a}) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/build/uv10-O0", O_RDONLY|O_CLOEXEC) = 3</workspace/scratch/ruff-a-95908f/uv10-review/build/uv10-O0>
+27121 statx(3</workspace/scratch/ruff-a-95908f/uv10-review/build/uv10-O0>, "", AT_STATX_SYNC_AS_STAT|AT_EMPTY_PATH, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_blksize=4096, stx_attributes=0, stx_nlink=1, stx_uid=1000, stx_gid=1000, stx_mode=S_IFREG|0700, stx_ino=657659, stx_size=177909776, stx_blocks=347496, stx_attributes_mask=STATX_ATTR_COMPRESSED|STATX_ATTR_IMMUTABLE|STATX_ATTR_APPEND|STATX_ATTR_NODUMP|STATX_ATTR_ENCRYPTED|STATX_ATTR_AUTOMOUNT|STATX_ATTR_MOUNT_ROOT|STATX_ATTR_VERITY|STATX_ATTR_DAX, stx_atime={tv_sec=1794959897, tv_nsec=66656850} /* 2026-11-17T18:58:17.066656850-0500 */, stx_btime={tv_sec=1794959895, tv_nsec=130679797} /* 2026-11-17T18:58:15.130679797-0500 */, stx_ctime={tv_sec=1794959896, tv_nsec=990241682} /* 2026-11-17T18:58:16.990241682-0500 */, stx_mtime={tv_sec=1794959896, tv_nsec=986657798} /* 2026-11-17T18:58:16.986657798-0500 */, stx_rdev_major=0, stx_rdev_minor=0, stx_dev_major=0, stx_dev_minor=27, stx_mnt_id=0x7a}) = 0
+27121 close(3</workspace/scratch/ruff-a-95908f/uv10-review/build/uv10-O0>) = 0
+27121 statx(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/build/uv10-O0/<imre stdlib>/tomllib", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7fff57fd0dc0) = -1 ENOTDIR (Not a directory)
+27121 newfstatat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963605 /* 2026-11-17T20:00:05.694568310-0500 */, st_atime_nsec=694568310, st_mtime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_mtime_nsec=674568546, st_ctime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_ctime_nsec=674568546}, 0) = 0
+27121 newfstatat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963605 /* 2026-11-17T20:00:05.694568310-0500 */, st_atime_nsec=694568310, st_mtime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_mtime_nsec=674568546, st_ctime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_ctime_nsec=674568546}, 0) = 0
+27121 newfstatat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963605 /* 2026-11-17T20:00:05.694568310-0500 */, st_atime_nsec=694568310, st_mtime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_mtime_nsec=674568546, st_ctime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_ctime_nsec=674568546}, 0) = 0
+27121 newfstatat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963605 /* 2026-11-17T20:00:05.694568310-0500 */, st_atime_nsec=694568310, st_mtime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_mtime_nsec=674568546, st_ctime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_ctime_nsec=674568546}, 0) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3</proc/27121/cgroup>
+27121 statx(3</proc/27121/cgroup>, "", AT_STATX_SYNC_AS_STAT|AT_EMPTY_PATH, STATX_ALL, {stx_mask=STATX_BASIC_STATS|STATX_MNT_ID, stx_blksize=1024, stx_attributes=0, stx_nlink=1, stx_uid=1000, stx_gid=1000, stx_mode=S_IFREG|0444, stx_ino=94497, stx_size=0, stx_blocks=0, stx_attributes_mask=STATX_ATTR_AUTOMOUNT|STATX_ATTR_MOUNT_ROOT|STATX_ATTR_DAX, stx_atime={tv_sec=1794963605, tv_nsec=722567980} /* 2026-11-17T20:00:05.722567980-0500 */, stx_ctime={tv_sec=1794963605, tv_nsec=722567980} /* 2026-11-17T20:00:05.722567980-0500 */, stx_mtime={tv_sec=1794963605, tv_nsec=722567980} /* 2026-11-17T20:00:05.722567980-0500 */, stx_rdev_major=0, stx_rdev_minor=0, stx_dev_major=0, stx_dev_minor=30, stx_mnt_id=0x7b}) = 0
+27121 close(3</proc/27121/cgroup>)      = 0
+27121 statx(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/sys/fs/cgroup/cgroup.controllers", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_BASIC_STATS|STATX_MNT_ID, stx_blksize=4096, stx_attributes=0, stx_nlink=1, stx_uid=65534, stx_gid=65534, stx_mode=S_IFREG|0444, stx_ino=152, stx_size=0, stx_blocks=0, stx_attributes_mask=STATX_ATTR_AUTOMOUNT|STATX_ATTR_MOUNT_ROOT|STATX_ATTR_DAX, stx_atime={tv_sec=1794930785, tv_nsec=235879463} /* 2026-11-17T10:53:05.235879463-0500 */, stx_ctime={tv_sec=1794930785, tv_nsec=235879463} /* 2026-11-17T10:53:05.235879463-0500 */, stx_mtime={tv_sec=1794930785, tv_nsec=235879463} /* 2026-11-17T10:53:05.235879463-0500 */, stx_rdev_major=0, stx_rdev_minor=0, stx_dev_major=0, stx_dev_minor=24, stx_mnt_id=0x81}) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3</sys/fs/cgroup/cpu.max>
+27121 statx(3</sys/fs/cgroup/cpu.max>, "", AT_STATX_SYNC_AS_STAT|AT_EMPTY_PATH, STATX_ALL, {stx_mask=STATX_BASIC_STATS|STATX_MNT_ID, stx_blksize=4096, stx_attributes=0, stx_nlink=1, stx_uid=65534, stx_gid=65534, stx_mode=S_IFREG|0644, stx_ino=173, stx_size=0, stx_blocks=0, stx_attributes_mask=STATX_ATTR_AUTOMOUNT|STATX_ATTR_MOUNT_ROOT|STATX_ATTR_DAX, stx_atime={tv_sec=1794930783, tv_nsec=444189297} /* 2026-11-17T10:53:03.444189297-0500 */, stx_ctime={tv_sec=1794930783, tv_nsec=443879484} /* 2026-11-17T10:53:03.443879484-0500 */, stx_mtime={tv_sec=1794930783, tv_nsec=443879484} /* 2026-11-17T10:53:03.443879484-0500 */, stx_rdev_major=0, stx_rdev_minor=0, stx_dev_major=0, stx_dev_minor=24, stx_mnt_id=0x81}) = 0
+27121 close(3</sys/fs/cgroup/cpu.max>)  = 0
+27121 newfstatat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963605 /* 2026-11-17T20:00:05.694568310-0500 */, st_atime_nsec=694568310, st_mtime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_mtime_nsec=674568546, st_ctime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_ctime_nsec=674568546}, 0) = 0
+27121 newfstatat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963605 /* 2026-11-17T20:00:05.694568310-0500 */, st_atime_nsec=694568310, st_mtime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_mtime_nsec=674568546, st_ctime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_ctime_nsec=674568546}, 0) = 0
+27121 newfstatat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963605 /* 2026-11-17T20:00:05.694568310-0500 */, st_atime_nsec=694568310, st_mtime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_mtime_nsec=674568546, st_ctime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_ctime_nsec=674568546}, 0) = 0
+27121 newfstatat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963605 /* 2026-11-17T20:00:05.694568310-0500 */, st_atime_nsec=694568310, st_mtime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_mtime_nsec=674568546, st_ctime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_ctime_nsec=674568546}, 0) = 0
+27121 newfstatat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963605 /* 2026-11-17T20:00:05.694568310-0500 */, st_atime_nsec=694568310, st_mtime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_mtime_nsec=674568546, st_ctime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_ctime_nsec=674568546}, 0) = 0
+27121 newfstatat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963605 /* 2026-11-17T20:00:05.694568310-0500 */, st_atime_nsec=694568310, st_mtime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_mtime_nsec=674568546, st_ctime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_ctime_nsec=674568546}, 0) = 0
+27121 newfstatat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963605 /* 2026-11-17T20:00:05.694568310-0500 */, st_atime_nsec=694568310, st_mtime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_mtime_nsec=674568546, st_ctime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_ctime_nsec=674568546}, 0) = 0
+27121 newfstatat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963605 /* 2026-11-17T20:00:05.694568310-0500 */, st_atime_nsec=694568310, st_mtime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_mtime_nsec=674568546, st_ctime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_ctime_nsec=674568546}, 0) = 0
+27121 newfstatat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963605 /* 2026-11-17T20:00:05.694568310-0500 */, st_atime_nsec=694568310, st_mtime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_mtime_nsec=674568546, st_ctime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_ctime_nsec=674568546}, 0) = 0
+27121 newfstatat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963605 /* 2026-11-17T20:00:05.694568310-0500 */, st_atime_nsec=694568310, st_mtime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_mtime_nsec=674568546, st_ctime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_ctime_nsec=674568546}, 0) = 0
+27121 newfstatat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963605 /* 2026-11-17T20:00:05.694568310-0500 */, st_atime_nsec=694568310, st_mtime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_mtime_nsec=674568546, st_ctime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_ctime_nsec=674568546}, 0) = 0
+27121 statx(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/build/uv10-O0/<imre stdlib>/pathlib", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7fff57fcf700) = -1 ENOTDIR (Not a directory)
+27121 statx(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/build/uv10-O0/<imre stdlib>", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7fff57fcf700) = -1 ENOTDIR (Not a directory)
+27121 statx(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/build/uv10-O0", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_blksize=4096, stx_attributes=0, stx_nlink=1, stx_uid=1000, stx_gid=1000, stx_mode=S_IFREG|0700, stx_ino=657659, stx_size=177909776, stx_blocks=347496, stx_attributes_mask=STATX_ATTR_COMPRESSED|STATX_ATTR_IMMUTABLE|STATX_ATTR_APPEND|STATX_ATTR_NODUMP|STATX_ATTR_ENCRYPTED|STATX_ATTR_AUTOMOUNT|STATX_ATTR_MOUNT_ROOT|STATX_ATTR_VERITY|STATX_ATTR_DAX, stx_atime={tv_sec=1794959897, tv_nsec=66656850} /* 2026-11-17T18:58:17.066656850-0500 */, stx_btime={tv_sec=1794959895, tv_nsec=130679797} /* 2026-11-17T18:58:15.130679797-0500 */, stx_ctime={tv_sec=1794959896, tv_nsec=990241682} /* 2026-11-17T18:58:16.990241682-0500 */, stx_mtime={tv_sec=1794959896, tv_nsec=986657798} /* 2026-11-17T18:58:16.986657798-0500 */, stx_rdev_major=0, stx_rdev_minor=0, stx_dev_major=0, stx_dev_minor=27, stx_mnt_id=0x7a}) = 0
+27121 statx(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/build/uv10-O0", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_blksize=4096, stx_attributes=0, stx_nlink=1, stx_uid=1000, stx_gid=1000, stx_mode=S_IFREG|0700, stx_ino=657659, stx_size=177909776, stx_blocks=347496, stx_attributes_mask=STATX_ATTR_COMPRESSED|STATX_ATTR_IMMUTABLE|STATX_ATTR_APPEND|STATX_ATTR_NODUMP|STATX_ATTR_ENCRYPTED|STATX_ATTR_AUTOMOUNT|STATX_ATTR_MOUNT_ROOT|STATX_ATTR_VERITY|STATX_ATTR_DAX, stx_atime={tv_sec=1794959897, tv_nsec=66656850} /* 2026-11-17T18:58:17.066656850-0500 */, stx_btime={tv_sec=1794959895, tv_nsec=130679797} /* 2026-11-17T18:58:15.130679797-0500 */, stx_ctime={tv_sec=1794959896, tv_nsec=990241682} /* 2026-11-17T18:58:16.990241682-0500 */, stx_mtime={tv_sec=1794959896, tv_nsec=986657798} /* 2026-11-17T18:58:16.986657798-0500 */, stx_rdev_major=0, stx_rdev_minor=0, stx_dev_major=0, stx_dev_minor=27, stx_mnt_id=0x7a}) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/build/uv10-O0", O_RDONLY|O_CLOEXEC) = 3</workspace/scratch/ruff-a-95908f/uv10-review/build/uv10-O0>
+27121 statx(3</workspace/scratch/ruff-a-95908f/uv10-review/build/uv10-O0>, "", AT_STATX_SYNC_AS_STAT|AT_EMPTY_PATH, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_blksize=4096, stx_attributes=0, stx_nlink=1, stx_uid=1000, stx_gid=1000, stx_mode=S_IFREG|0700, stx_ino=657659, stx_size=177909776, stx_blocks=347496, stx_attributes_mask=STATX_ATTR_COMPRESSED|STATX_ATTR_IMMUTABLE|STATX_ATTR_APPEND|STATX_ATTR_NODUMP|STATX_ATTR_ENCRYPTED|STATX_ATTR_AUTOMOUNT|STATX_ATTR_MOUNT_ROOT|STATX_ATTR_VERITY|STATX_ATTR_DAX, stx_atime={tv_sec=1794959897, tv_nsec=66656850} /* 2026-11-17T18:58:17.066656850-0500 */, stx_btime={tv_sec=1794959895, tv_nsec=130679797} /* 2026-11-17T18:58:15.130679797-0500 */, stx_ctime={tv_sec=1794959896, tv_nsec=990241682} /* 2026-11-17T18:58:16.990241682-0500 */, stx_mtime={tv_sec=1794959896, tv_nsec=986657798} /* 2026-11-17T18:58:16.986657798-0500 */, stx_rdev_major=0, stx_rdev_minor=0, stx_dev_major=0, stx_dev_minor=27, stx_mnt_id=0x7a}) = 0
+27121 close(3</workspace/scratch/ruff-a-95908f/uv10-review/build/uv10-O0>) = 0
+27121 statx(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/build/uv10-O0/<imre stdlib>/pathlib", AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x7fff57fd0b40) = -1 ENOTDIR (Not a directory)
+27121 newfstatat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/work/scripts", {st_dev=makedev(0, 0x28), st_ino=1, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=0, st_size=40, st_atime=1794963605 /* 2026-11-17T20:00:05.694568310-0500 */, st_atime_nsec=694568310, st_mtime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_mtime_nsec=674568546, st_ctime=1794963605 /* 2026-11-17T20:00:05.674568546-0500 */, st_ctime_nsec=674568546}, 0) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/work/Cargo.lock", O_RDONLY|O_CLOEXEC) = 3</workspace/scratch/ruff-a-95908f/uv10-review/work/Cargo.lock>
+27121 close(3</workspace/scratch/ruff-a-95908f/uv10-review/work/Cargo.lock>) = 0
+27121 openat(AT_FDCWD</workspace/scratch/ruff-a-95908f/uv10-review/work>, "/workspace/scratch/ruff-a-95908f/uv10-review/work/crates/uv-trampoline/Cargo.lock", O_RDONLY|O_CLOEXEC) = 3</workspace/scratch/ruff-a-95908f/uv10-review/work/crates/uv-trampoline/Cargo.lock>
+27121 close(3</workspace/scratch/ruff-a-95908f/uv10-review/work/crates/uv-trampoline/Cargo.lock>) = 0
+27121 exit_group(0)                     = ?
+27120 wait4(-1, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 27121
+27120 exit_group(0)                     = ?

@@ -1,0 +1,524 @@
+{
+  "authority_commit": "880648b620f57905a495eb51fbb4600755ee0c54",
+  "compiler_revision": "95908fb0acadc2a67304a8080e584deaef395746",
+  "compiler_custody": {
+    "imre": {
+      "path": "/workspace/ruff-b-practical-95908/product/imre",
+      "sha256": "e2d0886948f766332df6370a2e3140a5be5c8b0fc108224ef7242fc38fc58bd4",
+      "bytes": 251547560
+    },
+    "imre.d": {
+      "path": "/workspace/ruff-b-practical-95908/product/imre.d",
+      "sha256": "988b937a995cdba3b39954620115ce717463469b060f9fd6c79a4632905eaef8",
+      "bytes": 56638
+    },
+    "libimre_runtime.a": {
+      "path": "/workspace/ruff-b-practical-95908/product/libimre_runtime.a",
+      "sha256": "33ae5dfef5eff3c1fac5e0a5e19263daa980d7d80a5917979b426e85fa128c5c",
+      "bytes": 296226340
+    },
+    "libimre_runtime.d": {
+      "path": "/workspace/ruff-b-practical-95908/product/libimre_runtime.d",
+      "sha256": "b3eebec3bdad48392e272b9665b4ea50ac005fe4e452eea77a41c62af0d5dcad",
+      "bytes": 44046
+    }
+  },
+  "archived_checkout": "9b48f40c9f4fbea54387264318b8c0c6f0d6d184",
+  "per_file_commit": "d4e4bf90906c7677049bc3a29d1735de7d22052d",
+  "anchor_raw_sha256": "99f6f8e8b21fa56d8846571c3c3f666356b6196ab4c315f8f3708bf4b3d7e434",
+  "preimages": {
+    "README.md": "8da93511cec1298648c345618960559c7dec67504b9132c1b9aee9a841e9fe08",
+    "dist-workspace.toml": "02d617fb6e1ee474d3b0f52e4350d816ec5fdc78ec892fc9df78345ac756e0eb",
+    "scripts/transform_readme.py": "d6a13d50218b55e3b73587974e8357b9bc68b7c364d8bb10d04708fec5e2d64f"
+  },
+  "archived_checkout_manifest_sha256": "02d617fb6e1ee474d3b0f52e4350d816ec5fdc78ec892fc9df78345ac756e0eb",
+  "builds": {
+    "O0": {
+      "argv": [
+        "/workspace/ruff-b-practical-95908/product/imre",
+        "build",
+        "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts/transform_readme.py",
+        "--opt-level",
+        "0",
+        "--runtime",
+        "/workspace/ruff-b-practical-95908/product/libimre_runtime.a",
+        "-q",
+        "-o",
+        "/workspace/ruff-b-practical-95908/followup-880648/ty05/images/O0"
+      ],
+      "environment": {
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "HOME": "/workspace/ruff-b-practical-95908/followup-880648/ty05/launch",
+        "XDG_CACHE_HOME": "/workspace/ruff-b-practical-95908/followup-880648/ty05/build-cache/O0",
+        "LC_ALL": "C.UTF-8",
+        "TZ": "UTC"
+      },
+      "exit_code": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr": "",
+      "elapsed_seconds": 12.906,
+      "image_emitted": true,
+      "image_sha256": "e39f264bcbe70402152efc804c4234553fb2c34e7917ebee74802f04638279b0"
+    },
+    "O3": {
+      "argv": [
+        "/workspace/ruff-b-practical-95908/product/imre",
+        "build",
+        "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts/transform_readme.py",
+        "--opt-level",
+        "3",
+        "--runtime",
+        "/workspace/ruff-b-practical-95908/product/libimre_runtime.a",
+        "-q",
+        "-o",
+        "/workspace/ruff-b-practical-95908/followup-880648/ty05/images/O3"
+      ],
+      "environment": {
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "HOME": "/workspace/ruff-b-practical-95908/followup-880648/ty05/launch",
+        "XDG_CACHE_HOME": "/workspace/ruff-b-practical-95908/followup-880648/ty05/build-cache/O3",
+        "LC_ALL": "C.UTF-8",
+        "TZ": "UTC"
+      },
+      "exit_code": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr": "",
+      "elapsed_seconds": 59.497,
+      "image_emitted": true,
+      "image_sha256": "d1edc8f43c5cba6dfae62416fbb3d4299c3f029769ff095395e69432a17592e1"
+    }
+  },
+  "poisons": {
+    "direct-O0": {
+      "argv": [
+        "/workspace/ruff-b-practical-95908/product/imre",
+        "build",
+        "/workspace/ruff-b-practical-95908/followup-880648/ty05/poison/direct.py",
+        "--extension-path",
+        "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts",
+        "--opt-level",
+        "0",
+        "--runtime",
+        "/workspace/ruff-b-practical-95908/product/libimre_runtime.a",
+        "-q",
+        "-o",
+        "/workspace/ruff-b-practical-95908/followup-880648/ty05/poison/direct-O0"
+      ],
+      "exit_code": 1,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "4c1c1d20ef6dcd28e906869d4cec9f218034049e9b9a7d4c702179751657c7c1",
+      "stderr": "/workspace/ruff-b-practical-95908/followup-880648/ty05/poison/direct.py:1:15: Imre: expected int, got str; annotations are enforced contracts\n",
+      "image_emitted": false,
+      "passed": true
+    },
+    "imported-O0": {
+      "argv": [
+        "/workspace/ruff-b-practical-95908/product/imre",
+        "build",
+        "/workspace/ruff-b-practical-95908/followup-880648/ty05/poison/launcher.py",
+        "--extension-path",
+        "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts",
+        "--opt-level",
+        "0",
+        "--runtime",
+        "/workspace/ruff-b-practical-95908/product/libimre_runtime.a",
+        "-q",
+        "-o",
+        "/workspace/ruff-b-practical-95908/followup-880648/ty05/poison/imported-O0"
+      ],
+      "exit_code": 1,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "0c78274cfc6c70586e1684d0a78705ebde43710f13f094814b8d60aa81f8a9a8",
+      "stderr": "/workspace/ruff-b-practical-95908/followup-880648/ty05/poison/launcher.py:6:14: Imre: expected int, got str; annotations are enforced contracts\n",
+      "image_emitted": false,
+      "passed": true
+    },
+    "direct-O3": {
+      "argv": [
+        "/workspace/ruff-b-practical-95908/product/imre",
+        "build",
+        "/workspace/ruff-b-practical-95908/followup-880648/ty05/poison/direct.py",
+        "--extension-path",
+        "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts",
+        "--opt-level",
+        "3",
+        "--runtime",
+        "/workspace/ruff-b-practical-95908/product/libimre_runtime.a",
+        "-q",
+        "-o",
+        "/workspace/ruff-b-practical-95908/followup-880648/ty05/poison/direct-O3"
+      ],
+      "exit_code": 1,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "4c1c1d20ef6dcd28e906869d4cec9f218034049e9b9a7d4c702179751657c7c1",
+      "stderr": "/workspace/ruff-b-practical-95908/followup-880648/ty05/poison/direct.py:1:15: Imre: expected int, got str; annotations are enforced contracts\n",
+      "image_emitted": false,
+      "passed": true
+    },
+    "imported-O3": {
+      "argv": [
+        "/workspace/ruff-b-practical-95908/product/imre",
+        "build",
+        "/workspace/ruff-b-practical-95908/followup-880648/ty05/poison/launcher.py",
+        "--extension-path",
+        "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts",
+        "--opt-level",
+        "3",
+        "--runtime",
+        "/workspace/ruff-b-practical-95908/product/libimre_runtime.a",
+        "-q",
+        "-o",
+        "/workspace/ruff-b-practical-95908/followup-880648/ty05/poison/imported-O3"
+      ],
+      "exit_code": 1,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "0c78274cfc6c70586e1684d0a78705ebde43710f13f094814b8d60aa81f8a9a8",
+      "stderr": "/workspace/ruff-b-practical-95908/followup-880648/ty05/poison/launcher.py:6:14: Imre: expected int, got str; annotations are enforced contracts\n",
+      "image_emitted": false,
+      "passed": true
+    }
+  },
+  "runs": {
+    "stock": {
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.241,
+      "exec_events": [
+        {
+          "pid": 36274,
+          "syscall": "execve",
+          "path": "/workspace/.toolchains/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "argv": [
+            "/workspace/.toolchains/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts/transform_readme.py"
+          ],
+          "path_executable": true,
+          "allowed": true
+        }
+      ],
+      "argv": [
+        "/workspace/.toolchains/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts/transform_readme.py"
+      ],
+      "cwd": "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture",
+      "environment": {
+        "LC_ALL": "C.UTF-8",
+        "TZ": "UTC",
+        "PYTHONHASHSEED": "0",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "NO_COLOR": "1",
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "HOME": "/workspace/ruff-b-practical-95908/followup-880648/ty05/launch",
+        "RAYON_NUM_THREADS": "2"
+      },
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "effects_manifest": "{\"README.md\":{\"after\":{\"bytes\":5755,\"sha256\":\"8d6a1835e193986c470a85ced817c3f5469227af7a61215a255aa56ef3057829\"},\"before\":{\"bytes\":5610,\"sha256\":\"8da93511cec1298648c345618960559c7dec67504b9132c1b9aee9a841e9fe08\"}}}",
+      "effects_sha256": "57128fff7793fa3839a64d60d2bb067286031e5a6d891ef4771fadaf56c27a3b"
+    },
+    "O0": {
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.172,
+      "exec_events": [
+        {
+          "pid": 36948,
+          "syscall": "execve",
+          "path": "/workspace/ruff-b-practical-95908/followup-880648/ty05/images/O0",
+          "argv": [
+            "/workspace/ruff-b-practical-95908/followup-880648/ty05/images/O0"
+          ],
+          "path_executable": true,
+          "allowed": true
+        }
+      ],
+      "argv": [
+        "/workspace/ruff-b-practical-95908/followup-880648/ty05/images/O0"
+      ],
+      "cwd": "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture",
+      "environment": {
+        "LC_ALL": "C.UTF-8",
+        "TZ": "UTC",
+        "PYTHONHASHSEED": "0",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "NO_COLOR": "1",
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "HOME": "/workspace/ruff-b-practical-95908/followup-880648/ty05/launch",
+        "RAYON_NUM_THREADS": "2"
+      },
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "effects_manifest": "{\"README.md\":{\"after\":{\"bytes\":5755,\"sha256\":\"8d6a1835e193986c470a85ced817c3f5469227af7a61215a255aa56ef3057829\"},\"before\":{\"bytes\":5610,\"sha256\":\"8da93511cec1298648c345618960559c7dec67504b9132c1b9aee9a841e9fe08\"}}}",
+      "effects_sha256": "57128fff7793fa3839a64d60d2bb067286031e5a6d891ef4771fadaf56c27a3b"
+    },
+    "O0-withdraw": {
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.088,
+      "exec_events": [
+        {
+          "pid": 36951,
+          "syscall": "execve",
+          "path": "/workspace/ruff-b-practical-95908/followup-880648/ty05/images/O0",
+          "argv": [
+            "/workspace/ruff-b-practical-95908/followup-880648/ty05/images/O0"
+          ],
+          "path_executable": true,
+          "allowed": true
+        }
+      ],
+      "argv": [
+        "/workspace/ruff-b-practical-95908/followup-880648/ty05/images/O0"
+      ],
+      "cwd": "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture",
+      "environment": {
+        "LC_ALL": "C.UTF-8",
+        "TZ": "UTC",
+        "PYTHONHASHSEED": "0",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "NO_COLOR": "1",
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "HOME": "/workspace/ruff-b-practical-95908/followup-880648/ty05/launch",
+        "RAYON_NUM_THREADS": "2"
+      },
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "effects_manifest": "{\"README.md\":{\"after\":{\"bytes\":5755,\"sha256\":\"8d6a1835e193986c470a85ced817c3f5469227af7a61215a255aa56ef3057829\"},\"before\":{\"bytes\":5610,\"sha256\":\"8da93511cec1298648c345618960559c7dec67504b9132c1b9aee9a841e9fe08\"}}}",
+      "effects_sha256": "57128fff7793fa3839a64d60d2bb067286031e5a6d891ef4771fadaf56c27a3b"
+    },
+    "O0-stock-withdraw": {
+      "exit_code": 2,
+      "timed_out": false,
+      "elapsed_seconds": 0.025,
+      "exec_events": [
+        {
+          "pid": 36954,
+          "syscall": "execve",
+          "path": "/workspace/.toolchains/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "argv": [
+            "/workspace/.toolchains/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts/transform_readme.py"
+          ],
+          "path_executable": true,
+          "allowed": true
+        }
+      ],
+      "argv": [
+        "/workspace/.toolchains/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts/transform_readme.py"
+      ],
+      "cwd": "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture",
+      "environment": {
+        "LC_ALL": "C.UTF-8",
+        "TZ": "UTC",
+        "PYTHONHASHSEED": "0",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "NO_COLOR": "1",
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "HOME": "/workspace/ruff-b-practical-95908/followup-880648/ty05/launch",
+        "RAYON_NUM_THREADS": "2"
+      },
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "4bfd9ec2a315efb586fe3f696f0174b76ba789007f018a26acc2626873003b18",
+      "effects_manifest": "{}",
+      "effects_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    "O0-deny-python": {
+      "exit_code": 126,
+      "timed_out": false,
+      "elapsed_seconds": 0.003,
+      "exec_events": [
+        {
+          "pid": 36957,
+          "syscall": "execve",
+          "path": "/workspace/.toolchains/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "argv": [
+            "/workspace/.toolchains/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "-c",
+            "print(123)"
+          ],
+          "path_executable": true,
+          "allowed": false
+        }
+      ],
+      "argv": [
+        "/workspace/.toolchains/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-c",
+        "print(123)"
+      ],
+      "cwd": "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture",
+      "environment": {
+        "LC_ALL": "C.UTF-8",
+        "TZ": "UTC",
+        "PYTHONHASHSEED": "0",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "NO_COLOR": "1",
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "HOME": "/workspace/ruff-b-practical-95908/followup-880648/ty05/launch",
+        "RAYON_NUM_THREADS": "2"
+      },
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "6ffd1f79004a9d7835509dc690d122cabf559e2e2343a47d0587fe8bd867ac03",
+      "effects_manifest": "{}",
+      "effects_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    "O3": {
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.092,
+      "exec_events": [
+        {
+          "pid": 36960,
+          "syscall": "execve",
+          "path": "/workspace/ruff-b-practical-95908/followup-880648/ty05/images/O3",
+          "argv": [
+            "/workspace/ruff-b-practical-95908/followup-880648/ty05/images/O3"
+          ],
+          "path_executable": true,
+          "allowed": true
+        }
+      ],
+      "argv": [
+        "/workspace/ruff-b-practical-95908/followup-880648/ty05/images/O3"
+      ],
+      "cwd": "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture",
+      "environment": {
+        "LC_ALL": "C.UTF-8",
+        "TZ": "UTC",
+        "PYTHONHASHSEED": "0",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "NO_COLOR": "1",
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "HOME": "/workspace/ruff-b-practical-95908/followup-880648/ty05/launch",
+        "RAYON_NUM_THREADS": "2"
+      },
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "effects_manifest": "{\"README.md\":{\"after\":{\"bytes\":5755,\"sha256\":\"8d6a1835e193986c470a85ced817c3f5469227af7a61215a255aa56ef3057829\"},\"before\":{\"bytes\":5610,\"sha256\":\"8da93511cec1298648c345618960559c7dec67504b9132c1b9aee9a841e9fe08\"}}}",
+      "effects_sha256": "57128fff7793fa3839a64d60d2bb067286031e5a6d891ef4771fadaf56c27a3b"
+    },
+    "O3-withdraw": {
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 0.086,
+      "exec_events": [
+        {
+          "pid": 36963,
+          "syscall": "execve",
+          "path": "/workspace/ruff-b-practical-95908/followup-880648/ty05/images/O3",
+          "argv": [
+            "/workspace/ruff-b-practical-95908/followup-880648/ty05/images/O3"
+          ],
+          "path_executable": true,
+          "allowed": true
+        }
+      ],
+      "argv": [
+        "/workspace/ruff-b-practical-95908/followup-880648/ty05/images/O3"
+      ],
+      "cwd": "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture",
+      "environment": {
+        "LC_ALL": "C.UTF-8",
+        "TZ": "UTC",
+        "PYTHONHASHSEED": "0",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "NO_COLOR": "1",
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "HOME": "/workspace/ruff-b-practical-95908/followup-880648/ty05/launch",
+        "RAYON_NUM_THREADS": "2"
+      },
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "effects_manifest": "{\"README.md\":{\"after\":{\"bytes\":5755,\"sha256\":\"8d6a1835e193986c470a85ced817c3f5469227af7a61215a255aa56ef3057829\"},\"before\":{\"bytes\":5610,\"sha256\":\"8da93511cec1298648c345618960559c7dec67504b9132c1b9aee9a841e9fe08\"}}}",
+      "effects_sha256": "57128fff7793fa3839a64d60d2bb067286031e5a6d891ef4771fadaf56c27a3b"
+    },
+    "O3-stock-withdraw": {
+      "exit_code": 2,
+      "timed_out": false,
+      "elapsed_seconds": 0.014,
+      "exec_events": [
+        {
+          "pid": 36966,
+          "syscall": "execve",
+          "path": "/workspace/.toolchains/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "argv": [
+            "/workspace/.toolchains/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts/transform_readme.py"
+          ],
+          "path_executable": true,
+          "allowed": true
+        }
+      ],
+      "argv": [
+        "/workspace/.toolchains/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture/scripts/transform_readme.py"
+      ],
+      "cwd": "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture",
+      "environment": {
+        "LC_ALL": "C.UTF-8",
+        "TZ": "UTC",
+        "PYTHONHASHSEED": "0",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "NO_COLOR": "1",
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "HOME": "/workspace/ruff-b-practical-95908/followup-880648/ty05/launch",
+        "RAYON_NUM_THREADS": "2"
+      },
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "4bfd9ec2a315efb586fe3f696f0174b76ba789007f018a26acc2626873003b18",
+      "effects_manifest": "{}",
+      "effects_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    "O3-deny-python": {
+      "exit_code": 126,
+      "timed_out": false,
+      "elapsed_seconds": 0.003,
+      "exec_events": [
+        {
+          "pid": 36969,
+          "syscall": "execve",
+          "path": "/workspace/.toolchains/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "argv": [
+            "/workspace/.toolchains/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "-c",
+            "print(123)"
+          ],
+          "path_executable": true,
+          "allowed": false
+        }
+      ],
+      "argv": [
+        "/workspace/.toolchains/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-c",
+        "print(123)"
+      ],
+      "cwd": "/workspace/ruff-b-practical-95908/followup-880648/ty05/fixture",
+      "environment": {
+        "LC_ALL": "C.UTF-8",
+        "TZ": "UTC",
+        "PYTHONHASHSEED": "0",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "NO_COLOR": "1",
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "HOME": "/workspace/ruff-b-practical-95908/followup-880648/ty05/launch",
+        "RAYON_NUM_THREADS": "2"
+      },
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "6ffd1f79004a9d7835509dc690d122cabf559e2e2343a47d0587fe8bd867ac03",
+      "effects_manifest": "{}",
+      "effects_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    }
+  },
+  "no_credit": true
+}

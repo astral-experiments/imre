@@ -1,0 +1,99 @@
+{
+  "actual_child_argv": [
+    "/workspace/.toolchains/uv-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "-B",
+    "scripts/reverse-changelog.py",
+    "CHANGELOG.md"
+  ],
+  "actual_child_environment": {
+    "HOME": "/workspace/scratch/uvb-959-stock-before-v2/uv-26/home",
+    "LC_ALL": "C.UTF-8",
+    "NO_COLOR": "1",
+    "PATH": "/usr/bin:/bin",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONHASHSEED": "0",
+    "PYTHONNOUSERSITE": "1",
+    "TZ": "UTC"
+  },
+  "after": {
+    "CHANGELOG.md": {
+      "bytes": 26115,
+      "sha256": "880e3d98e9a56f11641fefa454924e6764609b882a52d590d02e50e15607f0f8"
+    },
+    "scripts/reverse-changelog.py": {
+      "bytes": 1410,
+      "sha256": "a64754cb29823660ed73b02d5fa6511ea070e6df3a0bee61cf37e38940f7eb9d"
+    }
+  },
+  "anchor_raw_line_sha256": "ac38a9e6c92e840eaffc8af28dc59a86af3be702537daa869f5868ae382caba5",
+  "argv": [
+    "/workspace/.toolchains/uv-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "-B",
+    "scripts/reverse-changelog.py",
+    "CHANGELOG.md"
+  ],
+  "before": {
+    "CHANGELOG.md": {
+      "bytes": 26115,
+      "sha256": "cc23618aa6c3ed5405e8e4dd3343fe06f48825ef065096a8cd8c421ad2d665cc"
+    },
+    "scripts/reverse-changelog.py": {
+      "bytes": 1410,
+      "sha256": "a64754cb29823660ed73b02d5fa6511ea070e6df3a0bee61cf37e38940f7eb9d"
+    }
+  },
+  "compiler_revision": "95908fb0acadc2a67304a8080e584deaef395746",
+  "controller_sha256": "68f08c3af82db42c41849eefebbdf97cd3a462d33437b36eb63baf25a5cead32",
+  "cwd": "/workspace/scratch/uvb-959-stock-before-v2/uv-26/work",
+  "effects_sha256": "f0ea6f2f84bbf905af44bf4f2e54b75a8a22d3c945f23bec3e93bdce52244448",
+  "environment": {
+    "HOME": "/workspace/scratch/uvb-959-stock-before-v2/uv-26/home",
+    "LC_ALL": "C.UTF-8",
+    "NO_COLOR": "1",
+    "PATH": "/usr/bin:/bin",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONHASHSEED": "0",
+    "PYTHONNOUSERSITE": "1",
+    "TZ": "UTC"
+  },
+  "exit_code": 0,
+  "historical_authority": "880648b620f57905a495eb51fbb4600755ee0c54",
+  "interpreter": {
+    "path": "/workspace/.toolchains/uv-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "resolved_path": "/workspace/.toolchains/uv-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+    "version": "Python 3.14.5"
+  },
+  "original_normalized_invocation": {
+    "argv": [
+      "$PYTHON",
+      "-B",
+      "scripts/reverse-changelog.py",
+      "CHANGELOG.md"
+    ],
+    "cwd": "$WORK",
+    "env": {
+      "HOME": "$TASK_HOME",
+      "LC_ALL": "C.UTF-8",
+      "NO_COLOR": "1",
+      "PATH": "/usr/bin:/bin",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONHASHSEED": "0",
+      "PYTHONNOUSERSITE": "1",
+      "TZ": "UTC"
+    }
+  },
+  "seconds": 0.2403,
+  "source": {
+    "commit": "24688aaca1e7fd104437a0909d5db3afdc7dcdb0",
+    "path": "scripts/reverse-changelog.py",
+    "repo": "https://github.com/astral-sh/uv",
+    "sha256": "a64754cb29823660ed73b02d5fa6511ea070e6df3a0bee61cf37e38940f7eb9d"
+  },
+  "source_sha256": "a64754cb29823660ed73b02d5fa6511ea070e6df3a0bee61cf37e38940f7eb9d",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stdout_sha256": "5992edbea4f36e88eff092b8acafada4f192a2f557e1336c53b1bd5ce5a6385a",
+  "timed_out": false,
+  "trace_bytes": 24559,
+  "trace_sha256": "1ae87d80c4afa58527bb6656977ed44cf57e5a9915dd746f17b3b2191d9d53a2"
+}

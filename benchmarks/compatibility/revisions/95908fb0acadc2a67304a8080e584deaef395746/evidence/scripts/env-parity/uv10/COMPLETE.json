@@ -1,0 +1,7 @@
+{
+  "archive_sha256": "e1a1643eb96d84f2eeb1e1442c3e9bbd4f0f0b874c85241c0f4383caa0cb56a3",
+  "credit": 0,
+  "lane": "uv10",
+  "manifest_sha256": "9c40f3f489f514a20f6a8160962028e8c884736f9bbf36691cc6acabcae25b7f",
+  "schema": "imre.compatibility.env-parity-inbox.v1"
+}

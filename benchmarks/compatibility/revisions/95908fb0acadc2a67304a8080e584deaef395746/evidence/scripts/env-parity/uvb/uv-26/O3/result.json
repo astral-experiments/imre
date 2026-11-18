@@ -1,0 +1,72 @@
+{
+  "actual_image_environment": {
+    "HOME": "/workspace/scratch/uvb-959-env-parity-v1/uv-26/O3/home",
+    "LC_ALL": "C.UTF-8",
+    "NO_COLOR": "1",
+    "PATH": "/usr/bin:/bin",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONHASHSEED": "0",
+    "PYTHONNOUSERSITE": "1",
+    "TZ": "UTC"
+  },
+  "argv": [
+    "/workspace/practical-d26-scratch-retry/supervisor",
+    "/workspace/scratch/uvb-959-env-parity-v1/uv-26/O3/work/scripts/reverse-changelog.py",
+    "/workspace/scratch/uvb-959-env-parity-v1/uv-26/O3/withdrawn.source",
+    "-",
+    "-",
+    "/usr/bin/bwrap",
+    "/usr/bin/bwrap",
+    "--ro-bind",
+    "/",
+    "/",
+    "--tmpfs",
+    "/workspace/uv-b-959-replay-v1/uv-26/O3/work/scripts",
+    "--bind",
+    "/workspace/scratch/uvb-959-env-parity-v1/uv-26/O3/work",
+    "/workspace/scratch/uvb-959-env-parity-v1/uv-26/O3/work",
+    "--chdir",
+    "/workspace/scratch/uvb-959-env-parity-v1/uv-26/O3/work",
+    "--die-with-parent",
+    "--",
+    "/usr/bin/env",
+    "-u",
+    "PWD",
+    "--argv0=scripts/reverse-changelog.py",
+    "/workspace/uv-b-959-replay-v1/uv-26/O3/saved.exe",
+    "CHANGELOG.md"
+  ],
+  "bwrap_sha256": "573236e5328ac2ebb08f59ae3a9805b4f8d12bdef14be8af4450d5463294985f",
+  "controller_sha256": "9a869218021020cbc2f3904510935e765a602f3a359731a0d2b4e0e60d44ce0c",
+  "cwd": "/workspace/scratch/uvb-959-env-parity-v1/uv-26/O3/work",
+  "effects_sha256": "f0ea6f2f84bbf905af44bf4f2e54b75a8a22d3c945f23bec3e93bdce52244448",
+  "env_trampoline_sha256": "eb1c64bbc9908afcdf8cb48524f17112d8dd76a249f80dee2f01da14747b3b6e",
+  "environment": {
+    "HOME": "/workspace/scratch/uvb-959-env-parity-v1/uv-26/O3/home",
+    "LC_ALL": "C.UTF-8",
+    "NO_COLOR": "1",
+    "PATH": "/usr/bin:/bin",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONHASHSEED": "0",
+    "PYTHONNOUSERSITE": "1",
+    "TZ": "UTC"
+  },
+  "exit_code": 0,
+  "image_sha256": "67039409afbe17c9e7e58752ec2836176687b985d36840b0411c1e262e1b8b05",
+  "masked_original_entry": "/workspace/uv-b-959-replay-v1/uv-26/O3/work/scripts/reverse-changelog.py",
+  "preimages": {
+    "CHANGELOG.md": {
+      "bytes": 26115,
+      "sha256": "cc23618aa6c3ed5405e8e4dd3343fe06f48825ef065096a8cd8c421ad2d665cc"
+    },
+    "scripts/reverse-changelog.py": {
+      "bytes": 1410,
+      "sha256": "a64754cb29823660ed73b02d5fa6511ea070e6df3a0bee61cf37e38940f7eb9d"
+    }
+  },
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stdout_sha256": "5992edbea4f36e88eff092b8acafada4f192a2f557e1336c53b1bd5ce5a6385a",
+  "supervisor_sha256": "36cce31bde9b0e1e7847d20d4a0821b2b509dca186d0b7c0231bb3e5fb14c88a",
+  "trace_bytes": 35997,
+  "trace_sha256": "6f446bf6b473841c978c1697fecae705ce346043eee3977968f95e01db4cd863"
+}

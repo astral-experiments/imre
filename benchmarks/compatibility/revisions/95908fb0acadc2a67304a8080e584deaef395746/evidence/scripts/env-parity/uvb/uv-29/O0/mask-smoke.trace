@@ -1,0 +1,175 @@
+23516 execve("/usr/bin/bwrap", ["/usr/bin/bwrap", "--ro-bind", "/", "/", "--tmpfs", "/workspace/uv-b-959-replay-v1/uv-29/O0/work/scripts", "--", "/usr/bin/stat", "/workspace/uv-b-959-replay-v1/uv-29/O0/work/scripts/transform_readme.py"], ["HOME=/workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/home", "LC_ALL=C.UTF-8", "NO_COLOR=1", "PATH=/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE=1", "PYTHONHASHSEED=0", "PYTHONNOUSERSITE=1", "TZ=UTC"]) = 0
+23516 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache>
+23516 close(3</etc/ld.so.cache>)        = 0
+23516 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/lib/x86_64-linux-gnu/libselinux.so.1", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libselinux.so.1>
+23516 close(3</usr/lib/x86_64-linux-gnu/libselinux.so.1>) = 0
+23516 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/lib/x86_64-linux-gnu/libcap.so.2", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libcap.so.2.75>
+23516 close(3</usr/lib/x86_64-linux-gnu/libcap.so.2.75>) = 0
+23516 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libc.so.6>
+23516 close(3</usr/lib/x86_64-linux-gnu/libc.so.6>) = 0
+23516 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/lib/x86_64-linux-gnu/libpcre2-8.so.0", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libpcre2-8.so.0.14.0>
+23516 close(3</usr/lib/x86_64-linux-gnu/libpcre2-8.so.0.14.0>) = 0
+23516 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/proc/filesystems", O_RDONLY|O_CLOEXEC) = 3</proc/filesystems>
+23516 close(3</proc/filesystems>)       = 0
+23516 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/proc/mounts", O_RDONLY|O_CLOEXEC) = 3</proc/23516/mounts>
+23516 close(3</proc/23516/mounts>)      = 0
+23516 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/proc/sys/kernel/overflowuid", O_RDONLY|O_CLOEXEC) = 3</proc/sys/kernel/overflowuid>
+23516 close(3</proc/sys/kernel/overflowuid>) = 0
+23516 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/proc/sys/kernel/overflowgid", O_RDONLY|O_CLOEXEC) = 3</proc/sys/kernel/overflowgid>
+23516 close(3</proc/sys/kernel/overflowgid>) = 0
+23516 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/proc", O_RDONLY|O_PATH) = 3</proc>
+23516 wait4(-1, 0x7ffd3cf39920, WNOHANG, NULL) = -1 ECHILD (No child processes)
+23516 clone(child_stack=NULL, flags=CLONE_NEWNS|CLONE_NEWUSER|SIGCHLD) = 23517
+23516 openat(3</proc>, "23517/ns", O_RDONLY|O_PATH) = 5</proc/23517/ns>
+23516 newfstatat(5</proc/23517/ns>, "mnt", {st_dev=makedev(0, 0x4), st_ino=4026532287, st_mode=S_IFREG|0444, st_nlink=1, st_uid=0, st_gid=0, st_blksize=4096, st_blocks=0, st_size=0, st_atime=1794963569 /* 2026-11-18T00:59:29.619320786+0000 */, st_atime_nsec=619320786, st_mtime=1794963569 /* 2026-11-18T00:59:29.619320786+0000 */, st_mtime_nsec=619320786, st_ctime=1794963569 /* 2026-11-18T00:59:29.619320786+0000 */, st_ctime_nsec=619320786}, 0) = 0
+23516 close(5</proc/23517/ns>)          = 0
+23516 close(4<{eventfd-count=0, eventfd-id=14, eventfd-semaphore=0}> <unfinished ...>
+23517 close(4<{eventfd-count=0, eventfd-id=14, eventfd-semaphore=0}> <unfinished ...>
+23516 <... close resumed>)              = 0
+23516 openat(3</proc>, "self/fd", O_RDONLY|O_NOCTTY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY <unfinished ...>
+23517 <... close resumed>)              = 0
+23516 <... openat resumed>)             = 4</proc/23516/fd>
+23516 fcntl(4</proc/23516/fd>, F_GETFL) = 0x18800 (flags O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_DIRECTORY)
+23516 fcntl(4</proc/23516/fd>, F_SETFD, FD_CLOEXEC) = 0
+23516 close(3</proc>)                   = 0
+23516 close(4</proc/23516/fd>)          = 0
+23517 openat(3</proc>, "self", O_RDONLY|O_PATH) = 4</proc/23517>
+23517 openat(4</proc/23517>, "uid_map", O_RDWR|O_CLOEXEC) = 5</proc/23517/uid_map>
+23517 close(5</proc/23517/uid_map>)     = 0
+23517 openat(4</proc/23517>, "setgroups", O_RDWR|O_CLOEXEC) = 5</proc/23517/setgroups>
+23517 close(5</proc/23517/setgroups>)   = 0
+23517 openat(4</proc/23517>, "gid_map", O_RDWR|O_CLOEXEC) = 5</proc/23517/gid_map>
+23517 close(5</proc/23517/gid_map>)     = 0
+23517 close(4</proc/23517>)             = 0
+23517 mount(NULL, "/", NULL, MS_REC|MS_SILENT|MS_SLAVE, NULL) = 0
+23517 mount("tmpfs", "/tmp", "tmpfs", MS_NOSUID|MS_NODEV, NULL) = 0
+23517 chdir("/tmp")                     = 0
+23517 mount("newroot", "newroot", NULL, MS_MGC_VAL|MS_BIND|MS_REC|MS_SILENT, NULL) = 0
+23517 pivot_root("/tmp", "oldroot")     = 0
+23517 chdir("/")                        = 0
+23517 mount("oldroot/proc", "proc", NULL, MS_BIND|MS_REC|MS_SILENT, NULL) = 0
+23517 openat(AT_FDCWD</>, "/oldroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</oldroot>
+23517 openat2(4</oldroot>, "/", {flags=O_RDONLY|O_PATH, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 5</oldroot>
+23517 close(4</oldroot>)                = 0
+23517 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+23517 openat2(4</newroot>, "/", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 6</newroot>
+23517 close(4</newroot>)                = 0
+23517 openat(6</newroot>, ".", O_RDONLY|O_NOFOLLOW|O_CLOEXEC|O_PATH) = 4</newroot>
+23517 mount("/proc/self/fd/5", "/proc/self/fd/4", NULL, MS_BIND|MS_REC|MS_SILENT, NULL) = 0
+23517 openat(3</proc>, "self/mountinfo", O_RDONLY|O_CLOEXEC) = 7</proc/23517/mountinfo>
+23517 close(7</proc/23517/mountinfo>)   = 0
+23517 mount("none", "/newroot", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+23517 mount("none", "/newroot/proc", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+23517 mount("none", "/newroot/dev", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_REMOUNT|MS_BIND|MS_SILENT, NULL) = 0
+23517 mount("none", "/newroot/dev/pts", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+23517 mount("none", "/newroot/dev/shm", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+23517 mount("none", "/newroot/dev/mqueue", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+23517 mount("none", "/newroot/sys", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+23517 mount("none", "/newroot/sys/fs/cgroup", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+23517 mount("none", "/newroot/run", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+23517 mount("none", "/newroot/run/codex-runtime-secrets", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+23517 mount("none", "/newroot/run/codex-ssh", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+23517 mount("none", "/newroot/run/lock", NULL, MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_REMOUNT|MS_BIND|MS_SILENT|MS_RELATIME, NULL) = 0
+23517 close(6</newroot>)                = 0
+23517 close(4</newroot>)                = 0
+23517 close(5</oldroot>)                = 0
+23517 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+23517 openat2(4</newroot>, "/", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 5</newroot>
+23517 close(4</newroot>)                = 0
+23517 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+23517 openat2(4</newroot>, "/workspace", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 6</newroot/workspace>
+23517 close(4</newroot>)                = 0
+23517 close(5</newroot>)                = 0
+23517 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+23517 openat2(4</newroot>, "/workspace/uv-b-959-replay-v1", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 5</newroot/workspace/uv-b-959-replay-v1>
+23517 close(4</newroot>)                = 0
+23517 close(6</newroot/workspace>)      = 0
+23517 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+23517 openat2(4</newroot>, "/workspace/uv-b-959-replay-v1/uv-29", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 6</newroot/workspace/uv-b-959-replay-v1/uv-29>
+23517 close(4</newroot>)                = 0
+23517 close(5</newroot/workspace/uv-b-959-replay-v1>) = 0
+23517 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+23517 openat2(4</newroot>, "/workspace/uv-b-959-replay-v1/uv-29/O0", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 5</newroot/workspace/uv-b-959-replay-v1/uv-29/O0>
+23517 close(4</newroot>)                = 0
+23517 close(6</newroot/workspace/uv-b-959-replay-v1/uv-29>) = 0
+23517 openat(AT_FDCWD</>, "/newroot", O_RDONLY|O_NOCTTY|O_CLOEXEC|O_PATH) = 4</newroot>
+23517 openat2(4</newroot>, "/workspace/uv-b-959-replay-v1/uv-29/O0/work", {flags=O_RDONLY|O_DIRECTORY, resolve=RESOLVE_NO_MAGICLINKS|RESOLVE_IN_ROOT}, 24) = 6</newroot/workspace/uv-b-959-replay-v1/uv-29/O0/work>
+23517 close(4</newroot>)                = 0
+23517 close(5</newroot/workspace/uv-b-959-replay-v1/uv-29/O0>) = 0
+23517 openat(6</newroot/workspace/uv-b-959-replay-v1/uv-29/O0/work>, "scripts", O_RDONLY|O_NOFOLLOW|O_CLOEXEC|O_PATH) = 4</newroot/workspace/uv-b-959-replay-v1/uv-29/O0/work/scripts>
+23517 mount("tmpfs", "/proc/self/fd/4", "tmpfs", MS_NOSUID|MS_NODEV, "mode=0755") = 0
+23517 close(6</newroot/workspace/uv-b-959-replay-v1/uv-29/O0/work>) = 0
+23517 close(4</newroot/workspace/uv-b-959-replay-v1/uv-29/O0/work/scripts>) = 0
+23517 mount("oldroot", "oldroot", NULL, MS_REC|MS_SILENT|MS_PRIVATE, NULL) = 0
+23517 umount2("oldroot", MNT_DETACH)    = 0
+23517 openat(AT_FDCWD</>, "/", O_RDONLY|O_DIRECTORY) = 4</>
+23517 chdir("/newroot")                 = 0
+23517 pivot_root(".", ".")              = 0
+23517 fchdir(4</>)                      = 0
+23517 umount2(".", MNT_DETACH)          = 0
+23517 chdir("/")                        = 0
+23517 close(4</>)                       = 0
+23517 chdir("/workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work") = 0
+23517 close(3</proc>)                   = 0
+23517 execve("/usr/bin/stat", ["/usr/bin/stat", "/workspace/uv-b-959-replay-v1/uv-29/O0/work/scripts/transform_readme.py"], ["HOME=/workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/home", "LC_ALL=C.UTF-8", "NO_COLOR=1", "PATH=/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE=1", "PYTHONHASHSEED=0", "PYTHONNOUSERSITE=1", "TZ=UTC", "PWD=/workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work"]) = 0
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache>
+23517 close(3</etc/ld.so.cache>)        = 0
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/lib/x86_64-linux-gnu/libselinux.so.1", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libselinux.so.1>
+23517 close(3</usr/lib/x86_64-linux-gnu/libselinux.so.1>) = 0
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libc.so.6>
+23517 close(3</usr/lib/x86_64-linux-gnu/libc.so.6>) = 0
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/lib/x86_64-linux-gnu/libpcre2-8.so.0", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libpcre2-8.so.0.14.0>
+23517 close(3</usr/lib/x86_64-linux-gnu/libpcre2-8.so.0.14.0>) = 0
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/proc/filesystems", O_RDONLY|O_CLOEXEC) = 3</proc/filesystems>
+23517 close(3</proc/filesystems>)       = 0
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/proc/mounts", O_RDONLY|O_CLOEXEC) = 3</proc/23517/mounts>
+23517 close(3</proc/23517/mounts>)      = 0
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/locale/locale-archive", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/share/locale/locale.alias", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/locale/C.UTF-8/LC_IDENTIFICATION", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/locale/C.utf8/LC_IDENTIFICATION", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_IDENTIFICATION>
+23517 close(3</usr/lib/locale/C.utf8/LC_IDENTIFICATION>) = 0
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache>
+23517 close(3</usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache>) = 0
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/locale/C.UTF-8/LC_MEASUREMENT", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/locale/C.utf8/LC_MEASUREMENT", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_MEASUREMENT>
+23517 close(3</usr/lib/locale/C.utf8/LC_MEASUREMENT>) = 0
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/locale/C.UTF-8/LC_TELEPHONE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/locale/C.utf8/LC_TELEPHONE", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_TELEPHONE>
+23517 close(3</usr/lib/locale/C.utf8/LC_TELEPHONE>) = 0
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/locale/C.UTF-8/LC_ADDRESS", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/locale/C.utf8/LC_ADDRESS", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_ADDRESS>
+23517 close(3</usr/lib/locale/C.utf8/LC_ADDRESS>) = 0
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/locale/C.UTF-8/LC_NAME", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/locale/C.utf8/LC_NAME", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_NAME>
+23517 close(3</usr/lib/locale/C.utf8/LC_NAME>) = 0
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/locale/C.UTF-8/LC_PAPER", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/locale/C.utf8/LC_PAPER", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_PAPER>
+23517 close(3</usr/lib/locale/C.utf8/LC_PAPER>) = 0
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/locale/C.UTF-8/LC_MESSAGES", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/locale/C.utf8/LC_MESSAGES", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_MESSAGES>
+23517 close(3</usr/lib/locale/C.utf8/LC_MESSAGES>) = 0
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/locale/C.utf8/LC_MESSAGES/SYS_LC_MESSAGES", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_MESSAGES/SYS_LC_MESSAGES>
+23517 close(3</usr/lib/locale/C.utf8/LC_MESSAGES/SYS_LC_MESSAGES>) = 0
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/locale/C.UTF-8/LC_MONETARY", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/locale/C.utf8/LC_MONETARY", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_MONETARY>
+23517 close(3</usr/lib/locale/C.utf8/LC_MONETARY>) = 0
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/locale/C.UTF-8/LC_COLLATE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/locale/C.utf8/LC_COLLATE", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_COLLATE>
+23517 close(3</usr/lib/locale/C.utf8/LC_COLLATE>) = 0
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/locale/C.UTF-8/LC_TIME", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/locale/C.utf8/LC_TIME", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_TIME>
+23517 close(3</usr/lib/locale/C.utf8/LC_TIME>) = 0
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/locale/C.UTF-8/LC_NUMERIC", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/locale/C.utf8/LC_NUMERIC", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_NUMERIC>
+23517 close(3</usr/lib/locale/C.utf8/LC_NUMERIC>) = 0
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/locale/C.UTF-8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+23517 openat(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/usr/lib/locale/C.utf8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = 3</usr/lib/locale/C.utf8/LC_CTYPE>
+23517 close(3</usr/lib/locale/C.utf8/LC_CTYPE>) = 0
+23517 statx(AT_FDCWD</workspace/scratch/uvb-959-env-parity-v1/uv-29/O0/work>, "/workspace/uv-b-959-replay-v1/uv-29/O0/work/scripts/transform_readme.py", AT_STATX_SYNC_AS_STAT|AT_SYMLINK_NOFOLLOW|AT_NO_AUTOMOUNT, STATX_ALL, 0x7ffe6bc5b2e0) = -1 ENOENT (No such file or directory)
+23517 fcntl(1<pipe:[95793]>, F_GETFL)   = 0x1 (flags O_WRONLY)
+23517 close(1<pipe:[95793]>)            = 0
+23517 close(2<pipe:[95794]>)            = 0
+23517 exit_group(1)                     = ?
+23516 wait4(-1, [{WIFEXITED(s) && WEXITSTATUS(s) == 1}], WNOHANG, NULL) = 23517
+23516 exit_group(1)                     = ?

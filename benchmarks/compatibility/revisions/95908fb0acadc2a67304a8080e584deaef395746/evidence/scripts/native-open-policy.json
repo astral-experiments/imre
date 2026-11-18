@@ -1,0 +1,419 @@
+{
+  "directory_flags": [
+    "O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY"
+  ],
+  "env_open_profiles": {
+    "C": [
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/etc/ld.so.cache",
+        "lexical": "/etc/ld.so.cache",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/x86_64-linux-gnu/libc.so.6",
+        "lexical": "/lib/x86_64-linux-gnu/libc.so.6",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/locale/C.utf8/LC_IDENTIFICATION",
+        "lexical": "/usr/lib/locale/C.utf8/LC_IDENTIFICATION",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache",
+        "lexical": "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/locale/C.utf8/LC_MEASUREMENT",
+        "lexical": "/usr/lib/locale/C.utf8/LC_MEASUREMENT",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/locale/C.utf8/LC_TELEPHONE",
+        "lexical": "/usr/lib/locale/C.utf8/LC_TELEPHONE",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/locale/C.utf8/LC_ADDRESS",
+        "lexical": "/usr/lib/locale/C.utf8/LC_ADDRESS",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/locale/C.utf8/LC_NAME",
+        "lexical": "/usr/lib/locale/C.utf8/LC_NAME",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/locale/C.utf8/LC_PAPER",
+        "lexical": "/usr/lib/locale/C.utf8/LC_PAPER",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/locale/C.utf8/LC_MESSAGES",
+        "lexical": "/usr/lib/locale/C.utf8/LC_MESSAGES",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/locale/C.utf8/LC_MESSAGES/SYS_LC_MESSAGES",
+        "lexical": "/usr/lib/locale/C.utf8/LC_MESSAGES/SYS_LC_MESSAGES",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/locale/C.utf8/LC_MONETARY",
+        "lexical": "/usr/lib/locale/C.utf8/LC_MONETARY",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/locale/C.utf8/LC_COLLATE",
+        "lexical": "/usr/lib/locale/C.utf8/LC_COLLATE",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/locale/C.utf8/LC_TIME",
+        "lexical": "/usr/lib/locale/C.utf8/LC_TIME",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/locale/C.utf8/LC_NUMERIC",
+        "lexical": "/usr/lib/locale/C.utf8/LC_NUMERIC",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/locale/C.utf8/LC_CTYPE",
+        "lexical": "/usr/lib/locale/C.utf8/LC_CTYPE",
+        "mode": null
+      }
+    ],
+    "en_US": [
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/etc/ld.so.cache",
+        "lexical": "/etc/ld.so.cache",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/x86_64-linux-gnu/libc.so.6",
+        "lexical": "/lib/x86_64-linux-gnu/libc.so.6",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/locale/en_US.utf8/LC_IDENTIFICATION",
+        "lexical": "/usr/lib/locale/en_US.utf8/LC_IDENTIFICATION",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache",
+        "lexical": "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/locale/chr_US/LC_MEASUREMENT",
+        "lexical": "/usr/lib/locale/en_US.utf8/LC_MEASUREMENT",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/locale/chr_US/LC_TELEPHONE",
+        "lexical": "/usr/lib/locale/en_US.utf8/LC_TELEPHONE",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/locale/en_US.utf8/LC_ADDRESS",
+        "lexical": "/usr/lib/locale/en_US.utf8/LC_ADDRESS",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/locale/bi_VU/LC_NAME",
+        "lexical": "/usr/lib/locale/en_US.utf8/LC_NAME",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/locale/chr_US/LC_PAPER",
+        "lexical": "/usr/lib/locale/en_US.utf8/LC_PAPER",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/locale/en_US.utf8/LC_MESSAGES",
+        "lexical": "/usr/lib/locale/en_US.utf8/LC_MESSAGES",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/locale/en_AG/LC_MESSAGES/SYS_LC_MESSAGES",
+        "lexical": "/usr/lib/locale/en_US.utf8/LC_MESSAGES/SYS_LC_MESSAGES",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/locale/chr_US/LC_MONETARY",
+        "lexical": "/usr/lib/locale/en_US.utf8/LC_MONETARY",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/locale/aa_DJ.utf8/LC_COLLATE",
+        "lexical": "/usr/lib/locale/en_US.utf8/LC_COLLATE",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/locale/en_US.utf8/LC_TIME",
+        "lexical": "/usr/lib/locale/en_US.utf8/LC_TIME",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/locale/aa_ET/LC_NUMERIC",
+        "lexical": "/usr/lib/locale/en_US.utf8/LC_NUMERIC",
+        "mode": null
+      },
+      {
+        "flags": "O_RDONLY|O_CLOEXEC",
+        "kernel": "/usr/lib/locale/aa_DJ.utf8/LC_CTYPE",
+        "lexical": "/usr/lib/locale/en_US.utf8/LC_CTYPE",
+        "mode": null
+      }
+    ]
+  },
+  "families": {
+    "ty-05": {
+      "directories": 1,
+      "image_reads": 2,
+      "opens": 15
+    },
+    "uv-10": {
+      "directories": 1,
+      "image_reads": 2,
+      "opens": 16
+    },
+    "uv-26": {
+      "directories": 1,
+      "image_reads": 0,
+      "opens": 12
+    },
+    "uv-29": {
+      "directories": 1,
+      "image_reads": 7,
+      "opens": 20
+    }
+  },
+  "fixture": {
+    "directories": [],
+    "each_count": 0,
+    "root": "unused-{pid}",
+    "writes": []
+  },
+  "readonly_flags": "O_RDONLY|O_CLOEXEC",
+  "schema": "imre.compatibility.native-content-policy.v1",
+  "script_cases": {
+    "ty-05": {
+      "compile_directory": "scripts",
+      "fixture_file_access": [
+        {
+          "count": 1,
+          "flags": "O_RDONLY|O_CLOEXEC",
+          "mode": null,
+          "path": "dist-workspace.toml"
+        },
+        {
+          "count": 1,
+          "flags": "O_RDONLY|O_CLOEXEC",
+          "mode": null,
+          "path": "README.md"
+        },
+        {
+          "count": 1,
+          "flags": "O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC",
+          "mode": "0666",
+          "path": "README.md"
+        }
+      ]
+    },
+    "uv-10": {
+      "compile_directory": "scripts",
+      "fixture_file_access": [
+        {
+          "count": 1,
+          "flags": "O_RDONLY|O_CLOEXEC",
+          "mode": null,
+          "path": "Cargo.lock"
+        },
+        {
+          "count": 1,
+          "flags": "O_RDONLY|O_CLOEXEC",
+          "mode": null,
+          "path": "crates/uv-trampoline/Cargo.lock"
+        }
+      ],
+      "system": [
+        {
+          "count": 1,
+          "kernel": "/etc/ld.so.cache",
+          "lexical": "/etc/ld.so.cache"
+        },
+        {
+          "count": 1,
+          "kernel": "/usr/lib/x86_64-linux-gnu/libm.so.6",
+          "lexical": "/lib/x86_64-linux-gnu/libm.so.6"
+        },
+        {
+          "count": 1,
+          "kernel": "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
+          "lexical": "/lib/x86_64-linux-gnu/libgcc_s.so.1"
+        },
+        {
+          "count": 1,
+          "kernel": "/usr/lib/x86_64-linux-gnu/libc.so.6",
+          "lexical": "/lib/x86_64-linux-gnu/libc.so.6"
+        },
+        {
+          "count": 1,
+          "kernel": "/etc/nsswitch.conf",
+          "lexical": "/etc/nsswitch.conf"
+        },
+        {
+          "count": 1,
+          "kernel": "/etc/passwd",
+          "lexical": "/etc/passwd"
+        },
+        {
+          "count": 1,
+          "kernel": "/usr/lib/locale/aa_DJ.utf8/LC_CTYPE",
+          "lexical": "/usr/lib/locale/en_US.utf8/LC_CTYPE"
+        },
+        {
+          "count": 1,
+          "kernel": "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache",
+          "lexical": "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache"
+        },
+        {
+          "count": 1,
+          "kernel": "/proc/{pid}/maps",
+          "lexical": "/proc/self/maps"
+        },
+        {
+          "count": 1,
+          "kernel": "/proc/{pid}/cgroup",
+          "lexical": "/proc/self/cgroup"
+        },
+        {
+          "count": 1,
+          "kernel": "/sys/fs/cgroup/cpu.max",
+          "lexical": "/sys/fs/cgroup/cpu.max"
+        }
+      ]
+    },
+    "uv-26": {
+      "compile_directory": ".",
+      "fixture_file_access": [
+        {
+          "count": 1,
+          "flags": "O_RDONLY|O_CLOEXEC",
+          "mode": null,
+          "path": "CHANGELOG.md"
+        },
+        {
+          "count": 1,
+          "flags": "O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC",
+          "mode": "0666",
+          "path": "CHANGELOG.md"
+        }
+      ]
+    },
+    "uv-29": {
+      "compile_directory": ".",
+      "fixture_file_access": [
+        {
+          "count": 1,
+          "flags": "O_RDONLY|O_CLOEXEC",
+          "mode": null,
+          "path": "README.md"
+        },
+        {
+          "count": 1,
+          "flags": "O_RDONLY|O_CLOEXEC",
+          "mode": null,
+          "path": "pyproject.toml"
+        },
+        {
+          "count": 1,
+          "flags": "O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC",
+          "mode": "0666",
+          "path": "README.md"
+        }
+      ]
+    }
+  },
+  "system_common": [
+    {
+      "count": 1,
+      "kernel": "/etc/ld.so.cache",
+      "lexical": "/etc/ld.so.cache"
+    },
+    {
+      "count": 1,
+      "kernel": "/usr/lib/x86_64-linux-gnu/libm.so.6",
+      "lexical": "/lib/x86_64-linux-gnu/libm.so.6"
+    },
+    {
+      "count": 1,
+      "kernel": "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
+      "lexical": "/lib/x86_64-linux-gnu/libgcc_s.so.1"
+    },
+    {
+      "count": 1,
+      "kernel": "/usr/lib/x86_64-linux-gnu/libc.so.6",
+      "lexical": "/lib/x86_64-linux-gnu/libc.so.6"
+    },
+    {
+      "count": 1,
+      "kernel": "/usr/lib/locale/C.utf8/LC_CTYPE",
+      "lexical": "/usr/lib/locale/C.utf8/LC_CTYPE"
+    },
+    {
+      "count": 1,
+      "kernel": "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache",
+      "lexical": "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache"
+    },
+    {
+      "count": 1,
+      "kernel": "/proc/{pid}/maps",
+      "lexical": "/proc/self/maps"
+    },
+    {
+      "count": 1,
+      "kernel": "/proc/{pid}/cgroup",
+      "lexical": "/proc/self/cgroup"
+    },
+    {
+      "count": 1,
+      "kernel": "/sys/fs/cgroup/cpu.max",
+      "lexical": "/sys/fs/cgroup/cpu.max"
+    }
+  ]
+}

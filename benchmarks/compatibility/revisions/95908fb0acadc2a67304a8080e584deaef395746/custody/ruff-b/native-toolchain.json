@@ -1,0 +1,30 @@
+{
+  "artifacts": {
+    "/workspace/ruff-b-practical-95908/product/imre": "e2d0886948f766332df6370a2e3140a5be5c8b0fc108224ef7242fc38fc58bd4",
+    "/workspace/ruff-b-practical-95908/product/libimre_runtime.a": "33ae5dfef5eff3c1fac5e0a5e19263daa980d7d80a5917979b426e85fa128c5c",
+    "/workspace/scratch/imre-95908-transferred-v1/product/imre": "e2d0886948f766332df6370a2e3140a5be5c8b0fc108224ef7242fc38fc58bd4",
+    "/workspace/scratch/imre-95908-transferred-v1/product/libimre_runtime.a": "33ae5dfef5eff3c1fac5e0a5e19263daa980d7d80a5917979b426e85fa128c5c"
+  },
+  "build_argv": [
+    "CARGO_HOME=/workspace/.toolchains/cargo",
+    "RUSTUP_HOME=/workspace/.toolchains/rustup",
+    "CARGO_TARGET_DIR=/workspace/imre/target",
+    "CARGO_BUILD_JOBS=3",
+    "cargo",
+    "build",
+    "--workspace",
+    "--release",
+    "--locked"
+  ],
+  "build_log_sha256": "b82d18267aca6539a449f16a006ac972cb4db41715c512f055ee438bf07eb169",
+  "clean_source": true,
+  "setup_sha256": "631fc87439c1a1c66572879393adff85c185373a83e75e2c671f1ec004e1611e",
+  "source_revision": "95908fb0acadc2a67304a8080e584deaef395746",
+  "toolchain": {
+    "compiler_revision": "95908fb0acadc2a67304a8080e584deaef395746",
+    "compiler_sha256": "e2d0886948f766332df6370a2e3140a5be5c8b0fc108224ef7242fc38fc58bd4",
+    "runtime_revision": "95908fb0acadc2a67304a8080e584deaef395746",
+    "runtime_sha256": "33ae5dfef5eff3c1fac5e0a5e19263daa980d7d80a5917979b426e85fa128c5c"
+  },
+  "transfer_sha256": "fb254f1bb4f4a3782ee0e622b12e315e913ca260ac1f835bb4e78f7d36e6bcb8"
+}
