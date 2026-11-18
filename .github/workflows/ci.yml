@@ -238,7 +238,7 @@ jobs:
     timeout-minutes: 30
     env:
       CARGO_HOME: /tmp/codex-cargo-home
-      RUFF_SOURCE_REV: 0be08a206f9c3180afd3e93bcc792ed5cb1f4db1
+      RUFF_SOURCE_REV: 091d4521d657eaf85659b8f20830507f99bb532c
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
