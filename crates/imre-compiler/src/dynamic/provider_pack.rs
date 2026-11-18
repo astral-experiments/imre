@@ -47,6 +47,7 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
                 |_| checked.as_deref().filter(|_| !source.contains('\r')),
                 None,
                 Some(source),
+                None,
             )
             .ok()?;
             let package = crate::modules::import_package(name, path.ends_with("__init__.py"));

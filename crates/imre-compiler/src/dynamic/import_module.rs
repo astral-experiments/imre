@@ -338,15 +338,23 @@ fn launcher_target(
     call: &ast::ExprCall,
     arguments: &[Option<String>],
 ) -> Option<String> {
+    launcher_target_at(call, arguments, |value| {
+        graph.resolve(module, value) == Some(Binding::IntrinsicModule(IntrinsicModule::Sys))
+    })
+}
+
+/// Decode the existing launcher-argument form only after its `sys` receiver is resolved.
+fn launcher_target_at(
+    call: &ast::ExprCall,
+    arguments: &[Option<String>],
+    is_sys: impl FnOnce(&Expr) -> bool,
+) -> Option<String> {
     let operand = call
         .arguments
         .find_argument_value("name", 0)?
         .as_subscript_expr()?;
     let argv = operand.value.as_attribute_expr()?;
-    if argv.attr.as_str() != "argv"
-        || graph.resolve(module, &argv.value)
-            != Some(Binding::IntrinsicModule(IntrinsicModule::Sys))
-    {
+    if argv.attr.as_str() != "argv" || !is_sys(&argv.value) {
         return None;
     }
     let ast::Number::Int(index) = &operand.slice.as_number_literal_expr()?.value else {
@@ -355,6 +363,70 @@ fn launcher_target(
     let index = usize::try_from(index.as_i64()?).ok()?.checked_sub(1)?;
     let name = arguments.get(index)?.as_deref()?;
     crate::modules::valid_module_operand(name).then(|| name.to_owned())
+}
+
+/// Classify one observed call after the checker resolves its actual callable.
+/// `None` includes unresolved callables; `Err` is a genuine importer or executor
+/// without an admitted finite operand. Proven transfers are rejected by the caller.
+pub(super) fn selected_provider_call(
+    session: &crate::analysis::Session,
+    file: ruff_db::files::File,
+    call: &ast::ExprCall,
+    arguments: &[Option<String>],
+) -> Option<Result<(crate::analysis::RegisteredImportFunction, String), ()>> {
+    use crate::analysis::RegisteredImportFunction;
+    let function = session.registered_import_function(file, &call.func)?;
+    if function == RegisteredImportFunction::BuiltinExec
+        || call.arguments.args.iter().any(Expr::is_starred_expr)
+        || call
+            .arguments
+            .keywords
+            .iter()
+            .any(|keyword| keyword.arg.is_none())
+    {
+        return Some(Err(()));
+    }
+    let builtin_level = || {
+        call.arguments
+            .find_argument_value("level", 4)
+            .is_none_or(|value| {
+                matches!(
+                    value.as_number_literal_expr().map(|n| &n.value),
+                    Some(ast::Number::Int(n)) if n.as_i64() == Some(0)
+                )
+            })
+    };
+    let builtin_fromlist = || {
+        call.arguments
+            .find_argument_value("fromlist", 3)
+            .is_none_or(|value| {
+                matches!(value, Expr::Tuple(tuple) if tuple.elts.is_empty())
+                    || matches!(value, Expr::List(list) if list.elts.is_empty())
+            })
+    };
+    let level_supported = function != RegisteredImportFunction::BuiltinImport
+        || builtin_level() && builtin_fromlist();
+    let literal = match function {
+        RegisteredImportFunction::ImportModule => target(call),
+        RegisteredImportFunction::BuiltinImport if level_supported => call
+            .arguments
+            .find_argument_value("name", 0)
+            .and_then(Expr::as_string_literal_expr)
+            .map(|name| name.value.to_str())
+            .filter(|name| crate::modules::valid_module_operand(name))
+            .map(str::to_owned),
+        RegisteredImportFunction::BuiltinImport | RegisteredImportFunction::BuiltinExec => None,
+    };
+    let name = literal.or_else(|| {
+        level_supported
+            .then(|| {
+                launcher_target_at(call, arguments, |value| {
+                    session.registered_module_is(file, value, "sys")
+                })
+            })
+            .flatten()
+    });
+    Some(name.map(|name| (function, name)).ok_or(()))
 }
 
 fn target(call: &ast::ExprCall) -> Option<String> {
