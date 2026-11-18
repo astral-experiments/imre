@@ -1,0 +1,651 @@
+--- a/benchmarks/compatibility/raw_control.py
++++ b/benchmarks/compatibility/raw_control.py
+@@ -8,6 +8,7 @@
+ import ast
+ import hashlib
+ import json
++import os
+ import posixpath
+ import re
+ import subprocess
+@@ -86,6 +87,20 @@
+     return result
+ 
+ 
++def successful_exec_events(lines, require):
++    """Decode successful execve calls, including PID-matched unfinished/resumed records."""
++    result=[]
++    for i,line in enumerate(lines):
++        normalized=line
++        if re.match(r'^\d+\s+execve\(',line) and line.endswith(' <unfinished ...>'):
++            pid=line.split()[0];following=[x for x in lines[i+1:] if x.startswith(pid+' ')]
++            require(following and re.fullmatch(r'\d+\s+<\.\.\. execve resumed>\)\s+= 0',following[0]), 'unfinished execve lacks matching successful PID resume')
++            normalized=line.removesuffix(' <unfinished ...>')+') = 0'
++        m=EXEC.fullmatch(normalized)
++        if m:result.append((i,m[1],json.loads(m[2]),json.loads(m[3]),normalized))
++    return result
++
++
+ def execs(lines, require):
+     return exec_sequence(lines, require, 2)
+ 
+@@ -111,6 +126,11 @@
+ def stat(lines, pid, path, absent, start=0):
+     tail = r'= -1 ENOENT\b' if absent else r'= 0$'
+     return find(lines, rf'^{pid}\s+newfstatat\(AT_FDCWD(?:<[^<>]+>)?, {re.escape(json.dumps(path))}, .*{tail}', start)
++
++
++def child_exit_code(lines,pid,require):
++    matches=[int(m[1]) for line in lines if (m:=re.fullmatch(r'^'+re.escape(str(pid))+r'\s+exit_group\(([0-9]+)\)\s*= \?$',line))]
++    require(len(matches)==1,'compiler child exit is missing or ambiguous in raw trace');return matches[0]
+ 
+ 
+ def exits(lines, parent, child, code, start):
+@@ -165,10 +185,7 @@
+     return re.search(r'(?:^|/)proc/(?:[0-9]+|self|thread-self)/'+task_part+r'fd/[0-9]+(?:/|$)|(?:^|/)dev/fd/[0-9]+(?:/|$)', path) is not None
+ 
+ 
+-def trace_withdraw(api, text, image, probe, tree, stash, leaf, cwd, require, extra_sources=(), strict_payloads=False, content_policy=None):
+-    """Allow only ENOENT withdrawn-path probes; never allow Python probes or child execs."""
+-    from posixpath import normpath
+-    lines = text.splitlines()
++def direct_withdrawal(lines, image, probe, tree, stash, leaf, extra_sources, require):
+     first, target = execs(lines, require)
+     require(first[2:] == (probe, [probe, 'withdraw', tree, stash, leaf, image])
+         and target[2:] == (image, [image]), 'withdrawal did not run the saved image directly')
+@@ -199,15 +216,69 @@
+         moved = find(lines, rf'^{first[1]}\s+rename\({re.escape(json.dumps(source_stash))}, {re.escape(json.dumps(source))}\) = 0$', missing+1)
+         show = stat(lines, first[1], source, False, moved+1)
+         require(show < restored, 'extra source was not restored after native exec')
++    return first, target, waited
++
++
++def wrapped_withdrawal(lines, image, probe, tree, stash, leaf, cwd, chain, require):
++    """Prove one declared source-withdrawal and read-only workspace execution chain."""
++    from script_control import BWRAP_SHA256
++    first, wrapper, inner, target = exec_sequence(lines, require, 4)
++    require(chain.get('schema') == 'imre.compatibility.withdraw-chain.bwrap-data.v1'
++            and chain.get('wrapper_sha256') == BWRAP_SHA256 and chain.get('wrapper') == '/usr/bin/bwrap'
++            and isinstance(chain.get('timeout_seconds'), int) and 0 < chain['timeout_seconds'] <= 3600
++            and isinstance(chain.get('skeleton'),str) and Path(chain['skeleton']).is_absolute()
++            and chain.get('workspace') == '/workspace' and isinstance(chain.get('tmp'), str)
++            and Path(chain['tmp']).is_absolute() and all(Path(x).is_absolute() for x in chain.get('absent', []))
++            and len(chain['absent']) == len(set(chain['absent'])) and leaf in chain['absent'] and stash in chain['absent'],
++            'invalid declared wrapper, pin, paths or absent witnesses')
++    bargs = [chain['wrapper'],'--ro-bind','/','/','--ro-bind',chain['skeleton'],chain['workspace'],
++             '--ro-bind',image,image,'--ro-bind',probe,probe,'--bind',cwd,cwd,'--bind',chain['tmp'],chain['tmp'],
++             '--chdir',cwd,'--die-with-parent','--',probe,'absent-exec',*chain['absent'],'--',image]
++    require(first[2:] == (probe,[probe,'withdraw-wrap',str(chain['timeout_seconds']),tree,stash,leaf,*bargs])
++            and wrapper[2:] == (chain['wrapper'],bargs) and inner[2:] == (probe,[probe,'absent-exec',*chain['absent'],'--',image])
++            and target[2:] == (image,[image]) and len({first[1],wrapper[1],inner[1]}) == 3 and inner[1] == target[1],
++            'undeclared supervisor, wrapper, inner probe or saved image invocation')
++    env=exec_environment(lines[target[0]],require)
++    require(exec_environment(lines[first[0]],require)==exec_environment(lines[wrapper[0]],require)==env
++            and exec_environment(lines[inner[0]],require)=={**env,'PWD':cwd}, 'wrapper or target environment differs')
++    def witness(pid,path,absent,start,kind=None):
++        i=stat(lines,pid,path,absent,start);line=lines[i]
++        require('AT_SYMLINK_NOFOLLOW' in line and (kind is None or 'st_mode='+kind in line), 'source witness follows symlinks or has wrong kind')
++        return i
++    a=witness(first[1],tree,False,first[0]+1,'S_IFDIR');a=witness(first[1],leaf,False,a+1,'S_IFREG');a=witness(first[1],stash,True,a+1)
++    a=find(lines,rf'^{first[1]}\s+rename\({re.escape(json.dumps(tree))}, {re.escape(json.dumps(stash))}\) = 0$',a+1)
++    a=witness(first[1],tree,True,a+1);a=witness(first[1],leaf,True,a+1);require(a<wrapper[0], 'source tree was not withdrawn before wrapper exec')
++    a=inner[0]
++    for path in chain['absent']:a=witness(inner[1],path,True,a+1)
++    require(a<target[0], 'withdrawn path was not absent before saved image exec')
++    end=find(lines,rf'^{target[1]}\s+exit_group\(0\)',target[0]+1)
++    wait=find(lines,rf'^{wrapper[1]}\s+wait4\(-1, .*WEXITSTATUS\(s\) == 0.*= {target[1]}$',end+1)
++    wrap_end=find(lines,rf'^{wrapper[1]}\s+exit_group\(0\)',wait+1)
++    outer=find(lines,rf'^{first[1]}\s+(?:<\.\.\. wait4 resumed>|wait4\({wrapper[1]},).*WEXITSTATUS\(s\) == 0.*= {wrapper[1]}$',wrap_end+1)
++    a=witness(first[1],tree,True,outer+1);a=witness(first[1],leaf,True,a+1);a=witness(first[1],stash,False,a+1,'S_IFDIR')
++    a=find(lines,rf'^{first[1]}\s+rename\({re.escape(json.dumps(stash))}, {re.escape(json.dumps(tree))}\) = 0$',a+1)
++    a=witness(first[1],tree,False,a+1,'S_IFDIR');a=witness(first[1],leaf,False,a+1,'S_IFREG');a=witness(first[1],stash,True,a+1);find(lines,rf'^{first[1]}\s+exit_group\(0\)',a+1)
++    return first,target,wait
++
++
++def trace_withdraw(api, text, image, probe, tree, stash, leaf, cwd, require, extra_sources=(), strict_payloads=False, content_policy=None, chain_policy=None):
++    """Allow only ENOENT withdrawn-path probes; never allow Python probes or child execs."""
++    from posixpath import normpath
++    lines = text.splitlines()
++    first,target,waited = (wrapped_withdrawal(lines,image,probe,tree,stash,leaf,cwd,chain_policy,require) if chain_policy else direct_withdrawal(lines,image,probe,tree,stash,leaf,extra_sources,require))
+     require(isinstance(cwd, str) and Path(cwd).is_absolute(), 'native cwd missing')
+     stem = Path(leaf).stem.lower()
+     extra_paths = {Path(p) for source in extra_sources for p in (source, source+'.raw-control-stash')}
+     launcher_stem = Path(extra_sources[0]).stem.lower() if extra_sources else None
+     native = lines[target[0]:waited+1]
++    allowed_data={Path(x['runtime']) for x in content_policy[0]['families'][content_policy[1]].get('readonly_data_files',[])} if chain_policy and content_policy else set()
++    allowed_dirs={Path(x) for x in content_policy[0]['families'][content_policy[1]].get('directory_paths',[]) if Path(x).is_relative_to(Path(tree))} if chain_policy and content_policy else set()
++    probe_policy=chain_policy.get('python_probe') if chain_policy else None;python_attempts=0
++    if probe_policy:require(set(probe_policy)=={'pid','operation','path','errno','count'} and probe_policy['pid']=='target' and probe_policy['operation']=='statx' and Path(probe_policy['path']).is_absolute() and probe_policy['errno']=='ENOENT' and probe_policy['count']==1, 'invalid exact Python probe policy')
+     for line in native:
+         # A successful io_uring setup would permit unobserved asynchronous opens.
+         require(not re.search(r'\bio_uring_setup\(.*= [0-9]+$', line), 'native io_uring may hide file access')
+-        m = OPEN.match(line) or re.match(r'^\d+\s+newfstatat\(.*?("(?:[^"\\]|\\.)*")', line)
++        m = OPEN.match(line) or re.match(r'^\d+\s+newfstatat\(.*?("(?:[^"\\]|\\.)*")', line) or (re.match(r'^\d+\s+statx\(.*?("(?:[^"\\]|\\.)*")',line) if chain_policy else None)
+         if m:
+             try: path = ast.literal_eval(m[1])
+             except (ValueError, SyntaxError): require(False, "invalid traced path")
+@@ -217,7 +288,9 @@
+             folded = path.lower()
+             name = Path(path).name.lower()
+             python_probe = 'libpython' in folded or any(part.startswith('python') for part in Path(folded).parts)
+-            require(not python_probe, 'native probed CPython or libpython')
++            if python_probe:
++                exact=rf'^{target[1]}\s+statx\(AT_FDCWD<{re.escape(cwd)}>, {re.escape(json.dumps(probe_policy["path"]))}, AT_STATX_SYNC_AS_STAT, STATX_ALL, 0x[0-9a-fA-F]+\) = -1 ENOENT \(No such file or directory\)$' if probe_policy else '(?!)'
++                require(re.fullmatch(exact,line) is not None, 'native probed CPython or libpython outside declared exact failed statx');python_attempts+=1
+             resolved = Path(normpath(path if Path(path).is_absolute() else str(Path(cwd)/path)))
+             withdrawn = (name == stem+'.py'
+                 or name in {stem+'.pyc', stem+'.pyo'}
+@@ -229,11 +302,15 @@
+                 or (launcher_stem and (name in {launcher_stem+'.pyc',launcher_stem+'.pyo'}
+                     or name.startswith(launcher_stem+'.') and name.endswith(('.pyc','.pyo')))))
+             # Only an explicit ENOENT proves this withdrawn path was absent.
+-            require(not withdrawn or re.search(r'\) = -1 ENOENT(?: \([^)]*\))?$', line),
++            declared=resolved in allowed_data|allowed_dirs
++            data_open=declared and OPEN.match(line) and re.search(r'\) = [0-9]+<[^<>]+>$',line)
++            data_stat=declared and line.startswith(target[1]+' ') and re.search(r'\b(?:newfstatat|statx)\(AT_FDCWD<'+re.escape(cwd)+r'>, '+re.escape(json.dumps(str(resolved)))+r',',line) and line.endswith('= 0') and ('S_IFREG' in line if resolved in allowed_data else 'S_IFDIR' in line)
++            require(not withdrawn or data_open or data_stat or re.search(r'\) = -1 ENOENT(?: \([^)]*\))?$', line),
+                     'native opened CPython, libpython, withdrawn source or matching bytecode')
+         if strict_payloads:
+             require(not re.search(r'(?:\b(?:open|openat|openat2|creat)\(.*<unfinished|<\.\.\. (?:open|openat|openat2|creat) resumed>)', line), 'unfinished native payload open is unverified')
+             require(not re.search(r'\bcreat\(.*\) = [0-9]+(?:<[^>]*>)?$', line), 'native successful creat is unverified')
++    if probe_policy:require(python_attempts==probe_policy['count'], 'exact Python statx probe count differs')
+     if content_policy is not None:
+         native_content(api, native, target[1], image, cwd, content_policy, require)
+     for path in api.successful_open_paths('\n'.join(native), cwd, preserve_traversal=strict_payloads):
+@@ -250,8 +327,64 @@
+                      or (launcher_stem and (name in {launcher_stem+'.pyc',launcher_stem+'.pyo'}
+                          or name.startswith(launcher_stem+'.') and name.endswith(('.pyc','.pyo'))))
+                      or 'libpython' in str(path).lower() or name.startswith('python'))
+-        require(not forbidden, 'native opened CPython, libpython, withdrawn source or matching bytecode')
+-
++        require(not forbidden or path in (allowed_data|allowed_dirs) and path.suffix.lower() not in {'.py','.pyc','.pyo','.zip','.whl'}, 'native opened CPython, libpython, withdrawn source or matching bytecode')
++
++
++
++def resource_sources(api, rules, proof, preimage, extension, require):
++    """Bind declared resource bytes to an independently sealed CPython archive/member proof."""
++    require(proof.get('source_commit')==api.COHORT['cpython_commit'] and isinstance(proof.get('members'),list), 'resource source authority differs')
++    index={x['path']:x for x in proof['members']};require(len(index)==len(proof['members']), 'duplicate resource authority member')
++    seen=set()
++    for rule in rules:
++        source=rule['source'];runtime=rule['runtime'];raw=preimage(source['path']);w=index.get(source['path']);blob=hashlib.sha1(f'blob {len(raw)}\0'.encode()+raw).hexdigest()
++        require(source.get('repo')=='https://github.com/python/cpython' and source.get('commit')==proof['source_commit']
++                and source.get('archive_sha256')==proof['archive_sha256'] and w is not None and w.get('archive_member')==source.get('member')
++                and source['member']==f"cpython-{source['commit']}/{source['path']}" and source['path'].startswith('Lib/test/') and '..' not in Path(source['path']).parts
++                and w.get('matches_source_authority') is True and w.get('matches_captured_preimage') is True
++                and w.get('sha256')==source.get('sha256')==sha(raw) and w.get('git_blob')==source.get('git_blob')==blob
++                and w.get('bytes')==source.get('bytes')==len(raw) and Path(runtime).is_absolute() and runtime not in seen
++                and Path(runtime)==Path(extension)/Path(source['path']).relative_to('Lib') and Path(runtime).suffix.lower() not in {'.py','.pyc','.pyo','.so','.zip','.whl'} and rule.get('operation') in {'open','openat','openat2'}
++                and rule.get('flags')=='O_RDONLY|O_CLOEXEC' and rule.get('mode') is None and type(rule.get('count')) is int and rule['count']>0,
++                'resource hash, source blob, archive member, path or readonly policy differs')
++        seen.add(runtime)
++
++
++def temporary_content(lines, pid, cwd, case, events, require):
++    """Check ordered create/write/read/unlink cycles of one owned pid-specific temporary file."""
++    path=case['path'].format(pid=pid);require(Path(path).parent==Path(cwd) and '{pid}' in case['path'] and not payload_alias(path), 'temporary path escapes cwd')
++    byline={e['line']:e for e in events if e['path']==Path(path) or e['returned']==Path(path)};active=None;phase=[];cycles=Counter();writes=unlinks=0
++    if case['unlink']['operation']=='unlink':require(case['unlink']['flags'] is None and not any(re.search(r'^'+pid+r'\s+(?:chdir|fchdir)\(',x) for x in lines),'temporary unlink cwd is unverified')
++    for number,line in enumerate(lines,1):
++        e=byline.get(number)
++        if e:
++            require(e['pid']==pid and e['path']==e['returned']==Path(path) and e['lexical']==path and e['operation']==case['create']['operation'], 'temporary fd, lexical or kernel path differs')
++            fd=re.search(r'\) = ([0-9]+)<',line);require(fd is not None, 'temporary open has no fd')
++            if e['flags']==case['create']['flags'] and e['mode']==case['create']['mode']:
++                require(not phase and active is None,'overlapping temporary create');phase=['create'];active=fd[1]
++            else:
++                require(e['flags']==case['read_open']['flags'] and e['mode']==case['read_open']['mode'] and phase==['create','write'], 'unauthorized temporary read/flags')
++                phase.append('read');active=fd[1]
++        m=re.match(r'^'+pid+r'\s+write(?:v)?\(([0-9]+)(?:<([^<>]*)>)?,',line)
++        if m and int(m[1])>2:
++            try:kernel=os.fsdecode(ast.literal_eval('b"'+m[2]+'"')) if m[2] else None
++            except (SyntaxError,ValueError,UnicodeError):kernel=None
++            n=re.search(r', ([0-9]+)\) = ([0-9]+)$',line)
++            require(kernel==path and m[1]==active and phase==['create'] and n is not None and int(n[1])==int(n[2])==case['write']['each_bytes'], 'unauthorized file write, fd alias or write size')
++            phase.append('write');writes+=1
++        if re.search(r'\b(?:unlink|unlinkat|rename|renameat|renameat2|link|linkat|symlink|symlinkat)\(',line):
++            operation=case['unlink']['operation'];m=None;name=None;directory=None
++            if operation=='unlinkat':
++                pat=r'^'+pid+r'\s+unlinkat\(AT_FDCWD<([^<>]+)>, ("(?:[^"\\]|\\.)*"), '+re.escape(case['unlink']['flags'])+r'\) = 0$';m=re.fullmatch(pat,line);directory=m[1] if m else None;quoted=m[2] if m else None
++            elif operation=='unlink':
++                m=re.fullmatch(r'^'+pid+r'\s+unlink\(("(?:[^"\\]|\\.)*")\) = 0$',line);directory=cwd;quoted=m[1] if m else None
++            else:require(False,'unknown temporary unlink operation')
++            try:name=os.fsdecode(ast.literal_eval('b'+quoted)) if quoted else None
++            except (SyntaxError,ValueError,UnicodeError):name=None
++            require(m is not None and directory==cwd and name==Path(path).name and phase in (['create','write'],['create','write','read']), 'unauthorized unlink, mutation, dirfd or lifecycle')
++            cycles['/'.join(phase+['unlink'])]+=1;phase=[];active=None;unlinks+=1
++    require(not phase and writes==case['write']['count'] and unlinks==case['unlink']['count'] and sum(cycles.values())==case['create']['count']
++            and cycles['create/write/read/unlink']==case['read_open']['count'] and cycles['create/write/unlink']==case['create']['count']-case['read_open']['count'], 'temporary lifecycle census differs')
+ 
+ 
+ def native_content(api, lines, pid, image, cwd, context, require):
+@@ -271,6 +404,9 @@
+         directory = script_case.get('compile_directory')
+         require(directory in {'.','scripts'}, 'invalid script compile directory policy')
+         static = {Path(launcher).parent.parent / directory}
++    case=policy['families'][family];resources=case.get('readonly_data_files',[]);temporary=case.get('temporary_lifecycle');resource_index={Path(x['runtime']):x for x in resources};resource_counts=Counter();temp_events=[]
++    require(len(resource_index)==len(resources), 'duplicate resource runtime path')
++    if resources:static={Path(x) for x in case['directory_paths']}
+     allowed_dirs = static | directories | ({Path(cwd)} if family == 'glob' else set())
+     system = list(policy['system_common']) + (policy['logging_extra'] if family == 'logging' else [])
+     if script_case and 'system' in script_case:
+@@ -302,6 +438,10 @@
+         elif (str(path),flags,event['mode']) in expected_access:
+             require(returned == path, 'unauthorized fixture file target')
+             file_access[(str(path),flags,event['mode'])] += 1
++        elif path in resource_index:
++            rule=resource_index[path];require(lexical==str(path) and returned==path and event['operation']==rule['operation'] and flags==rule['flags'] and event['mode']==rule['mode'], 'unauthorized resource path, fd alias, flags or mutation');resource_counts[str(path)]+=1
++        elif temporary and (path==Path(temporary['path'].format(pid=pid)) or returned==Path(temporary['path'].format(pid=pid))):
++            temp_events.append(event)
+         elif path == Path(image) and returned == path and flags == policy['readonly_flags'] and event['mode'] is None:
+             counts['image_reads'] += 1
+         else:
+@@ -311,6 +451,8 @@
+             observed_system[pair] += 1
+     require({k:counts[k] for k in ('opens','directories','image_reads')} == {k:policy['families'][family][k] for k in ('opens','directories','image_reads')}
+             and observed_system == expected_system, 'native content open census differs')
++    if resources:require(resource_counts==Counter({x['runtime']:x['count'] for x in resources}), 'resource open census differs')
++    if temporary:temporary_content(lines,pid,cwd,temporary,temp_events,require)
+     expected=lambda names:Counter({name:fixture['each_count'] for name in names})
+     require(writes == (expected(fixture['writes']) if family == 'glob' else Counter())
+             and reads == (expected(fixture['directories']) if family == 'glob' else Counter()) and file_access == expected_access,
+@@ -341,7 +483,7 @@
+     return index
+ 
+ 
+-def comparable_run(run, extension, compiler, require):
++def comparable_run(run, extension, compiler, require, tier_environment=None):
+     """Compare the finite test configuration while allowing tier launch mechanics."""
+     metas = run['runs']
+     def cwd(meta):
+@@ -357,7 +499,13 @@
+     for tier, opt in (('O0','0'),('O3','3')):
+         meta = metas[tier]; env = meta.get('environment', {})
+         require(cwd(meta) == cwd(stock) and common(meta) == settings and meta.get('timeout_seconds') == stock.get('timeout_seconds') and isinstance(meta.get('timeout_seconds'), (int,float)) and meta['timeout_seconds'] > 0, tier+' finite cohort common configuration differs from stock')
+-        require(posixpath.normpath(env.get('PYTHONPATH','')) == posixpath.normpath(extension) and env.get('IMRE_PYTHON') == compiler and env.get('IMREFLAGS') == '--opt-level '+opt, tier+' finite cohort tier configuration differs')
++        policy = tier_environment if tier_environment is not None else {'schema':'imre.compatibility.finite-tier-environment.v1','tiers':{'O0':'driver-flags','O3':'driver-flags'}}
++        require(isinstance(policy,dict) and set(policy)=={'schema','tiers'} and policy['schema']=='imre.compatibility.finite-tier-environment.v1' and isinstance(policy['tiers'],dict) and set(policy['tiers'])=={'O0','O3'} and all(x in {'driver-flags','stock-unchanged'} for x in policy['tiers'].values()), 'invalid finite tier environment role')
++        require(posixpath.normpath(env.get('PYTHONPATH','')) == posixpath.normpath(extension), tier+' finite cohort extension differs')
++        if policy['tiers'][tier]=='driver-flags':
++            require(env.get('IMRE_PYTHON') == compiler and env.get('IMREFLAGS') == '--opt-level '+opt, tier+' finite cohort tier configuration differs')
++        else:
++            require(env == stock['environment'], tier+' finite declared child environment differs from stock')
+ 
+ 
+ SOURCE_PIN = '8571ca2dbecabf8d7863c369dc776611fd57d8ad'
+@@ -468,8 +616,7 @@
+     entry = json.loads(entry_json) if entry_json else api.activation_entry(family)
+     path = api.bound_artifact(entry,locator) if entry_json else api.checked_file(api.repository_file(locator, api.DATA_ROOT), digest)
+     if entry_json:
+-        from extensions.successor959_v1 import authority as successor
+-        binding=successor.effective_binding(api,entry)
++        binding=api.extension_authority(entry).effective_binding(api,entry)
+     else:binding=json.loads(path.read_text())
+     require(binding.get('schema') == ('imre.compatibility.successor-input.v1' if entry_json else 'imre.compatibility.raw-control.v1') and binding.get('family') == family, 'invalid normalized raw-control binding')
+     cohorts, originals = binding.get('cohorts'), binding.get('originals')
+@@ -536,7 +683,7 @@
+     api.require(isinstance(artifacts,dict), 'missing raw-control artifacts')
+     def file(role):
+         loc=artifacts.get(role);api.require(isinstance(loc,str), 'missing raw-control role: '+role)
+-        return api.bound_artifact(entry,loc) if entry.get('adapter')=='raw-control-v2' else api.checked_file(api.repository_file(loc,api.DATA_ROOT),api.binding_digest(entry,loc))
++        return api.bound_artifact(entry,loc) if entry.get('adapter') in {'raw-control-v2','raw-control-v3'} else api.checked_file(api.repository_file(loc,api.DATA_ROOT),api.binding_digest(entry,loc))
+     return file
+ 
+ 
+@@ -551,10 +698,42 @@
+     require(negative==expected, 'finite launcher operation/delta differs');return line
+ 
+ 
++def finite_withdrawal(api,tier,source,context,meta,image,launcher,extension,archive,data,text,obj):
++    """Consume one tier's declared exec policy in the common finite withdrawal path."""
++    require=api.require;trace=text(tier+'_trace');lines=trace.splitlines();policy=obj('policy');path=Path(source['path']);withdrawal=context['withdrawal'];tree=str(Path(extension)/withdrawal['tree_relative_to_extension']);leaf=str(Path(extension)/path.relative_to('Lib'))
++    require(path.parts[:2]==('Lib','test') and path.suffix=='.py' and '..' not in path.parts and sha(data(tier+'_trace'))==meta['trace_sha256'], 'finite trace digest or original leaf differs')
++    execution=context.get('exec_policy')
++    if execution:
++        require(context.get('identity') and execution.get('schema')=='imre.compatibility.finite-exec-policy.v1' and set(execution.get('tiers',{}))=={'O0','O3'}, 'finite exec policy lacks identity or exact tier roles')
++        chain=execution['tiers'][tier];capture=obj(tier+'_withdraw_capture');before=obj(tier+'_source_before');after=obj(tier+'_source_after');cleanup=obj(tier+'_cleanup');proof=obj('resource_archive_proof');probe=chain['probe'];case=policy['families'][context['family']]
++        require(capture.get('trace_sha256')==meta['trace_sha256'] and capture.get('exit_code')==0 and capture.get('cwd')==meta['cwd'] and capture.get('environment')==meta['environment'] and capture.get('stdout_sha256')==meta['stdout_sha256'] and capture.get('stderr_sha256')==meta['stderr_sha256']
++                and capture.get('policy_sha256')==sha(data('policy')) and capture.get('probe_sha256')==chain['probe_sha256']==sha(data('withdraw_probe_binary')) and capture.get('bwrap_sha256')==chain['wrapper_sha256']
++                and capture.get('source_controller_sha256')==sha(data(tier+'_withdraw_controller')) and before==after and before.get('fixture_manifest')==obj('fixture_manifest')
++                and before.get('launcher')==sha(data('positive_launcher')) and before.get('leaf')==source['sha256'] and before.get('archive')==proof['archive_sha256'] and before.get('image')==meta['image_sha256']
++                and cleanup.get('exit_code')==0 and cleanup.get('timed_out') is False and cleanup.get('wait_error') is None and cleanup.get('restoration',{}).get('restored') is True and cleanup['restoration'].get('leaf_sha256')==source['sha256']
++                and {leaf,tree+'/__pycache__',tree+withdrawal['tree_stash_suffix'],launcher,proof['archive_path']}<=set(chain['absent']), 'finite source withdrawal, hash, wrapper, fixture or restoration proof differs')
++        if tier+'_source_join' in context['roles']:
++            join=obj(tier+'_source_join');require(join.get('schema')=='imre.compatibility.identical-source-state-join.v1' and join.get('credit')==0 and join.get('before_sha256')==sha(data(tier+'_source_before')) and join.get('after_sha256')==sha(data(tier+'_source_after')), 'withdrawal content-addressed state join differs')
++        elf=obj('elf_capture');record=elf['images'][tier];rawelf=data(tier+'_readelf');require(elf.get('schema')=='imre.compatibility.static-elf.v1' and elf.get('credit')==0 and elf['controller_sha256']==sha(data('elf_controller')) and elf['tool']=='/usr/bin/readelf' and elf['tool_sha256']==context['elf_tool_sha256'] and record['path']==image and record['sha256_before']==record['sha256_after']==meta['image_sha256'] and record['fd_before']==record['fd_after'] and record['magic_hex']=='7f454c46' and record['argv']==['/usr/bin/readelf','-d',image] and record['environment']=={'PATH':'/usr/bin'} and record['exit_code']==0 and record['stdout_sha256']==sha(rawelf) and record['stderr_sha256']==sha(b'') and b'Dynamic section' in rawelf and b'libpython' not in rawelf.lower(), 'finite static ELF or libpython linkage differs')
++        skeleton=obj(tier+'_skeleton_manifest');entries={x['path']:x for x in skeleton};require(len(entries)==len(skeleton) and all(x['kind'] in {'directory','regular'} for x in skeleton), 'invalid resource workspace skeleton or symlink')
++        files={x['path']:x for x in skeleton if x['kind']=='regular'};rel=lambda x:Path(x).relative_to(chain['workspace']).as_posix();expected={rel(r['runtime']):r for r in case['readonly_data_files']};mounts={rel(image),rel(probe)}
++        require(set(files)==set(expected)|mounts and not set(expected)&mounts and all(files[k]['sha256']==r['source']['sha256'] and files[k]['bytes']==r['source']['bytes'] and files[k]['mode']=='0o444' for k,r in expected.items())
++                and all(files[k]['bytes']==0 and files[k]['sha256']==sha(b'') for k in mounts), 'resource bind set, bytes, readonly mode or mount target differs')
++        trace_withdraw(api,trace,image,probe,tree,tree+withdrawal['tree_stash_suffix'],leaf,meta['cwd'],require,(),True,(policy,context['family'],launcher,extension),chain)
++    else:
++        parent,child=execs(lines,require);expected_env={**meta['environment'],'IMRE_WITHDRAW_LAUNCHER':launcher,'IMRE_WITHDRAW_ARCHIVE':archive};legacy=context['legacy']
++        require(child[2]==image and exec_environment(lines[parent[0]],require)==expected_env and exec_environment(lines[child[0]],require)==meta['environment'] and not any(k.startswith('IMRE_WITHDRAW_') for k in meta['environment']) and (not legacy or meta['supervisor_environment']==expected_env),tier+' finite withdrawal environment differs')
++        probe=context['withdraw_probe'] if legacy else context['probe']['executable'];trace_withdraw(api,trace,image,probe,tree,tree+withdrawal['tree_stash_suffix'],leaf,meta['cwd'],require,(launcher,archive),content_policy=(policy,context['family'],launcher,extension))
++
++
+ def finite_core(api,family,source,binding,file,data,text,obj,context):
+     """One finite gate, tier, inventory, effects and withdrawal acceptance path."""
+-    require=api.require;legacy=context['legacy'];run=context['run'];positive=data('positive_launcher');builds={t:obj(t+'_build_json') for t in ('O0','O3')};command=builds['O0']['argv'];compiler=command[0];runtime=api.runtime_argument(command);extension=api.option(command,'--extension-path');launcher=command[2];comparable_run(run,extension,compiler,require)
+-    withdrawal=context['withdrawal'];tree_role=withdrawal['tree_relative_to_extension'];archive_role=withdrawal['archive_relative_to_launcher'];suffix=withdrawal['tree_stash_suffix'];require(tree_role=='test' and Path(archive_role).name==archive_role and archive_role.endswith('.py') and suffix.startswith('.') and '/' not in suffix, 'finite withdrawal roles escape their declared source graph');archive=str(Path(launcher).parent/archive_role)
++    require=api.require;legacy=context['legacy'];run=context['run'];positive=data('positive_launcher');builds={t:obj(t+'_build_json') for t in ('O0','O3')};command=builds['O0']['argv'];compiler=command[0];runtime=api.runtime_argument(command);extension=api.option(command,'--extension-path');launcher=command[2];comparable_run(run,extension,compiler,require,context.get('tier_environment'))
++    context={**context,'family':family};withdrawal=context['withdrawal'];tree_role=withdrawal['tree_relative_to_extension'];suffix=withdrawal['tree_stash_suffix'];require(tree_role=='test' and suffix.startswith('.') and '/' not in suffix, 'finite withdrawal tree roles escape their source graph')
++    if context.get('exec_policy'):
++        archive=None;rules=obj('policy')['families'][family]['readonly_data_files'];roles=context['resource_roles'];require(set(roles)=={r['source']['path'] for r in rules} and len(set(roles.values()))==len(roles), 'finite immutable resource role closure differs');resource_sources(api,rules,obj('resource_archive_proof'),lambda p:data(roles[p]),extension,require)
++    else:
++        archive_role=withdrawal['archive_relative_to_launcher'];require(Path(archive_role).name==archive_role and archive_role.endswith('.py'), 'finite archive role escapes its launcher graph');archive=str(Path(launcher).parent/archive_role)
+     stock=run['runs']['stock'];require(stock['environment'].get('PYTHONPATH')==extension and stock['argv'][1:]==['-B',launcher], 'finite stock and native launcher/configuration differ')
+     gate_role=lambda tier,mode,suffix:(mode+'_'+suffix if legacy else 'gate_'+tier+'_'+mode+'_'+suffix)
+     for tier in context['gate_tiers']:
+@@ -563,7 +742,7 @@
+             role=lambda suffix:gate_role(tier,mode,suffix);meta=obj(role('meta'));trace=text(role('trace'));first,child=execs(trace.splitlines(),require);gated=child[3];diagnostic=text(role('stderr'));negative=data(mode+'_launcher');operation=dict(context['operations'][mode]);operation.update({'negative_sha256':meta['negative_launcher_sha256']} if legacy else {});line=finite_gate_delta(positive,negative,operation,require)
+             expected=(b'\nstatus: int = True\n' if legacy else b'status: int = True\n') if mode=='direct' else ('import '+context['poison_module']+'\n').encode();require(line==expected and sha(negative)==meta['negative_launcher_sha256'] and sha(data(role('trace')))==meta['trace_sha256'] and sha(data(role('stderr')))==meta['stderr_sha256'] and data(role('stdout'))==b'' and api.comparable_build(gated)==api.comparable_build(cmd), 'finite gate source, raw evidence or positive build differs')
+             if legacy:require(meta.get('controller_sha256')==context['controller_sha256'] and meta.get('compiler_sha256')==context['product']['imre'] and meta.get('runtime_sha256')==context['product']['libimre_runtime.a'] and meta.get('exit_code')==0 and meta.get('image_exists') is False, 'legacy finite gate custody differs')
+-            else:require(meta['original_launcher_sha256']==sha(positive) and meta['positive_build_metadata_sha256']==sha(data(tier+'_build_json')) and meta['positive_build_argv']==cmd and meta['build_argv']==gated and meta['probe_sha256']==context['probe']['executable_sha256'] and meta['probe_source_sha256']==context['probe']['source_sha256'] and first[2]==context['probe']['executable'] and meta['supervisor_exit_code']==0 and meta['compiler_child_exit_code']==1 and meta['image_absent_before'] is True and meta['image_absent_after'] is True and exec_environment(trace.splitlines()[child[0]],require)==meta['actual_compiler_child_environment']==builds[tier]['environment'], 'finite gate child, no-image or identity differs')
++            else:require(meta['original_launcher_sha256']==sha(positive) and meta['positive_build_metadata_sha256']==sha(data(tier+'_build_json')) and meta['positive_build_argv']==cmd and meta['build_argv']==gated and meta['probe_sha256']==context['probe']['executable_sha256'] and meta['probe_source_sha256']==context['probe']['source_sha256'] and first[2]==context['probe']['executable'] and meta['supervisor_exit_code']==0 and meta['compiler_child_exit_code']==1 and ((meta.get('image_absent_before') is True and meta.get('image_absent_after') is True) or (context.get('exec_policy') and meta.get('image_exists') is False)) and exec_environment(trace.splitlines()[child[0]],require)==meta['actual_compiler_child_environment']==builds[tier]['environment'], 'finite gate child, no-image or identity differs')
+             if context.get('identity'):finite_identity_gate(api,tier,mode,context,builds[tier],meta,child,first,trace,data)
+             probe=context['gate_probe'] if legacy else first[2]
+             if mode=='direct':trace_direct_gate(trace,gated,probe,diagnostic,require,expected_exit=1)
+@@ -575,14 +754,22 @@
+         if tier=='stock':
+             require(capture==meta,'finite stock capture differs')
+             if not legacy:
+-                trace=text('stock_trace');lines=trace.splitlines();child=exec_sequence(lines,require,1)[0];identity=context['stock_interpreter'];expected_source=str(Path(extension)/Path(source['path']).relative_to('Lib'));events=api.successful_open_paths(trace,meta['cwd'],kernel_events=True);required={launcher,expected_source};opened={str(e['path']) for e in events if e['pid']==child[1] and e['path']==e['returned'] and e['flags'] in {'O_RDONLY','O_RDONLY|O_CLOEXEC'} and 'AT_FDCWD<'+meta['cwd']+'>' in lines[e['line']-1]};require(sha(data('stock_trace'))==meta['trace_sha256'] and child[2]==identity['path']==meta['argv'][0] and child[3]==meta['argv'] and exec_environment(lines[child[0]],require)==meta['environment'] and required<=opened, 'finite stock exec, cwd, environment, launcher or source differs');find(lines,rf'^{child[1]}\s+exit_group\(0\)',child[0]+1)
++                trace=text('stock_trace');lines=trace.splitlines();child=exec_sequence(lines,require,1)[0];identity=context['stock_interpreter'];expected_source=str(Path(extension)/Path(source['path']).relative_to('Lib'));events=list(api.successful_open_paths(trace,meta['cwd'],kernel_events=True));required={launcher,expected_source};opened={str(e['path']) for e in events if e['pid']==child[1] and e['path']==e['returned'] and e['flags'] in {'O_RDONLY','O_RDONLY|O_CLOEXEC'} and 'AT_FDCWD<'+meta['cwd']+'>' in lines[e['line']-1]};require(sha(data('stock_trace'))==meta['trace_sha256'] and child[2]==identity['path']==meta['argv'][0] and child[3]==meta['argv'] and exec_environment(lines[child[0]],require)==meta['environment'] and required<=opened, 'finite stock exec, cwd, environment, launcher or source differs');find(lines,rf'^{child[1]}\s+exit_group\(0\)',child[0]+1)
+                 if context.get('identity'):finite_identity_stock(api,context,meta,child,data)
++                if context.get('exec_policy'):
++                    case=obj('policy')['families'][family];rules=case['readonly_data_files'];expected={r['runtime']:r['source']['sha256'] for r in rules};seen=Counter()
++                    require(meta.get('resources_before_sha256')==meta.get('resources_after_sha256')==expected,'stock resource preimage or restoration differs')
++                    for e in events:
++                        if str(e['path']) in expected or str(e['returned']) in expected:
++                            r=next(x for x in rules if x['runtime'] in {str(e['path']),str(e['returned'])});require(e['pid']==child[1] and e['lexical']==r['runtime'] and e['path']==e['returned']==Path(r['runtime']) and e['operation']==r['operation'] and e['flags']==r['flags'] and e['mode']==r['mode'],'stock resource open, fd path or readonly flags differ');seen[r['runtime']]+=1
++                    require(seen==Counter({r['runtime']:r['count'] for r in rules}),'stock resource read census differs');unlink=context['identity']['stock_unlink'];require(unlink=={'operation':'unlink','flags':None},'stock temporary unlink role differs');temp={**case['temporary_lifecycle'],'unlink':{**case['temporary_lifecycle']['unlink'],**unlink}};temporary_content(lines,child[1],meta['cwd'],temp,events,require)
+             continue
+         build=builds[tier];argv=build['argv'];api.matched_build(argv,tier,compiler,runtime);normalized=list(argv);normalized[normalized.index('--opt-level')+1]='0';output=api.option(argv,'-o');image=meta['argv'][0];require((output==image or context.get('identity') and context['join_modes'][tier]=='same-image-content-join' and build['image_sha256']==meta['image_sha256']) and api.comparable_build(normalized)==api.comparable_build(command) and build.get('exit_code')==0 and build['image_sha256']==meta['image_sha256']==meta['before'][image]==meta['after'][image] and meta['argv']==[image] and meta['restored'] is True, tier+' finite build/image differs')
+         if legacy:require(build.get('compiler_sha256')==context['product']['imre'] and build.get('runtime_sha256')==context['product']['libimre_runtime.a'] and build.get('controller_sha256')==context['controller_sha256'] and capture.get('argv')==meta.get('capture_argv') and all(capture.get(k)==meta.get(k) for k in ('environment','supervisor_environment','controller_sha256','trace_sha256','image_sha256','exit_code','timed_out','cwd','timeout_seconds')) and meta.get('controller_sha256')==context['collector_sha256'] and meta.get('supervisor_sha256')==context['withdraw_sha256'],tier+' legacy finite custody differs')
+-        else:require(capture==meta and build.get('source_sha256')==source['sha256'] and build.get('launcher_sha256')==sha(positive) and meta['supervisor_sha256']==context['probe']['executable_sha256'], tier+' finite source or supervisor differs')
++        else:require(capture==meta and build.get('source_sha256')==source['sha256'] and build.get('launcher_sha256')==sha(positive) and meta['supervisor_sha256']==(context['exec_policy']['tiers'][tier]['probe_sha256'] if context.get('exec_policy') else context['probe']['executable_sha256']), tier+' finite source or supervisor differs')
+         if context.get('identity'):finite_identity_build(api,tier,context,build,meta,data,text)
+-        trace=text(tier+'_trace');lines=trace.splitlines();parent,child=execs(lines,require);expected_env={**meta['environment'],'IMRE_WITHDRAW_LAUNCHER':launcher,'IMRE_WITHDRAW_ARCHIVE':archive};require(sha(data(tier+'_trace'))==meta['trace_sha256'] and child[2]==image and exec_environment(lines[parent[0]],require)==expected_env and exec_environment(lines[child[0]],require)==meta['environment'] and not any(k.startswith('IMRE_WITHDRAW_') for k in meta['environment']) and (not legacy or meta['supervisor_environment']==expected_env),tier+' finite withdrawal environment differs');probe=context['withdraw_probe'] if legacy else context['probe']['executable'];path=Path(source['path']);require(path.parts[:2]==('Lib','test') and path.suffix=='.py' and '..' not in path.parts, 'finite original leaf escapes test tree');tree=str(Path(extension)/tree_role);leaf=str(Path(extension)/path.relative_to('Lib'));trace_withdraw(api,trace,image,probe,tree,tree+suffix,leaf,meta['cwd'],require,(launcher,archive),content_policy=(obj('policy'),family,launcher,extension))
++        finite_withdrawal(api,tier,source,context,meta,image,launcher,extension,archive,data,text,obj)
++    if context.get('ordered_originals') is not None:require(all(list(inventories[t])==context['ordered_originals'] for t in api.TIERS),'finite ordered original occurrence inventory differs')
+     require(effects[0]==effects[1]==effects[2] and outputs[0]==outputs[1]==outputs[2] and all(set(x)==set(inventories['stock']) for x in inventories.values()) and (context.get('observed') is None or len(inventories['stock'])==context['observed']), 'finite original IDs, occurrences, output or effects differ')
+     return {**run,'platform':context['platform'],'source':source},inventories,paths
+ 
+@@ -612,34 +799,78 @@
+     check=api.require;pre=meta['held_fd_pre'];post=meta['held_fd_post'];sample=meta['proc_exe_sample'];expected=context['stock_interpreter'];check(pre==post and pre['sha256']==expected['sha256'] and pre['fstat']==meta['path_post_fstat']==sample['fstat'] and sample['pid']==child[1] and sample['target']==expected['path']==child[2] and meta['proc_exe_sample_error'] is None and meta['start_utc_ns']<meta['finish_utc_ns'] and meta['controller_sha256']==sha(data('stock_controller')) and meta['original_stock_metadata_sha256']==sha(data('prior_stock_meta')) and meta['ordered_streams_and_effects_equal'] is True and len(meta['environment'])==6 and sha(data('stock_stderr'))==sha(data('prior_stock_stderr')) and data('stock_effects_before')==data('stock_effects_after'), 'held stock FD, live proc executable, provenance or observations differ')
+ 
+ 
++def finite_held_identity(api, context, pre, post, paths, product, phase="positive"):
++    """Check the declared held-FD proof without inventing within-read/path-stat witnesses."""
++    check=api.require;mode=context['identity'].get('held_proof','read-bracket-v1')
++    check(set(pre)==set(post)==set(paths) and pre==post,'held product invocation bracket differs')
++    if mode=='read-bracket-v1':
++        check(phase in {'positive','gate'} and all(pre[k]['path']==paths[k] and Path(pre[k]['fd_realpath']).is_absolute() and pre[k]['sha256']==product[k] and (phase=='gate' or pre[k]['fstat']==pre[k]['path_stat'] and pre[k]['read_fstat_unchanged'] is True) for k in paths),'positive build substituted tool path/hash or changed held FD')
++    elif mode=='invocation-bracket-v1':
++        baseline=context['raw_obj']('capture_before')['inputs'];fields={'path','canonical_path','fd','flags','sha256','dev','ino','ctime_ns','mtime_ns','mode','bytes','nlink'}
++        for k,path in paths.items():
++            r=pre[k];w=baseline.get(path,{})
++            check(set(r)==fields and r['path']==path and Path(r['canonical_path']).is_absolute() and type(r['fd']) is int and r['fd']>=3 and type(r['flags']) is int and r['flags']&os.O_ACCMODE==os.O_RDONLY and r['sha256']==product[k] and w.get('canonical_path')==r['canonical_path'] and w.get('sha256')==r['sha256'] and all(w.get(f)==r[f] for f in ('dev','ino','ctime_ns','mode')) and w.get('size')==r['bytes'], 'invocation held FD, unsupported proof field or independent path witness differs')
++    else:check(False,'unknown held-FD proof mode')
++    return mode
++
++
++def finite_live_build_samples(api,tier,context,raw,events,compiler,linker,data):
++    """Bind independently observed post-exec samples; retain declared nonmatching sample debt."""
++    check=api.require;policy=context['identity']['live_samples'][tier];pre=raw['fd_before'];samples=raw.get('live_exe_samples',[]);good=Counter();debt=Counter();event_by_pid={int(e[1]):e for e in events}
++    for x in samples:
++        role=x['role'];pid=x['pid'];event=event_by_pid.get(pid);claimed=x.get('held_fd_matches')
++        if claimed is True:
++            key='cli' if role=='cli' else 'clang' if role=='clang' else None;r=pre.get(key,{})
++            check(key is not None and event is not None and event[2]==r['path'] and event[3]==x['argv'] and x['target']==r['canonical_path'] and all(x[f]==r[f] for f in ('dev','ino','bytes')), 'live product sample differs from held FD or traced exec');good[role]+=1
++        else:
++            check(claimed is False and role in policy['debt'] and event is not None and x.get('target')!=pre['clang']['canonical_path'] and (x.get('dev'),x.get('ino'))!=(pre['clang']['dev'],pre['clang']['ino']), 'unverified live sample debt differs');debt[role]+=1
++    check(good==Counter(policy['success']) and debt==Counter(policy['debt']), 'live product sample census differs')
++    role=policy.get('observer_report')
++    if role:
++        report=json.loads(data(role));check(report['credit']==0 and report['capture_source_sha256']==sha(data(policy['observer_source'])) and len(report['samples'])==2, 'independent observer source or report differs')
++        for x,event,key in zip(report['samples'],(compiler,linker),('cli','clang')):
++            r=pre[key];st=x['proc_fstat'];check(type(x['observed_utc_ns']) is int and type(report['captured_utc_ns']) is int and raw['start_utc_ns']<x['observed_utc_ns']<=report['captured_utc_ns']<raw['finish_utc_ns'] and x['pid']==int(event[1]) and x['actual_argv']==event[3] and x['product_path']==r['path'] and x['product_sha256']==r['sha256'] and x['proc_exe_target']==r['canonical_path'] and st==x['product_fstat'] and all(st[f]==r[f] for f in ('dev','ino','ctime_ns','mtime_ns')) and st['size']==r['bytes'] and st['mode']==int(r['mode'],8), 'independent observer PID, image, held product or traced exec differs')
++
++
+ def finite_identity_build(api,tier,context,build,meta,data,text):
+-    check=api.require;raw=context['raw_obj'](tier+'_build_json');argv=raw['build_argv'];product=context['product'];paths={'cli':argv[0],'runtime':api.runtime_argument(argv),'clang':api.option(argv,'--clang')};pre=raw['fd_before'];post=raw['fd_after'];check(set(pre)==set(post)==set(paths) and pre==post and all(pre[k]['path']==paths[k] and Path(pre[k]['fd_realpath']).is_absolute() and pre[k]['sha256']==product[k] and pre[k]['fstat']==pre[k]['path_stat'] and pre[k]['read_fstat_unchanged'] is True for k in paths),'positive build substituted tool path/hash or changed held FD')
+-    trace=text(tier+'_positive_trace');lines=trace.splitlines();m=EXEC.fullmatch(lines[0]);check(m is not None and m.group(1)==str(raw['compiler_pid']) and json.loads(m.group(2))==raw['actual_compiler_path']==argv[0] and json.loads(m.group(3))==raw['actual_compiler_argv']==argv and exec_environment(lines[0],check)==raw['actual_compiler_environment']==raw['environment']==build['environment'] and raw['trace_sha256']==sha(data(tier+'_positive_trace')) and raw['controller_sha256']==sha(data('build_controller')) and raw['compiler_exit_code']==0 and raw['strace_exit_code']==0 and raw['timed_out'] is False and raw['start_utc_ns']<raw['finish_utc_ns'] and raw['positive_build_metadata_sha256']==sha(data('prior_'+tier+'_build_json')) and raw['source_sha256']==context['source']['sha256'] and raw['launcher_sha256']==sha(data('positive_launcher')) and raw['new_image_sha256']==meta['image_sha256'] and sha(data(tier+'_positive_stdout'))==raw['stdout_sha256'] and sha(data(tier+'_positive_stderr'))==raw['stderr_sha256'] and data(tier+'_positive_effects_before')==data(tier+'_positive_effects_after') and sha(data(tier+'_positive_effects_before'))==raw['effects_before_sha256'] and sha(data(tier+'_positive_effects_after'))==raw['effects_after_sha256'],'positive raw compiler exec/env, source, image or capture differs')
++    check=api.require;raw=context.get('identity_obj',context['raw_obj'])(tier+'_build_json');argv=raw['build_argv'];product=context['product'];paths={'cli':argv[0],'runtime':api.runtime_argument(argv),'clang':api.option(argv,'--clang')};pre=raw['fd_before'];post=raw['fd_after'];finite_held_identity(api,context,pre,post,paths,product)
++    trace=text(tier+'_positive_trace');lines=trace.splitlines();events=successful_exec_events(lines,check);compilers=[e for e in events if e[1]==str(raw['compiler_pid']) and e[2]==argv[0]];check(len(compilers)==1,'positive build lacks unique compiler exec');compiler_event=compilers[0];policy=context.get('build_exec_policy')
++    if policy:
++        check(policy=={'schema':'imre.compatibility.build-timeout-chain.v1','path':'/usr/bin/timeout','timeout_seconds':360} and events[0][0]==0 and events[0][1]!=compiler_event[1] and events[0][2:4]==(policy['path'],[policy['path'],'--signal=TERM','--kill-after=5s',str(policy['timeout_seconds'])+'s',*argv]) and exec_environment(events[0][4],check)==raw['environment'] and compiler_event[0]>events[0][0] and raw.get('prior_image_matches') is True, 'positive bounded compiler chain differs');exits(lines,events[0][1],compiler_event[1],0,compiler_event[0])
++    else:check(compiler_event[0]==0,'positive compiler exec is not first')
++    check(compiler_event[1]==str(raw['compiler_pid']) and compiler_event[2]==raw['actual_compiler_path']==argv[0] and compiler_event[3]==raw['actual_compiler_argv']==argv and exec_environment(compiler_event[4],check)==raw['actual_compiler_environment']==raw['environment']==build['environment'] and raw['trace_sha256']==sha(data(tier+'_positive_trace')) and raw['controller_sha256']==sha(data(tier+'_build_controller' if context.get('exec_policy') else 'build_controller')) and raw['compiler_exit_code']==0 and raw['strace_exit_code']==0 and raw['timed_out'] is False and raw['start_utc_ns']<raw['finish_utc_ns'] and raw['positive_build_metadata_sha256']==sha(data('prior_'+tier+'_build_json')) and raw['source_sha256']==context['source']['sha256'] and raw['launcher_sha256']==sha(data('positive_launcher')) and raw['new_image_sha256']==meta['image_sha256'] and sha(data(tier+'_positive_stdout'))==raw['stdout_sha256'] and sha(data(tier+'_positive_stderr'))==raw['stderr_sha256'] and data(tier+'_positive_effects_before')==data(tier+'_positive_effects_after') and sha(data(tier+'_positive_effects_before'))==raw['effects_before_sha256'] and sha(data(tier+'_positive_effects_after'))==raw['effects_after_sha256'],'positive raw compiler exec/env, source, image or capture differs')
+     compiler=str(raw['compiler_pid']);compiler_exit=find(lines,rf'^{compiler}\s+exit_group\(0\)',1);output=api.option(argv,'-o');linkers=[]
+-    for i,line in enumerate(lines[1:],1):
+-        event=EXEC.fullmatch(line)
+-        if not event or event[1]==compiler:continue
+-        args=json.loads(event[3])
+-        if output not in args:continue
++    for event in events:
++        i,pid,path,args,line=event
++        if pid==compiler or output not in args:continue
+         try:
+-            pending=find(lines,rf'^{compiler}\s+wait4\({event[1]},',i+1);waited=exits(lines,compiler,event[1],0,pending+1)
++            pending=find(lines,rf'^{compiler}\s+wait4\({pid},',i+1);waited=exits(lines,compiler,pid,0,pending+1)
+         except ValueError:continue
+-        if waited<compiler_exit:linkers.append((line,event,args))
+-    check(len(linkers)==1,'positive build lacks one directly reaped linker child');line,event,args=linkers[0]
+-    check(json.loads(event[2])==args[0]==pre['clang']['path'] and args.count(output)==1 and api.option(args,'-o')==output and args.count(pre['runtime']['path'])==1 and exec_environment(line,check)==raw['environment'],'positive linker executable, runtime archive or environment differs')
++        if waited<compiler_exit:linkers.append(event)
++    check(len(linkers)==1,'positive build lacks one directly reaped linker child');_,pid,path,args,line=linkers[0]
++    check(path==args[0]==pre['clang']['path'] and args.count(output)==1 and api.option(args,'-o')==output and args.count(pre['runtime']['path'])==1 and exec_environment(line,check)==raw['environment'],'positive linker executable, runtime archive or environment differs')
++    if context['identity'].get('held_proof')=='invocation-bracket-v1':finite_live_build_samples(api,tier,context,raw,events,compiler_event,linkers[0],data)
+     mode=context['join_modes'][tier]
+     if mode=='fresh-image-run':check(raw['new_image_sha256']!=raw['old_image_sha256'] and meta['argv']==[api.option(argv,'-o')] and meta['controller_sha256']==sha(data('native_controller')) and meta['image_identity_before_after'] is True,'fresh image must use its own native withdrawal/run')
+-    elif mode=='same-image-content-join':check(raw['new_image_sha256']==raw['old_image_sha256']==meta['image_sha256'] and meta['argv']==context['raw_obj']('prior_'+tier+'_meta')['argv'] and raw['elf_identical'] is True,'saved native content join differs')
++    elif mode=='same-image-content-join':check(raw['new_image_sha256']==raw['old_image_sha256']==meta['image_sha256'] and meta['argv']==context.get('identity_obj',context['raw_obj'])('prior_'+tier+'_meta')['argv'] and raw['elf_identical'] is True,'saved native content join differs')
+     else:check(False,'undeclared native image join')
+ 
+ 
+ def finite_identity_gate(api,tier,mode,context,build,meta,child,first,trace,data):
+-    check=api.require;raw=context['raw_obj']('gate_'+tier+'_'+mode+'_meta');br=context['raw_obj']('gate_bracket');positive=context['raw_obj'](tier+'_build_json');pre=br['fd_before'];post=br['fd_after'];product=context['product'];argv=child[3];paths={'cli':argv[0],'runtime':api.runtime_argument(argv),'clang':api.option(argv,'--clang')};check(br['fd_unchanged'] is True and pre==post and set(pre)==set(paths) and all(pre[k]['path']==paths[k] and pre[k]['fd_realpath']==positive['fd_before'][k]['fd_realpath'] and pre[k]['sha256']==product[k] and raw['fd_fstat_before'][k]==raw['fd_fstat_after'][k]==pre[k]['fstat'] and all(positive['fd_before'][k]['fstat'].get(field)==value for field,value in pre[k]['fstat'].items()) for k in paths),'gate held FD bracket, compiler tuple or fstat differs')
+-    records=[x for x in br['controls'] if x['tier']==tier and x['kind']==mode];check(len(records)==1 and records[0]['record_sha256']==sha(data('gate_'+tier+'_'+mode+'_meta')) and br['controller_sha256']==raw['controller_sha256']==sha(data('gate_controller')) and raw['corrected_gate_record_sha256']==sha(data('prior_gate_'+tier+'_'+mode+'_meta')) and raw['actual_compiler_path']==child[2]==paths['cli'] and raw['actual_compiler_argv']==raw['build_argv']==argv and raw['actual_compiler_environment']==positive['environment']==exec_environment(trace.splitlines()[child[0]],check) and api.comparable_build(argv)==api.comparable_build(positive['build_argv']) and raw['compiler_child_exit_code']==1 and raw['supervisor_exit_code']==0 and raw['image_absent_before'] is True and raw['image_absent_after'] is True and raw['source_negative_sha256']==meta['negative_launcher_sha256'],'gate raw compiler, environment, graph or no-image proof differs')
++    check=api.require;io=context.get('identity_obj',context['raw_obj']);raw=io('gate_'+tier+'_'+mode+'_meta');br=io(tier+'_gate_bracket' if context.get('exec_policy') else 'gate_bracket');positive=io(tier+'_build_json');pre=br['fd_before'];post=br['fd_after'];product=context['product'];argv=child[3];paths={'cli':argv[0],'runtime':api.runtime_argument(argv),'clang':api.option(argv,'--clang')};mode_proof=finite_held_identity(api,context,pre,post,paths,product,'gate');check(br['fd_unchanged'] is True,'gate held FD bracket differs')
++    if mode_proof=='read-bracket-v1':check(all(pre[k]['fd_realpath']==positive['fd_before'][k]['fd_realpath'] and raw['fd_fstat_before'][k]==raw['fd_fstat_after'][k]==pre[k]['fstat'] and all(positive['fd_before'][k]['fstat'].get(field)==value for field,value in pre[k]['fstat'].items()) for k in paths),'gate held FD bracket, compiler tuple or fstat differs')
++    else:check(all(pre[k]==positive['fd_before'][k] for k in paths),'gate product differs from positive invocation bracket')
++    if mode_proof=='invocation-bracket-v1':
++        samples=raw.get('live_cli_samples',[]);check(len(samples)==context['identity']['live_gate_samples'][tier] and all(x['pid']==int(child[1]) and x['proc_exe']=='/proc/'+child[1]+'/exe' and x['resolved_target']==pre['cli']['canonical_path'] and x['matches_held_cli_fd'] is True and all(x[f]==pre['cli'][f] for f in ('dev','ino','bytes','ctime_ns','mtime_ns','mode')) for x in samples),'gate live compiler sample differs')
++    records=[x for x in br['controls'] if x['tier']==tier and x['kind']==mode];check(len(records)==1 and records[0]['record_sha256']==sha(data('gate_'+tier+'_'+mode+'_meta')) and br['controller_sha256']==raw['controller_sha256']==sha(data(tier+'_gate_controller' if context.get('exec_policy') else 'gate_controller')) and (context.get('exec_policy') or raw['corrected_gate_record_sha256']==sha(data('prior_gate_'+tier+'_'+mode+'_meta'))) and raw['actual_compiler_path']==child[2]==paths['cli'] and raw['actual_compiler_argv']==raw['build_argv']==argv and raw['actual_compiler_environment']==positive['environment']==exec_environment(trace.splitlines()[child[0]],check) and api.comparable_build(argv)==api.comparable_build(positive['build_argv']) and raw['compiler_child_exit_code']==1 and raw['supervisor_exit_code']==0 and ((raw.get('image_absent_before') is True and raw.get('image_absent_after') is True) or (context.get('exec_policy') and raw.get('image_exists') is False)) and raw['source_negative_sha256']==meta['negative_launcher_sha256'],'gate raw compiler, environment, graph or no-image proof differs')
+ 
+ 
+ def adapt_selected_finite(api,family,manifest,binding,source,file,data,text,obj,entry):
+     """Normalize a versioned semantic role binding into the same finite core."""
++    if manifest.get('identity',{}).get('capture_format')=='held-supervised-v1':
++        from extensions.data_resource959_v1.identity_roles import HeldCapture
++        producer=HeldCapture(api,manifest,data,obj);context=producer.context(entry,binding)
++        return finite_core(api,family,source,binding,file,data,text,producer.object,context)
+     from extensions.successor959_v1 import authority as successor
+     require=api.require;raw_obj=obj;obj,run=finite_identity_normalize(api,manifest,raw_obj,data);assessment=obj('assessment');require(source==manifest['source'] and binding['source_leaf']==source['path'] and run['family']==family and run['revision']==assessment['revision']==api.COHORT['imre_revision'] and assessment['canonical_denominator']==manifest['canonical_denominator'] and assessment['observed_originals']==manifest['observed_originals'] and assessment['other_originals_not_run']==manifest['other_originals_not_run'], 'finite source/denominator/revision differs');validate_stock_source(file('stock_source'),None,source,None,require);successor.donor(api,entry,assessment['product']);require(sha(data('positive_launcher'))==assessment['launcher_sha256'] and assessment['stock_python_version']=='Python '+api.COHORT['cpython_version'], 'finite launcher/stock identity differs');identity=binding['stock_interpreter'];expected=successor.predecessor_stock(api);require((identity['sha256'],identity['version'])==(assessment['stock_python_sha256'],assessment['stock_python_version'])==expected and Path(identity['path']).is_absolute(), 'finite stock identity differs from public predecessor');probe=obj('gate_probe_build');require(probe['source_sha256']==sha(data('gate_probe_source')), 'finite gate probe source differs')
+     return finite_core(api,family,source,binding,file,data,text,obj,{'legacy':False,'run':run,'platform':dict(api.COHORT['platform']),'gate_tiers':('O0','O3'),'poison_module':binding['poison_module'],'operations':binding['gate_operations'],'probe':probe,'observed':manifest['observed_originals'],'withdrawal':binding['withdrawal'],'stock_interpreter':identity,'identity':manifest['identity'],'roles':manifest['roles'],'join_modes':manifest['identity']['join_modes'],'raw_obj':raw_obj,'product':assessment['product'],'source':source})
+@@ -655,7 +886,7 @@
+     artifacts = manifest['roles'] if kind=='finite-selected-v1' else binding.get('artifacts'); file = bound_artifacts(api,entry,artifacts)
+     def data(role):
+         if entry_json:
+-            loc=manifest['base_roles'][role.removeprefix('prior_')] if role.startswith('prior_') else artifacts[role]
++            loc=artifacts[role] if role in artifacts else manifest['base_roles'][role.removeprefix('prior_')]
+             return api.bound_bytes(entry,loc)
+         return file(role).read_bytes()
+     def text(role): return data(role).decode()
+@@ -847,7 +1078,7 @@
+ 
+ 
+ def validate_record(api, r, eligible, check, entry):
+-    versioned=entry.get('adapter')=='raw-control-v2';locator=entry.get('binding') if versioned else entry.get('sources',{}).get('binding')
++    versioned=entry.get('adapter') in {'raw-control-v2','raw-control-v3'};locator=entry.get('binding') if versioned else entry.get('sources',{}).get('binding')
+     check(isinstance(locator,str), 'missing normalized raw-control binding')
+     digest = api.binding_digest(entry, locator)
+     activation_digest = sha(json.dumps(entry, sort_keys=True).encode())
+--- a/benchmarks/compatibility/scorecard.py
++++ b/benchmarks/compatibility/scorecard.py
+@@ -77,31 +77,43 @@
+ 
+ 
+ 
+-def successor_entry(name):
++def activated_extension_entries():
+     import source_stage_pins
+-    if not is_snapshot() or COHORT['imre_revision']!='95908fb0acadc2a67304a8080e584deaef395746' or getattr(source_stage_pins,'REVISION_959_SUCCESSOR',None) is None:return None
++    if not is_snapshot() or COHORT['imre_revision']!='95908fb0acadc2a67304a8080e584deaef395746' or getattr(source_stage_pins,'REVISION_959_SUCCESSOR',None) is None:return {}
+     from extensions.successor959_v1 import authority as successor
+-    return successor.entry_for(sys.modules[__name__],name)
++    entries=dict(successor.activated_entries(sys.modules[__name__])['families'])
++    if getattr(source_stage_pins,'REVISION_959_RESOURCE',None) is not None:
++        from extensions.data_resource959_v1 import authority as resource
++        extra=resource.activated_entries(sys.modules[__name__])['families'];require(not set(entries)&set(extra),'append-only extension family collision');entries.update(extra)
++    return entries
++
++
++def successor_entry(name):return activated_extension_entries().get(name)
++
++
++def extension_authority(entry):
++    if entry.get('adapter')=='raw-control-v3':
++        from extensions.data_resource959_v1 import authority
++    else:
++        from extensions.successor959_v1 import authority
++    return authority
+ 
+ 
+ def bound_artifact(entry, locator):
+-    if entry.get('adapter')=='raw-control-v2':
+-        from extensions.successor959_v1 import authority as successor
+-        return successor.artifact(sys.modules[__name__],entry,locator)
++    if entry.get('adapter') in {'raw-control-v2','raw-control-v3'}:
++        return extension_authority(entry).artifact(sys.modules[__name__],entry,locator)
+     return checked_file(repository_file(locator,DATA_ROOT),binding_digest(entry,locator))
+ 
+ 
+ def bound_bytes(entry,locator):
+-    if entry.get('adapter')=='raw-control-v2':
+-        from extensions.successor959_v1 import authority as successor
+-        return successor.read(sys.modules[__name__],entry,locator)
++    if entry.get('adapter') in {'raw-control-v2','raw-control-v3'}:
++        return extension_authority(entry).read(sys.modules[__name__],entry,locator)
+     return bound_artifact(entry,locator).read_bytes()
+ 
+ 
+ def binding_digest(entry, locator):
+     if 'files' not in entry:
+-        from extensions.successor959_v1 import authority as successor
+-        return successor.digest(sys.modules[__name__],entry,locator)
++        return extension_authority(entry).digest(sys.modules[__name__],entry,locator)
+     files = entry.get("files", {})
+     require(isinstance(files, dict) and isinstance(files.get(locator), str) and bool(HEX64.fullmatch(files[locator])), f"snapshot file is not digest-bound: {locator}")
+     return files[locator]
+@@ -630,7 +642,7 @@
+ 
+ def validate_activated_family_record(r, eligible, check, entry):
+     adapter = entry.get("adapter"); source = r["source"]; family = r["family"]; d = DATA_ROOT / "evidence" / family
+-    if adapter in {'raw-control-v1','raw-control-v2'}:
++    if adapter in {'raw-control-v1','raw-control-v2','raw-control-v3'}:
+         import raw_control
+         return raw_control.validate_record(sys.modules[__name__], r, eligible, check, entry)
+     if adapter == "shared-family-v1": return validate_family_artifact_record(r, eligible, check)
+@@ -861,7 +873,7 @@
+     if vendored.is_file():
+         stat = vendored.stat()
+         require(source_digests(vendored, stat.st_mtime_ns, stat.st_size) == (source["sha256"], source["git_blob"]), f"{r['id']}: source hash differs from vendored upstream")
+-    if is_snapshot() and ((successor_entry(r['family']) or activation_entry(r['family']) or {}).get('adapter') in {'raw-control-v1','raw-control-v2'}):
++    if is_snapshot() and ((successor_entry(r['family']) or activation_entry(r['family']) or {}).get('adapter') in {'raw-control-v1','raw-control-v2','raw-control-v3'}):
+         return  # validate_snapshot_record already verified raw finite-runner events and locators.
+     module = source_module(source["path"])
+     for tier, run in r["runs"].items():
+@@ -948,8 +960,7 @@
+     if is_snapshot() and kind=='stdlib':
+         import source_stage_pins
+         if COHORT['imre_revision']=='95908fb0acadc2a67304a8080e584deaef395746' and getattr(source_stage_pins,'REVISION_959_SUCCESSOR',None) is not None:
+-            from extensions.successor959_v1 import authority as successor
+-            for name,entry in successor.activated_entries(sys.modules[__name__])['families'].items():
++            for name,entry in activated_extension_entries().items():
+                 path=bound_artifact(entry,entry['receipt'])
+                 for line in path.read_text().splitlines():
+                     r=validate_record(json.loads(line),kind,names,frozen_scripts);key=(r['family'],r['id'],r['occurrence']);require(key not in seen and r['family']==name,'successor receipt collides or differs from its entry');seen.add(key);verify_stdlib_evidence(r);records.append(r)
+--- a/benchmarks/compatibility/extensions/successor959_v1/authority.py
++++ b/benchmarks/compatibility/extensions/successor959_v1/authority.py
+@@ -33,6 +33,12 @@
+     lexical=api.ROOT/value
+     api.require(not any(part.is_symlink() for part in (lexical,*lexical.parents) if part.is_relative_to(api.ROOT)), 'successor symlink path')
+     return api.repository_file(value, api.ROOT)
++
++
++def approved_digest(api,path,digest):
++    if getattr(source_stage_pins,'REVISION_959_RESOURCE',None) is None:return digest
++    from extensions.data_resource959_v1 import authority as resource
++    return resource.expected(api,path,digest)
+ 
+ 
+ def verify_stage(api, manifest):
+@@ -53,7 +59,7 @@
+     ext=(api.ROOT/BASE).resolve();api.require(ext.is_dir() and ext.is_relative_to(api.ROOT.resolve()), "successor extension directory escapes repository")
+     api.require(not any(p.is_symlink() for p in ext.rglob('*')), 'unbound successor symlink')
+     actual = {p.relative_to(api.ROOT).as_posix() for p in ext.rglob("*") if p.is_file() and p not in {ext/"manifest.json",ext/"activation.json"}}
+-    api.require(set(files) == actual and all(loc.startswith(BASE+'/') and api.HEX64.fullmatch(digest) and raw_control.sha(safe_path(api,loc).read_bytes()) == digest for loc,digest in files.items()), 'successor shared map is incomplete, unbound or altered')
++    api.require(set(files) == actual and all(loc.startswith(BASE+'/') and api.HEX64.fullmatch(digest) and raw_control.sha(safe_path(api,loc).read_bytes()) == approved_digest(api,loc,digest) for loc,digest in files.items()), 'successor shared map is incomplete, unbound or altered')
+     amended={BASE+'/'+x for x in ('authority.py','check_stage.py','generate.py','patches/validators.patch')}
+     api.require(set(prior_stage['files'])<=set(files) and all((loc in amended and raw_control.sha(raw_control.git(api.ROOT,'show','--no-textconv',STAGE_PREDECESSOR['commit']+':'+loc))==digest) or files[loc]==digest for loc,digest in prior_stage['files'].items()), 'f178 source/evidence bytes removed or changed outside the amendment')
+     changed = {};target_set={f'benchmarks/compatibility/{name}' for name in ('scorecard.py','raw_control.py','script_control.py','test_revision959_stage.py')}
+@@ -74,7 +80,7 @@
+             for path,digest in entry['files'].items():
+                 api.require(path not in shared or shared[path]==digest, 'predecessor digest conflict');shared[path]=digest
+     for path,digest in shared.items():
+-        expected=changed.get(path,digest)
++        expected=approved_digest(api,path,changed.get(path,digest))
+         api.require(raw_control.sha(safe_path(api,path).read_bytes())==expected, 'predecessor artifact or patched source digest differs: '+path)
+     inputs=manifest.get('inputs');shared_roles=manifest.get('shared_roles');used=set();references=set()
+     api.require(isinstance(inputs,dict) and inputs and len(set(inputs.values()))==len(inputs) and isinstance(shared_roles,dict), 'invalid successor input index')
+@@ -142,14 +148,24 @@
+ 
+ @lru_cache(maxsize=None)
+ def archive_members(api,archive,config_json):
+-    cfg=json.loads(config_json);raw=safe_path(api,archive).read_bytes();outer=safe_path(api,cfg['outer_seal']).read_bytes();api.require(raw_control.sha(outer)==cfg['outer_sha256'],'identity outer seal differs');obj=json.loads(outer);api.require(obj.get('credit')==0 and obj.get('files')==[{'name':Path(archive).name,'bytes':len(raw),'sha256':raw_control.sha(raw)}],'identity archive differs from outer seal')
++    """Resolve immutable safe archive members under a declared versioned seal/manifest format."""
++    cfg=json.loads(config_json);raw=safe_path(api,archive).read_bytes();outer=safe_path(api,cfg['outer_seal']).read_bytes();api.require(raw_control.sha(outer)==cfg['outer_sha256'],'identity outer seal differs');obj=json.loads(outer);outer_format=cfg.get('outer_format','single-archive-v1');manifest_format=cfg.get('manifest_format','files-map-v1')
++    if outer_format=='single-archive-v1':api.require(obj.get('credit')==0 and obj.get('files')==[{'name':Path(archive).name,'bytes':len(raw),'sha256':raw_control.sha(raw)}], 'identity archive differs from outer seal')
++    elif outer_format=='archive-fields-v1':api.require(obj.get('credit')==0 and Path(obj.get('archive_path','')).name==Path(archive).name and obj.get('archive_bytes')==len(raw) and obj.get('archive_sha256')==raw_control.sha(raw) and obj.get('member_list_sha256')==cfg['manifest_sha256'], 'identity archive fields differ from outer seal')
++    else:api.require(outer_format=='member-manifest-v1' and obj.get('credit')==0 and cfg.get('archive_sha256')==raw_control.sha(raw), 'identity archive or manifest-only seal differs')
+     with tarfile.open(safe_path(api,archive)) as t:
+         result={}
+         for x in t.getmembers():
+             if x.name=='.' and x.isdir():continue
+             name=x.name.removeprefix('./');api.require(x.isreg() and name and name not in result and not Path(name).is_absolute() and '..' not in Path(name).parts and Path(name).as_posix()==name and x.name in {name,'./'+name},'unsafe, duplicate or nonregular identity archive member');result[name]=t.extractfile(x).read()
+-    member=cfg['manifest_member'];api.require(member in result and raw_control.sha(result[member])==cfg['manifest_sha256'],'identity member manifest differs');m=json.loads(result[member]);extra={member}|({cfg['additional_seal']} if cfg['additional_seal'] else set());api.require(m.get('schema')==cfg['manifest_schema'] and m.get('credit')==0 and len(m['files'])==cfg['members'] and set(result)==set(m['files'])|extra and all(result.get(k) is not None and v=={'bytes':len(result[k]),'sha256':raw_control.sha(result[k])} for k,v in m['files'].items()),'identity archive contains unbound or altered members')
+-    if cfg['additional_seal']:api.require(json.loads(result[cfg['additional_seal']]).get('manifest_sha256')==cfg['manifest_sha256'],'identity inner seal differs')
++    member=cfg['manifest_member'];api.require(member in result and raw_control.sha(result[member])==cfg['manifest_sha256'],'identity member manifest differs');m=json.loads(result[member]);extra={member}|({cfg['additional_seal']} if cfg.get('additional_seal') else set())
++    if manifest_format=='files-map-v1':files=m.get('files');api.require(isinstance(files,dict) and m.get('schema')==cfg['manifest_schema'],'identity files-map manifest schema differs')
++    else:
++        api.require(manifest_format=='members-list-v1' and isinstance(m.get('members'),list),'unknown identity member manifest format');items=m['members'];api.require(all(isinstance(v,dict) and set(v)=={'path','bytes','sha256'} and isinstance(v['path'],str) for v in items) and len({v['path'] for v in items})==len(items),'duplicate or malformed identity list member');files={v['path']:{'bytes':v['bytes'],'sha256':v['sha256']} for v in items}
++    api.require(m.get('credit')==0 and len(files)==cfg['members'] and set(result)==set(files)|extra and all(result.get(k) is not None and v=={'bytes':len(result[k]),'sha256':raw_control.sha(result[k])} for k,v in files.items()), 'identity archive contains unbound or altered members')
++    if outer_format=='member-manifest-v1':api.require(outer==result[member], 'outer and archived member manifests differ')
++    if outer_format=='archive-fields-v1':api.require(obj.get('member_count')==len(result),'identity archive member count differs')
++    if cfg.get('additional_seal'):api.require(json.loads(result[cfg['additional_seal']]).get('manifest_sha256')==cfg['manifest_sha256'],'identity inner seal differs')
+     return result
+ 
+ 
+--- a/benchmarks/compatibility/test_revision959_stage.py
++++ b/benchmarks/compatibility/test_revision959_stage.py
+@@ -90,10 +90,15 @@
+             with patch.object(scorecard,'DATA_ROOT',SNAPSHOT),patch.object(scorecard,'COHORT',{**scorecard.CANONICAL_COHORT,'imre_revision':PIN}):
+                 activation=scorecard.snapshot_activation();entries=[*activation['families'].values(),*activation['script_shards'].values()];self.assertTrue(entries)
+                 public=script_control.authority(scorecard,entries[0]);self.assertEqual(public,m);self.assertEqual(manifest.read_bytes(),raw_control.git(scorecard.ROOT,'show','--no-textconv',f"{pin['commit']}:{pin['manifest']}"))
+-                verified={entry['receipt'] for entry in entries};self.assertEqual(verified,{p.relative_to(scorecard.ROOT).as_posix() for p in (SNAPSHOT/'verified').rglob('*.jsonl')});self.assertTrue(all(entry['source_stage']==pin for entry in entries))
++                verified={entry['receipt'] for entry in entries}|{entry['receipt'] for entry in scorecard.activated_extension_entries().values()};self.assertEqual(verified,{p.relative_to(scorecard.ROOT).as_posix() for p in (SNAPSHOT/'verified').rglob('*.jsonl')});self.assertTrue(all(entry['source_stage']==pin for entry in entries))
+                 extras={str((SNAPSHOT/name).relative_to(scorecard.ROOT)) for name in ('activation.json','README.md','docs/stdlib.md')}|verified;self.assertEqual(actual,set(files)|extras)
+                 fs,scripts=scorecard.summary();self.assertEqual((fs['fnmatch']['paired'],fs['fnmatch']['receipts']),(24,24));self.assertEqual({r['id'] for r in scripts if r['paired']},{'uv-10','uv-26','uv-29','ty-05'})
+-        for loc,digest in {**m['sources'],**files}.items():self.assertEqual(sha(scorecard.ROOT/loc),digest,loc)
++        for loc,digest in m['sources'].items():
++            if pin is not None and getattr(script_control.source_stage_pins,'REVISION_959_SUCCESSOR',None) is not None:
++                from extensions.successor959_v1 import authority as successor
++                successor.legacy_file(scorecard,loc,digest)
++            else:self.assertEqual(sha(scorecard.ROOT/loc),digest,loc)
++        for loc,digest in files.items():self.assertEqual(sha(scorecard.ROOT/loc),digest,loc)
+         for id,ref in m['bindings']['script'].items():
+             binding=json.loads((scorecard.ROOT/ref['path']).read_text());self.assertEqual(ref['sha256'],sha(scorecard.ROOT/ref['path']));self.assertEqual(ref['strict_source_control'],binding['strict_source_control']);self.assertEqual(binding['id'],id)
+         tuple=m['build_tuples']['ruff_a'];tool=json.loads((SNAPSHOT/'custody/ruff-a-native-toolchain.json').read_text());ref=tuple['retrospective_transcript'];self.assertEqual(tuple['cargo_build_argv'],tool['cargo_build_argv']);self.assertEqual(tuple['cargo_build_environment'],tool['cargo_build_environment']);self.assertEqual(ref['sha256'],sha(scorecard.ROOT/ref['path']));self.assertEqual(tuple['custody_files'][ref['path']],ref['sha256'])
