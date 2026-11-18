@@ -3267,12 +3267,14 @@ unsafe extern "C" fn imre_dyn_replacement_positional_call_at(
     // SAFETY: the generated caller still owns the active context and both words.
     let context = unsafe { &*ctx };
     if context.heap.execution.pending.is_some() {
+        // SAFETY: the generated caller keeps the independent proof word writable.
         unsafe { proof.write(NONE) };
     } else if fresh_text.get()
         && !effect.get()
         && context.heap.private_replacement_frame(scope)
         && context.heap.is_fresh_text_list(result)
     {
+        // SAFETY: the generated caller keeps the independent next word writable.
         unsafe { next.write(result) };
     }
     result
@@ -3381,6 +3383,10 @@ unsafe fn scoped_call(
 
 /// Call with a caller-specific return-dispatch observer. Preparation must clear
 /// any ownership proof before returning a call that can execute arbitrary code.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the native call operands and each effect boundary require independent hooks"
+)]
 unsafe fn scoped_call_checked(
     context: *mut Context,
     span: Option<&[u32; 4]>,
@@ -4349,6 +4355,7 @@ unsafe extern "C" fn imre_dyn_replacement_statement(
     let (ctx, live) = unsafe { (&mut *ctx, live_handles(live, len)) };
     // SAFETY: the independent compiler-local proof word is writable throughout the checkpoint.
     if unsafe { *proof } != NONE && !ctx.replacement_checkpoint_safe(scope) {
+        // SAFETY: the same proof word remains writable until this checkpoint returns.
         unsafe { proof.write(NONE) };
     }
     // SAFETY: file and roots have the ordinary native statement lifetime. The
@@ -4368,6 +4375,7 @@ unsafe extern "C" fn imre_dyn_replacement_statement(
         )
     };
     if let Err(error) = result {
+        // SAFETY: the generated caller still owns the independent proof word.
         unsafe { proof.write(NONE) };
         finish(ctx, Err(error));
     }
