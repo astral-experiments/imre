@@ -1,0 +1,13 @@
+{
+  "archive_sha256_metadata_only": "c9cfcd02e0cc62dc7928119d68a4c4da5125f8030657c1c52b2cd3d49cb554b0",
+  "capture_source_sha256": "18f97e56290a9ad54d3053c16e128462a00bb04974930beb2e621fdbc65afecf",
+  "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+  "compiler_sha256": "e2d0886948f766332df6370a2e3140a5be5c8b0fc108224ef7242fc38fc58bd4",
+  "custody": "donor-built transferred binary; no receiver build",
+  "original_summary_sha256": "5f1d6696c4ec3c13dbcc0c086541ff235a8f765950f5ac1d87eaf42782c775c7",
+  "python_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+  "revision": "95908fb0acadc2a67304a8080e584deaef395746",
+  "runtime_sha256": "33ae5dfef5eff3c1fac5e0a5e19263daa980d7d80a5917979b426e85fa128c5c",
+  "supervisor_sha256": "36cce31bde9b0e1e7847d20d4a0821b2b509dca186d0b7c0231bb3e5fb14c88a",
+  "tree": "e6405a3243de706adcab772bf16942808d6ca6fb"
+}

@@ -1,0 +1,110 @@
+{
+  "actual_child_argv": [
+    "/workspace/.toolchains/uv-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "-B",
+    "scripts/transform_readme.py",
+    "--target",
+    "pypi"
+  ],
+  "actual_child_environment": {
+    "HOME": "/workspace/scratch/uvb-959-stock-before-v2/uv-29/home",
+    "LC_ALL": "C.UTF-8",
+    "NO_COLOR": "1",
+    "PATH": "/usr/bin:/bin",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONHASHSEED": "0",
+    "PYTHONNOUSERSITE": "1",
+    "TZ": "UTC"
+  },
+  "after": {
+    "README.md": {
+      "bytes": 9512,
+      "sha256": "4512c75b1cb5e273b21d0706ba797605e24d3072724fa878c0ed4a9ccea5bb65"
+    },
+    "pyproject.toml": {
+      "bytes": 7093,
+      "sha256": "4092f71e82353cb21e783343b3771758eb5ee9153be62e079022e82aa6d4dc08"
+    },
+    "scripts/transform_readme.py": {
+      "bytes": 4577,
+      "sha256": "5e2667b59cd363c887fbcae04d14db51e12995a053478e7c40ce50e506d3fcdc"
+    }
+  },
+  "anchor_raw_line_sha256": "8c3ead8936e565f1729d4183bd215b3bd04993140087cde57997e65746c65f3b",
+  "argv": [
+    "/workspace/.toolchains/uv-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "-B",
+    "scripts/transform_readme.py",
+    "--target",
+    "pypi"
+  ],
+  "before": {
+    "README.md": {
+      "bytes": 9859,
+      "sha256": "57a84a5a635f30e3a26541ebc16ca690944a7750f05713b1af92d3170b58f704"
+    },
+    "pyproject.toml": {
+      "bytes": 7093,
+      "sha256": "4092f71e82353cb21e783343b3771758eb5ee9153be62e079022e82aa6d4dc08"
+    },
+    "scripts/transform_readme.py": {
+      "bytes": 4577,
+      "sha256": "5e2667b59cd363c887fbcae04d14db51e12995a053478e7c40ce50e506d3fcdc"
+    }
+  },
+  "compiler_revision": "95908fb0acadc2a67304a8080e584deaef395746",
+  "controller_sha256": "68f08c3af82db42c41849eefebbdf97cd3a462d33437b36eb63baf25a5cead32",
+  "cwd": "/workspace/scratch/uvb-959-stock-before-v2/uv-29/work",
+  "effects_sha256": "faf27cd05d86446c13a6201bfb1904631c348a59c33f4f60d9578958be56b653",
+  "environment": {
+    "HOME": "/workspace/scratch/uvb-959-stock-before-v2/uv-29/home",
+    "LC_ALL": "C.UTF-8",
+    "NO_COLOR": "1",
+    "PATH": "/usr/bin:/bin",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONHASHSEED": "0",
+    "PYTHONNOUSERSITE": "1",
+    "TZ": "UTC"
+  },
+  "exit_code": 0,
+  "historical_authority": "880648b620f57905a495eb51fbb4600755ee0c54",
+  "interpreter": {
+    "path": "/workspace/.toolchains/uv-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "resolved_path": "/workspace/.toolchains/uv-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+    "version": "Python 3.14.5"
+  },
+  "original_normalized_invocation": {
+    "argv": [
+      "$PYTHON",
+      "-B",
+      "scripts/transform_readme.py",
+      "--target",
+      "pypi"
+    ],
+    "cwd": "$WORK",
+    "env": {
+      "HOME": "$TASK_HOME",
+      "LC_ALL": "C.UTF-8",
+      "NO_COLOR": "1",
+      "PATH": "/usr/bin:/bin",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONHASHSEED": "0",
+      "PYTHONNOUSERSITE": "1",
+      "TZ": "UTC"
+    }
+  },
+  "seconds": 0.6324,
+  "source": {
+    "commit": "24688aaca1e7fd104437a0909d5db3afdc7dcdb0",
+    "path": "scripts/transform_readme.py",
+    "repo": "https://github.com/astral-sh/uv",
+    "sha256": "5e2667b59cd363c887fbcae04d14db51e12995a053478e7c40ce50e506d3fcdc"
+  },
+  "source_sha256": "5e2667b59cd363c887fbcae04d14db51e12995a053478e7c40ce50e506d3fcdc",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "timed_out": false,
+  "trace_bytes": 54935,
+  "trace_sha256": "b0d5002df0164cc003d597943c5ce23c5238bc7ae735daebb1466432c0d3f183"
+}

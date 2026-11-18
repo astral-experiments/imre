@@ -1077,3 +1077,72 @@ fn set_done_after_body_exit_releases_the_unclaimed_native_handle() {
     assert!(status(&mut ctx, &handle, Status::IsDone));
     handle.join(None).unwrap();
 }
+
+#[test]
+fn owned_wait_validation_poll_consumes_once_and_respects_deadline() {
+    use crate::dynamic::thread_lock::{Lock, WaitStep};
+    use crate::objects::locks::WaitPhase;
+
+    let gate = Arc::<PrimitiveLock>::default();
+    let wait = OwnedWait::Acquire(None, NONE, Lock::Primitive(Arc::clone(&gate)));
+    assert!(matches!(wait.poll(WaitPhase::Initial), WaitStep::Ready));
+    assert!(gate.locked());
+    assert!(matches!(wait.poll(WaitPhase::Initial), WaitStep::Pending));
+    let expired = OwnedWait::Acquire(
+        Some(Deadline::after(Duration::ZERO)),
+        NONE,
+        Lock::Primitive(Arc::clone(&gate)),
+    );
+    assert!(matches!(expired.poll(WaitPhase::Initial), WaitStep::TimedOut));
+    assert!(gate.release().is_ok());
+    assert!(matches!(expired.poll(WaitPhase::Initial), WaitStep::Ready));
+    assert!(gate.locked());
+    assert!(gate.release().is_ok());
+}
+
+#[test]
+fn owned_wait_validation_public_acquire_timeout_wake_and_race() {
+    use std::sync::atomic::AtomicUsize;
+    use std::time::Instant;
+
+    let mut ctx = context();
+    let parked = Arc::<AtomicUsize>::default();
+    ctx.heap.parked_count_probe = Some(Arc::clone(&parked));
+    let gate = Arc::<PrimitiveLock>::default();
+    let receiver = ctx.alloc(Value::PrimitiveLock(Arc::clone(&gate)));
+    let acquire = ctx.lookup_attr(receiver, "acquire").unwrap();
+    let release = ctx.lookup_attr(receiver, "release").unwrap();
+    assert_eq!(ctx.call(acquire, vec![], vec![]).unwrap(), boolean(true));
+    let zero = ctx.int(0);
+    assert_eq!(ctx.call(acquire, vec![boolean(true), zero], vec![]).unwrap(), boolean(false));
+    let short = ctx.alloc(Value::Float(0.02));
+    let started = Instant::now();
+    assert_eq!(ctx.call(acquire, vec![boolean(true), short], vec![]).unwrap(), boolean(false));
+    assert!(started.elapsed() >= Duration::from_millis(10));
+    assert!(started.elapsed() < Duration::from_secs(2));
+    thread::scope(|scope| {
+        let gate = Arc::clone(&gate);
+        let parked = Arc::clone(&parked);
+        scope.spawn(move || {
+            let end = Instant::now() + Duration::from_secs(3);
+            while parked.load(Ordering::Acquire) == 0 {
+                assert!(Instant::now() < end, "acquire did not park");
+                thread::yield_now();
+            }
+            assert!(gate.release().is_ok());
+        });
+        assert_eq!(ctx.call(acquire, vec![], vec![]).unwrap(), boolean(true));
+    });
+    assert_eq!(ctx.call(release, vec![], vec![]).unwrap(), NONE);
+    for _ in 0..16 {
+        assert!(gate.acquire(false, None));
+        thread::scope(|scope| {
+            let gate = Arc::clone(&gate);
+            scope.spawn(move || assert!(gate.release().is_ok()));
+            let limit = ctx.alloc(Value::Float(1.0));
+            assert_eq!(ctx.call(acquire, vec![boolean(true), limit], vec![]).unwrap(), boolean(true));
+        });
+        assert_eq!(ctx.call(release, vec![], vec![]).unwrap(), NONE);
+    }
+    assert_eq!(parked.load(Ordering::Acquire), 0);
+}

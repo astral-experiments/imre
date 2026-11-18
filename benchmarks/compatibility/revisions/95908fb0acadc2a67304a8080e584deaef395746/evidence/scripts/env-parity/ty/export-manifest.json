@@ -1,0 +1,54 @@
+{
+  "capture/controller.py": {
+    "bytes": 4898,
+    "sha256": "ff6cd21e4efa91f0b513e5efcf9cf7e0b9feb4b6d559f0fc48443371ce0e48fe"
+  },
+  "mask-smoke.json": {
+    "bytes": 1227,
+    "sha256": "9aa87c262d7a4e1bfeef96eb5662acf663d8d3e929d0169123b009f3b553899c"
+  },
+  "mask-smoke.trace": {
+    "bytes": 16534,
+    "sha256": "1753bb5903fdf0f8e990921fa2ef81f9e833bf68784e707fa80e7593ebd88a9b"
+  },
+  "ty-05/O0/effects.json": {
+    "bytes": 214,
+    "sha256": "57128fff7793fa3839a64d60d2bb067286031e5a6d891ef4771fadaf56c27a3b"
+  },
+  "ty-05/O0/result.json": {
+    "bytes": 3916,
+    "sha256": "1ea25fe55a3331d67bdf39f1d7ce4adde9159ab1084306fabe8945aee5867f4b"
+  },
+  "ty-05/O0/run.trace": {
+    "bytes": 53424,
+    "sha256": "b7ec4724cc3b63020d31842a0c6a071886aa2b268251e27af314b286e637b828"
+  },
+  "ty-05/O0/stderr": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "ty-05/O0/stdout": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "ty-05/O3/effects.json": {
+    "bytes": 214,
+    "sha256": "57128fff7793fa3839a64d60d2bb067286031e5a6d891ef4771fadaf56c27a3b"
+  },
+  "ty-05/O3/result.json": {
+    "bytes": 3916,
+    "sha256": "3247543737fa4fa962e3be911d25a5a5dd920807e259266ff55eb42517f8cb72"
+  },
+  "ty-05/O3/run.trace": {
+    "bytes": 53427,
+    "sha256": "0efbb39a7929df880aa87a1dcbe62763ed6695f25bc59fe303d6a75cc020ea92"
+  },
+  "ty-05/O3/stderr": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "ty-05/O3/stdout": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

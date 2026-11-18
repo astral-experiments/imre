@@ -88,3 +88,15 @@ For each captured observation, provide exactly one raw representation: `stdout` 
 A strict pair additionally requires an independently reviewed entry in `benchmarks/compatibility/frozen/scripts.jsonl`, using `frozen-script.schema.json`. The replay shard cannot supply its own authority. Each anchor binds `id`, `source`, and `normalized_invocation` to an immutable frozen evidence `locator`, plus a SHA-256-verified `raw`, `raw_base64`, or repository-local `raw_path` JSON excerpt. That excerpt contains the same `id`, `source`, and `normalized_invocation`, a nonempty `fixture_scope`, a complete `preimages` map (repository-relative path to SHA-256, or null for an absent input), and a `reference` object with frozen exit code, raw stdout/stderr, raw effect-manifest JSON and their digests. The coordinator must review the excerpt against the frozen campaign evidence before adding an anchor. This separate registry is the trust boundary; the validator checks consistency, not the authenticity of an unreviewed external locator.
 
 For `exact_frozen`, the receipt also supplies `fixture_provenance.preimages.stock`, `.O0`, and `.O3`. All three maps must equal the frozen map, and the current stock exit/output/effects must equal the frozen reference. Only then can exact stock/O0/O3 comparisons produce `paired:true`. For ty-05, the reviewed frozen fixture must include the `dist-workspace.toml` preimage beginning `02d617` and the frozen stock README postimage beginning `8d6a18`; a reconstructed postimage beginning `ea831c` cannot pair. No frozen anchors are inferred or generated from replay outputs.
+
+## Frozen 857 verification
+
+The 857 snapshot is frozen at public commit `d0b396559a8ffda965cb495063b2967847d116aa` ([#9110](https://github.com/astral-experiments/imre/pull/9110)). Its 1,276 verified pairs and 3,163 validated receipts can be reproduced with the verifier and authority from that exact checkout:
+
+```sh
+git worktree add --detach /tmp/imre-857-frozen d0b396559a8ffda965cb495063b2967847d116aa
+cd /tmp/imre-857-frozen
+python3 benchmarks/compatibility/scorecard.py --snapshot 8571ca2dbecabf8d7863c369dc776611fd57d8ad --check --root-summary
+```
+
+Current modified scorecard sources do not validate the frozen 857 snapshot. Its source-stage manifest and activation remain unchanged.

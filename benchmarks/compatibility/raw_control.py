@@ -73,16 +73,33 @@ def sha_lines(text):
     return result
 
 
-def execs(lines, require):
+def exec_sequence(lines, require, count=2):
     calls = [(i, line) for i, line in enumerate(lines) if re.search(r'\bexecve(?:at)?\(', line)]
-    require(len(calls) == 2, 'raw control must execute exactly supervisor and target; a native child exec is unverified')
+    require(len(calls) == count, 'raw control must execute exactly supervisor and target; a native child exec is unverified'
+            if count == 2 else 'raw control has an unverified exec sequence')
     result = []
     for i, line in calls:
         match = EXEC.fullmatch(line)
         require(match is not None, 'raw exec attempt failed, was truncated, or used execveat')
         result.append((i, match[1], json.loads(match[2]), json.loads(match[3])))
-    require(result[0][1] != result[1][1], 'supervisor and target PID must differ')
+    if count > 1: require(result[0][1] != result[-1][1], 'supervisor and target PID must differ')
     return result
+
+
+def execs(lines, require):
+    return exec_sequence(lines, require, 2)
+
+
+def exec_environment(line, require):
+    """Read a complete environment from a verbose strace execve record."""
+    try:
+        values = json.loads(line.rsplit('], ', 1)[1].removesuffix(') = 0'))
+        pairs = [value.split('=', 1) for value in values]
+    except (IndexError, ValueError, TypeError, AttributeError):
+        require(False, 'raw exec environment is absent or truncated')
+    require(isinstance(values, list) and all(len(pair) == 2 for pair in pairs)
+            and len({pair[0] for pair in pairs}) == len(pairs), 'raw exec environment is invalid or duplicated')
+    return dict(pairs)
 
 
 def find(lines, pattern, start=0):
@@ -102,7 +119,7 @@ def exits(lines, parent, child, code, start):
     return waited
 
 
-def trace_gate(text, command, probe, poison_path, diagnostic, require):
+def trace_gate(text, command, probe, poison_path, diagnostic, require, expected_exit=None):
     lines = text.splitlines()
     first, target = execs(lines, require)
     out = command[command.index('-o') + 1]
@@ -113,17 +130,18 @@ def trace_gate(text, command, probe, poison_path, diagnostic, require):
         found = False
         for line in lines[target[0]+1:]:
             m = OPEN.match(line)
-            if m and line.startswith(target[1] + ' ') and json.loads(m[1]) == path and re.search(r'= [0-9]+$', line): found = True
+            if m and line.startswith(target[1] + ' ') and json.loads(m[1]) == path and re.search(r'= [0-9]+(?:<[^>]*>)?$', line): found = True
         require(found, 'gate compiler did not open the actual launcher and imported poison')
     m = re.search(rf'^{target[1]}\s+exit_group\(([1-9][0-9]*)\)', text, re.M)
     require(m is not None, 'gate compiler did not exit nonzero')
+    require(expected_exit is None or int(m[1]) == expected_exit, 'gate compiler exit differs')
     waited = exits(lines, first[1], target[1], int(m[1]), target[0])
     after = stat(lines, first[1], out, True, waited + 1)
     find(lines, rf'^{first[1]}\s+exit_group\(0\)', after + 1)
     require(poison_path in diagnostic and re.search(r'expected\s+int,\s*got\s+bool', diagnostic), 'missing imported int/bool diagnostic')
 
 
-def trace_direct_gate(text, command, probe, diagnostic, require):
+def trace_direct_gate(text, command, probe, diagnostic, require, expected_exit=None):
     lines = text.splitlines(); first, target = execs(lines, require)
     out = command[command.index('-o') + 1]
     require(first[2:] == (probe, [probe, 'gate', out, *command]) and target[2:] == (command[0], command),
@@ -131,9 +149,10 @@ def trace_direct_gate(text, command, probe, diagnostic, require):
     before = stat(lines, first[1], out, True, first[0] + 1)
     require(before < target[0] and any(
         (m := OPEN.match(line)) and line.startswith(target[1] + ' ') and json.loads(m[1]) == command[2]
-        and re.search(r'= [0-9]+$', line) for line in lines[target[0]+1:]), 'direct gate did not open launcher')
+        and re.search(r'= [0-9]+(?:<[^>]*>)?$', line) for line in lines[target[0]+1:]), 'direct gate did not open launcher')
     m = re.search(rf'^{target[1]}\s+exit_group\(([1-9][0-9]*)\)', text, re.M)
     require(m is not None, 'direct gate compiler did not exit nonzero')
+    require(expected_exit is None or int(m[1]) == expected_exit, 'direct gate compiler exit differs')
     waited = exits(lines, first[1], target[1], int(m[1]), target[0])
     after = stat(lines, first[1], out, True, waited + 1)
     find(lines, rf'^{first[1]}\s+exit_group\(0\)', after + 1)
@@ -247,11 +266,21 @@ def native_content(api, lines, pid, image, cwd, context, require):
     directories = {root / part for part in fixture['directories']} if family == 'glob' else set()
     aliases = {root/'sym3':root/'a/bcd', root/'sym3/efg':root/'a/bcd/efg'} if family == 'glob' else {}
     static = {Path(launcher).parent, Path(extension)}
+    script_case = policy.get('script_cases',{}).get(family)
+    if script_case:
+        directory = script_case.get('compile_directory')
+        require(directory in {'.','scripts'}, 'invalid script compile directory policy')
+        static = {Path(launcher).parent.parent / directory}
     allowed_dirs = static | directories | ({Path(cwd)} if family == 'glob' else set())
     system = list(policy['system_common']) + (policy['logging_extra'] if family == 'logging' else [])
+    if script_case and 'system' in script_case:
+        system = script_case['system']
     expected_system = Counter({(x['lexical'],x['kernel'].format(pid=pid)):x['count'] for x in system})
     if family == 'logging': expected_system[('/etc/ld.so.cache','/etc/ld.so.cache')] = policy['families'][family]['ld_cache_reads']
-    observed_system=Counter(); writes=Counter(); reads=Counter(); counts=Counter()
+    observed_system=Counter(); writes=Counter(); reads=Counter(); counts=Counter(); file_access=Counter()
+    accesses = script_case['fixture_file_access'] if script_case else policy.get('fixture_file_access',[]) if family == 'ty-05' else []
+    require(all(not Path(x['path']).is_absolute() and '..' not in Path(x['path']).parts for x in accesses), 'invalid script fixture path')
+    expected_access=Counter({(str(Path(cwd)/x['path']),x['flags'],x['mode']):x['count'] for x in accesses})
     for event in api.successful_open_paths('\n'.join(lines),cwd,kernel_events=True):
         counts['opens'] += 1
         lexical, path, returned, flags = event['lexical'], event['path'], event['returned'], event['flags']
@@ -270,6 +299,9 @@ def native_content(api, lines, pid, image, cwd, context, require):
             require(returned == path and flags == fixture['directory_read_flags'] and event['mode'] is None
                     and event['directory_witness'] == str(path), 'unauthorized fixture directory read without S_IFDIR')
             reads['' if path == root else str(path.relative_to(root))] += 1
+        elif (str(path),flags,event['mode']) in expected_access:
+            require(returned == path, 'unauthorized fixture file target')
+            file_access[(str(path),flags,event['mode'])] += 1
         elif path == Path(image) and returned == path and flags == policy['readonly_flags'] and event['mode'] is None:
             counts['image_reads'] += 1
         else:
@@ -277,11 +309,11 @@ def native_content(api, lines, pid, image, cwd, context, require):
             require(pair in expected_system and flags == policy['readonly_flags'] and event['mode'] is None,
                     'unauthorized native content open: '+lexical)
             observed_system[pair] += 1
-    require(dict(counts) == {k:policy['families'][family][k] for k in ('opens','directories','image_reads')}
+    require({k:counts[k] for k in ('opens','directories','image_reads')} == {k:policy['families'][family][k] for k in ('opens','directories','image_reads')}
             and observed_system == expected_system, 'native content open census differs')
     expected=lambda names:Counter({name:fixture['each_count'] for name in names})
     require(writes == (expected(fixture['writes']) if family == 'glob' else Counter())
-            and reads == (expected(fixture['directories']) if family == 'glob' else Counter()),
+            and reads == (expected(fixture['directories']) if family == 'glob' else Counter()) and file_access == expected_access,
             'native fixture operation census differs')
 
 
@@ -361,11 +393,26 @@ def git(root, *args):
 
 
 @lru_cache(maxsize=None)
-def source_manifest(root, commit, blob, digest):
-    raw = git(root,'show','--no-textconv',f'{commit}:{SOURCE_MANIFEST}')
+def git_manifest(root, commit, path, blob, digest):
+    raw = git(root,'show','--no-textconv',f'{commit}:{path}')
     computed = hashlib.sha1(f'blob {len(raw)}\0'.encode()+raw).hexdigest()
     if computed != blob or sha(raw) != digest: raise ValueError('source-stage manifest Git blob or digest differs')
     return json.loads(raw)
+
+
+def source_manifest(root, commit, blob, digest):
+    return git_manifest(root,commit,SOURCE_MANIFEST,blob,digest)
+
+
+def public_commit(api, commit):
+    head = git(api.ROOT,'rev-parse','HEAD').decode().strip()
+    remote = git(api.ROOT,'remote','get-url','origin').decode().strip()
+    api.require(isinstance(commit,str) and api.HEX40.fullmatch(commit)
+                and remote in {'https://github.com/astral-experiments/imre.git','git@github.com:astral-experiments/imre.git'}
+                and commit != head and git(api.ROOT,'cat-file','-t',commit).strip() == b'commit',
+                'source stage must be a distinct public commit')
+    git(api.ROOT,'merge-base','--is-ancestor',commit,head)
+    git(api.ROOT,'merge-base','--is-ancestor',commit,'refs/remotes/origin/main')
 
 
 @lru_cache(maxsize=None)
@@ -379,13 +426,7 @@ def source_stage_authority(api, family, activation_digest):
             and anchor['manifest'] == SOURCE_MANIFEST and isinstance(anchor['git_blob'],str)
             and api.HEX40.fullmatch(anchor['git_blob']) and isinstance(anchor['sha256'],str)
             and api.HEX64.fullmatch(anchor['sha256']), 'missing fixed source-stage authority')
-    commit = anchor['commit']; head = git(api.ROOT,'rev-parse','HEAD').decode().strip()
-    remote = git(api.ROOT,'remote','get-url','origin').decode().strip()
-    require(remote in {'https://github.com/astral-experiments/imre.git','git@github.com:astral-experiments/imre.git'}
-            and commit != head and git(api.ROOT,'cat-file','-t',commit).strip() == b'commit',
-            'source stage must be a distinct public commit')
-    git(api.ROOT,'merge-base','--is-ancestor',commit,head)
-    git(api.ROOT,'merge-base','--is-ancestor',commit,'refs/remotes/origin/main')
+    commit = anchor['commit']; public_commit(api,commit)
     manifest = source_manifest(api.ROOT,commit,anchor['git_blob'],anchor['sha256'])
     require(manifest.get('schema') == 'imre.compatibility.source-stage.v1'
             and manifest.get('imre_revision') == api.COHORT['imre_revision']
@@ -442,8 +483,101 @@ def load_binding(api, family, locator, digest, activation_digest):
     require(len(keys) == len(set(keys)) and set(keys) == set(mapping) and set(mapping.values()) == set(cohorts), 'launcher cohort mapping must cover every receipt original exactly once')
     for row in rows:
         kind = cohorts[mapping[(row['id'], row['occurrence'])]].get('kind', 'finite')
-        require(kind in {'finite','stock-only'} and (kind != 'stock-only' or row.get('paired') is False), 'credited original cannot use a stock-only cohort')
+        require(kind in {'finite','finite-959','stock-only'} and (kind != 'stock-only' or row.get('paired') is False), 'credited original cannot use a stock-only cohort')
     return binding, mapping
+
+
+GENERATED_WITNESS_SHA = '5facddf547bed1baedeaa19544ed2f6845f6234d59b64b25df3a2fb991344b95'
+BUILD_LOG_SHA = {'ruff-a':'1ab43a2224644ef174b090e9d9e673d29388280a1f13954c9f1891ce64db6758',
+                 'ruff-b':'b82d18267aca6539a449f16a006ac972cb4db41715c512f055ee438bf07eb169'}
+
+
+def depfile_custody(api, lane, revision, worktree, product, build_log, depfiles, witness, require):
+    """Join exact depfile outputs and generated inputs to the retrospective donor audit."""
+    require(sha(witness) == GENERATED_WITNESS_SHA and sha(build_log) == BUILD_LOG_SHA.get(lane),
+            'generated-input witness or build log provenance differs')
+    audit = json.loads(witness); donors = [x for x in audit.get('donors',[]) if x.get('lane') == lane]
+    require(audit.get('compiler_revision') == revision and len(donors) == 1, 'generated-input donor differs')
+    donor = donors[0]; inputs = donor.get('inputs',[])
+    require(donor.get('compiler_sha256') == product.get('imre',{}).get('sha256')
+            and donor.get('runtime_sha256') == product.get('libimre_runtime.a',{}).get('sha256')
+            and len(inputs) == 7 and len({x['path'] for x in inputs}) == 7
+            and all(api.HEX64.fullmatch(x.get('sha256','')) and type(x.get('bytes')) is int and x['bytes'] > 0 for x in inputs),
+            'generated-input content hashes or build output tuple differs')
+    tree = set(git(api.ROOT,'ls-tree','-r','--name-only',revision).decode().splitlines()); prefix=worktree.rstrip('/')+'/'
+    expected = {'imre.d':{x['path'] for x in inputs[:2]},'libimre_runtime.d':{x['path'] for x in inputs[2:]}}
+    require(set(depfiles) == set(expected), 'depfile set differs')
+    for name, raw in depfiles.items():
+        require(sha(raw) == product.get(name,{}).get('sha256'), 'depfile digest differs')
+        output, sep, body = raw.decode().partition(': '); entries=body.split()
+        paths=[x[len(prefix):] for x in entries if x.startswith(prefix)]; generated=[x for x in entries if not x.startswith(prefix)]
+        require(sep and output == '/workspace/imre/target/release/'+('imre' if name=='imre.d' else 'libimre_runtime.a')
+                and paths and len(paths)==len(set(paths)) and all(posixpath.normpath(x) in tree for x in paths)
+                and len(generated)==len(set(generated)) and set(generated)==expected[name], 'depfile source or generated path custody differs')
+
+
+def custody_tuple(api, setup, build_log, depfiles, witness, require):
+    """Check a clean revision build and its depfile source paths against Git."""
+    revision = api.COHORT['imre_revision']; product = setup.get('product', {})
+    require(setup.get('compiler_revision') == revision and setup.get('tree') == git(api.ROOT,'rev-parse',revision+'^{tree}').decode().strip()
+            and setup.get('status_porcelain') == '' and setup.get('origin') == 'https://github.com/astral-experiments/imre.git'
+            and 'cargo build' in setup.get('build_command','') and '--release' in setup['build_command'] and '--locked' in setup['build_command']
+            and all(x in build_log for x in ('Compiling imre-compiler','Compiling imre-runtime','Finished `release`')), 'clean compiler/runtime build custody differs')
+    depfile_custody(api,'ruff-b',revision,setup['worktree'],product,build_log.encode(),depfiles,witness,require)
+    result={k:product.get(k,{}).get('sha256') for k in ('imre','libimre_runtime.a')}
+    require(all(isinstance(v,str) and api.HEX64.fullmatch(v) for v in result.values()), 'invalid compiler/runtime tuple')
+    return result
+
+
+def bound_artifacts(api, entry, artifacts):
+    api.require(isinstance(artifacts,dict), 'missing raw-control artifacts')
+    def file(role):
+        loc=artifacts.get(role);api.require(isinstance(loc,str), 'missing raw-control role: '+role)
+        return api.checked_file(api.repository_file(loc,api.DATA_ROOT),api.binding_digest(entry,loc))
+    return file
+
+
+def adapt_finite_959(api, family, binding, source, file, data, text, obj):
+    """Adapt the corrected finite fnmatch capture through the shared raw controls."""
+    require=api.require; run=obj('run'); setup=obj('setup'); custody=obj('custody_setup')
+    require(api.COHORT['imre_revision']=='95908fb0acadc2a67304a8080e584deaef395746' and family=='fnmatch'
+            and binding.get('strict_source_control')=='native-content-v1' and run.get('family')==family and run.get('revision')==api.COHORT['imre_revision']
+            and setup.get('pin')==run['revision'] and setup.get('tree')==custody.get('tree') and binding.get('platform',{}).get('os')=='linux', 'finite source or strict mode differs')
+    validate_stock_source(file('stock_source'),None,source,None,require)
+    require(setup.get('fixture_sha256')==source['sha256'] and setup.get('fixture_blob')==source['git_blob'] and sha(data('positive_launcher'))==setup.get('launcher_sha256'), 'finite source or launcher identity differs')
+    tuple_=custody_tuple(api,custody,text('custody_build_log'),{n:data(role) for n,role in (('imre.d','cli_depfile'),('libimre_runtime.d','runtime_depfile'))},data('generated_witness'),require)
+    require(tuple_=={k:setup['product'][k] for k in tuple_} and obj('transfer').get('cli_sha256')==tuple_['imre'] and obj('transfer').get('runtime_sha256')==tuple_['libimre_runtime.a'], 'transferred build tuple differs')
+    builds={t:obj(t+'_build_json') for t in ('O0','O3')}; command=builds['O0']['argv']; compiler=command[0]; runtime=api.runtime_argument(command); extension=api.option(command,'--extension-path'); launcher=command[2]
+    comparable_run(run,extension,compiler,require); stock=run['runs']['stock']; require(stock['environment'].get('PYTHONPATH')==extension and stock['argv'][1:]==['-B',launcher] and setup['stock_version'].startswith('Python '+api.COHORT['cpython_version']+' '), 'stock source invocation differs')
+    positive=data('positive_launcher'); poison=data('poison'); gateprobe=binding.get('gate_probe'); withdrawprobe=binding.get('withdraw_probe')
+    require(run['gate_evidence'].get('probe_sha256')==setup.get('probe_sha256') and setup['probe_sha256'] in text('gate_probe_build') and sha(data('gate_probe_source')) in text('gate_probe_build')
+            and run['gate_evidence'].get('controller_sha256')==sha(data('original_controller'))
+            and obj('withdraw_probe_build').get('executable_sha256')==run['withdrawal_evidence'].get('probe_sha256')
+            and obj('withdraw_probe_build').get('source_sha256')==sha(data('withdraw_probe_source'))==run['withdrawal_evidence'].get('probe_source_sha256')
+            and run['withdrawal_evidence'].get('controller_sha256')==sha(data('collector')) and gateprobe!=withdrawprobe, 'as-used gate/withdrawal source identities differ')
+    for mode in ('direct','imported'):
+        meta=obj(mode+'_meta'); trace=text(mode+'_trace'); lines=trace.splitlines(); first,target=execs(lines,require); gated=target[3]
+        require(meta.get('trace_sha256')==sha(data(mode+'_trace')) and meta.get('stderr_sha256')==sha(data(mode+'_stderr')) and data(mode+'_stdout')==b''
+                and meta.get('controller_sha256')==sha(data('original_controller')) and meta.get('compiler_sha256')==tuple_['imre'] and meta.get('runtime_sha256')==tuple_['libimre_runtime.a']
+                and api.comparable_build(gated)==api.comparable_build(command) and meta.get('exit_code')==0 and meta.get('image_exists') is False, 'gate build, tuple or raw evidence differs')
+        negative=data(mode+'_launcher'); expected=positive.replace(b'import unittest\n',b'import unittest\n\nstatus: int = True\n',1) if mode=='direct' else positive.splitlines(keepends=True)[0]+b'import fnmatch_control_poison\n'+b''.join(positive.splitlines(keepends=True)[1:])
+        require(negative==expected and sha(negative)==meta.get('negative_launcher_sha256'), 'gate source delta differs')
+        if mode=='direct': trace_direct_gate(trace,gated,gateprobe,text(mode+'_stderr'),require,expected_exit=1)
+        else:
+            require(poison==b'status: int = True\n' and sha(poison)==meta.get('poison_sha256'), 'imported poison differs')
+            trace_gate(trace,gated,gateprobe,str(Path(launcher).parent/'fnmatch_control_poison.py'),text(mode+'_stderr'),require,expected_exit=1)
+    inventories={}; paths={}; effects=[]; outputs=[]
+    for tier in api.TIERS:
+        meta=run['runs'][tier]; capture=obj(tier+'_meta'); raw=file(tier+'_stderr'); require(meta.get('exit_code')==0 and meta.get('timed_out') is False and sha(raw.read_bytes())==meta.get('stderr_sha256') and sha(data(tier+'_stdout'))==meta.get('stdout_sha256') and data(tier+'_stdout')==b'', tier+' raw observation differs')
+        before=data(tier+'_effects_before'); after=data(tier+'_effects_after'); require(before==after and sha(before)==meta.get('effects_before_sha256') and sha(after)==meta.get('effects_after_sha256'),tier+' effects differ');effects.append(before);outputs.append(raw.read_bytes());inventories[tier]=event_index(raw,require);paths[tier]=raw.relative_to(api.ROOT).as_posix()
+        if tier=='stock': require(capture==meta, 'stock capture metadata differs'); continue
+        build=builds[tier]; argv=build['argv']; api.matched_build(argv,tier,compiler,runtime); normalized=list(argv); normalized[normalized.index('--opt-level')+1]='0'; image=api.option(argv,'-o')
+        require(api.comparable_build(normalized)==api.comparable_build(command) and build.get('exit_code')==0 and build.get('compiler_sha256')==tuple_['imre'] and build.get('runtime_sha256')==tuple_['libimre_runtime.a'] and build.get('controller_sha256')==sha(data('original_controller')) and build.get('image_sha256')==meta.get('image_sha256')==meta['before'].get(image)==meta['after'].get(image) and meta.get('argv')==[image] and meta.get('restored') is True, tier+' build/image custody differs')
+        require(capture.get('argv')==meta.get('capture_argv') and all(capture.get(k)==meta.get(k) for k in ('environment','supervisor_environment','controller_sha256','trace_sha256','image_sha256','exit_code','timed_out','cwd','timeout_seconds')) and meta.get('controller_sha256')==sha(data('collector')) and meta.get('supervisor_sha256')==run['withdrawal_evidence']['probe_sha256'] and sha(data(tier+'_trace'))==meta.get('trace_sha256'),tier+' run-only binding differs')
+        trace=text(tier+'_trace'); lines=trace.splitlines(); parent,child=execs(lines,require); env=meta['supervisor_environment']; require(exec_environment(lines[parent[0]],require)==env and exec_environment(lines[child[0]],require)==meta['environment'] and env=={**meta['environment'],'IMRE_WITHDRAW_LAUNCHER':launcher,'IMRE_WITHDRAW_ARCHIVE':str(Path(launcher).parent/'stock.source.py')} and not any(k.startswith('IMRE_WITHDRAW_') for k in meta['environment']),tier+' child launch configuration differs')
+        tree=str(Path(extension)/'test'); leaf=str(Path(tree)/Path(source['path']).name); trace_withdraw(api,trace,image,withdrawprobe,tree,tree+'.raw-control-stash',leaf,meta['cwd'],require,(launcher,str(Path(launcher).parent/'stock.source.py')),content_policy=(obj('policy'),family,launcher,extension))
+    require(effects[0]==effects[1]==effects[2] and outputs[0]==outputs[1]==outputs[2] and all(set(x)==set(inventories['stock']) for x in inventories.values()), 'finite original IDs, outputs or effects differ')
+    return {**run,'platform':binding['platform'],'source':source},inventories,paths
 
 
 @lru_cache(maxsize=None)
@@ -453,15 +587,12 @@ def adapt(api, family, locator, digest, source_json, activation_digest, cohort):
     manifest, mapping = load_binding(api, family, locator, digest, activation_digest)
     binding = manifest['cohorts'][cohort]
     kind = binding.get('kind', 'finite')
-    artifacts = binding.get('artifacts')
-    require(isinstance(artifacts, dict), 'missing raw-control artifacts')
-    def file(role):
-        loc = artifacts.get(role)
-        require(isinstance(loc, str), 'missing raw-control role: '+role)
-        return api.checked_file(api.repository_file(loc, api.DATA_ROOT), api.binding_digest(entry, loc))
+    artifacts = binding.get('artifacts'); file = bound_artifacts(api,entry,artifacts)
     def data(role): return file(role).read_bytes()
     def text(role): return data(role).decode()
     def obj(role): return json.loads(text(role))
+    if kind == 'finite-959':
+        return adapt_finite_959(api,family,binding,json.loads(source_json),file,data,text,obj)
     run, gate, source = obj('run'), obj('gate'), json.loads(source_json)
     revision = api.COHORT['imre_revision']
     head = text('head').splitlines()

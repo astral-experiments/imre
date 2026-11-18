@@ -1,0 +1,7 @@
+{
+  "bwrap_sha256": "573236e5328ac2ebb08f59ae3a9805b4f8d12bdef14be8af4450d5463294985f",
+  "exit_code": 1,
+  "masked_original_entry": "/workspace/uv-b-959-replay-v1/uv-26/O3/work/scripts/reverse-changelog.py",
+  "stderr": "stat: cannot statx '/workspace/uv-b-959-replay-v1/uv-26/O3/work/scripts/reverse-changelog.py': No such file or directory\n",
+  "trace_sha256": "5dbc9e56dbd8ee7e037d01a49bfd8ba7a93db9fffa658fec5e426c565b4426b2"
+}

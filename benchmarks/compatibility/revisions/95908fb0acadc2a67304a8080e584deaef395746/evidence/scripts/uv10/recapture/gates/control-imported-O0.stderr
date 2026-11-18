@@ -1,0 +1,2 @@
+ Compiling /workspace/scratch/ruff-a-95908f/uv10-review/controls/imported.py (-O0)
+/workspace/scratch/ruff-a-95908f/uv10-review/controls/imported.py:6:14: Imre: expected int, got bool; annotations are enforced contracts

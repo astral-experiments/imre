@@ -180,7 +180,7 @@ An observed intersection means the same original passed stock, O0 and O3; frozen
 <!-- compatibility-scorecard:end -->
 
 <!-- current-compatibility-snapshot:start -->
-### Current compatibility snapshot
+### Frozen historical compatibility snapshot
 
 Revision `8571ca2dbecabf8d7863c369dc776611fd57d8ad` · **3,163 validated receipts**, **1,276 verified pairs**.
 
@@ -200,7 +200,23 @@ Revision `8571ca2dbecabf8d7863c369dc776611fd57d8ad` · **3,163 validated receipt
 | `urllib` | 178 | 174 verified |
 
 [Full revision table](benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/docs/stdlib.md)
+
+These historical totals were validated at public commit [`d0b396559a8ffda965cb495063b2967847d116aa`](https://github.com/astral-experiments/imre/commit/d0b396559a8ffda965cb495063b2967847d116aa). The evolving scorecard sources in this checkout do not validate that frozen snapshot; see the [exact checkout instructions](benchmarks/compatibility/README.md#frozen-857-verification).
 <!-- current-compatibility-snapshot:end -->
+
+<!-- compatibility-snapshot-95908fb0acadc2a67304a8080e584deaef395746:start -->
+### Compatibility snapshot
+
+Revision `95908fb0acadc2a67304a8080e584deaef395746`.
+
+| Stdlib module | Verified pairs / raw originals | Status |
+| --- | ---: | --- |
+| `fnmatch` | 24 / 24 | validated |
+
+Scripts: **4 verified / 72 historically reported stock-success commands** among **84 original script IDs** ([public historical authority](https://github.com/astral-experiments/imre/commit/880648b620f57905a495eb51fbb4600755ee0c54)).
+
+[Full revision table](benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/docs/stdlib.md)
+<!-- compatibility-snapshot-95908fb0acadc2a67304a8080e584deaef395746:end -->
 
 ### Prospective practical scripts
 

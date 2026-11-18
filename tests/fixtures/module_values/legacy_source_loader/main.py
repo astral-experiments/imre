@@ -19,8 +19,11 @@ class RecordingLoader(SourceFileLoader):
         if sys.implementation.name == "imre":
             try:
                 super().exec_module(module)
-            except NotImplementedError as exc:
-                assert str(exc) == f"no compiled Python body for <module> ({self.path}:1)"
+            except ImportError as exc:
+                assert type(exc) is ImportError
+                assert exc.name == self.name and exc.path == self.path
+                assert "no matching linked code" in str(exc)
+                assert "Declare and import the qualified module" in str(exc)
             else:
                 raise AssertionError("fresh unlinked source unexpectedly executed")
             module.owner = sys.modules[module.__name__]
@@ -89,9 +92,14 @@ with tempfile.TemporaryDirectory() as root:
         with open(path, "w", encoding="utf-8") as f:
             f.write("=")
         try:
-            loader.load_module()
+            SourceFileLoader(name, path).load_module()
+        except ImportError as exc:
+            assert sys.implementation.name == "imre" and type(exc) is ImportError
+            assert exc.name == name and exc.path == path
+            assert "no matching linked code" in str(exc)
+            assert "Declare and import the qualified module" in str(exc)
         except SyntaxError:
-            pass
+            assert sys.implementation.name != "imre"
         else:
             raise AssertionError("invalid source accepted")
         assert name not in sys.modules

@@ -1,0 +1,29 @@
+{
+  "argv": [
+    "/workspace/scratch/uvb-959-strict-recapture-v1/gate-probe",
+    "gate",
+    "/workspace/scratch/uvb-959-strict-recapture-v1/uv-29/gates/direct-O0.exe",
+    "/workspace/scratch/imre-95908-transferred-v1/product/imre",
+    "build",
+    "/workspace/uv-b-959-replay-v1/uv-29/direct-control/direct.py",
+    "--module-root",
+    "/workspace/uv-b-959-replay-v1/uv-29/direct-control",
+    "--no-cache",
+    "--opt-level",
+    "0",
+    "--runtime",
+    "/workspace/scratch/imre-95908-transferred-v1/product/libimre_runtime.a",
+    "--clang",
+    "/workspace/scratch/imre-95908-transferred-v1/product/imre-toolchain/bin/clang",
+    "-o",
+    "/workspace/scratch/uvb-959-strict-recapture-v1/uv-29/gates/direct-O0.exe"
+  ],
+  "compiler_exit": 1,
+  "image_missing": true,
+  "probe_exit": 0,
+  "probe_sha256": "1294e97884c87cd49368a05ebbcd89962081b52663a2e9d955f8bd5ecded2a36",
+  "probe_source_sha256": "fa57a3d90c735b76210df621af5e32619afb282729922246da93c836d9437cd2",
+  "stderr_sha256": "2a0c5099b60035645971f3ab437659a5a29205b7ef2d9ced3485e5451ce94ede",
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "trace_sha256": "9d054a808992b7c09ecd52f7de4329bb098df4035dcdab3a5b40144b9bbec6e7"
+}

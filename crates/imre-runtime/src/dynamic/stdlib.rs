@@ -647,6 +647,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "bind_doctest"
             | "compile_single"
             | "get_code"
+            | "get_code_optional"
             | "loader_fields"
             | "path_stats"
             | "source_name"
@@ -2658,9 +2659,26 @@ pub(super) fn call(
             ("open_run_path", [opener, path, filename], []) => {
                 return io::open_run_path(ctx, *opener, *path, *filename);
             }
-            ("get_code", [loader, path], []) => return ctx.registered_code(*loader, *path, None),
-            ("get_code", [loader, path, name, read, convert], []) => {
-                return ctx.registered_code(*loader, *path, Some((*name, *read, *convert)));
+            ("get_code", [loader, path], []) => {
+                return ctx
+                    .registered_code(*loader, *path, None, None)
+                    .and_then(|status| status.into_python(ctx, None));
+            }
+            (
+                operation @ ("get_code" | "get_code_optional"),
+                [loader, path, name, read, convert] | [loader, path, name, read, convert, _],
+                [],
+            ) if operation == "get_code" || args.len() == 5 => {
+                return ctx
+                    .registered_code(
+                        *loader,
+                        *path,
+                        Some((*name, *read, *convert)),
+                        args.get(5).copied(),
+                    )
+                    .and_then(|status| {
+                        status.into_python(ctx, (operation == "get_code").then_some((*name, *path)))
+                    });
             }
             ("path_stats", [path], []) => return os::source_path_stats(ctx, *path),
             ("loader_fields", [object], []) => {
@@ -2987,7 +3005,7 @@ pub(super) fn call(
                 return builtins::builtin_slot(ctx, name, args, kwargs);
             }
             if member == "run" {
-                let call = ctx.prepare_context_run(args, kwargs.to_vec())?;
+                let call = ctx.prepare_context_run(args.into(), kwargs.to_vec())?;
                 // SAFETY: the synchronous caller retains the context and operands through return.
                 return unsafe { call.run(ctx) };
             }
