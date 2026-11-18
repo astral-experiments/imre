@@ -95,7 +95,6 @@ struct Layout {
     texts: usize,
     dense_prefix: usize,
     prefix_extra_memo: usize,
-    all_nonshort: bool,
 }
 
 struct Cursor<'a> {
@@ -150,7 +149,6 @@ fn preflight(data: &[u8]) -> Option<Layout> {
     // ASCII text. Keep that prefix in place even if a later item needs the
     // general grammar; only the remaining pushes need packed descriptors.
     let mut dense_prefix = 0usize;
-    let mut all_nonshort = true;
     while cursor.at < end && data[cursor.at] == SHORT_BINUNICODE {
         let Some(&length) = data.get(cursor.at.checked_add(1)?) else {
             break;
@@ -162,7 +160,6 @@ fn preflight(data: &[u8]) -> Option<Layout> {
         }
         cursor.at = text_end + 1;
         dense_prefix = dense_prefix.checked_add(1)?;
-        all_nonshort &= length > 2;
     }
     let mut items: Vec<Item> = Vec::new();
     items
@@ -186,7 +183,6 @@ fn preflight(data: &[u8]) -> Option<Layout> {
                 items.try_reserve(1).ok()?;
                 items.push(Item::text(offset, length, ascii)?);
                 texts = texts.checked_add(1)?;
-                all_nonshort &= length > 2;
             }
             BINGET | LONG_BINGET => {
                 let index = cursor.get_index(op)?;
@@ -218,7 +214,6 @@ fn preflight(data: &[u8]) -> Option<Layout> {
                     texts,
                     dense_prefix,
                     prefix_extra_memo,
-                    all_nonshort: all_nonshort && texts != 0,
                 });
             }
             _ => return None,
@@ -315,9 +310,24 @@ fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
     // backing allocation does not move when heap slots grow. No callback,
     // collection, signal checkpoint, or mutation runs while decoding.
     let input = unsafe { std::slice::from_raw_parts(pointer, length) };
+    let mut saw_short = false;
     if layout.dense_prefix != 0 {
         let mut at = 14usize;
-        for position in 0..layout.dense_prefix {
+        let mut first = 0usize;
+        if !layout.has_get {
+            // SAFETY: dense preflight validated each exact ASCII entry against this rooted,
+            // immutable byte input. Both output IDs and heap slots/operand roots were reserved
+            // before the first leaf. The batch stops before a short or longer payload.
+            (at, first) = unsafe {
+                ctx.heap.append_reserved_dense_ascii_texts(
+                    input,
+                    at,
+                    layout.dense_prefix,
+                    &mut values,
+                )
+            };
+        }
+        for position in first..layout.dense_prefix {
             // SAFETY: dense preflight validated the complete frame, its short
             // text lengths and ASCII contents. The rooted bytes cannot change.
             let length = usize::from(unsafe { *input.get_unchecked(at + 1) });
@@ -328,7 +338,12 @@ fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
                     length,
                 ))
             };
-            let top = ctx.heap.unobserved_text(text, true);
+            let top = if layout.has_get {
+                ctx.heap.unobserved_text(text, true)
+            } else {
+                ctx.heap
+                    .unobserved_text_noting_short(text, true, &mut saw_short)
+            };
             values.push(top);
             if layout.has_get {
                 memo.push(top);
@@ -348,7 +363,12 @@ fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
             // immutable input has not changed. CompactString copies into its slot.
             let text =
                 unsafe { std::str::from_utf8_unchecked(&input[start..start + item.length()]) };
-            ctx.heap.unobserved_text(text, item.is_ascii())
+            if layout.has_get {
+                ctx.heap.unobserved_text(text, item.is_ascii())
+            } else {
+                ctx.heap
+                    .unobserved_text_noting_short(text, item.is_ascii(), &mut saw_short)
+            }
         };
         values.push(top);
         if layout.has_get {
@@ -357,7 +377,7 @@ fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
     }
     let result = ctx.alloc(Value::List(values));
     if !layout.has_get {
-        if layout.all_nonshort {
+        if layout.texts != 0 && !saw_short {
             ctx.heap.mark_fresh_nonshort_text_list(result);
         } else {
             ctx.heap.mark_fresh_text_list(result);
@@ -552,6 +572,39 @@ mod tests {
                 assert_ne!(items[0], items[1]);
             }
         }
+    }
+
+    #[test]
+    fn dense_batch_flushes_before_final_short_and_preserves_distinct_leaves() {
+        let mut payload = vec![EMPTY_LIST, MEMOIZE, MARK];
+        for _ in 0..99 {
+            payload.extend_from_slice(b"\x8c\x05equal\x94");
+        }
+        payload.extend_from_slice(b"\x8c\x01x\x94e.");
+        let mut bytes = vec![PROTO, 5, FRAME];
+        bytes.extend_from_slice(&(payload.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(&payload);
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let data = ctx.alloc(Value::Bytes(bytes));
+        let result = attempt_data(&mut ctx, data, false, || {})
+            .unwrap()
+            .unwrap()
+            .value();
+        assert!(ctx.heap.is_fresh_text_list(result));
+        assert!(!ctx.heap.is_fresh_nonshort_text_list(result));
+        let Value::List(values) = ctx.heap.get(result) else {
+            unreachable!()
+        };
+        assert_eq!(values.len(), 100);
+        assert!(values[..99].windows(2).all(|pair| pair[0] != pair[1]));
+        assert!(
+            values[..99]
+                .iter()
+                .all(|&id| matches!(ctx.heap.get(id), Value::Str(s) if s == "equal"))
+        );
+        let short = values[99];
+        assert!(matches!(ctx.heap.get(short), Value::Str(s) if s == "x"));
+        assert_eq!(short, ctx.heap.unobserved_text("x", true));
     }
 
     #[test]

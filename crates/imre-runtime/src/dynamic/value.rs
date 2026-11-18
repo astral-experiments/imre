@@ -3265,9 +3265,9 @@ enum SlotShape {
     Vacant,
     Other,
     FreshTextList,
-    FreshNonshortTextList,
     ScalarLeaf,
     AsciiStr,
+    FreshNonshortTextList,
 }
 
 impl SlotShape {
@@ -4718,31 +4718,135 @@ impl Heap {
             slot.finalization = Finalization::None;
             index
         } else {
-            debug_assert!(self.slot_shapes.len() < self.slot_shapes.capacity());
-            debug_assert!(self.traces.len() < self.traces.capacity());
-            debug_assert!(self.slots.len() < self.slots.capacity());
-            self.slot_shapes.push(shape);
-            self.traces.push(Cell::new(UNMARKED));
-            let index = self.slots.len();
-            // SAFETY: reserve_unobserved_texts reserved this slot and no
-            // callback or collection can consume that capacity. Initialize all
-            // Slot::new fields in spare storage before publishing its length.
-            // Write the owned text last, with no fallible work before set_len.
-            unsafe {
-                let slot = self.slots.as_mut_ptr().add(index);
-                std::ptr::addr_of_mut!((*slot).gc_next).write(Cell::new(UNMARKED));
-                std::ptr::addr_of_mut!((*slot).gc_prev).write(Cell::new(UNMARKED));
-                std::ptr::addr_of_mut!((*slot).untracked_tuple).write(Cell::new(false));
-                std::ptr::addr_of_mut!((*slot).has_gc_header).write(false);
-                std::ptr::addr_of_mut!((*slot).may_have_buffer_views).write(false);
-                std::ptr::addr_of_mut!((*slot).finalization).write(Finalization::None);
-                std::ptr::addr_of_mut!((*slot).generation).write(0);
-                std::ptr::addr_of_mut!((*slot).value).write(Some(Value::Str(text)));
-                self.slots.set_len(index + 1);
-            }
-            index
+            Self::append_reserved_text_slot(
+                &mut self.slots,
+                &mut self.slot_shapes,
+                &mut self.traces,
+                text,
+                shape,
+            )
         };
         index as Id
+    }
+
+    /// Append one completely initialized exact-text slot to the reserved flat arrays.
+    #[inline(always)]
+    fn append_reserved_text_slot(
+        slots: &mut Vec<Slot>,
+        shapes: &mut Vec<SlotShape>,
+        traces: &mut Vec<Cell<usize>>,
+        text: crate::Str,
+        shape: SlotShape,
+    ) -> usize {
+        debug_assert!(shapes.len() < shapes.capacity());
+        debug_assert!(traces.len() < traces.capacity());
+        debug_assert!(slots.len() < slots.capacity());
+        shapes.push(shape);
+        traces.push(Cell::new(UNMARKED));
+        let index = slots.len();
+        // SAFETY: reserve_unobserved_texts reserved this slot and no callback or
+        // collection can consume its capacity. Initialize all Slot::new fields
+        // before publishing the length, writing owned text last.
+        unsafe {
+            let slot = slots.as_mut_ptr().add(index);
+            std::ptr::addr_of_mut!((*slot).gc_next).write(Cell::new(UNMARKED));
+            std::ptr::addr_of_mut!((*slot).gc_prev).write(Cell::new(UNMARKED));
+            std::ptr::addr_of_mut!((*slot).untracked_tuple).write(Cell::new(false));
+            std::ptr::addr_of_mut!((*slot).has_gc_header).write(false);
+            std::ptr::addr_of_mut!((*slot).may_have_buffer_views).write(false);
+            std::ptr::addr_of_mut!((*slot).finalization).write(Finalization::None);
+            std::ptr::addr_of_mut!((*slot).generation).write(0);
+            std::ptr::addr_of_mut!((*slot).value).write(Some(Value::Str(text)));
+            slots.set_len(index + 1);
+        }
+        index
+    }
+
+    /// Fill a prevalidated dense ASCII TEXT prefix without exposing an inconsistent free list.
+    ///
+    /// The caller must have reserved `count` text slots, operand roots and output IDs. The
+    /// immutable input is a sequence of the validated short-text opcode, length, ASCII payload,
+    /// and memo opcode. The batch stops before any payload outside the allocation-free 3–8 byte
+    /// range. No callback, checkpoint, collector, recoverable error, or arbitrary iterator runs
+    /// while the free head is held locally. Every leaf is rooted and published in source order.
+    ///
+    /// # Safety
+    /// All `count` encoded entries beginning at `at` must have been fully validated in this exact
+    /// immutable input by the TEXT reader preflight, and the reserved capacities must remain valid.
+    pub(super) unsafe fn append_reserved_dense_ascii_texts(
+        &mut self,
+        input: &[u8],
+        mut at: usize,
+        count: usize,
+        values: &mut Vec<Id>,
+    ) -> (usize, usize) {
+        debug_assert!(!self.allocation_traces.is_tracing());
+        // compact_str's inline capacity is size_of::<String>(). If a future target cannot
+        // inline the whole eligible range, retain the original scalar path instead of risking
+        // an allocation failure while the free head is held locally.
+        if std::mem::size_of::<String>() < 8 {
+            return (at, 0);
+        }
+        debug_assert!(values.capacity() - values.len() >= count);
+        debug_assert!(
+            self.execution.current().live.capacity() - self.execution.current().live.len() >= count
+        );
+        let additional = count.saturating_sub(self.free_count);
+        debug_assert!(self.slots.capacity() - self.slots.len() >= additional);
+        debug_assert!(self.slot_shapes.capacity() - self.slot_shapes.len() >= additional);
+        debug_assert!(self.traces.capacity() - self.traces.len() >= additional);
+
+        let mut free_head = self.free_head;
+        let mut popped = 0usize;
+        let mut consumed = 0usize;
+        let live = &mut self.execution.current_mut().live;
+        while consumed < count {
+            // SAFETY: the caller guarantees that each dense entry, including this length byte,
+            // was preflighted against this immutable input.
+            let length = usize::from(unsafe { *input.get_unchecked(at + 1) });
+            if !(3..=8).contains(&length) {
+                break;
+            }
+            // SAFETY: preflight checked the exact payload range and its ASCII contents.
+            let text = unsafe {
+                std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                    input.as_ptr().add(at + 2),
+                    length,
+                ))
+            };
+            // compact_str stores at most eight bytes inline and cannot allocate or fail here.
+            let text: crate::Str = text.into();
+            let index = if free_head != END {
+                let index = free_head;
+                let slot = &mut self.slots[index];
+                free_head = slot.gc_next.replace(UNMARKED);
+                popped += 1;
+                self.slot_shapes[index] = SlotShape::AsciiStr;
+                slot.value = Some(Value::Str(text));
+                slot.may_have_buffer_views = false;
+                slot.generation = 0;
+                slot.untracked_tuple.set(false);
+                slot.has_gc_header = false;
+                slot.finalization = Finalization::None;
+                index
+            } else {
+                Self::append_reserved_text_slot(
+                    &mut self.slots,
+                    &mut self.slot_shapes,
+                    &mut self.traces,
+                    text,
+                    SlotShape::AsciiStr,
+                )
+            };
+            let id = index as Id;
+            live.push(id);
+            values.push(id);
+            at += length + 3;
+            consumed += 1;
+        }
+        self.free_head = free_head;
+        self.free_count -= popped;
+        (at, consumed)
     }
 
     /// Fill one reserved untracked text slot without the generic object/finalizer path.
@@ -4754,6 +4858,27 @@ impl Heap {
             && let Some(id) = self.short_string(text)
         {
             return id;
+        }
+        let id = self.fill_reserved_text_slot(text.into(), ascii);
+        self.keep(id);
+        id
+    }
+
+    /// Record byte-short text while performing the existing singleton check. A no-GET decoder
+    /// uses the flag to distinguish its narrow nonshort producer provenance after decoding.
+    pub(super) fn unobserved_text_noting_short(
+        &mut self,
+        text: &str,
+        ascii: bool,
+        saw_short: &mut bool,
+    ) -> Id {
+        debug_assert!(!self.allocation_traces.is_tracing());
+        debug_assert_eq!(ascii, text.is_ascii());
+        if text.len() <= 2 {
+            *saw_short = true;
+            if let Some(id) = self.short_string(text) {
+                return id;
+            }
         }
         let id = self.fill_reserved_text_slot(text.into(), ascii);
         self.keep(id);
@@ -8650,6 +8775,75 @@ mod tests {
         heap.collect(std::iter::empty());
         assert!(heap.slots[ascii as usize].value.is_none());
         assert!(heap.slots[long as usize].value.is_none());
+    }
+
+    #[test]
+    fn dense_ascii_batch_preserves_scalar_slot_order_roots_and_short_fallback() {
+        fn seeded() -> (Heap, usize, Id) {
+            let mut heap = Heap::new();
+            let mark = heap.temporary_mark();
+            let recycled = heap.alloc(Value::List(Vec::new()));
+            heap.release_temporaries_since(mark);
+            heap.collect(std::iter::empty());
+            let slot = &mut heap.slots[recycled as usize];
+            slot.generation = 2;
+            slot.untracked_tuple.set(true);
+            slot.may_have_buffer_views = true;
+            slot.finalization = Finalization::Finalized;
+            heap.reserve_unobserved_texts(3).unwrap();
+            (heap, mark, recycled)
+        }
+        let (mut batch, mark, recycled) = seeded();
+        let (mut scalar, scalar_mark, scalar_recycled) = seeded();
+        assert_eq!(recycled, scalar_recycled);
+        let input = b"\x8c\x03abc\x94\x8c\x08abcdefgh\x94\x8c\x01x\x94";
+        let mut values = Vec::with_capacity(3);
+        // SAFETY: the three complete encoded entries above are known ASCII and all capacities
+        // were reserved before the batch; the third short value deliberately ends the batch.
+        let (at, consumed) =
+            unsafe { batch.append_reserved_dense_ascii_texts(input, 0, 3, &mut values) };
+        assert_eq!((at, consumed), (17, 2));
+        let expected = [
+            scalar.unobserved_text("abc", true),
+            scalar.unobserved_text("abcdefgh", true),
+        ];
+        assert_eq!(values, expected);
+        assert_eq!(values[0], recycled);
+        assert_eq!(
+            batch.execution.current().live[mark..],
+            scalar.execution.current().live[scalar_mark..]
+        );
+        assert_eq!(
+            (batch.free_head, batch.free_count),
+            (scalar.free_head, scalar.free_count)
+        );
+        for &id in &values {
+            let left = &batch.slots[id as usize];
+            let right = &scalar.slots[id as usize];
+            assert!(batch.slot_shapes[id as usize] == scalar.slot_shapes[id as usize]);
+            assert_eq!(left.generation, right.generation);
+            assert_eq!(left.untracked_tuple.get(), right.untracked_tuple.get());
+            assert_eq!(left.may_have_buffer_views, right.may_have_buffer_views);
+            assert_eq!(left.has_gc_header, right.has_gc_header);
+            assert!(left.finalization == right.finalization);
+            assert_eq!(left.gc_next.get(), right.gc_next.get());
+            assert_eq!(
+                batch.traces[id as usize].get(),
+                scalar.traces[id as usize].get()
+            );
+        }
+        let short = batch.unobserved_text("x", true);
+        let scalar_short = scalar.unobserved_text("x", true);
+        assert_eq!(short, scalar_short);
+        values.push(short);
+        let owner = batch.alloc(Value::List(values.clone()));
+        let scalar_owner = scalar.alloc(Value::List(vec![expected[0], expected[1], scalar_short]));
+        assert_eq!(owner, scalar_owner);
+        batch.release_temporaries_since(mark);
+        batch.collect([owner].into_iter());
+        assert!(matches!(batch.get(values[0]), Value::Str(s) if s == "abc"));
+        assert!(matches!(batch.get(values[1]), Value::Str(s) if s == "abcdefgh"));
+        assert!(matches!(batch.get(values[2]), Value::Str(s) if s == "x"));
     }
 
     #[test]
