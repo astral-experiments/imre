@@ -244,7 +244,10 @@ mod tests {
     #[test]
     fn cleanup_of_an_externally_reaped_child_preserves_an_observed_status() {
         let reaped_child = || {
-            let mut child = Command::new("/bin/true").spawn().unwrap();
+            let mut child = Command::new("/bin/sh")
+                .args(["-c", "exit 0"])
+                .spawn()
+                .unwrap();
             assert!(child.wait().unwrap().success());
             ChildControl::new(LaunchedChild::Process(child))
         };
