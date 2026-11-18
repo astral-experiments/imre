@@ -1273,7 +1273,16 @@ pub(crate) struct RegisteredSource<'a> {
 impl<'a> RegisteredSource<'a> {
     /// Use typeshed for SDK modules whose core classes are supplied by native initialization.
     pub(crate) fn uses_typeshed_interface(&self) -> bool {
-        matches!(self.name, "typing" | "abc" | "enum")
+        !self.is_program
+            && matches!(self.name, "typing" | "abc" | "enum")
+            && self.is_original_bundled_source(bundled_module_source(self.name, false))
+    }
+
+    /// Identify an immutable compiler-embedded provider prepared through the normal AOT path.
+    pub(crate) fn is_original_bundled_provider(&self) -> bool {
+        self.unit.is_some()
+            && self.kind == SourceKind::File
+            && !self.is_program
             && self.is_original_bundled_source(bundled_module_source(self.name, false))
     }
 
@@ -1927,6 +1936,7 @@ pub(crate) fn compile(
     let mut sdk_work = VecDeque::new();
     let mut following_sdk = false;
     let mut checked_providers = HashSet::new();
+    let mut unproved_source = None;
     let mut work = VecDeque::new();
     let mut uses_import_builtin = false;
     let mut uses_exec = false;
@@ -2034,7 +2044,7 @@ pub(crate) fn compile(
         } else if let Some(modules) = archive_modules.take().or_else(|| {
             wheel_roots.retain(|root| {
                 let selected = sources.iter().any(|(_, path, _)| path.starts_with(root));
-                if selected {
+                if selected && !options.require_checked_module_entry {
                     installed_wheels.extend(wheel_records.discover(
                         root,
                         &mut inputs,
@@ -2500,7 +2510,20 @@ pub(crate) fn compile(
                             checked_sdk_providers.push((id, sources.len()));
                         }
                     }
-                    let winner = select_member && on_sdk_path && !project_parent && !builtin;
+                    let graph_demand = options.require_checked_module_entry
+                        && literal
+                        && origin != ImportOrigin::Alternative
+                        && checked_graph.is_some_and(|graph| {
+                            graph
+                                .python_file(&owner)
+                                .or_else(|| graph.bundled_module(&owner))
+                                .is_some()
+                        });
+                    let winner = (select_member || graph_demand)
+                        && on_sdk_path
+                        && !project_parent
+                        && !builtin
+                        && !frozen;
                     if winner && (named_path || checking_provider) {
                         // Reserve the original source slot, but visit it only after ordered
                         // physical lookup establishes that this bundled provider really won.
@@ -2604,6 +2627,11 @@ pub(crate) fn compile(
                         && (origin != ImportOrigin::Startup
                             || index < site_root_count
                             || startup_added_roots.contains(root));
+                    if options.require_checked_module_entry
+                        && (!winner || file_alternatives || origin == ImportOrigin::Alternative)
+                    {
+                        continue;
+                    }
                     let child_origin = origin
                         .file(winner && (filesystem_import || origin == ImportOrigin::Startup));
                     let selected_child = winner
@@ -2829,7 +2857,9 @@ pub(crate) fn compile(
                         (module_entry.is_some() || origin == ImportOrigin::Startup) && !winner;
                     let file_alternatives =
                         file_alternatives || wheel_origins.is_some() || shadowed;
-                    let identity = if let Some((identity, _)) = checked_slot {
+                    let identity = if let Some((identity, _)) = checked_slot
+                        && !(options.require_checked_module_entry && winner)
+                    {
                         identity.clone()
                     } else {
                         match filesystem.canonicalize(&path) {
@@ -2870,8 +2900,10 @@ pub(crate) fn compile(
                     } else {
                         None
                     };
-                    let checked =
-                        graph_file.filter(|(graph, id)| graph.inputs.files[*id].1 == identity);
+                    let checked = graph_file.filter(|(graph, id)| {
+                        graph.inputs.files[*id].1 == identity
+                            && (!options.require_checked_module_entry || checked_slot.is_some())
+                    });
                     // A registered file can still be selected after the path or finder order
                     // changes. Keep its syntax failure with the loader that would execute it.
                     let file_alternate = checked.is_none()
@@ -3080,6 +3112,15 @@ pub(crate) fn compile(
                     if winner {
                         registrations.python_providers.insert(unit);
                         selected_sources.push((unit, false, checked));
+                        if options.require_checked_module_entry && pending.is_none() {
+                            entry_sources.insert(
+                                prefix.clone(),
+                                (
+                                    bundled_root.into(),
+                                    sources[unit].1.ends_with("__init__.py"),
+                                ),
+                            );
+                        }
                     }
                     if let Some((package, path, source, parser)) = pending {
                         let mut getter = Imports::default();
@@ -3125,6 +3166,11 @@ pub(crate) fn compile(
                 if let Some(member) = installed {
                     // Removing an earlier path can expose this SDK member to its ordinary ZIP loader.
                     let winner = selected_member.is_some() && !entry_sources.contains_key(&prefix);
+                    if options.require_checked_module_entry
+                        && (!winner || file_alternatives || origin == ImportOrigin::Alternative)
+                    {
+                        continue;
+                    }
                     let (path, source, package, digest) =
                         if let Some(root) = &options.installed_stdlib_archive {
                             let archive = match archives.entry(root.clone()) {
@@ -3289,16 +3335,18 @@ pub(crate) fn compile(
             .find(|(id, _, _)| sources[*id].0 == name)?;
         Some((id, root, *package))
     });
-    let entry_owner = module_entry.and_then(|_| {
-        crate::installed_wheels::ModuleEntryRoot::select(
-            module_body.map(|(id, root, _)| (root.as_path(), sources[id].1.as_path())),
-            initial[..path0_len].first().map(PathBuf::as_path),
-            &mut wheel_records,
-            options,
-            &mut inputs,
-            &mut filesystem,
-        )
-    });
+    let entry_owner = module_entry
+        .filter(|_| !options.require_checked_module_entry)
+        .and_then(|_| {
+            crate::installed_wheels::ModuleEntryRoot::select(
+                module_body.map(|(id, root, _)| (root.as_path(), sources[id].1.as_path())),
+                initial[..path0_len].first().map(PathBuf::as_path),
+                &mut wheel_records,
+                options,
+                &mut inputs,
+                &mut filesystem,
+            )
+        });
     drop(installed_wheels);
     // A runtime path change can select any linked file. Bind its functions using the
     // file's own search root and wheel membership, including for shadowed sources.
@@ -3336,7 +3384,29 @@ pub(crate) fn compile(
             semantic_files.insert(path.as_path(), identity.clone());
             owned_sources.insert(id);
         }
+        let checked_application = options.require_checked_module_entry
+            && registrations
+                .checked_units
+                .get(&id)
+                .and_then(|unit| unit.source)
+                .is_some_and(|file| {
+                    let module = file.module(modules);
+                    module.saved_source_contract()
+                        && module.name == sources[id].0
+                        && module.original_source() == sources[id].2.as_ref()
+                        && registrations
+                            .physical_files
+                            .get(path)
+                            .is_some_and(|physical| physical.digest == module.raw_digest)
+                });
+        if options.require_checked_module_entry
+            && !checked_application
+            && !checked_providers.contains(&id)
+        {
+            unproved_source.get_or_insert(id);
+        }
         let application = owned.is_some()
+            || checked_application
             || entry_owner
                 .as_ref()
                 .and_then(|owner| owner.is_program(root, path))
@@ -3409,8 +3479,12 @@ pub(crate) fn compile(
             let application = !registrations.python_providers.contains(&id);
             let saved_application = options.require_checked_module_entry
                 && application
-                && index < ordinary_registrations.unwrap_or(usize::MAX)
-                && registrations.physical_files.contains_key(&sources[id].1);
+                && module.is_some_and(|module| modules[module].saved_source_contract())
+                && registrations
+                    .checked_units
+                    .get(&id)
+                    .and_then(|unit| unit.source)
+                    .is_some_and(|file| Some(file.id()) == module);
             let checked_provider = checked_providers.contains(&id);
             // Emit the selected application's signature. Preserve the existing checker
             // scope: owning a declaration does not prove that a call will reach it.
@@ -3585,19 +3659,6 @@ pub(crate) fn compile(
             root.clone_from(physical);
         }
     }
-    check(
-        project.as_mut(),
-        entry_requests_objects || startup_provider,
-        Some(RegisteredSources {
-            layouts: &mut layouts,
-            root: semantic_roots.get(&root).unwrap_or(&root),
-            roots: &roots,
-            winners,
-            file_alternatives,
-            provider_sources,
-            has_file_body: sdk_runpy.then_some(&has_file_body),
-        }),
-    )?;
     if options.require_checked_module_entry {
         let Some(name) = module_entry else {
             return Err("checked module admission requires a named entry".into());
@@ -3609,6 +3670,10 @@ pub(crate) fn compile(
                     && source.is_program
                     && source.check_execution
                     && source.declares_signatures
+                    && checked_graph.is_none_or(|graph| {
+                        source.checked_module == Some(graph.entry)
+                            && graph.modules[graph.entry].saved_source_contract()
+                    })
             })
         });
         if !checked_entry {
@@ -3623,7 +3688,73 @@ pub(crate) fn compile(
                 "cannot save module {name:?}: its selected entry has no checked source registration; make its source available on PYTHONPATH or build the entry file directly"
             ));
         }
+        if let Some(unit) = unproved_source {
+            let (name, path, _) = &sources[unit];
+            if let Some(error) = unavailable_sources.get(name) {
+                return Err(error.to_string());
+            }
+            return Err(format!(
+                "cannot save module {name:?}: selected source {} has no exact checked graph or provider proof",
+                path.display()
+            ));
+        }
+        for source in winners {
+            let provider = source
+                .unit
+                .is_some_and(|id| checked_providers.contains(&id))
+                && source.is_program
+                && source.declares_signatures
+                && source.check_execution;
+            let graph_source =
+                checked_graph
+                    .zip(source.checked_module)
+                    .is_some_and(|(graph, id)| {
+                        let module = &graph.modules[id];
+                        module.name == source.name
+                            && module.original_source() == source.source
+                            && source.is_program == module.checks_source_contracts()
+                            && (!source.is_program
+                                || source.declares_signatures && source.check_execution)
+                            && (module.bundled
+                                || source.unit.is_some_and(|unit| {
+                                    registrations
+                                        .checked_units
+                                        .get(&unit)
+                                        .and_then(|entry| entry.source)
+                                        .is_some_and(|file| file.id() == id)
+                                        && module.saved_source_contract()
+                                }))
+                    });
+            let bundled = source.is_original_bundled_provider();
+            if !provider && !graph_source && !bundled {
+                return Err(format!(
+                    "cannot save module {:?}: selected source {} has no exact checked graph or provider proof",
+                    source.name,
+                    source.path.display()
+                ));
+            }
+        }
+        if let Some(source) = file_alternatives.first() {
+            return Err(format!(
+                "cannot save module {:?}: executable alternative {} requires a separate source check",
+                source.name,
+                source.path.display()
+            ));
+        }
     }
+    check(
+        project.as_mut(),
+        entry_requests_objects || startup_provider,
+        Some(RegisteredSources {
+            layouts: &mut layouts,
+            root: semantic_roots.get(&root).unwrap_or(&root),
+            roots: &roots,
+            winners,
+            file_alternatives,
+            provider_sources,
+            has_file_body: sdk_runpy.then_some(&has_file_body),
+        }),
+    )?;
     // A namespace portion has no initializer. Its registered origin is a directory
     // that must remain available for the scratch session to add its child modules.
     let namespace_portions: HashSet<_> = inputs.directories.iter().map(|(path, _)| path).collect();

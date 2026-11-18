@@ -702,11 +702,12 @@ fn object_fallback(
                          registrations: Option<&dynamic::RegisteredSources<'_>>|
      -> Result<(), String> {
         if let Some(graph) = graph.filter(|g| !g.has_checked_only_import) {
+            let check_file_contracts = checked_file || options.require_checked_module_entry;
             let requested = graph.check_fallback_calls.get();
             // A runtime class export can admit a new import graph. Keep direct source-call
             // diagnostics unless this entry already requested Python object semantics.
             let check_class_import = graph.imports_runtime_class && !entry_requests_objects;
-            if !checked_file
+            if !check_file_contracts
                 && !check_class_import
                 && !matches!(requested, analysis::FallbackCalls::FunctionBodies)
             {
@@ -725,11 +726,11 @@ fn object_fallback(
             let (skipped, overloads) = graph.diagnostic_scopes();
             let entry = &graph.modules[graph.entry];
             let all_calls = !matches!(requested, analysis::FallbackCalls::None)
-                || checked_file && graph.has_object_constructor_fallback.get()
+                || check_file_contracts && graph.has_object_constructor_fallback.get()
                 || !entry.optional_imports.is_empty()
                 || !graph.needs_object_runtime.get() && kind.checks_object_calls()
-                || checked_file && graph.uses_source_loader();
-            let checked_calls = if !checked_file {
+                || check_file_contracts && graph.uses_source_loader();
+            let checked_calls = if !check_file_contracts {
                 if check_class_import
                     && !matches!(requested, analysis::FallbackCalls::FunctionBodies)
                 {
@@ -759,7 +760,7 @@ fn object_fallback(
                         !checked_source(*id)
                             && replaced.is_none_or(|r| !r.provider_sources.contains_key(id))
                     }),
-                    checked_file.then_some(&graph.modules),
+                    check_file_contracts.then_some(&graph.modules),
                     replaced.is_none().then_some(refusal.as_ref()).flatten(),
                 )
             };
