@@ -8098,22 +8098,27 @@ mod tests {
         let old = heap.alloc(Value::List(Vec::new()));
         heap.release_temporaries_since(mark);
         heap.collect(std::iter::empty());
-        heap.reserve_unobserved_texts(4).unwrap();
+        heap.reserve_unobserved_texts(5).unwrap();
         let ascii = heap.unobserved_text("alpha", true);
         let unicode = heap.unobserved_text("éclair", false);
         let singleton = heap.unobserved_text("x", true);
         let same = heap.unobserved_text("x", true);
+        let long = heap.unobserved_text("a text leaf longer than the inline string capacity", true);
         assert_eq!(ascii, old);
         assert_eq!(singleton, same);
-        let list = heap.alloc(Value::List(vec![ascii, unicode, singleton]));
+        let list = heap.alloc(Value::List(vec![ascii, unicode, singleton, long]));
         heap.release_temporaries_since(mark);
         heap.collect(std::iter::once(list));
         assert!(matches!(heap.get(ascii), Value::Str(s) if s == "alpha"));
         assert!(matches!(heap.get(unicode), Value::Str(s) if s == "éclair"));
+        assert!(
+            matches!(heap.get(long), Value::Str(s) if s == "a text leaf longer than the inline string capacity")
+        );
         assert!(heap.is_ascii_str(ascii));
         assert!(!heap.is_ascii_str(unicode));
         heap.collect(std::iter::empty());
         assert!(heap.slots[ascii as usize].value.is_none());
+        assert!(heap.slots[long as usize].value.is_none());
     }
 
     #[test]
