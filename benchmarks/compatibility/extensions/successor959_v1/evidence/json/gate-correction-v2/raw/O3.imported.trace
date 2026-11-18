@@ -1,0 +1,63 @@
+44047 execve("/workspace/scratch/fnmatch-95908-replay-v1/correction-v2/raw-control-probe-child-env", ["/workspace/scratch/fnmatch-95908-replay-v1/correction-v2/raw-control-probe-child-env", "gate", "/workspace/scratch/json-decode-959-replay-v1/gate-correction-v2/O3.imported.exe", "/workspace/scratch/imre-95908-transferred-stdlib-v1/product/imre", "build", "/workspace/scratch/json-decode-959-replay-v1/launch/launcher.py", "--module-root", "/workspace/scratch/json-decode-959-replay-v1/launch", "--extension-path", "/workspace/scratch/json-decode-959-replay-v1/fixtures/Lib", "--no-cache", "--quiet", "--opt-level", "3", "--runtime", "/workspace/scratch/imre-95908-transferred-stdlib-v1/product/libimre_runtime.a", "--clang", "/workspace/scratch/imre-95908-transferred-stdlib-v1/product/imre-toolchain/bin/clang", "-o", "/workspace/scratch/json-decode-959-replay-v1/gate-correction-v2/O3.imported.exe"], ["NO_COLOR=1", "PATH=/workspace/scratch/imre-95908-transferred-stdlib-v1/product/imre-toolchain/bin:/usr/bin", "PYTHONDONTWRITEBYTECODE=1", "PYTHONPATH=/workspace/scratch/json-decode-959-replay-v1/fixtures/Lib", "PYTHON_COLORS=0", "TMPDIR=/workspace/scratch/json-decode-959-replay-v1/tmp"]) = 0
+44047 openat(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache>
+44047 close(3</etc/ld.so.cache>)        = 0
+44047 openat(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libc.so.6>
+44047 close(3</usr/lib/x86_64-linux-gnu/libc.so.6>) = 0
+44047 newfstatat(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/workspace/scratch/json-decode-959-replay-v1/gate-correction-v2/O3.imported.exe", 0x7fff11e41180, 0) = -1 ENOENT (No such file or directory)
+44047 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7fb75ca1ba10) = 44048
+44047 wait4(44048,  <unfinished ...>
+44048 execve("/workspace/scratch/imre-95908-transferred-stdlib-v1/product/imre", ["/workspace/scratch/imre-95908-transferred-stdlib-v1/product/imre", "build", "/workspace/scratch/json-decode-959-replay-v1/launch/launcher.py", "--module-root", "/workspace/scratch/json-decode-959-replay-v1/launch", "--extension-path", "/workspace/scratch/json-decode-959-replay-v1/fixtures/Lib", "--no-cache", "--quiet", "--opt-level", "3", "--runtime", "/workspace/scratch/imre-95908-transferred-stdlib-v1/product/libimre_runtime.a", "--clang", "/workspace/scratch/imre-95908-transferred-stdlib-v1/product/imre-toolchain/bin/clang", "-o", "/workspace/scratch/json-decode-959-replay-v1/gate-correction-v2/O3.imported.exe"], ["NO_COLOR=1", "PATH=/workspace/scratch/imre-95908-transferred-stdlib-v1/product/imre-toolchain/bin:/usr/bin", "PYTHONDONTWRITEBYTECODE=1", "PYTHONPATH=/workspace/scratch/json-decode-959-replay-v1/fixtures/Lib", "PYTHON_COLORS=0", "TMPDIR=/workspace/scratch/json-decode-959-replay-v1/tmp"]) = 0
+44048 openat(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3</etc/ld.so.cache>
+44048 close(3</etc/ld.so.cache>)        = 0
+44048 openat(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libgcc_s.so.1>
+44048 close(3</usr/lib/x86_64-linux-gnu/libgcc_s.so.1>) = 0
+44048 openat(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libm.so.6>
+44048 close(3</usr/lib/x86_64-linux-gnu/libm.so.6>) = 0
+44048 openat(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3</usr/lib/x86_64-linux-gnu/libc.so.6>
+44048 close(3</usr/lib/x86_64-linux-gnu/libc.so.6>) = 0
+44048 fcntl(0</dev/null>, F_GETFD)      = 0
+44048 fcntl(1<pipe:[314786]>, F_GETFD)  = 0
+44048 fcntl(2<pipe:[314787]>, F_GETFD)  = 0
+44048 openat(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3</proc/44048/maps>
+44048 close(3</proc/44048/maps>)        = 0
+44048 openat2(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/workspace/scratch/json-decode-959-replay-v1/launch/launcher.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3</workspace/scratch/json-decode-959-replay-v1/launch/launcher.py>
+44048 close(3</workspace/scratch/json-decode-959-replay-v1/launch/launcher.py>) = 0
+44048 openat(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3</proc/44048/cgroup>
+44048 close(3</proc/44048/cgroup>)      = 0
+44048 openat(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3</sys/fs/cgroup/cpu.max>
+44048 close(3</sys/fs/cgroup/cpu.max>)  = 0
+44048 openat(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3</proc/44048/cgroup>
+44048 close(3</proc/44048/cgroup>)      = 0
+44048 openat(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3</sys/fs/cgroup/cpu.max>
+44048 close(3</sys/fs/cgroup/cpu.max>)  = 0
+44048 openat(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3</proc/44048/cgroup>
+44048 close(3</proc/44048/cgroup>)      = 0
+44048 openat(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3</sys/fs/cgroup/cpu.max>
+44048 close(3</sys/fs/cgroup/cpu.max>)  = 0
+44048 openat(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3</proc/44048/maps>
+44048 close(3</proc/44048/maps>)        = 0
+44048 openat2(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/workspace/scratch/json-decode-959-replay-v1/launch/json_decode_gate_poison.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3</workspace/scratch/json-decode-959-replay-v1/launch/json_decode_gate_poison.py>
+44048 close(3</workspace/scratch/json-decode-959-replay-v1/launch/json_decode_gate_poison.py>) = 0
+44048 openat2(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/workspace/scratch/json-decode-959-replay-v1/fixtures/Lib/test/__init__.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3</workspace/scratch/json-decode-959-replay-v1/fixtures/Lib/test/__init__.py>
+44048 close(3</workspace/scratch/json-decode-959-replay-v1/fixtures/Lib/test/__init__.py>) = 0
+44048 openat2(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/workspace/scratch/json-decode-959-replay-v1/fixtures/Lib/test/test_json/__init__.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3</workspace/scratch/json-decode-959-replay-v1/fixtures/Lib/test/test_json/__init__.py>
+44048 close(3</workspace/scratch/json-decode-959-replay-v1/fixtures/Lib/test/test_json/__init__.py>) = 0
+44048 openat2(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/workspace/scratch/json-decode-959-replay-v1/fixtures/Lib/test/test_json/test_decode.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3</workspace/scratch/json-decode-959-replay-v1/fixtures/Lib/test/test_json/test_decode.py>
+44048 close(3</workspace/scratch/json-decode-959-replay-v1/fixtures/Lib/test/test_json/test_decode.py>) = 0
+44048 openat2(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/workspace/scratch/json-decode-959-replay-v1/fixtures/Lib/test/support/__init__.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3</workspace/scratch/json-decode-959-replay-v1/fixtures/Lib/test/support/__init__.py>
+44048 close(3</workspace/scratch/json-decode-959-replay-v1/fixtures/Lib/test/support/__init__.py>) = 0
+44048 openat2(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/workspace/scratch/json-decode-959-replay-v1/fixtures/Lib/test/support/import_helper.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3</workspace/scratch/json-decode-959-replay-v1/fixtures/Lib/test/support/import_helper.py>
+44048 close(3</workspace/scratch/json-decode-959-replay-v1/fixtures/Lib/test/support/import_helper.py>) = 0
+44048 openat2(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/workspace/scratch/json-decode-959-replay-v1/fixtures/Lib/test/support/os_helper.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3</workspace/scratch/json-decode-959-replay-v1/fixtures/Lib/test/support/os_helper.py>
+44048 close(3</workspace/scratch/json-decode-959-replay-v1/fixtures/Lib/test/support/os_helper.py>) = 0
+44048 openat2(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/workspace/scratch/json-decode-959-replay-v1/fixtures/Lib/test/support/script_helper.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3</workspace/scratch/json-decode-959-replay-v1/fixtures/Lib/test/support/script_helper.py>
+44048 close(3</workspace/scratch/json-decode-959-replay-v1/fixtures/Lib/test/support/script_helper.py>) = 0
+44048 openat(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/workspace/scratch/json-decode-959-replay-v1/launch", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3</workspace/scratch/json-decode-959-replay-v1/launch>
+44048 close(3</workspace/scratch/json-decode-959-replay-v1/launch>) = 0
+44048 openat(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/workspace/scratch/json-decode-959-replay-v1/fixtures/Lib", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3</workspace/scratch/json-decode-959-replay-v1/fixtures/Lib>
+44048 close(3</workspace/scratch/json-decode-959-replay-v1/fixtures/Lib>) = 0
+44048 exit_group(1)                     = ?
+44047 <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 1}], 0, NULL) = 44048
+44047 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=44048, si_uid=1000, si_status=1, si_utime=18 /* 0.18 s */, si_stime=10 /* 0.10 s */} ---
+44047 newfstatat(AT_FDCWD</workspace/scratch/json-decode-959-replay-v1/empty>, "/workspace/scratch/json-decode-959-replay-v1/gate-correction-v2/O3.imported.exe", 0x7fff11e41180, 0) = -1 ENOENT (No such file or directory)
+44047 exit_group(0)                     = ?
