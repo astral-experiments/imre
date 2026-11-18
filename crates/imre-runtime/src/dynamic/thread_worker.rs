@@ -2,7 +2,7 @@
 
 use super::calls::RegisteredCall;
 use super::thread_callback::Callback;
-use super::thread_lock::NativeWait;
+use super::thread_lock::OwnedWait;
 use super::value::{Heap, ParkedExecution};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak, atomic::Ordering, mpsc};
 use std::thread::{self, JoinHandle};
@@ -66,9 +66,9 @@ impl Join {
     /// The registered caller owns this context on the current thread through wait and resumption.
     #[inline(never)]
     pub(super) unsafe fn run(self, context: *mut Context) -> Result<Id> {
+        let mut wait = OwnedWait::Join(self.deadline, self.handle, Completion::Join);
         // SAFETY: the registered caller owns the interrupted frame through signal dispatch.
-        let result =
-            unsafe { NativeWait::Join(self.deadline, &self.handle, Completion::Join).run(context) };
+        let result = unsafe { wait.run(context) };
         // SAFETY: the native wait and any signal callback have returned to their owner.
         let ctx = unsafe { &mut *context };
         result.map_err(|error| super::stdlib::io::qualify_error(ctx, error, None))?;
@@ -742,9 +742,10 @@ unsafe fn join_shutdown_handles(context: *mut Context) -> Result<()> {
             .find(|handle| handle.awaiting_exit())
             .cloned();
         let Some(handle) = handle else { break };
+        let mut wait = OwnedWait::Join(None, handle, Completion::Shutdown);
         // SAFETY: the registered caller owns the context through signal dispatch.
         // Only the owned native handle crosses the wait.
-        unsafe { NativeWait::Join(None, &handle, Completion::Shutdown).run(context) }?;
+        unsafe { wait.run(context) }?;
     }
     // Other workers may have published completion during an interruptible wait.
     // Finish their native joins, which can still block in native thread teardown.
@@ -943,43 +944,14 @@ pub(super) fn prepare_detached(
     ))
 }
 
-/// Limit canonical worker admission to callers that own the mutable context.
-/// Shared callers can inspect ready callbacks and hash operations, but cannot
-/// prepare a projected or direct lock call that requires canonical resolution.
-trait WorkerTargetContext {
-    fn context(&self) -> &Context;
-    fn mutable_context(&mut self) -> Option<&mut Context>;
-}
-
-impl WorkerTargetContext for &Context {
-    fn context(&self) -> &Context {
-        self
-    }
-
-    fn mutable_context(&mut self) -> Option<&mut Context> {
-        None
-    }
-}
-
-impl WorkerTargetContext for &mut Context {
-    fn context(&self) -> &Context {
-        self
-    }
-
-    fn mutable_context(&mut self) -> Option<&mut Context> {
-        Some(self)
-    }
-}
-
 // Validate the actual bound method and its operands before starting an OS
 // thread. No Python handle, callback, or pointer into Context may cross here.
 fn worker_target(
-    mut owner: impl WorkerTargetContext,
+    ctx: &mut Context,
     target: Id,
     args: Id,
     kwargs: Id,
 ) -> Result<(Operation, Vec<Id>)> {
-    let ctx = owner.context();
     if target == NONE {
         return Ok((Operation::Empty, Vec::new()));
     }
@@ -1000,17 +972,9 @@ fn worker_target(
             &operands[..1]
         };
     if let Some(captured) = Callback::capture(ctx, target_value, roots, pos, Some(kwargs), true)? {
-        let operation = if let Some(ctx) = owner.mutable_context() {
-            captured.resolve(ctx)?
-        } else {
-            match captured {
-                super::thread_callback::Capture::Ready(operation, roots) => {
-                    Some((operation, roots))
-                }
-                super::thread_callback::Capture::Projected { .. } => None,
-            }
-        };
-        return operation.ok_or_else(super::thread_callback::unsupported_target);
+        return captured
+            .resolve(ctx)?
+            .ok_or_else(super::thread_callback::unsupported_target);
     }
     if let Value::Method {
         callable, receiver, ..
@@ -1019,9 +983,6 @@ fn worker_target(
         && keywords.is_empty()
         && matches!(ctx.heap.get(receiver), Value::PrimitiveLock(_))
     {
-        let ctx = owner
-            .mutable_context()
-            .ok_or_else(super::thread_callback::unsupported_target)?;
         let operation =
             super::thread_callback::prepare_primitive_acquire(ctx, callable, receiver, receiver)
                 .map_err(|error| {
@@ -1038,37 +999,25 @@ fn worker_target(
         callable, receiver, ..
     } = *target_value
         && keywords.is_empty()
+        && let [input] = pos.as_slice()
     {
-        let (symbol, storage) = match ctx.heap.get(callable) {
-            Value::Native(symbol) => (symbol.as_str(), receiver),
-            Value::HeapTypeMethod {
-                owner,
-                name: "update",
-                ..
-            } if ctx.heap.get(receiver).instance_class() == Some(*owner) => {
-                ("hash.update", ctx.scalar_value(receiver))
-            }
-            _ => ("", receiver),
-        };
-        let operation = match (ctx.heap.get(storage), pos.as_slice()) {
-            (value @ Value::Hash(hash), [id])
-                if super::builtins::method_name(value, "update").as_deref() == Some(symbol) =>
-            {
-                if let Value::Bytes(data) = ctx.heap.get(*id) {
-                    Some(Operation::UpdateHash {
-                        hash: hash.clone(),
-                        data: super::copy_ids(data)?,
-                    })
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        };
-        if let Some(operation) = operation {
-            // The bound call owns its expanded arguments even if the caller clears the list.
-            return Ok((operation, super::concat_ids(roots, pos)?));
-        }
+        let input = *input;
+        let operation =
+            super::thread_callback::prepare_hash_update(ctx, callable, receiver, receiver, input)
+                .map_err(|error| {
+                    if error.kind == "MemoryError" {
+                        error
+                    } else {
+                        super::thread_callback::unsupported_target()
+                    }
+                })?
+                .ok_or_else(super::thread_callback::unsupported_target)?;
+        // Retain the selected callable, original receiver, and expanded argument even if the
+        // creator replaces the target field or clears the original argument container.
+        return Ok((
+            operation,
+            super::concat_ids(roots, &[callable, receiver, input])?,
+        ));
     }
     Err(super::thread_callback::unsupported_target())
 }
@@ -1194,7 +1143,7 @@ pub(super) fn prepare_start(
             args,
             kwargs,
         } => {
-            let (operation, roots) = worker_target(&mut *ctx, target, args, kwargs)?;
+            let (operation, roots) = worker_target(ctx, target, args, kwargs)?;
             (operation, roots, RunMode::Default)
         }
         RunEntry::Bound { function } => {

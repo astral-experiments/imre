@@ -6210,13 +6210,23 @@ second = (lambda data: data)(t'{client.lookup(*args)}{(lambda v: v)(values)}')",
         use crate::ir::{self, RegisteredCallTarget};
         use serde_json::json;
 
-        for (source, target, key, expected, calls, excluded) in [
+        for (source, target, key, expected, calls, selector, excluded) in [
             (
                 include_str!("../../../../tests/fixtures/boxed_thread_bound_lock.py"),
                 "def task(",
                 "thread_projected_call",
                 json!(["gate", "acquire"]),
                 1,
+                "acquire",
+                "def replacement(",
+            ),
+            (
+                include_str!("../../../../tests/fixtures/boxed_thread_hash_update.py"),
+                "def update(self):",
+                "thread_projected_call",
+                json!(["state", "update", "chunk"]),
+                1,
+                "update",
                 "def replacement(",
             ),
             (
@@ -6225,6 +6235,7 @@ second = (lambda data: data)(t'{client.lookup(*args)}{(lambda v: v)(values)}')",
                 "thread_captured_locks",
                 json!(["gate"]),
                 1,
+                "acquire",
                 "def make_wait(",
             ),
             (
@@ -6233,6 +6244,7 @@ second = (lambda data: data)(t'{client.lookup(*args)}{(lambda v: v)(values)}')",
                 "thread_lock_only",
                 json!(true),
                 2,
+                "acquire",
                 "def handle(",
             ),
         ] {
@@ -6272,7 +6284,7 @@ second = (lambda data: data)(t'{client.lookup(*args)}{(lambda v: v)(values)}')",
                     methods.push(name.as_str());
                 }
             });
-            assert_eq!(methods, vec!["acquire"; calls]);
+            assert_eq!(methods, vec![selector; calls]);
         }
     }
 

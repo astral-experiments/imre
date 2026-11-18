@@ -205,6 +205,92 @@ pub(super) fn new(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
     Ok(ctx.alloc(Value::Hash(SharedHash::new(state))))
 }
 
+/// A checked, callback-free update of one boxed hash from exact immutable bytes.
+pub(in crate::dynamic) struct UpdateHash {
+    receiver: Id,
+    input: Id,
+}
+
+impl UpdateHash {
+    /// Match the native symbol structure using ordinary dispatch's provider predicate.
+    pub(in crate::dynamic) fn native_class(name: &str) -> Option<&str> {
+        let class = name.strip_suffix(".update")?;
+        (class == "hash" || HashState::is_provider_class(class)).then_some(class)
+    }
+
+    /// Recognize only callable/receiver pairs already accepted by ordinary hash dispatch.
+    pub(in crate::dynamic) fn supports(ctx: &Context, callable: Id, receiver: Id) -> bool {
+        match ctx.heap.get(callable) {
+            Value::Native(name) => match Self::native_class(name) {
+                Some("hash") => matches!(ctx.heap.get(receiver), Value::Hash(_)),
+                Some(class) => {
+                    matches!(ctx.heap.get(receiver), Value::Hash(hash) if hash.lock().class_name() == class)
+                }
+                None => false,
+            },
+            Value::HeapTypeMethod {
+                owner,
+                name: "update",
+                ..
+            } => {
+                ctx.heap.get(*owner).heap_type() == Some(md5::CLASS)
+                    && ctx.heap.get(receiver).instance_class() == Some(*owner)
+                    && matches!(ctx.heap.get(ctx.scalar_value(receiver)), Value::Hash(hash) if hash.lock().class_name() == md5::CLASS)
+            }
+            _ => false,
+        }
+    }
+
+    /// Leave all other buffers, signatures, and errors on their ordinary dispatch path.
+    pub(in crate::dynamic) fn prepare(
+        ctx: &Context,
+        callable: Id,
+        args: &[Id],
+        kwargs: &[(String, Id)],
+    ) -> Option<Self> {
+        let [receiver, input] = args else {
+            return None;
+        };
+        (kwargs.is_empty()
+            && matches!(ctx.heap.get(*input), Value::Bytes(_))
+            && Self::supports(ctx, callable, *receiver))
+        .then_some(Self {
+            receiver: *receiver,
+            input: *input,
+        })
+    }
+
+    /// Execute through the existing hash method and its canonical digest state.
+    pub(in crate::dynamic) fn run(self, ctx: &mut Context) -> Result<Id> {
+        let storage = ctx.scalar_value(self.receiver);
+        let result = method(ctx, "hash.update", &[storage, self.input]);
+        if storage == self.receiver {
+            result.map_err(|error| super::io::qualify_error(ctx, error, None))
+        } else {
+            result
+        }
+    }
+
+    /// Retain only the shared native state and an owned immutable byte copy for a worker.
+    pub(in crate::dynamic) fn native(
+        self,
+        ctx: &Context,
+        receiver: Id,
+        input: Id,
+    ) -> Result<Option<(SharedHash, Vec<u8>)>> {
+        if self.receiver != receiver || self.input != input {
+            return Ok(None);
+        }
+        let Value::Hash(hash) = ctx.heap.get(ctx.scalar_value(receiver)) else {
+            return Ok(None);
+        };
+        let Value::Bytes(bytes) = ctx.heap.get(input) else {
+            return Ok(None);
+        };
+        Ok(Some((hash.clone(), super::super::copy_ids(bytes)?)))
+    }
+}
+
 pub(super) fn method(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
     let Value::Hash(hash) = ctx.heap.get(argument(args, 0)?) else {
         unreachable!("bound hash method");

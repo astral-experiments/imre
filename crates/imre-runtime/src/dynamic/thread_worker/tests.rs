@@ -540,7 +540,7 @@ fn python_worker_owns_its_bound_frame_before_publication() {
         let receiver = ctx.alloc(Value::HandlerLock(Arc::clone(&lock)));
         let method = ctx.bind_python_method(function, receiver);
         let kwargs = ctx.dict(vec![(keyword, receiver)]);
-        let (operation, roots) = worker_target(&ctx, method, args, kwargs).unwrap();
+        let (operation, roots) = worker_target(&mut ctx, method, args, kwargs).unwrap();
         assert!(matches!(operation, Operation::Python(_)));
         assert_eq!(roots, [method, args, receiver]);
         let handle = Arc::<Handle>::default();
@@ -629,9 +629,34 @@ fn bound_hash_worker_owns_expanded_input_while_running() {
     let args = ctx.alloc(Value::List(vec![input]));
     let kwargs = ctx.dict(Vec::new());
     let target = ctx.lookup_attr(digest, "update").unwrap();
+    let prepared = ctx
+        .prepare_call(target, std::borrow::Cow::Borrowed(&[input]), Vec::new())
+        .unwrap();
+    assert!(matches!(
+        prepared,
+        crate::dynamic::calls::RegisteredCall::UpdateHash(_)
+    ));
+    let Value::Method { callable, .. } = *ctx.heap.get(target) else {
+        unreachable!()
+    };
+
+    // Neither an unknown callable, a provider method rebound to the wrong hash,
+    // nor the actual copy sibling may run while admission classifies the target.
+    for symbol in ["unknown.update", "_hashlib.HASH.update"] {
+        let function = ctx.alloc(Value::Native(symbol.into()));
+        let rebound = ctx.alloc(Value::Method {
+            callable: function,
+            receiver: digest,
+            explicit: true,
+        });
+        assert!(worker_target(&mut ctx, rebound, args, kwargs).is_err());
+    }
+    let sibling = ctx.lookup_attr(digest, "copy").unwrap();
+    assert!(worker_target(&mut ctx, sibling, args, kwargs).is_err());
     let object = ctx.builtin("object");
     let owner = ctx.instance(object, None);
-    let (operation, operands) = worker_target(&ctx, target, args, kwargs).unwrap();
+    let (operation, operands) = worker_target(&mut ctx, target, args, kwargs).unwrap();
+    assert_eq!(operands, [target, callable, digest, input]);
 
     // Hold the worker inside the native update while the caller clears the original list.
     let held = hash.lock();

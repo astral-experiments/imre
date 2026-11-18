@@ -68,6 +68,7 @@ pub(super) enum Capture {
     Projected {
         operand: Id,
         selector: String,
+        argument: Option<(Id, String)>,
         roots: Vec<Id>,
     },
 }
@@ -113,22 +114,66 @@ pub(super) fn prepare_primitive_acquire(
         }))
 }
 
+/// Classify a verified hash callable through the ordinary registered-call producer.
+pub(super) fn prepare_hash_update(
+    ctx: &mut Context,
+    callable: Id,
+    bound_receiver: Id,
+    expected: Id,
+    input: Id,
+) -> Result<Option<Operation>> {
+    let (callable, receiver) = match *ctx.heap.get(callable) {
+        Value::Method {
+            callable, receiver, ..
+        } if bound_receiver == NONE => (callable, receiver),
+        _ => (callable, bound_receiver),
+    };
+    if receiver != expected
+        || !matches!(ctx.heap.get(input), Value::Bytes(_))
+        || !super::stdlib::hashlib::UpdateHash::supports(ctx, callable, receiver)
+    {
+        return Ok(None);
+    }
+    let args = [receiver, input];
+    let super::calls::RegisteredCall::UpdateHash(update) =
+        ctx.prepare_call(callable, std::borrow::Cow::Borrowed(&args), Vec::new())?
+    else {
+        return Ok(None);
+    };
+    Ok(update
+        .native(ctx, expected, input)?
+        .map(|(hash, data)| Operation::UpdateHash { hash, data }))
+}
+
 impl Capture {
     /// Resolve only the projected case after releasing the immutable capture borrows.
     pub(super) fn resolve(self, ctx: &mut Context) -> Result<Option<(Operation, Vec<Id>)>> {
-        let (operand, selector, roots) = match self {
+        let (operand, selector, argument, roots) = match self {
             Self::Ready(operation, roots) => return Ok(Some((operation, roots))),
             Self::Projected {
                 operand,
                 selector,
+                argument,
                 roots,
-            } => (operand, selector, roots),
+            } => (operand, selector, argument, roots),
         };
         let mark = ctx.heap.temporary_mark();
         let result = (|| {
             let (callable, receiver) = ctx.builtin_method_target(operand, &selector)?;
-            prepare_primitive_acquire(ctx, callable, receiver, operand)
-                .map(|operation| operation.map(|operation| (operation, roots)))
+            if let Some((owner, field)) = argument {
+                let Some(input) = ctx.plain_instance_field(owner, &field) else {
+                    return Ok(None);
+                };
+                let Some(operation) = prepare_hash_update(ctx, callable, receiver, operand, input)?
+                else {
+                    return Ok(None);
+                };
+                let roots = super::concat_ids(&roots, &[callable, input])?;
+                Ok(Some((operation, roots)))
+            } else {
+                prepare_primitive_acquire(ctx, callable, receiver, operand)
+                    .map(|operation| operation.map(|operation| (operation, roots)))
+            }
         })();
         ctx.heap.release_temporaries_since(mark);
         match result {
@@ -182,19 +227,21 @@ impl Callback {
         let mut meta: serde_json::Value = serde_json::from_str(signature)
             .map_err(|e| Error::new("SystemError", e.to_string()))?;
         if let Some((function, receiver)) = method
-            && let Some(serde_json::Value::Array(mut site)) = meta
+            && let Some(serde_json::Value::Array(site)) = meta
                 .get_mut("thread_projected_call")
                 .map(serde_json::Value::take)
         {
-            let [
-                serde_json::Value::String(field),
-                serde_json::Value::String(selector),
-            ] = site.as_mut_slice()
+            let mut site = site.into_iter();
+            let (Some(serde_json::Value::String(field)), Some(serde_json::Value::String(selector))) =
+                (site.next(), site.next())
             else {
                 return Ok(None);
             };
-            let field = std::mem::take(field);
-            let selector = std::mem::take(selector);
+            let argument = match (site.next(), site.next()) {
+                (None, None) => None,
+                (Some(serde_json::Value::String(field)), None) => Some((receiver, field)),
+                _ => return Ok(None),
+            };
             if !matches!(code.body, Body::Native(_, NONE)) {
                 return Ok(None);
             }
@@ -206,8 +253,8 @@ impl Callback {
             {
                 return Ok(None);
             }
-            // This operation executes only the lock acquire. A receiver check that
-            // would raise in the Python frame still requires the worker's exception path.
+            // A receiver check that would raise in the Python frame still requires
+            // the worker's Python exception path.
             if meta.get("types").is_some() {
                 let sig = code
                     .definition
@@ -226,15 +273,23 @@ impl Callback {
             let Some(operand) = ctx.plain_instance_field(receiver, &field) else {
                 return Ok(None);
             };
-            let Value::PrimitiveLock(_) = ctx.heap.get(operand) else {
-                return Ok(None);
+            let supported = match argument {
+                None => matches!(ctx.heap.get(operand), Value::PrimitiveLock(_)),
+                Some(_) => {
+                    matches!(ctx.heap.get(operand), Value::Hash(_))
+                        && super::builtins::method_name(ctx.heap.get(operand), &selector).is_some()
+                }
             };
+            if !supported {
+                return Ok(None);
+            }
             // Retain the original method and projected wrapper until actual worker exit.
             // Canonical resolution remains on the creator before startup publication.
             let roots = super::concat_ids(roots, &[operand])?;
             return Ok(Some(Capture::Projected {
                 operand,
                 selector,
+                argument,
                 roots,
             }));
         }
