@@ -1,0 +1,76 @@
+{
+  "controller_sha256": "2373655aaaddea78072a54a260914662c23bf0df7203cb932628802f9b764f65",
+  "controls": [
+    {
+      "comparable_build": true,
+      "compiler_child_exit_code": 1,
+      "image_absent_after": true,
+      "image_absent_before": true,
+      "kind": "direct",
+      "matched_build": true,
+      "negative_launcher_sha256": "30900c895a79ddd78645ed525502c72a1d6005125cafa5bdbecd9b822e538265",
+      "poison_sha256": null,
+      "seconds": 0.603,
+      "tier": "O0",
+      "trace_sha256": "b5490202db6b85ff07818e1fbf1c1bc28c18f9d93f8315a948ac79a71b68bcb0"
+    },
+    {
+      "comparable_build": true,
+      "compiler_child_exit_code": 1,
+      "image_absent_after": true,
+      "image_absent_before": true,
+      "kind": "imported",
+      "matched_build": true,
+      "negative_launcher_sha256": "2236a6f312dfd51d6e41681e92550091badbecb73861907539341de696199c5d",
+      "poison_sha256": "14841721c7b84f57d26a6a38a53827c683daf10930b9f297cfc15335bd1257b5",
+      "seconds": 0.555,
+      "tier": "O0",
+      "trace_sha256": "5fc12d9b6356298fdec18c7a6b4e28797e36720d20e1c4a70e356bc87c456d0f"
+    },
+    {
+      "comparable_build": true,
+      "compiler_child_exit_code": 1,
+      "image_absent_after": true,
+      "image_absent_before": true,
+      "kind": "direct",
+      "matched_build": true,
+      "negative_launcher_sha256": "30900c895a79ddd78645ed525502c72a1d6005125cafa5bdbecd9b822e538265",
+      "poison_sha256": null,
+      "seconds": 0.555,
+      "tier": "O3",
+      "trace_sha256": "9f2d34cf26a47943f9473384eaef81f1418c69313d6605080a2b54021393467c"
+    },
+    {
+      "comparable_build": true,
+      "compiler_child_exit_code": 1,
+      "image_absent_after": true,
+      "image_absent_before": true,
+      "kind": "imported",
+      "matched_build": true,
+      "negative_launcher_sha256": "2236a6f312dfd51d6e41681e92550091badbecb73861907539341de696199c5d",
+      "poison_sha256": "14841721c7b84f57d26a6a38a53827c683daf10930b9f297cfc15335bd1257b5",
+      "seconds": 0.519,
+      "tier": "O3",
+      "trace_sha256": "e7b92876e46d3857494ccf35b4f882781474063f9648bb35da6ec35c1d69bb83"
+    }
+  ],
+  "credit": 0,
+  "effects_scope": [
+    "empty",
+    "tmp"
+  ],
+  "launcher_restored_sha256": "55367f06f64b7441708387dba7625753f4312e0a70fdf5b37208e40dd35fee0b",
+  "limits": "A gate-only supplementary capture, not a contemporaneous part of the original assessment; effect snapshots cover only the two named private roots.",
+  "original_assessment_sha256": "fa010dd280e6bc0e1ccab91432b44d5c201607d176e9fab8d9a7b7a5cefcdd13",
+  "poison_absent": true,
+  "positive_images_after": {
+    "O0": "fb0535ca32be0015c7de4b66211290193fdec85658ea836a79482601eae5b8bf",
+    "O3": "be39b37641a52ab6862464eff96bc93e93b9fc7c898667dc7f18bd93c1570e9c"
+  },
+  "positive_images_before": {
+    "O0": "fb0535ca32be0015c7de4b66211290193fdec85658ea836a79482601eae5b8bf",
+    "O3": "be39b37641a52ab6862464eff96bc93e93b9fc7c898667dc7f18bd93c1570e9c"
+  },
+  "revision": "95908fb0acadc2a67304a8080e584deaef395746",
+  "schema": "imre.compatibility.json-decode-gate-correction.v2"
+}

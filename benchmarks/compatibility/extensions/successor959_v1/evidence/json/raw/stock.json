@@ -1,0 +1,44 @@
+{
+  "argv": [
+    "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "-B",
+    "/workspace/scratch/json-decode-959-replay-v1/launch/launcher.py"
+  ],
+  "capture_argv": [
+    "/usr/bin/strace",
+    "-f",
+    "-y",
+    "-v",
+    "-qq",
+    "-s",
+    "512",
+    "-e",
+    "trace=execve,execveat,open,openat,openat2,creat,io_uring_setup,newfstatat,rename,wait4,waitid,exit,exit_group,chdir,fchdir,close,close_range,dup,dup2,dup3,fcntl,clone,clone3,fork,vfork",
+    "-o",
+    "/workspace/scratch/json-decode-959-replay-v1/raw/stock.trace",
+    "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "-B",
+    "/workspace/scratch/json-decode-959-replay-v1/launch/launcher.py"
+  ],
+  "controller_sha256": "4ecd6e286f7cf143a52849c6a3cb351509387e4c8bfbd5e011eee38bc0165370",
+  "cwd": "/workspace/scratch/json-decode-959-replay-v1/empty",
+  "effects_after_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+  "effects_before_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+  "effects_equal": true,
+  "environment": {
+    "NO_COLOR": "1",
+    "PATH": "/workspace/scratch/imre-95908-transferred-stdlib-v1/product/imre-toolchain/bin",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONPATH": "/workspace/scratch/json-decode-959-replay-v1/fixtures/Lib",
+    "PYTHON_COLORS": "0",
+    "TMPDIR": "/workspace/scratch/json-decode-959-replay-v1/tmp"
+  },
+  "exit_code": 0,
+  "seconds": 1.195,
+  "stderr_sha256": "06402e2bb7a8437039446c32db1408641a779e6ca18d054b6bc1670d7e157d92",
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "timed_out": false,
+  "timeout_seconds": 90,
+  "trace_bytes": 109961,
+  "trace_sha256": "abc2a513e60d4847a44df7bb1a53fc0ca3b3a0fbedd47e68c76e5ccc24acdf40"
+}
