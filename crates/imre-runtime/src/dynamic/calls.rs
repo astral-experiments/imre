@@ -9937,14 +9937,24 @@ impl Context {
         else {
             unreachable!("registered Python function");
         };
+        let qualname = fields.qualname;
         let (argc, kwargs) = match &arguments {
             FunctionArguments::Written(positional, keywords, _) => {
                 (positional.len(), keywords.as_slice())
             }
             FunctionArguments::Bound(slots) => (slots.len(), &[][..]),
         };
-        let parameters = self.code_object(code).parameters;
-        let name = self.copy_name(fields.qualname)?;
+        let definition = self.code_object(code);
+        let parameters = definition.parameters;
+        if u32::from(definition.definition.provider_body()) == value::PICKLE_LOADS_BODY
+            && let FunctionArguments::Written(ref args, ref kwargs, _) = arguments
+            && let [data] = args.as_ref()
+            && kwargs.is_empty()
+            && let Some(value) = stdlib::pickle::try_direct_loads(self, scope, kwdefaults, *data)?
+        {
+            return Ok(RegisteredCall::Returned(value));
+        }
+        let name = self.copy_name(qualname)?;
         if parameters == NONE {
             if let Some((key, _)) = kwargs.first() {
                 return Err(Error::new(

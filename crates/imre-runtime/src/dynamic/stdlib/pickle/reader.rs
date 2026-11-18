@@ -247,18 +247,17 @@ fn unobserved(ctx: &Context) -> bool {
 }
 
 fn options(ctx: &Context, scope: Id) -> bool {
-    let Some(fix_imports) = ctx.scope_name(scope, "fix_imports") else {
-        return false;
-    };
-    if !matches!(ctx.heap.get(fix_imports), Value::Bool(_))
-        || ctx.scope_name(scope, "buffers") != Some(NONE)
-    {
-        return false;
-    }
-    ["encoding", "errors"].iter().all(|name| {
-        ctx.scope_name(scope, name)
-            .is_some_and(|id| matches!(ctx.heap.get(id), Value::Str(text) if !text.contains('\0')))
-    })
+    valid_options(ctx, |name| ctx.scope_name(scope, name))
+}
+
+fn valid_options(ctx: &Context, option: impl Fn(&str) -> Option<Id>) -> bool {
+    option("fix_imports").is_some_and(|id| matches!(ctx.heap.get(id), Value::Bool(_)))
+        && option("buffers") == Some(NONE)
+        && ["encoding", "errors"].iter().all(|name| {
+            option(name).is_some_and(
+                |id| matches!(ctx.heap.get(id), Value::Str(text) if !text.contains('\0')),
+            )
+        })
 }
 
 /// Build from validated input offsets. A memo vector is needed only if the
@@ -280,7 +279,7 @@ fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
         unreachable!()
     };
     let (pointer, length) = (bytes.as_ptr(), bytes.len());
-    // SAFETY: the source frame roots this exact immutable bytes object; its Vec
+    // SAFETY: the call operands root this exact immutable bytes object; its Vec
     // backing allocation does not move when heap slots grow. No callback,
     // collection, signal checkpoint, or mutation runs while decoding.
     let input = unsafe { std::slice::from_raw_parts(pointer, length) };
@@ -323,6 +322,29 @@ fn attempt(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     let Some(data) = ctx.scope_name(scope, "data") else {
         return Ok(None);
     };
+    attempt_data(ctx, data, false)
+}
+
+/// Try a positional call to the authenticated bundled `pickle.loads` body
+/// before allocating and binding an otherwise unobservable Python frame.
+pub(in crate::dynamic) fn try_direct_loads(
+    ctx: &mut Context,
+    scope: Id,
+    kwdefaults: Id,
+    data: Id,
+) -> Result<Option<Id>> {
+    let root = ctx.root_scope(scope);
+    let globals = ctx.scope_data(root);
+    if globals.module != "pickle"
+        || globals.exec_globals.is_some()
+        || !valid_options(ctx, |name| ctx.dict_named_item(kwdefaults, name))
+    {
+        return Ok(None);
+    }
+    attempt_data(ctx, data, true)
+}
+
+fn attempt_data(ctx: &mut Context, data: Id, direct: bool) -> Result<Option<Id>> {
     let Value::Bytes(bytes) = ctx.heap.get(data) else {
         return Ok(None);
     };
@@ -332,7 +354,7 @@ fn attempt(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
         return Ok(None);
     }
     let layout = preflight(bytes);
-    let vm = if layout.is_none() {
+    let vm = if layout.is_none() && !direct {
         super::vm::preflight(bytes)
     } else {
         None
@@ -340,6 +362,9 @@ fn attempt(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     #[cfg(unix)]
     if crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Acquire) {
         return Ok(None);
+    }
+    if direct && layout.is_some() {
+        ctx.check_call_depth(0)?;
     }
     match (layout, vm) {
         (Some(layout), _) => decode(ctx, data, layout).map(Some),
