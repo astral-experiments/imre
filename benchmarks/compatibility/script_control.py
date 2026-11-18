@@ -16,6 +16,20 @@ ORIGINAL_AUTHORITY = '880648b620f57905a495eb51fbb4600755ee0c54'
 MANIFEST = f'benchmarks/compatibility/revisions/{PIN}/controls/unified-source-stage.json'
 
 
+PREDECESSOR = {'commit':'7c790c02b96b422b2873fc7e05d3c601ec5ba999', 'manifest':MANIFEST,
+               'git_blob':'aac61fb78e490989b9a81b2124dff6342d5a1969',
+               'sha256':'8b69644e5cb93b0749accb06cce27457ba4cc361fb30d71d341ad631d878c5b6'}
+
+
+def verify_predecessor(api, manifest):
+    """Require the exact public first stage and preserve every frozen evidence object."""
+    api.require(manifest.get('predecessor') == PREDECESSOR, '959 predecessor differs from public first stage')
+    raw_control.public_commit(api, PREDECESSOR['commit'])
+    previous = raw_control.git_manifest(api.ROOT, **{'commit':PREDECESSOR['commit'], 'path':PREDECESSOR['manifest'], 'blob':PREDECESSOR['git_blob'], 'digest':PREDECESSOR['sha256']})
+    api.require(set(manifest) == set(previous) | {'predecessor'} and set(manifest.get('sources',{})) == set(previous['sources'])
+                and all(manifest[k] == v for k,v in previous.items() if k != 'sources'), '959 predecessor frozen stage or evidence set changed')
+
+
 def authority(api, entry):
     fixed = source_stage_pins.REVISION_959
     api.require(isinstance(fixed, dict) and set(fixed) == {'commit','manifest','git_blob','sha256'}
@@ -28,6 +42,7 @@ def authority(api, entry):
     api.require(manifest.get('schema') == 'imre.compatibility.source-stage.v1'
                 and manifest.get('imre_revision') == PIN and manifest.get('original_authority',{}).get('commit') == ORIGINAL_AUTHORITY,
                 '959 source-stage manifest identity differs')
+    verify_predecessor(api, manifest)
     return manifest
 
 

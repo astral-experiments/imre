@@ -145,11 +145,47 @@ class PublicAuthorityTests(unittest.TestCase):
             root=Path(tmp)
             def git(*args):return subprocess.check_output(['git',*args],cwd=root,stderr=subprocess.DEVNULL).decode().strip()
             git('init','-q');git('config','user.name','Charlie Marsh');git('config','user.email','charlie.r.marsh@gmail.com');git('remote','add','origin','https://github.com/astral-experiments/imre.git');p=root/script_control.MANIFEST;p.parent.mkdir(parents=True);dump(p,{'schema':'imre.compatibility.source-stage.v1','imre_revision':PIN,'original_authority':{'commit':script_control.ORIGINAL_AUTHORITY}});git('add','.');git('commit','-qm','stage');stage=git('rev-parse','HEAD');blob=git('rev-parse',f'{stage}:{script_control.MANIFEST}');git('update-ref','refs/remotes/origin/main',stage);(root/'later').write_text('later');git('add','.');git('commit','-qm','activation');fixed={'commit':stage,'manifest':script_control.MANIFEST,'git_blob':blob,'sha256':sha(p)};entry={'source_stage':copy.deepcopy(fixed)}
-            with patch.object(scorecard,'ROOT',root),patch.object(script_control.source_stage_pins,'REVISION_959',fixed):
+            with patch.object(scorecard,'ROOT',root),patch.object(script_control.source_stage_pins,'REVISION_959',fixed),patch.object(script_control,'verify_predecessor'):
                 script_control.authority(scorecard,entry);entry['source_stage']['git_blob']='0'*40
                 with self.assertRaisesRegex(ValueError,'fixed public'):script_control.authority(scorecard,entry)
                 entry['source_stage']=copy.deepcopy(fixed);entry['source_stage']['commit']=git('rev-parse','HEAD')
                 with self.assertRaises(ValueError):script_control.authority(scorecard,entry)
+
+
+class GeneratorStageTests(unittest.TestCase):
+    def setUp(self):
+        self.addCleanup(patch.stopall);patch.object(scorecard,'DATA_ROOT',SNAPSHOT).start();patch.object(scorecard,'COHORT',{**scorecard.CANONICAL_COHORT,'imre_revision':PIN}).start()
+
+    def test_independent_counts_and_shared_revision_render(self):
+        fs,_=scorecard.summary();row=fs['fnmatch'];row.update(receipts=24,paired=24,observed=24,pending=0)
+        scripts=[{'id':id,'paired':True,'runs':{t:{'outcome':'pass'} for t in scorecard.TIERS}} for id in ('uv-10','uv-26','uv-29','ty-05')]
+        root=scorecard.render_root_summary(fs,scripts);revision=scorecard.render('stdlib',(fs,scripts));cohort=scorecard.script_cohort_text(scripts)
+        self.assertIn('| `fnmatch` | 24 / 24 |',root);self.assertIn('4 verified / 72 historically reported stock-success commands',root);self.assertIn('84 original script IDs',root);self.assertIn(script_control.ORIGINAL_AUTHORITY,root);self.assertIn(cohort,revision);self.assertNotIn('28 verified',root)
+        original=(scorecard.ROOT/'README.md').read_text();frozen=original.split(scorecard.ROOT_SUMMARY_START)[1].split(scorecard.ROOT_SUMMARY_END)[0];updated=scorecard.replace_root_summary(original,root)
+        self.assertEqual(updated.split(scorecard.ROOT_SUMMARY_START)[1].split(scorecard.ROOT_SUMMARY_END)[0],frozen);self.assertIn('d0b396559a8ffda965cb495063b2967847d116aa',updated);self.assertEqual(scorecard.replace_root_summary(updated,root),updated)
+
+    def test_historical_cohort_rejects_unrelated_pairs_and_denominator(self):
+        with self.assertRaisesRegex(ValueError,'historical stock-success'):scorecard.script_cohort_text([{'id':'uv-13','paired':True}])
+        with patch.dict(scorecard.COHORT['scripts'],expected_commands=83),self.assertRaisesRegex(ValueError,'canonical originals'):scorecard.script_cohort_text([])
+
+    def test_exact_public_predecessor_and_rebound_frozen_sets(self):
+        manifest=json.loads((SNAPSHOT/'controls/unified-source-stage.json').read_text());self.assertEqual(manifest['predecessor'],script_control.PREDECESSOR)
+        with tempfile.TemporaryDirectory(dir=scorecard.ROOT) as tmp:
+            root=Path(tmp)
+            def git(*args):return subprocess.check_output(['git',*args],cwd=root,stderr=subprocess.DEVNULL).decode().strip()
+            git('init','-q');git('config','user.name','Charlie Marsh');git('config','user.email','charlie.r.marsh@gmail.com');common=subprocess.check_output(['git','rev-parse','--git-common-dir'],cwd=scorecard.ROOT,text=True).strip();objects=(scorecard.ROOT/Path(common)/'objects').resolve();(root/'.git/objects/info/alternates').write_text(str(objects)+'\n');base=script_control.PREDECESSOR['commit'];tree=git('rev-parse',base+'^{tree}');child=git('commit-tree',tree,'-p',base,'-m','temporary descendant');git('update-ref','HEAD',child);git('remote','add','origin','https://github.com/astral-experiments/imre.git');git('update-ref','refs/remotes/origin/main',base)
+            with patch.object(scorecard,'ROOT',root):
+                script_control.verify_predecessor(scorecard,manifest)
+                for field in ('artifacts','bindings','staged'):
+                    bad=copy.deepcopy(manifest);bad[field]={}
+                    with self.subTest(field=field),self.assertRaisesRegex(ValueError,'frozen stage'):script_control.verify_predecessor(scorecard,bad)
+                bad=copy.deepcopy(manifest);bad['predecessor']['sha256']='0'*64
+                with self.assertRaisesRegex(ValueError,'predecessor differs'):script_control.verify_predecessor(scorecard,bad)
+                git('update-ref','HEAD',base)
+                with self.assertRaisesRegex(ValueError,'distinct public'):script_control.verify_predecessor(scorecard,manifest)
+                git('update-ref','HEAD',child)
+                git('update-ref','-d','refs/remotes/origin/main')
+                with self.assertRaises(ValueError):script_control.verify_predecessor(scorecard,manifest)
 
 
 class ScriptReboundTests(unittest.TestCase):

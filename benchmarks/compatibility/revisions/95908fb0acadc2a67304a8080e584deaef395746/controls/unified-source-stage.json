@@ -438,13 +438,19 @@
       "uv-extra-02": "0cd4203c658d6c1367038587e25525b81a1bcf787116b2a03cdbe80415a833b0"
     }
   },
+  "predecessor": {
+    "commit": "7c790c02b96b422b2873fc7e05d3c601ec5ba999",
+    "git_blob": "aac61fb78e490989b9a81b2124dff6342d5a1969",
+    "manifest": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/controls/unified-source-stage.json",
+    "sha256": "8b69644e5cb93b0749accb06cce27457ba4cc361fb30d71d341ad631d878c5b6"
+  },
   "schema": "imre.compatibility.source-stage.v1",
   "sources": {
     "benchmarks/compatibility/collect_unittest_results.py": "1596e23f9c1a209805e8784ceb3b233e68b5857ad11b8c629c71c1ff9357daf8",
     "benchmarks/compatibility/raw_control.py": "9edb18699cd0a2a30dc51db20ab668a3e81e1cd36209e0ec82af767678cbfcbb",
-    "benchmarks/compatibility/scorecard.py": "d4c60aa1240fa140af45a55e08e1bfc4becdd4c0e5ca28600554394fb1d3d50c",
-    "benchmarks/compatibility/script_control.py": "0117ebf3fb4836f036bd1187254c54ada81eda6643671af06d85d5cf8e67d81f",
-    "benchmarks/compatibility/test_revision959_stage.py": "b0f3ed0065c94b84d63072b095172410a383158dd47d1834b19c6b0f586a3d4b"
+    "benchmarks/compatibility/scorecard.py": "24fc1f25516cc6da3d6648505af55fae2b22ddf22188bc5877b8950a7c46130e",
+    "benchmarks/compatibility/script_control.py": "041ea8b428a6564b6fc38f4d3c52b12583a2b3ad7475aaf5cd3e827c92943c0a",
+    "benchmarks/compatibility/test_revision959_stage.py": "68c07f6e43b43e7b95f81728231bbecfb5596859f991b745972732cd49cc66cd"
   },
   "staged": {
     "script": {
