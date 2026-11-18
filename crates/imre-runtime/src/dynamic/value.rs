@@ -8096,6 +8096,31 @@ impl Heap {
         self.free_count += 1;
     }
 
+    /// Recycle a fully verified, unmarked exact text leaf and link it to the batch's free head.
+    ///
+    /// Unlike an arbitrary swept value, this slot has no GC-order link, header,
+    /// finalization state, generator identity, or compound hash to remove. The caller
+    /// updates the batch's free count after retiring every leaf in source sweep order.
+    #[inline]
+    fn retire_verified_text_leaf(&mut self, id: usize, free_head: usize) {
+        debug_assert!(self.slot_shapes[id].is_scalar_leaf());
+        debug_assert_eq!(self.traces[id].get(), UNMARKED);
+        debug_assert_eq!(self.slots[id].gc_prev.get(), UNMARKED);
+        debug_assert!(!self.slots[id].has_gc_header);
+        debug_assert!(self.slots[id].finalization == Finalization::None);
+        debug_assert!(matches!(self.slots[id].value, Some(Value::Str(_))));
+        self.slot_shapes[id] = SlotShape::Vacant;
+        self.traces[id].set(UNMARKED);
+        if self.text_position.get().slot == id as Id {
+            self.text_position.set(TextPosition::default());
+        }
+        self.root_trace.recycled(id);
+        self.invalidate_stream_bindings(id);
+        let slot = &mut self.slots[id];
+        slot.value = None;
+        slot.gc_next.set(free_head);
+    }
+
     /// Recycle unmarked slots in a span which can contain unreachable values.
     fn sweep_slots(&mut self, span: Range<usize>) {
         // Vacant slots supply their own free-list links. A sweep can therefore
@@ -8149,6 +8174,7 @@ impl Heap {
                 || !shape.is_scalar_leaf()
                 || self.traces[child_index].get() != UNMARKED
                 || child_slot.has_gc_header
+                || child_slot.gc_prev.get() != UNMARKED
                 || child_slot.finalization != Finalization::None
             {
                 return false;
@@ -8156,7 +8182,8 @@ impl Heap {
             let Some(Value::Str(text)) = child_slot.value.as_ref() else {
                 return false;
             };
-            if let Some(short) = crate::objects::short_index(text)
+            if text.len() <= 2
+                && let Some(short) = crate::objects::short_index(text)
                 && self
                     .short_strings
                     .get(&short)
@@ -8166,21 +8193,30 @@ impl Heap {
             }
         }
         let count = items.len();
+        let items = items.as_ptr();
+        let mut free_head = self.free_head;
+        let mut retired = 0;
         for position in (0..count).rev() {
-            let Value::List(items) = self.slots[index].value.as_ref().unwrap() else {
-                unreachable!()
-            };
-            let child = items[position] as usize;
+            // SAFETY: preverification proved the owner remains an exact list and every
+            // child is a different exact string slot. No operation below reallocates the
+            // slot vector or the list's separate item allocation, mutates the list, runs
+            // Python, collects, or dispatches signals. The owner is retired only after
+            // the final read from this pointer.
+            let child = unsafe { *items.add(position) } as usize;
             if self.slot_shapes[child] == SlotShape::Vacant {
                 continue;
             }
             let Some(Value::Str(text)) = self.slots[child].value.as_ref() else {
                 unreachable!()
             };
-            if crate::objects::short_index(text).is_none() {
-                self.retire_slot(child);
+            if text.len() > 2 || crate::objects::short_index(text).is_none() {
+                self.retire_verified_text_leaf(child, free_head);
+                free_head = child;
+                retired += 1;
             }
         }
+        self.free_head = free_head;
+        self.free_count += retired;
         self.retire_slot(index);
         true
     }
@@ -8366,6 +8402,53 @@ mod tests {
         heap.allocation_traces.stop();
         // SAFETY: the isolated graph is unmarked and no observer is active.
         assert!(unsafe { heap.retire_proven_fresh_text_list(other) });
+    }
+
+    #[test]
+    fn verified_text_retirement_preserves_side_fields_and_free_order() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let (list, children) = fresh_text_list(
+            &mut heap,
+            &[("alpha", true), ("Ā", false), ("é", false), ("", true)],
+        );
+        heap.release_temporaries_since(mark);
+        let first = children[0] as usize;
+        let second = children[1] as usize;
+        let free_head = heap.free_head;
+        let free_count = heap.free_count;
+
+        // A scalar with an unexpected collector link must reject the complete
+        // graph before changing either the owner or a previously verified leaf.
+        heap.gc_order.push(second, &heap.slots);
+        // SAFETY: the isolated graph has no roots; verification rejects its linked leaf.
+        assert!(!unsafe { heap.retire_proven_fresh_text_list(list) });
+        assert_eq!(heap.free_count, free_count);
+        assert!(matches!(heap.get(children[0]), Value::Str(_)));
+        heap.gc_order.remove(second, &heap.slots);
+
+        heap.root_trace.flags.resize(heap.slots.len(), 0);
+        heap.root_trace.flags[first] = RootTrace::COVERED | RootTrace::FRONTIER;
+        heap.root_trace.valid = true;
+        let mut position = TextPosition::default();
+        position.slot = children[0];
+        heap.text_position.set(position);
+        heap.cache_standard_stream_bindings(children[0], [NONE; 3]);
+
+        // SAFETY: all non-singleton leaves and their exact owner are isolated,
+        // unmarked, unlinked and cannot be observed during retirement.
+        assert!(unsafe { heap.retire_proven_fresh_text_list(list) });
+        assert!(!heap.root_trace.valid);
+        assert_eq!(heap.root_trace.flags[first], 0);
+        assert_eq!(heap.text_position.get().slot, NONE);
+        assert!(heap.standard_stream_bindings(children[0]).is_none());
+        assert_eq!(heap.free_count, free_count + 3);
+        assert_eq!(heap.free_head, list as usize);
+        assert_eq!(heap.slots[list as usize].gc_next.get(), first);
+        assert_eq!(heap.slots[first].gc_next.get(), second);
+        assert_eq!(heap.slots[second].gc_next.get(), free_head);
+        assert!(matches!(heap.get(children[2]), Value::Str(text) if text == "é"));
+        assert!(matches!(heap.get(children[3]), Value::Str(text) if text.is_empty()));
     }
 
     #[test]
