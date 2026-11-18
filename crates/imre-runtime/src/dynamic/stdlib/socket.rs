@@ -1809,7 +1809,9 @@ pub(super) fn endpoint_method(
 }
 
 fn sendfile_write_for(ctx: &Context, receiver: Id) -> Option<(native::SendfileIdentity, Id)> {
-    ctx.sendfile_writes
+    ctx.heap
+        .execution
+        .sendfile_writes
         .iter()
         .find_map(|&(target, identity, session)| {
             (target == receiver).then_some((identity, session))
@@ -2035,14 +2037,17 @@ fn call_method(
         }
         let identity = sendfile_identity(ctx, owner)?;
         native::check_sendfile_owner(&s, native::fd(&s), &identity)?;
-        ctx.sendfile_writes
+        ctx.heap
+            .execution
+            .sendfile_writes
             .try_reserve(1)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        ctx.heap.keep(receiver);
-        ctx.heap.keep(session);
-        ctx.sendfile_writes.push((receiver, identity, session));
+        ctx.heap
+            .execution
+            .sendfile_writes
+            .push((receiver, identity, session));
         let result = ctx.call(send, vec![data], Vec::new());
-        ctx.sendfile_writes.pop();
+        ctx.heap.execution.sendfile_writes.pop();
         return result;
     }
     if method == "_check_sendfile_owner" {
@@ -2211,6 +2216,110 @@ pub(super) fn send_all_exported(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sendfile_callback_nesting_errors_and_transport_identity() {
+        unsafe extern "C" fn nested(raw: *mut Context, scope: Id) -> Id {
+            // SAFETY: the registered test entry exclusively owns this context.
+            let ctx = unsafe { &mut *raw };
+            let result = (|| -> Result<Id> {
+                let receiver = ctx.lookup(scope, "receiver")?;
+                let owner = ctx.lookup(scope, "owner")?;
+                let session = ctx.lookup(scope, "session")?;
+                let data = ctx.lookup(scope, "data")?;
+                let socket = ctx.heap.get(receiver).socket_handle().unwrap().clone();
+                check_tls_sendfile_owner(ctx, receiver, session, &socket)?;
+                if check_tls_sendfile_owner(ctx, receiver, NONE, &socket).is_ok() {
+                    return Err(Error::new(
+                        "AssertionError",
+                        "accepted a replaced TLS session",
+                    ));
+                }
+                let write = ctx.lookup_attr(receiver, "_sendfile_write")?;
+                let len = ctx.builtin("len");
+                let value = ctx.call(write, vec![owner, len, data, session], Vec::new())?;
+                if ctx.heap.execution.sendfile_writes.len() != 1
+                    || ctx
+                        .call(write, vec![owner, len, data, NONE], Vec::new())
+                        .is_ok()
+                {
+                    return Err(Error::new("AssertionError", "nested guard lost its owner"));
+                }
+                Ok(value)
+            })();
+            match result {
+                Ok(value) => value,
+                Err(error) => {
+                    ctx.heap.execution.pending = Some(error);
+                    NONE
+                }
+            }
+        }
+
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let name = ctx.text("_socket");
+        let module = ctx
+            .import_module_level("_socket", name, None, None, 0)
+            .unwrap();
+        let pair = socketpair(&mut ctx, &[module], &[]).unwrap();
+        let Value::Tuple(ends) = ctx.heap.get(pair) else {
+            unreachable!()
+        };
+        let receiver = ends[0];
+        let get_owner = ctx.lookup_attr(receiver, "_sendfile_owner").unwrap();
+        let owner = ctx.call(get_owner, Vec::new(), Vec::new()).unwrap();
+        let write = ctx.lookup_attr(receiver, "_sendfile_write").unwrap();
+        let data = ctx.alloc(Value::Bytes(b"abc".to_vec()));
+        let len = ctx.builtin("len");
+        let value = ctx
+            .call(write, vec![owner, len, data, NONE], Vec::new())
+            .unwrap();
+        assert_eq!(value, ctx.int(3));
+        let scalar = ctx.int(1);
+        assert_eq!(
+            ctx.call(write, vec![owner, len, scalar, NONE], Vec::new())
+                .unwrap_err()
+                .kind,
+            "TypeError"
+        );
+        assert!(ctx.heap.execution.sendfile_writes.is_empty());
+
+        let globals = ctx.scope("sendfile_test", None);
+        let session = ctx.alloc(Value::List(Vec::new()));
+        ctx.bind(globals, "receiver", receiver);
+        ctx.bind(globals, "owner", owner);
+        ctx.bind(globals, "session", session);
+        let name = ctx.text("nested");
+        let signature = ctx.text(r#"{"positional":["data"]}"#);
+        let file = ctx.text("sendfile_test.py");
+        let code = ctx.prelinked_code(
+            super::super::super::value::Body::Native(nested, NONE),
+            globals,
+            name,
+            signature,
+            (name, NONE),
+            (file, 1),
+        );
+        let callback = ctx
+            .define_function(code, globals, name, NONE, name, NONE, NONE, false)
+            .unwrap();
+        let value = ctx
+            .call(write, vec![owner, callback, data, session], Vec::new())
+            .unwrap();
+        assert_eq!(value, ctx.int(3));
+        assert!(ctx.heap.execution.sendfile_writes.is_empty());
+        let Value::Bytes(bytes) = ctx.heap.get(owner) else {
+            unreachable!()
+        };
+        let mut changed = bytes.clone();
+        changed[0] ^= 1;
+        let changed = ctx.alloc(Value::Bytes(changed));
+        assert!(
+            ctx.call(write, vec![changed, len, data, NONE], Vec::new())
+                .is_err()
+        );
+        assert!(ctx.heap.execution.sendfile_writes.is_empty());
+    }
 
     #[test]
     fn prepared_receive_parks_with_its_rooted_frame_operand() {
