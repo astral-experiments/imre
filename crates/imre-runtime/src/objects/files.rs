@@ -932,6 +932,54 @@ pub(super) fn read_path_bytes(path: &str) -> Result<Bytes> {
     close_file(file).map_err(errno_error).and(result)
 }
 
+/// Read like an unbuffered FileIO, dispatching default SIGINT before retrying EINTR.
+/// An empty nonblocking read returns None, while a partial read returns its bytes.
+pub(crate) fn read_path_bytes_interruptible(path: &str) -> Result<Option<Bytes>> {
+    let path = super::text::try_owned_string(path)?;
+    let (file, metadata) = open_file(&path, 0)?;
+    let mut bytes = Vec::new();
+    let regular = metadata.is_file();
+    let maximum = if regular { 8 * 1024 * 1024 } else { 8192 };
+    let initial = usize::try_from(metadata.len())
+        .unwrap_or(usize::MAX)
+        .clamp(8192, maximum);
+    let result = (|| {
+        bytes
+            .try_reserve_exact(initial)
+            .map_err(|_| Error::memory_error())?;
+        loop {
+            if bytes.len() == bytes.capacity() {
+                let extra = bytes.len().clamp(8192, maximum);
+                bytes
+                    .try_reserve(extra)
+                    .map_err(|_| Error::memory_error())?;
+            }
+            let spare = bytes.spare_capacity_mut();
+            let length = spare.len().min(maximum);
+            match super::os::try_read_spare(file.as_raw_fd(), &mut spare[..length]) {
+                Ok(None) => {
+                    super::stdlib::check_interrupt()?;
+                }
+                Ok(Some(0)) => return Ok(Some(bytes)),
+                Ok(Some(count)) => {
+                    // SAFETY: the successful read initialized exactly count spare bytes.
+                    unsafe { bytes.set_len(bytes.len() + count) };
+                }
+                Err(error)
+                    if error.os_args().is_some_and(|args| {
+                        args.errno == i64::from(libc::EAGAIN)
+                            || args.errno == i64::from(libc::EWOULDBLOCK)
+                    }) =>
+                {
+                    return Ok((!bytes.is_empty()).then_some(bytes));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    })();
+    close_file(file).map_err(errno_error).and(result)
+}
+
 pub(super) fn write_path_bytes(path: &str, bytes: &[u8]) -> Result<usize> {
     with_path_file(path, 1, true, |state| state.write_bytes(bytes))?;
     Ok(Int::from_usize(bytes.len()).into_raw())

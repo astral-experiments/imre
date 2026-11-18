@@ -38,6 +38,7 @@ mod idna;
 mod inspect;
 pub(super) mod itertools;
 pub(super) mod locale;
+mod path_read;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(super) mod pwd;
 pub(super) mod tempfile;

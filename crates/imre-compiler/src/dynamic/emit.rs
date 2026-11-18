@@ -1275,6 +1275,23 @@ impl SourceMap<'_> {
                 "_BytesFrame.read" => Some((None, permanent::PICKLE_BYTES_FRAME_READ_BODY)),
                 _ => None,
             }
+        } else if self.bundled && self.path == Path::new("<imre stdlib>/pathlib/__init__.py") {
+            match prefix.name {
+                "Path.read_bytes" => Some((
+                    Some("imre_dyn_path_read_bytes"),
+                    permanent::PATH_READ_BYTES_BODY,
+                )),
+                "Path.open" => Some((None, permanent::PATH_OPEN_BODY)),
+                "PurePath.__fspath__" => Some((None, permanent::PATH_FSPATH_BODY)),
+                "PurePath.__str__" => Some((None, permanent::PATH_STR_BODY)),
+                "PurePath._parse_path" => Some((None, permanent::PATH_PARSE_BODY)),
+                "PurePath._format_parsed_parts" => Some((None, permanent::PATH_FORMAT_BODY)),
+                "PurePath._raw_path" => Some((None, permanent::PATH_RAW_BODY)),
+                "PurePath.drive" => Some((None, permanent::PATH_DRIVE_BODY)),
+                "PurePath.root" => Some((None, permanent::PATH_ROOT_BODY)),
+                "PurePath._tail" => Some((None, permanent::PATH_TAIL_BODY)),
+                _ => None,
+            }
         } else if self.bundled
             && self.path == Path::new("<imre stdlib>/collections/__init__.py")
             && prefix.name == "_namedtuple_make.<locals>._make"

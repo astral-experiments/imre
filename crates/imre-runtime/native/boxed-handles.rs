@@ -56,3 +56,15 @@ pub(crate) const PICKLE_UNFRAMER_LINE_BODY: u32 = 30;
 pub(crate) const PICKLE_UNFRAMER_FRAME_BODY: u32 = 31;
 pub(crate) const PICKLE_BYTES_FRAME_INIT_BODY: u32 = 32;
 pub(crate) const PICKLE_BYTES_FRAME_READ_BODY: u32 = 33;
+
+/// Authenticated bundled pathlib definitions used by whole-file reads.
+pub(crate) const PATH_READ_BYTES_BODY: u32 = 100;
+pub(crate) const PATH_OPEN_BODY: u32 = 101;
+pub(crate) const PATH_FSPATH_BODY: u32 = 102;
+pub(crate) const PATH_STR_BODY: u32 = 103;
+pub(crate) const PATH_PARSE_BODY: u32 = 104;
+pub(crate) const PATH_FORMAT_BODY: u32 = 105;
+pub(crate) const PATH_RAW_BODY: u32 = 106;
+pub(crate) const PATH_DRIVE_BODY: u32 = 107;
+pub(crate) const PATH_ROOT_BODY: u32 = 108;
+pub(crate) const PATH_TAIL_BODY: u32 = 109;
