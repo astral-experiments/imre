@@ -184,6 +184,23 @@ impl BuildOptions {
         }
         options.read(command, args, true)?;
         options.add_pythonpath();
+        if command == "build"
+            && !options.help
+            && let Some(name) = options.compile.module_entry.take()
+        {
+            options.compile.require_checked_module_entry = true;
+            let mut operand = std::iter::once(OsString::from(name));
+            let (invocation, _) = crate::python_command::parse("-m".into(), &mut operand)
+                .map_err(|error| match error {
+                    crate::python_command::ParseError::Usage(message) => message,
+                    crate::python_command::ParseError::FatalStartup(message)
+                    | crate::python_command::ParseError::FatalCore(message) => message.into(),
+                    crate::python_command::ParseError::ContextWarnings(message) => format!(
+                        "Fatal Python error: config_init_context_aware_warnings: {message}\nPython runtime state: preinitialized\n"
+                    ),
+                })?;
+            return Self::with_python_entry(options, invocation);
+        }
         Ok(options)
     }
 
@@ -207,13 +224,22 @@ impl BuildOptions {
         if !flags.ignore_environment {
             options.add_pythonpath();
         }
+        options.verbosity = Verbosity::Quiet;
+        Self::with_python_entry(options, invocation)
+    }
+
+    /// Configure the same checked named/script entry for a saved image or an immediate run.
+    fn with_python_entry(
+        mut options: Self,
+        invocation: crate::python_command::Invocation,
+    ) -> Result<Self, String> {
+        use crate::python_command::Invocation;
         if options.module_root.is_some() {
             return Err(
                 "--module-root takes a file entry; command strings use the interpreter search path"
                     .into(),
             );
         }
-        options.verbosity = Verbosity::Quiet;
         match invocation {
             Invocation::Command(command) => {
                 options.source_path = Some("-c".into());
@@ -367,6 +393,16 @@ impl BuildOptions {
             };
             match flag.to_str() {
                 Some("--") if command_line && command == "run" => break,
+                Some("-m") if command_line && command == "build" => {
+                    if self.source_path.is_some() {
+                        return Err(USAGE.to_owned());
+                    }
+                    let name = value()?
+                        .into_string()
+                        .map_err(|_| "-m requires a UTF-8 module name")?;
+                    self.source_path = Some("-m".into());
+                    self.compile.module_entry = Some(name);
+                }
                 Some("-q" | "--quiet") => self.verbosity = Verbosity::Quiet,
                 Some("-v" | "--verbose") => self.verbosity = Verbosity::Verbose,
                 Some("--no-cache") => self.no_cache = true,
@@ -510,6 +546,32 @@ mod tests {
         options.read(command, &mut args(), true).unwrap();
         assert_eq!(options.source_path, Some(PathBuf::from("main.py")));
         assert!(options.verbosity == Verbosity::Verbose);
+    }
+
+    #[test]
+    fn build_module_is_exclusive_and_keeps_build_options() {
+        let command = OsStr::new("build");
+        let mut options = BuildOptions::default();
+        let mut args = ["-m", "pkg.entry", "-o", "image", "--opt-level", "3"]
+            .map(OsString::from)
+            .into_iter();
+        options.read(command, &mut args, true).unwrap();
+        assert_eq!(options.source_path.as_deref(), Some(Path::new("-m")));
+        assert_eq!(options.compile.module_entry.as_deref(), Some("pkg.entry"));
+        assert_eq!(options.output.as_deref(), Some(Path::new("image")));
+        assert_eq!(options.optimization, OsString::from("3"));
+
+        for words in [
+            &["script.py", "-m", "pkg"][..],
+            &["-m", "pkg", "script.py"][..],
+            &["-m", "pkg", "-m", "other"][..],
+            &["-m", "pkg", "--", "arg"][..],
+            &["-m"][..],
+        ] {
+            let mut options = BuildOptions::default();
+            let mut args = words.iter().copied().map(OsString::from);
+            assert!(options.read(command, &mut args, true).is_err());
+        }
     }
 
     #[test]
