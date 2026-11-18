@@ -2987,7 +2987,7 @@ pub(super) fn call(
                 return builtins::builtin_slot(ctx, name, args, kwargs);
             }
             if member == "run" {
-                let call = ctx.prepare_context_run(args, kwargs.to_vec())?;
+                let call = ctx.prepare_context_run(args.into(), kwargs.to_vec())?;
                 // SAFETY: the synchronous caller retains the context and operands through return.
                 return unsafe { call.run(ctx) };
             }
