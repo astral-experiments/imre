@@ -126,33 +126,13 @@ impl Checker<'_> {
         }
     }
 
-    pub(super) fn directory_manager(
-        &mut self,
-        intrinsic: Intrinsic,
-        call: &ast::ExprCall,
-    ) -> Result<Expr, String> {
-        let temporary = intrinsic == Intrinsic::TemporaryDirectory;
-        let value = if temporary {
-            self.temporary_directory(call)?
-        } else {
-            self.reject_builtin_keywords(call)?;
-            match call.arguments.args.as_ref() {
-                [] => Expr::none(),
-                [arg] => self.expr(arg)?,
-                _ => {
-                    return Err(error(
-                        self.source,
-                        call,
-                        "nullcontext accepts one path or string value",
-                    ));
-                }
-            }
-        };
+    pub(super) fn directory_manager(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let value = self.temporary_directory(call)?;
         let source = value.ty;
         let domain = self.types.union(&[Type::Str, Type::Path]).unwrap();
         let value = self.coerce(value, self.types.optional(domain), call)?;
         Ok(operation(
-            PathOperation::ContextNew { temporary },
+            PathOperation::ContextNew,
             self.types.directory_context(source),
             vec![value],
         ))
