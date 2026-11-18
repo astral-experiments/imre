@@ -37,6 +37,15 @@ pub(super) fn matching_linked_compilation(
     other: (Option<value::Code>, &[u8; 32], Option<u32>),
     loader: bool,
 ) -> bool {
+    matching_compilation(first, other, loader)
+}
+
+/// Compare the same descriptor fields when a file registration has no source digest.
+fn matching_compilation<D: PartialEq>(
+    first: (Option<value::Code>, D, Option<u32>),
+    other: (Option<value::Code>, D, Option<u32>),
+    loader: bool,
+) -> bool {
     first.1 == other.1
         && first.2 == other.2
         && match (first.0, other.0) {
@@ -45,6 +54,55 @@ pub(super) fn matching_linked_compilation(
             _ => false,
         }
 }
+
+/// Resolution of a default file loader, before or after authenticating finite bytes.
+pub(super) enum LoaderResolution {
+    Linked(Id),
+    NeedsBytes,
+    TrustedMiss,
+    Custom,
+}
+
+impl LoaderResolution {
+    /// A strict loader miss raises before Python can select a fallback; optional lookups miss as None.
+    pub(super) fn into_python(
+        self,
+        ctx: &Context,
+        strict_origin: Option<(Id, Id)>,
+    ) -> Result<Id> {
+        match self {
+            Self::Linked(code) => Ok(code),
+            Self::NeedsBytes => Ok(TRUE),
+            Self::Custom => Ok(NONE),
+            Self::TrustedMiss => {
+                let Some((name, path)) = strict_origin else {
+                    return Ok(NONE);
+                };
+                let mut error = Error::new(
+                    "ImportError",
+                    format!(
+                        "no matching linked code for {} at {}; a renamed or reconstructed \
+                         SourceFileLoader whose name differs from the registered module is \
+                         unsupported (including pydoc.importfile(path) on a package submodule). \
+                         Declare and import the qualified module, or use its linked registered provider",
+                        ctx.repr(name), ctx.repr(path),
+                    ),
+                );
+                let trace = error.tracing();
+                trace.import_names[0] = Some(name);
+                trace.import_names[1] = Some(path);
+                Err(error)
+            }
+        }
+    }
+}
+
+type FileCompilation = (
+    ModuleInitializer,
+    Option<value::Code>,
+    Option<&'static [u8; 32]>,
+    Option<u32>,
+);
 
 impl Context {
     /// Call the caller's import hook for side effects, then read the interpreter's module registry.
@@ -617,7 +675,6 @@ impl Context {
         inherited: u32,
         loader: bool,
     ) -> Result<Option<Id>> {
-        use sha2::{Digest, Sha256};
         let data = self.scalar_value(data);
         if !matches!(self.heap.get(data), Value::Bytes(_) | Value::ByteArray(_)) {
             return Ok(None);
@@ -636,7 +693,30 @@ impl Context {
                 Some(inherited),
             )));
         }
-        if loader {
+        self.authenticated_file_code_from_bytes(filename, data, inherited, loader, &path, None)
+    }
+
+    /// Match only code registered for this origin; an empty input has no implicit body here.
+    fn authenticated_file_code_from_bytes(
+        &mut self,
+        filename: Id,
+        data: Id,
+        inherited: u32,
+        loader: bool,
+        path: &Path,
+        fullname: Option<Id>,
+    ) -> Result<Option<Id>> {
+        use sha2::{Digest, Sha256};
+        // A compiler-issued fullname descriptor is authoritative over path-only write records.
+        let scoped = if fullname.is_some() {
+            match self.select_file_compilation(path, fullname, inherited, loader) {
+                Ok(candidate) => candidate,
+                Err(()) => return Ok(None),
+            }
+        } else {
+            None
+        };
+        if loader && scoped.is_none() {
             let bytes = self.bytes_like(data)?;
             let mut matching = self.linked_file_sources.iter().copied().filter(|source| {
                 source.path.as_os_str() == path.as_os_str()
@@ -654,30 +734,33 @@ impl Context {
                 )));
             }
         }
-        let mut entries = self.sources.values().flatten().filter_map(|source| {
-            if source.path.as_os_str() != path.as_os_str()
-                && !matches!(source.code, ModuleInitializer::File { declared_open_path: Some(alias), .. } if alias.as_os_str() == path.as_os_str())
-            {
-                return None;
-            }
-            match source.code {
-                code @ ModuleInitializer::File {
-                    entry,
-                    digest: Some(digest),
-                    flags,
-                    ..
-                } => Some((code, Some(entry), digest, flags)),
-                code @ ModuleInitializer::Zip(entry, digest, flags) => {
-                    Some((code, Some(entry), digest, Some(flags)))
-                }
-                code @ ModuleInitializer::Invalid {
-                    archive_digest: Some(digest),
-                    ..
-                } => Some((code, None, digest, None)),
-                _ => None,
-            }
-        });
-        let Some((code, entry, digest, flags)) = entries.next() else {
+        let candidate = if fullname.is_some() {
+            scoped
+        } else {
+            self.select_file_compilation(path, None, inherited, loader)
+                .ok()
+                .flatten()
+        };
+        let Some((code, _, Some(digest), _)) = candidate else {
+            return Ok(None);
+        };
+        if Sha256::digest(self.bytes_like(data)?).as_slice() != digest {
+            return Ok(None);
+        }
+        self.linked_module_code(code, path, Some(filename))
+            .map(|(code, _)| Some(code))
+    }
+
+    /// Select one compatible registration for an origin, refusing conflicting scoped candidates.
+    fn select_file_compilation(
+        &self,
+        path: &Path,
+        fullname: Option<Id>,
+        inherited: u32,
+        loader: bool,
+    ) -> std::result::Result<Option<FileCompilation>, ()> {
+        let mut entries = self.file_compilation_candidates(path, fullname);
+        let Some(first @ (code, entry, digest, flags)) = entries.next() else {
             return Ok(None);
         };
         // A source-declared future already applies to its initializer. Additional
@@ -691,18 +774,55 @@ impl Context {
             }
         );
         if inherited & !flags.unwrap_or(0) != 0 || (flags.is_none() && !loader && !parser_error) {
-            return Ok(None);
+            return Err(());
         }
         if entries.any(|(_, other, hash, other_flags)| {
-            !matching_linked_compilation((entry, digest, flags), (other, hash, other_flags), loader)
+            !matching_compilation((entry, digest, flags), (other, hash, other_flags), loader)
         }) {
-            return Ok(None);
+            return Err(());
         }
-        if Sha256::digest(self.bytes_like(data)?).as_slice() != digest {
-            return Ok(None);
-        }
-        self.linked_module_code(code, &path, Some(filename))
-            .map(|(code, _)| Some(code))
+        Ok(Some(first))
+    }
+
+    /// Scope loader candidates to the requested name; passive compile retains its unscoped lookup.
+    fn file_compilation_candidates<'a>(
+        &'a self,
+        path: &'a Path,
+        fullname: Option<Id>,
+    ) -> impl Iterator<Item = FileCompilation> + 'a {
+        let keyed = fullname
+            .into_iter()
+            .filter_map(move |name| self.str_value(name).ok())
+            .flat_map(move |name| self.file_sources(name));
+        let unscoped = fullname
+            .is_none()
+            .then_some(())
+            .into_iter()
+            .flat_map(move |()| self.sources.values().flatten());
+        keyed.chain(unscoped).filter_map(move |source| {
+            if source.path.as_os_str() != path.as_os_str()
+                && !matches!(source.code, ModuleInitializer::File { declared_open_path: Some(alias), .. } if alias.as_os_str() == path.as_os_str())
+            {
+                return None;
+            }
+            match source.code {
+                code @ ModuleInitializer::File {
+                    entry,
+                    digest,
+                    flags,
+                    ..
+                } => (digest.is_some() || fullname.is_some())
+                    .then_some((code, Some(entry), digest, flags)),
+                code @ ModuleInitializer::Zip(entry, digest, flags) => {
+                    Some((code, Some(entry), Some(digest), Some(flags)))
+                }
+                code @ ModuleInitializer::Invalid {
+                    archive_digest: Some(digest),
+                    ..
+                } => Some((code, None, Some(digest), None)),
+                _ => None,
+            }
+        })
     }
 
     /// Resolve the file that runpy tried to open to the declaring loader’s native code.
@@ -857,19 +977,24 @@ impl Context {
         self.loader_source(loader, filename)?.bundled_text
     }
 
-    /// Return an issued loader's body or the matching initializer for a plain file loader.
+    /// Resolve only an issued body, the requested name's file registrations, and finite writes.
     pub(super) fn registered_code(
         &mut self,
         loader: Id,
         path: Id,
         registration: Option<(Id, Id, Id)>,
-    ) -> Result<Id> {
-        if let Some((_, read, convert)) = registration {
-            if !matches!(self.heap.get(path), Value::Str(_) | Value::SurrogateStr(_)) {
-                return Ok(NONE);
+        data: Option<Id>,
+    ) -> Result<LoaderResolution> {
+        use LoaderResolution::{Custom, Linked, NeedsBytes, TrustedMiss};
+
+        if let Some((name, read, convert)) = registration {
+            if !matches!(self.heap.get(path), Value::Str(_) | Value::SurrogateStr(_))
+                || self.str_value(name).is_err()
+            {
+                return Ok(Custom);
             }
             let Value::Instance { class, .. } = *self.heap.get(loader) else {
-                return Ok(NONE);
+                return Ok(Custom);
             };
             // Reading a user descriptor to test eligibility would invoke a loader hook twice.
             if self.class_attr(class, "__getattribute__").is_some_and(|hook| {
@@ -877,26 +1002,57 @@ impl Context {
             }) || [("get_data", read), ("source_to_code", convert)].into_iter().any(|(attr, expected)| {
                 self.class_attr(class, attr) != Some(expected) || self.raw_instance_field(loader, attr).is_some()
             }) {
-                return Ok(NONE);
+                return Ok(Custom);
             }
+        }
+        if let Some(data) = data {
+            let Some((name, _, _)) = registration else {
+                return Ok(Custom);
+            };
+            let filename = self.import_path(path)?;
+            let data = self.scalar_value(data);
+            if !matches!(self.heap.get(data), Value::Bytes(_) | Value::ByteArray(_)) {
+                return Ok(TrustedMiss);
+            }
+            return Ok(self
+                .authenticated_file_code_from_bytes(path, data, 0, true, &filename, Some(name))?
+                .map_or(TrustedMiss, Linked));
         }
         if let Some(source) = self.loader_source(loader, path) {
             let (entry, origin) = (source.code, source.path.clone());
-            return self.module_code(entry, &origin);
+            return self.module_code(entry, &origin).map(Linked);
         }
-        // A Python-constructed file loader has no issued-loader binding.
-        if let Some((name, _, _)) = registration {
-            let path = self.import_path(path)?;
-            // Nested code retains the exact filename supplied at build time.
-            if let Ok(name) = self.str_value(name)
-                && let Some(source) = self.registered_file(name, &path)
-                && source.path.as_os_str() == path.as_os_str()
-                && let entry @ ModuleInitializer::File { .. } = source.code
-            {
-                return self.module_code(entry, &path);
-            }
+        let Some((name, _, _)) = registration else {
+            return Ok(Custom);
+        };
+        let filename = self.import_path(path)?;
+        let selected = match self.select_file_compilation(&filename, Some(name), 0, true) {
+            Ok(candidate) => candidate,
+            Err(()) => return Ok(TrustedMiss),
+        };
+        // Preserve the existing direct same-name/origin registration before finite writes.
+        if let Ok(name) = self.str_value(name)
+            && let Some(source) = self.registered_file(name, &filename)
+            && source.path.as_os_str() == filename.as_os_str()
+            && let entry @ ModuleInitializer::File { .. } = source.code
+        {
+            return self.module_code(entry, &filename).map(Linked);
         }
-        Ok(NONE)
+        if let Some((_, _, digest, _)) = selected {
+            return Ok(if digest.is_some() {
+                NeedsBytes
+            } else {
+                TrustedMiss
+            });
+        }
+        if self
+            .linked_file_sources
+            .iter()
+            .any(|source| source.path.as_os_str() == filename.as_os_str())
+        {
+            return Ok(NeedsBytes);
+        }
+        Ok(TrustedMiss)
     }
 
     fn file_spec(&mut self, name: Id, origin: Id, locations: Id, body: SourceBody) -> Result<Id> {
@@ -1144,6 +1300,42 @@ mod linked_compilation_tests {
     }
     extern "C" fn second(_: *mut Context, _: Id) -> Id {
         TRUE
+    }
+
+    #[test]
+    fn scoped_loader_selects_only_its_fullname_and_refuses_conflicting_entries() {
+        static DIGEST: [u8; 32] = [1; 32];
+        let argv = [c"imre".as_ptr()];
+        // SAFETY: the constructor consumes the argument pointers before returning.
+        let mut ctx = unsafe {
+            Box::from_raw(super::super::ffi::imre_dyn_new(
+                1,
+                argv.as_ptr(),
+                c"{\"paths\":[]}".as_ptr(),
+            ))
+        };
+        let origin = Path::new("shared.py");
+        let source = |entry| super::super::SourceModule {
+            path: origin.into(),
+            code: ModuleInitializer::File {
+                entry,
+                digest: Some(&DIGEST),
+                flags: Some(0),
+                declared_open_path: None,
+            },
+            bundled_text: None,
+            single_inputs: None,
+        };
+        ctx.sources.entry("pkg.first").or_default().push(source(first));
+        ctx.sources.entry("pkg.second").or_default().push(source(second));
+        let name = ctx.text("pkg.first");
+        let selected = ctx
+            .select_file_compilation(origin, Some(name), 0, true)
+            .unwrap()
+            .unwrap();
+        assert!(std::ptr::fn_addr_eq(selected.1.unwrap(), first as value::Code));
+        ctx.sources.entry("pkg.first").or_default().push(source(second));
+        assert!(ctx.select_file_compilation(origin, Some(name), 0, true).is_err());
     }
 
     #[test]
