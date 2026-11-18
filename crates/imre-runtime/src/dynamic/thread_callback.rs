@@ -275,8 +275,10 @@ impl Callback {
             };
             let supported = match argument {
                 None => matches!(ctx.heap.get(operand), Value::PrimitiveLock(_)),
-                Some(_) => matches!(ctx.heap.get(operand), Value::Hash(_))
-                    && super::builtins::method_name(ctx.heap.get(operand), &selector).is_some(),
+                Some(_) => {
+                    matches!(ctx.heap.get(operand), Value::Hash(_))
+                        && super::builtins::method_name(ctx.heap.get(operand), &selector).is_some()
+                }
             };
             if !supported {
                 return Ok(None);
