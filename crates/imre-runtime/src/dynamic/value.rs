@@ -8284,13 +8284,10 @@ impl Heap {
         slot.gc_next.set(free_head);
     }
 
-    /// Check once that no certified SHORT_BINUNICODE leaf can own side metadata.
+    /// Check once that no certified SHORT_BINUNICODE leaf can own cursor or stream metadata.
     /// A live text cursor belongs only to a non-ASCII string of at least 256 bytes;
     /// standard-stream bindings are indexed by their owning scope, never a string.
     fn certified_text_side_state_clear(&self) -> bool {
-        if !self.root_trace.flags.is_empty() {
-            return false;
-        }
         let position = self.text_position.get().slot;
         if position != NONE
             && !usize::try_from(position).ok().is_some_and(|index| {
@@ -8318,6 +8315,12 @@ impl Heap {
         debug_assert_eq!(self.slots[id].gc_prev.get(), UNMARKED);
         debug_assert!(!self.slots[id].has_gc_header);
         debug_assert!(self.slots[id].finalization == Finalization::None);
+        debug_assert!(
+            self.root_trace
+                .flags
+                .get(id)
+                .is_none_or(|&flags| flags == 0)
+        );
         debug_assert!(
             matches!(self.slots[id].value, Some(Value::Str(ref text)) if (3..=255).contains(&text.len()))
         );
@@ -8353,6 +8356,10 @@ impl Heap {
     /// removed. The producer guarantees a nonempty exact list containing only
     /// distinct dynamic exact SHORT_BINUNICODE string slots with UTF-8 byte length
     /// 3..=255; those slots have no GC header/link, trace or finalization state.
+    /// Every child was appended beyond the root-trace flags or allocated from a
+    /// vacant slot whose previous retirement cleared its flags. No root trace may
+    /// have been rebuilt or marked since that allocation, so every child flag is
+    /// still absent or zero even if unrelated slots retain root-trace flags.
     /// No Python observer or collector may run until this method returns.
     /// Failing an owner check changes no slot.
     pub(super) unsafe fn retire_certified_nonshort_text_list(&mut self, id: Id) -> bool {
@@ -8384,7 +8391,8 @@ impl Heap {
             for position in (0..count).rev() {
                 // SAFETY: the immediate producer and uninterrupted compiler witness
                 // prove each item is a distinct private 3..=255-byte exact string.
-                // The aggregate guard excludes every such leaf from side metadata.
+                // The witness proves zero root-trace flags; the aggregate guard
+                // excludes every such leaf from cursor and stream side metadata.
                 // No allocation, callback, collection, or owner mutation occurs.
                 let child = unsafe { *items.add(position) } as usize;
                 self.retire_private_text_leaf(child, free_head);
@@ -8635,25 +8643,25 @@ mod tests {
     }
 
     #[test]
-    fn private_text_retirement_falls_back_for_leaf_side_metadata() {
+    fn private_text_retirement_falls_back_for_uncertain_cursor_and_stream_state() {
         let mut heap = Heap::new();
         let mark = heap.temporary_mark();
         let (owner, children) = nonshort_text_list(&mut heap, &[("alpha", true), ("bravo", true)]);
         heap.release_temporaries_since(mark);
         let child = children[0] as usize;
         heap.root_trace.flags.resize(heap.slots.len(), 0);
-        heap.root_trace.flags[child] = RootTrace::COVERED | RootTrace::FRONTIER;
         heap.root_trace.valid = true;
         let mut position = TextPosition::default();
         position.slot = children[0];
         heap.text_position.set(position);
         heap.cache_standard_stream_bindings(children[0], [NONE; 3]);
         assert!(!heap.certified_text_side_state_clear());
-        // SAFETY: this isolated producer graph is private and unchanged; injected side
-        // metadata deliberately forces the full invalidation path before any slot is reused.
+        // SAFETY: this isolated producer graph is private and unchanged, with zero
+        // child root-trace flags. Uncertain cursor and stream metadata deliberately
+        // force the full invalidation path before any slot is reused.
         assert!(unsafe { heap.retire_certified_nonshort_text_list(owner) });
         assert_eq!(heap.root_trace.flags[child], 0);
-        assert!(!heap.root_trace.valid);
+        assert!(heap.root_trace.valid);
         assert_eq!(heap.text_position.get().slot, NONE);
         assert_eq!(heap.stream_binding_scope.get(), NONE);
         assert_eq!(heap.free_head, owner as usize);
@@ -8661,6 +8669,41 @@ mod tests {
             heap.slots[owner as usize].gc_next.get(),
             children[0] as usize
         );
+    }
+
+    #[test]
+    fn private_text_retirement_accepts_unrelated_flags_for_reused_and_appended_leaves() {
+        let mut heap = Heap::new();
+        let unrelated = heap.alloc(Value::Str("unrelated".into())) as usize;
+        let mark = heap.temporary_mark();
+        let reused = heap.alloc(Value::Str("retired".into())) as usize;
+        heap.release_temporaries_since(mark);
+        heap.root_trace.flags.resize(heap.slots.len(), 0);
+        heap.root_trace.flags[reused] = RootTrace::COVERED;
+        heap.retire_slot(reused);
+        assert_eq!(heap.root_trace.flags[reused], 0);
+        heap.root_trace.flags[unrelated] = RootTrace::COVERED | RootTrace::FRONTIER;
+        heap.root_trace.valid = true;
+
+        let appended = heap.slots.len();
+        let mark = heap.temporary_mark();
+        let (owner, children) = nonshort_text_list(&mut heap, &[("alpha", true), ("bravo", true)]);
+        heap.release_temporaries_since(mark);
+        assert_eq!(children, [reused as Id, appended as Id]);
+        assert_eq!(heap.root_trace.flags.get(reused), Some(&0));
+        assert!(heap.root_trace.flags.get(appended).is_none());
+        assert!(heap.certified_text_side_state_clear());
+        // SAFETY: both leaves were freshly allocated from a cleared vacant slot
+        // or beyond the flags table, and no mark/observer ran after production.
+        assert!(unsafe { heap.retire_certified_nonshort_text_list(owner) });
+        assert_eq!(
+            heap.root_trace.flags[unrelated],
+            RootTrace::COVERED | RootTrace::FRONTIER
+        );
+        assert!(heap.root_trace.valid);
+        assert_eq!(heap.free_head, owner as usize);
+        assert_eq!(heap.slots[owner as usize].gc_next.get(), reused);
+        assert_eq!(heap.slots[reused].gc_next.get(), appended);
     }
 
     #[test]
