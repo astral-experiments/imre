@@ -186,6 +186,8 @@ fn source_class(ctx: &Context, root: Id, class: Id, expected: &str) -> bool {
             "__getattr__",
             "__getattribute__",
             "__setattr__",
+            "__bool__",
+            "__len__",
             "__del__",
         ]
         .iter()
