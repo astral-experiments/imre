@@ -152,13 +152,31 @@ def archive_members(api,archive,config_json):
     cfg=json.loads(config_json);raw=safe_path(api,archive).read_bytes();outer=safe_path(api,cfg['outer_seal']).read_bytes();api.require(raw_control.sha(outer)==cfg['outer_sha256'],'identity outer seal differs');obj=json.loads(outer);outer_format=cfg.get('outer_format','single-archive-v1');manifest_format=cfg.get('manifest_format','files-map-v1')
     if outer_format=='single-archive-v1':api.require(obj.get('credit')==0 and obj.get('files')==[{'name':Path(archive).name,'bytes':len(raw),'sha256':raw_control.sha(raw)}], 'identity archive differs from outer seal')
     elif outer_format=='archive-fields-v1':api.require(obj.get('credit')==0 and Path(obj.get('archive_path','')).name==Path(archive).name and obj.get('archive_bytes')==len(raw) and obj.get('archive_sha256')==raw_control.sha(raw) and obj.get('member_list_sha256')==cfg['manifest_sha256'], 'identity archive fields differ from outer seal')
+    elif outer_format == 'external-files-map-v1':
+        api.require(
+            obj.get('credit') == 0 and obj.get('archive_bytes') == len(raw)
+            and obj.get('archive_sha256') == raw_control.sha(raw) == cfg['archive_sha256']
+            and isinstance(obj.get('files'), dict),
+            'identity externally sealed archive differs',
+        )
     else:api.require(outer_format=='member-manifest-v1' and obj.get('credit')==0 and cfg.get('archive_sha256')==raw_control.sha(raw), 'identity archive or manifest-only seal differs')
     with tarfile.open(safe_path(api,archive)) as t:
         result={}
         for x in t.getmembers():
             if x.name=='.' and x.isdir():continue
             name=x.name.removeprefix('./');api.require(x.isreg() and name and name not in result and not Path(name).is_absolute() and '..' not in Path(name).parts and Path(name).as_posix()==name and x.name in {name,'./'+name},'unsafe, duplicate or nonregular identity archive member');result[name]=t.extractfile(x).read()
-    member=cfg['manifest_member'];api.require(member in result and raw_control.sha(result[member])==cfg['manifest_sha256'],'identity member manifest differs');m=json.loads(result[member]);extra={member}|({cfg['additional_seal']} if cfg.get('additional_seal') else set())
+    if outer_format == 'external-files-map-v1':
+        member = None
+        m = obj
+        extra = set()
+    else:
+        member = cfg['manifest_member']
+        api.require(
+            member in result and raw_control.sha(result[member]) == cfg['manifest_sha256'],
+            'identity member manifest differs',
+        )
+        m = json.loads(result[member])
+        extra = {member} | ({cfg['additional_seal']} if cfg.get('additional_seal') else set())
     if manifest_format=='files-map-v1':files=m.get('files');api.require(isinstance(files,dict) and m.get('schema')==cfg['manifest_schema'],'identity files-map manifest schema differs')
     else:
         api.require(manifest_format=='members-list-v1' and isinstance(m.get('members'),list),'unknown identity member manifest format');items=m['members'];api.require(all(isinstance(v,dict) and set(v)=={'path','bytes','sha256'} and isinstance(v['path'],str) for v in items) and len({v['path'] for v in items})==len(items),'duplicate or malformed identity list member');files={v['path']:{'bytes':v['bytes'],'sha256':v['sha256']} for v in items}

@@ -185,7 +185,9 @@ def payload_alias(path, *, task=False):
     return re.search(r'(?:^|/)proc/(?:[0-9]+|self|thread-self)/'+task_part+r'fd/[0-9]+(?:/|$)|(?:^|/)dev/fd/[0-9]+(?:/|$)', path) is not None
 
 
-def direct_withdrawal(lines, image, probe, tree, stash, leaf, extra_sources, require):
+def direct_withdrawal(
+    lines, image, probe, tree, stash, leaf, extra_sources, require, expected_exit=0,
+):
     first, target = execs(lines, require)
     require(first[2:] == (probe, [probe, 'withdraw', tree, stash, leaf, image])
         and target[2:] == (image, [image]), 'withdrawal did not run the saved image directly')
@@ -195,12 +197,12 @@ def direct_withdrawal(lines, image, probe, tree, stash, leaf, extra_sources, req
     a = stat(lines, first[1], tree, True, mv+1)
     b = stat(lines, first[1], leaf, True, a+1)
     require(b < target[0], 'test source tree was not absent before native exec')
-    waited = exits(lines, first[1], target[1], 0, target[0])
+    waited = exits(lines, first[1], target[1], expected_exit, target[0])
     a = stat(lines, first[1], tree, True, waited+1)
     b = stat(lines, first[1], leaf, True, a+1)
     restored = find(lines, rf'^{first[1]}\s+rename\({re.escape(json.dumps(stash))}, {re.escape(json.dumps(tree))}\) = 0$', b+1)
     exists = stat(lines, first[1], leaf, False, restored+1)
-    find(lines, rf'^{first[1]}\s+exit_group\(0\)', exists+1)
+    find(lines, rf'^{first[1]}\s+exit_group\({expected_exit}\)', exists+1)
     hide = stat(lines, first[1], leaf, True, mv+1)
     for source in extra_sources:
         source_stash = source + '.raw-control-stash'
@@ -261,11 +263,22 @@ def wrapped_withdrawal(lines, image, probe, tree, stash, leaf, cwd, chain, requi
     return first,target,wait
 
 
-def trace_withdraw(api, text, image, probe, tree, stash, leaf, cwd, require, extra_sources=(), strict_payloads=False, content_policy=None, chain_policy=None):
-    """Allow only ENOENT withdrawn-path probes; never allow Python probes or child execs."""
+def trace_withdraw(
+    api, text, image, probe, tree, stash, leaf, cwd, require, extra_sources=(),
+    strict_payloads=False, content_policy=None, chain_policy=None, expected_exit=0,
+    python_probe=None,
+):
+    """Permit ENOENT withdrawn-path probes and only an explicitly declared Python probe."""
     from posixpath import normpath
     lines = text.splitlines()
-    first,target,waited = (wrapped_withdrawal(lines,image,probe,tree,stash,leaf,cwd,chain_policy,require) if chain_policy else direct_withdrawal(lines,image,probe,tree,stash,leaf,extra_sources,require))
+    if chain_policy:
+        first, target, waited = wrapped_withdrawal(
+            lines, image, probe, tree, stash, leaf, cwd, chain_policy, require,
+        )
+    else:
+        first, target, waited = direct_withdrawal(
+            lines, image, probe, tree, stash, leaf, extra_sources, require, expected_exit,
+        )
     require(isinstance(cwd, str) and Path(cwd).is_absolute(), 'native cwd missing')
     stem = Path(leaf).stem.lower()
     extra_paths = {Path(p) for source in extra_sources for p in (source, source+'.raw-control-stash')}
@@ -273,12 +286,25 @@ def trace_withdraw(api, text, image, probe, tree, stash, leaf, cwd, require, ext
     native = lines[target[0]:waited+1]
     allowed_data={Path(x['runtime']) for x in content_policy[0]['families'][content_policy[1]].get('readonly_data_files',[])} if chain_policy and content_policy else set()
     allowed_dirs={Path(x) for x in content_policy[0]['families'][content_policy[1]].get('directory_paths',[]) if Path(x).is_relative_to(Path(tree))} if chain_policy and content_policy else set()
-    probe_policy=chain_policy.get('python_probe') if chain_policy else None;python_attempts=0
+    require(
+        type(expected_exit) is int and expected_exit in {0, 1}
+        and (not chain_policy or expected_exit == 0),
+        'unrecognized native withdrawal exit policy',
+    )
+    probe_policy = chain_policy.get('python_probe') if chain_policy else python_probe
+    python_attempts = 0
     if probe_policy:require(set(probe_policy)=={'pid','operation','path','errno','count'} and probe_policy['pid']=='target' and probe_policy['operation']=='statx' and Path(probe_policy['path']).is_absolute() and probe_policy['errno']=='ENOENT' and probe_policy['count']==1, 'invalid exact Python probe policy')
     for line in native:
         # A successful io_uring setup would permit unobserved asynchronous opens.
         require(not re.search(r'\bio_uring_setup\(.*= [0-9]+$', line), 'native io_uring may hide file access')
-        m = OPEN.match(line) or re.match(r'^\d+\s+newfstatat\(.*?("(?:[^"\\]|\\.)*")', line) or (re.match(r'^\d+\s+statx\(.*?("(?:[^"\\]|\\.)*")',line) if chain_policy else None)
+        m = (
+            OPEN.match(line)
+            or re.match(r'^\d+\s+newfstatat\(.*?("(?:[^"\\]|\\.)*")', line)
+            or (
+                re.match(r'^\d+\s+statx\(.*?("(?:[^"\\]|\\.)*")', line)
+                if chain_policy or probe_policy else None
+            )
+        )
         if m:
             try: path = ast.literal_eval(m[1])
             except (ValueError, SyntaxError): require(False, "invalid traced path")
@@ -472,14 +498,122 @@ def policy_sources(api, policy, require):
                     'fixture source line witness differs')
 
 
-def event_index(path, require):
-    result = parse(path if isinstance(path,bytes) else path.read_bytes(), False)
-    require(result['inventory_complete'] and result['summary'] is not None, 'raw unittest collection or summary incomplete')
+def event_capture(path, require):
+    raw = path if isinstance(path, bytes) else path.read_bytes()
+    result = parse(raw, False)
+    require(
+        result['inventory_complete'] and result['summary'] is not None,
+        'raw unittest collection or summary incomplete',
+    )
     index = {}
     for row in result['originals']:
         key = (row['id'], row['occurrence'])
-        require(key not in index and row['outcome'] in {'pass','fail','error','skip'}, 'raw unittest original missing a completed outcome')
+        require(
+            key not in index and row['outcome'] in {'pass', 'fail', 'error', 'skip'},
+            'raw unittest original missing a completed outcome',
+        )
         index[key] = row
+    return result, index
+
+def event_index(path, require):
+    return event_capture(path, require)[1]
+
+
+def traced_output(lines, pid, fd, require):
+    """Reconstruct complete target-PID writes to one captured pipe descriptor."""
+    descriptor = str(fd)
+    process = re.escape(str(pid))
+    prefix = rf'^{process}\s+write(?:v)?\({descriptor}(?:<[^<>]*>)?,'
+    pattern = (
+        rf'^{process}\s+write\({descriptor}<pipe:\[[0-9]+\]>, '
+        r'("(?:[^"\\]|\\.)*"), ([0-9]+)\) = ([0-9]+)$'
+    )
+    chunks = []
+    for line in lines:
+        if not re.match(prefix, line):
+            continue
+        match = re.fullmatch(pattern, line)
+        require(
+            match is not None and match[2] == match[3],
+            f'completed unittest fd {fd} write is partial or unverified',
+        )
+        try:
+            chunk = ast.literal_eval('b' + match[1])
+        except (SyntaxError, ValueError):
+            require(False, 'completed unittest pipe write is undecodable')
+        require(len(chunk) == int(match[2]), 'completed unittest pipe write is truncated')
+        chunks.append(chunk)
+    return b''.join(chunks)
+
+
+def completed_unittest(raw, exit_code, trace, pid, require, *, stdout, canonical):
+    """Authenticate a complete, canonically ordered protocol and both output pipes."""
+    require(
+        isinstance(canonical, list)
+        and canonical
+        and all(
+            isinstance(key, tuple) and len(key) == 2
+            and isinstance(key[0], str) and type(key[1]) is int
+            for key in canonical
+        )
+        and len(canonical) == len(set(canonical)),
+        'completed unittest canonical ordered occurrences missing or duplicated',
+    )
+    require(
+        isinstance(raw, bytes) and raw.endswith(b'\n') and isinstance(stdout, bytes),
+        'completed unittest output framing is incomplete',
+    )
+    events = []
+    for line in raw.splitlines(keepends=True):
+        require(
+            line.endswith(b'\n') and line.startswith(b'IMRE_UNITTEST '),
+            'completed unittest contains non-event stderr',
+        )
+        try:
+            event = json.loads(line[len(b'IMRE_UNITTEST '):-1])
+        except (ValueError, UnicodeDecodeError):
+            require(False, 'completed unittest event is malformed')
+        require(
+            isinstance(event, dict) and isinstance(event.get('event'), str),
+            'completed unittest event framing differs',
+        )
+        events.append(event['event'])
+    require(
+        events and events[0] == 'collection' and events[-1] == 'summary'
+        and events.count('collection') == events.count('summary') == 1,
+        'completed unittest summary is premature, duplicated or not final',
+    )
+    count = len(canonical)
+    require(
+        events[1:count+1] == ['inventory'] * count
+        and all(event in {'start', 'result', 'subtest_skip'} for event in events[count+1:-1]),
+        'completed unittest protocol event order differs',
+    )
+    result, index = event_capture(raw, require)
+    summary = result['summary']
+    outcomes = [row['outcome'] for row in index.values()]
+    require(list(index) == canonical, 'completed unittest canonical inventory differs')
+    require(
+        type(summary.get('run')) is int and summary['run'] == result['collection'] == count,
+        'completed unittest summary count differs',
+    )
+    require(not result['fixtures'], 'completed unittest fixture outcomes are unsupported')
+    require(not result['subtest_skips'], 'completed unittest skipped subtest is unsupported')
+    require(
+        type(summary.get('successful')) is bool
+        and summary['successful'] == (not any(outcome in {'fail', 'error'} for outcome in outcomes)),
+        'completed unittest summary, outcomes differ',
+    )
+    require(
+        type(exit_code) is int and exit_code == (0 if summary['successful'] else 1),
+        'completed unittest expected exit differs',
+    )
+    lines = trace.splitlines()
+    require(child_exit_code(lines, pid, require) == exit_code, 'completed unittest traced child exit differs')
+    require(
+        traced_output(lines, pid, 1, require) == stdout and traced_output(lines, pid, 2, require) == raw,
+        'completed unittest stdout or stderr differs from traced target writes',
+    )
     return index
 
 
@@ -682,8 +816,13 @@ def custody_tuple(api, setup, build_log, depfiles, witness, require):
 def bound_artifacts(api, entry, artifacts):
     api.require(isinstance(artifacts,dict), 'missing raw-control artifacts')
     def file(role):
-        loc=artifacts.get(role);api.require(isinstance(loc,str), 'missing raw-control role: '+role)
-        return api.bound_artifact(entry,loc) if entry.get('adapter') in {'raw-control-v2','raw-control-v3'} else api.checked_file(api.repository_file(loc,api.DATA_ROOT),api.binding_digest(entry,loc))
+        locator = artifacts.get(role)
+        api.require(isinstance(locator, str), 'missing raw-control role: ' + role)
+        if entry.get('adapter') in {'raw-control-v2', 'raw-control-v3', 'raw-control-v4'}:
+            return api.bound_artifact(entry, locator)
+        return api.checked_file(
+            api.repository_file(locator, api.DATA_ROOT), api.binding_digest(entry, locator),
+        )
     return file
 
 
@@ -723,13 +862,51 @@ def finite_withdrawal(api,tier,source,context,meta,image,launcher,extension,arch
     else:
         parent,child=execs(lines,require);expected_env={**meta['environment'],'IMRE_WITHDRAW_LAUNCHER':launcher,'IMRE_WITHDRAW_ARCHIVE':archive};legacy=context['legacy']
         require(child[2]==image and exec_environment(lines[parent[0]],require)==expected_env and exec_environment(lines[child[0]],require)==meta['environment'] and not any(k.startswith('IMRE_WITHDRAW_') for k in meta['environment']) and (not legacy or meta['supervisor_environment']==expected_env),tier+' finite withdrawal environment differs')
-        probe=context['withdraw_probe'] if legacy else context['probe']['executable'];trace_withdraw(api,trace,image,probe,tree,tree+withdrawal['tree_stash_suffix'],leaf,meta['cwd'],require,(launcher,archive),content_policy=(policy,context['family'],launcher,extension))
+        probe = context['withdraw_probe'] if legacy else context['probe']['executable']
+        trace_withdraw(
+            api, trace, image, probe, tree, tree + withdrawal['tree_stash_suffix'], leaf,
+            meta['cwd'], require, (launcher, archive),
+            content_policy=(policy, context['family'], launcher, extension),
+            expected_exit=meta['exit_code'] if context.get('completion') else 0,
+            python_probe=withdrawal.get('python_probe'),
+        )
 
 
 def finite_core(api,family,source,binding,file,data,text,obj,context):
     """One finite gate, tier, inventory, effects and withdrawal acceptance path."""
     require=api.require;legacy=context['legacy'];run=context['run'];positive=data('positive_launcher');builds={t:obj(t+'_build_json') for t in ('O0','O3')};command=builds['O0']['argv'];compiler=command[0];runtime=api.runtime_argument(command);extension=api.option(command,'--extension-path');launcher=command[2];comparable_run(run,extension,compiler,require,context.get('tier_environment'))
-    context={**context,'family':family};withdrawal=context['withdrawal'];tree_role=withdrawal['tree_relative_to_extension'];suffix=withdrawal['tree_stash_suffix'];require(tree_role=='test' and suffix.startswith('.') and '/' not in suffix, 'finite withdrawal tree roles escape their source graph')
+    context = {**context, 'family': family}
+    completion = context.get('completion')
+    require(
+        completion is None or completion == {'schema': 'imre.compatibility.completed-unittest.v1'},
+        'unrecognized finite completion policy',
+    )
+    ordered = context.get('ordered_originals')
+    if completion:
+        require(
+            isinstance(ordered, list) and ordered and all(
+                isinstance(key, tuple) and len(key) == 2
+                and isinstance(key[0], str) and type(key[1]) is int
+                for key in ordered
+            ),
+            'finite completed cohort lacks canonical ordered occurrences',
+        )
+        enrolled = set(ordered)
+        frozen = [
+            key[1:] for key in api.canonical_originals('stdlib')
+            if key[0] == family and key[1:] in enrolled
+        ]
+        require(
+            len(enrolled) == len(ordered) and frozen == ordered,
+            'finite completed cohort lacks canonical ordered occurrences',
+        )
+    withdrawal = context['withdrawal']
+    tree_role = withdrawal['tree_relative_to_extension']
+    suffix = withdrawal['tree_stash_suffix']
+    require(
+        tree_role == 'test' and suffix.startswith('.') and '/' not in suffix,
+        'finite withdrawal tree roles escape their source graph',
+    )
     if context.get('exec_policy'):
         archive=None;rules=obj('policy')['families'][family]['readonly_data_files'];roles=context['resource_roles'];require(set(roles)=={r['source']['path'] for r in rules} and len(set(roles.values()))==len(roles), 'finite immutable resource role closure differs');resource_sources(api,rules,obj('resource_archive_proof'),lambda p:data(roles[p]),extension,require)
     else:
@@ -750,11 +927,68 @@ def finite_core(api,family,source,binding,file,data,text,obj,context):
                 poison=data('poison');path=str(Path(launcher).parent/(context['poison_module']+'.py')) if legacy else meta['poison_path'];require(poison==b'status: int = True\n' and sha(poison)==meta['poison_sha256'] and path==str(Path(launcher).parent/(context['poison_module']+'.py')), 'finite first-party poison differs');trace_gate(trace,gated,probe,path,diagnostic,require,expected_exit=1)
     inventories={};paths={};effects=[];outputs=[]
     for tier in api.TIERS:
-        meta=run['runs'][tier];capture=obj(tier+'_meta');raw=data(tier+'_stderr');stdout=data(tier+'_stdout');before=data(tier+'_effects_before');after=data(tier+'_effects_after');require(meta.get('exit_code')==0 and meta.get('timed_out') is False and sha(raw)==meta.get('stderr_sha256') and sha(stdout)==meta.get('stdout_sha256') and stdout==b'' and before==after and sha(before)==meta.get('effects_before_sha256') and sha(after)==meta.get('effects_after_sha256'), tier+' finite observation or effects differ');effects.append(b'no changes' if context.get('identity') else before);outputs.append(raw);inventories[tier]=event_index(raw,require);paths[tier]=context['roles'][tier+'_stderr'] if context.get('identity') else file(tier+'_stderr').relative_to(api.ROOT).as_posix()
+        meta = run['runs'][tier]
+        capture = obj(tier + '_meta')
+        raw = data(tier + '_stderr')
+        stdout = data(tier + '_stdout')
+        before = data(tier + '_effects_before')
+        after = data(tier + '_effects_after')
+        require(
+            (completion is not None or meta.get('exit_code') == 0)
+            and meta.get('timed_out') is False,
+            tier + ' finite observation or effects differ',
+        )
+        require(
+            sha(raw) == meta.get('stderr_sha256') and sha(stdout) == meta.get('stdout_sha256')
+            and stdout == b'',
+            tier + ' finite observation or effects differ',
+        )
+        require(
+            before == after and sha(before) == meta.get('effects_before_sha256')
+            and sha(after) == meta.get('effects_after_sha256'),
+            tier + ' finite observation or effects differ',
+        )
+        effects.append(b'no changes' if context.get('identity') else before)
+        outputs.append(raw)
+        if completion:
+            trace = text(tier + '_trace')
+            target = exec_sequence(trace.splitlines(), require, 1 if tier == 'stock' else 2)[-1]
+            inventories[tier] = completed_unittest(
+                raw, meta.get('exit_code'), trace, target[1], require,
+                stdout=stdout, canonical=ordered,
+            )
+        else:
+            inventories[tier] = event_index(raw, require)
+        paths[tier] = (
+            context['roles'][tier + '_stderr'] if context.get('identity')
+            else file(tier + '_stderr').relative_to(api.ROOT).as_posix()
+        )
         if tier=='stock':
             require(capture==meta,'finite stock capture differs')
             if not legacy:
-                trace=text('stock_trace');lines=trace.splitlines();child=exec_sequence(lines,require,1)[0];identity=context['stock_interpreter'];expected_source=str(Path(extension)/Path(source['path']).relative_to('Lib'));events=list(api.successful_open_paths(trace,meta['cwd'],kernel_events=True));required={launcher,expected_source};opened={str(e['path']) for e in events if e['pid']==child[1] and e['path']==e['returned'] and e['flags'] in {'O_RDONLY','O_RDONLY|O_CLOEXEC'} and 'AT_FDCWD<'+meta['cwd']+'>' in lines[e['line']-1]};require(sha(data('stock_trace'))==meta['trace_sha256'] and child[2]==identity['path']==meta['argv'][0] and child[3]==meta['argv'] and exec_environment(lines[child[0]],require)==meta['environment'] and required<=opened, 'finite stock exec, cwd, environment, launcher or source differs');find(lines,rf'^{child[1]}\s+exit_group\(0\)',child[0]+1)
+                trace = text('stock_trace')
+                lines = trace.splitlines()
+                child = exec_sequence(lines, require, 1)[0]
+                identity = context['stock_interpreter']
+                expected_source = str(Path(extension) / Path(source['path']).relative_to('Lib'))
+                events = list(api.successful_open_paths(trace, meta['cwd'], kernel_events=True))
+                required = {launcher, expected_source}
+                opened = {
+                    str(event['path']) for event in events
+                    if event['pid'] == child[1] and event['path'] == event['returned']
+                    and event['flags'] in {'O_RDONLY', 'O_RDONLY|O_CLOEXEC'}
+                    and 'AT_FDCWD<' + meta['cwd'] + '>' in lines[event['line'] - 1]
+                }
+                require(
+                    sha(data('stock_trace')) == meta['trace_sha256']
+                    and child[2] == identity['path'] == meta['argv'][0]
+                    and child[3] == meta['argv']
+                    and exec_environment(lines[child[0]], require) == meta['environment']
+                    and required <= opened,
+                    'finite stock exec, cwd, environment, launcher or source differs',
+                )
+                expected_exit = meta['exit_code'] if completion else 0
+                find(lines, rf'^{child[1]}\s+exit_group\({expected_exit}\)', child[0] + 1)
                 if context.get('identity'):finite_identity_stock(api,context,meta,child,data)
                 if context.get('exec_policy'):
                     case=obj('policy')['families'][family];rules=case['readonly_data_files'];expected={r['runtime']:r['source']['sha256'] for r in rules};seen=Counter()
@@ -770,7 +1004,20 @@ def finite_core(api,family,source,binding,file,data,text,obj,context):
         if context.get('identity'):finite_identity_build(api,tier,context,build,meta,data,text)
         finite_withdrawal(api,tier,source,context,meta,image,launcher,extension,archive,data,text,obj)
     if context.get('ordered_originals') is not None:require(all(list(inventories[t])==context['ordered_originals'] for t in api.TIERS),'finite ordered original occurrence inventory differs')
-    require(effects[0]==effects[1]==effects[2] and outputs[0]==outputs[1]==outputs[2] and all(set(x)==set(inventories['stock']) for x in inventories.values()) and (context.get('observed') is None or len(inventories['stock'])==context['observed']), 'finite original IDs, occurrences, output or effects differ')
+    require(effects[0] == effects[1] == effects[2], 'finite original IDs, occurrences, output or effects differ')
+    require(
+        completion is not None or outputs[0] == outputs[1] == outputs[2],
+        'finite original IDs, occurrences, output or effects differ',
+    )
+    require(
+        completion is None or all(list(index) == list(inventories['stock']) for index in inventories.values()),
+        'finite original IDs, occurrences, output or effects differ',
+    )
+    require(
+        all(set(index) == set(inventories['stock']) for index in inventories.values())
+        and (context.get('observed') is None or len(inventories['stock']) == context['observed']),
+        'finite original IDs, occurrences, output or effects differ',
+    )
     return {**run,'platform':context['platform'],'source':source},inventories,paths
 
 
@@ -838,7 +1085,41 @@ def finite_identity_build(api,tier,context,build,meta,data,text):
     if policy:
         check(policy=={'schema':'imre.compatibility.build-timeout-chain.v1','path':'/usr/bin/timeout','timeout_seconds':360} and events[0][0]==0 and events[0][1]!=compiler_event[1] and events[0][2:4]==(policy['path'],[policy['path'],'--signal=TERM','--kill-after=5s',str(policy['timeout_seconds'])+'s',*argv]) and exec_environment(events[0][4],check)==raw['environment'] and compiler_event[0]>events[0][0] and raw.get('prior_image_matches') is True, 'positive bounded compiler chain differs');exits(lines,events[0][1],compiler_event[1],0,compiler_event[0])
     else:check(compiler_event[0]==0,'positive compiler exec is not first')
-    check(compiler_event[1]==str(raw['compiler_pid']) and compiler_event[2]==raw['actual_compiler_path']==argv[0] and compiler_event[3]==raw['actual_compiler_argv']==argv and exec_environment(compiler_event[4],check)==raw['actual_compiler_environment']==raw['environment']==build['environment'] and raw['trace_sha256']==sha(data(tier+'_positive_trace')) and raw['controller_sha256']==sha(data(tier+'_build_controller' if context.get('exec_policy') else 'build_controller')) and raw['compiler_exit_code']==0 and raw['strace_exit_code']==0 and raw['timed_out'] is False and raw['start_utc_ns']<raw['finish_utc_ns'] and raw['positive_build_metadata_sha256']==sha(data('prior_'+tier+'_build_json')) and raw['source_sha256']==context['source']['sha256'] and raw['launcher_sha256']==sha(data('positive_launcher')) and raw['new_image_sha256']==meta['image_sha256'] and sha(data(tier+'_positive_stdout'))==raw['stdout_sha256'] and sha(data(tier+'_positive_stderr'))==raw['stderr_sha256'] and data(tier+'_positive_effects_before')==data(tier+'_positive_effects_after') and sha(data(tier+'_positive_effects_before'))==raw['effects_before_sha256'] and sha(data(tier+'_positive_effects_after'))==raw['effects_after_sha256'],'positive raw compiler exec/env, source, image or capture differs')
+    default_controller = tier + '_build_controller' if context.get('exec_policy') else 'build_controller'
+    controller_role = context.get('build_controller_roles', {}).get(tier, default_controller)
+    check(
+        compiler_event[1] == str(raw['compiler_pid'])
+        and compiler_event[2] == raw['actual_compiler_path'] == argv[0]
+        and compiler_event[3] == raw['actual_compiler_argv'] == argv
+        and exec_environment(compiler_event[4], check)
+        == raw['actual_compiler_environment'] == raw['environment'] == build['environment'],
+        'positive raw compiler exec or environment differs',
+    )
+    check(
+        raw['trace_sha256'] == sha(data(tier + '_positive_trace'))
+        and raw['controller_sha256'] == sha(data(controller_role)),
+        'positive raw compiler trace or controller differs',
+    )
+    check(
+        raw['compiler_exit_code'] == 0 and raw['strace_exit_code'] == 0
+        and raw['timed_out'] is False and raw['start_utc_ns'] < raw['finish_utc_ns'],
+        'positive raw compiler completion differs',
+    )
+    check(
+        raw['positive_build_metadata_sha256'] == sha(data('prior_' + tier + '_build_json'))
+        and raw['source_sha256'] == context['source']['sha256']
+        and raw['launcher_sha256'] == sha(data('positive_launcher'))
+        and raw['new_image_sha256'] == meta['image_sha256'],
+        'positive raw compiler source or image differs',
+    )
+    check(
+        sha(data(tier + '_positive_stdout')) == raw['stdout_sha256']
+        and sha(data(tier + '_positive_stderr')) == raw['stderr_sha256']
+        and data(tier + '_positive_effects_before') == data(tier + '_positive_effects_after')
+        and sha(data(tier + '_positive_effects_before')) == raw['effects_before_sha256']
+        and sha(data(tier + '_positive_effects_after')) == raw['effects_after_sha256'],
+        'positive raw compiler capture or effects differ',
+    )
     compiler=str(raw['compiler_pid']);compiler_exit=find(lines,rf'^{compiler}\s+exit_group\(0\)',1);output=api.option(argv,'-o');linkers=[]
     for event in events:
         i,pid,path,args,line=event
@@ -867,13 +1148,40 @@ def finite_identity_gate(api,tier,mode,context,build,meta,child,first,trace,data
 
 def adapt_selected_finite(api,family,manifest,binding,source,file,data,text,obj,entry):
     """Normalize a versioned semantic role binding into the same finite core."""
+    if manifest.get('identity', {}).get('capture_format') == 'held-direct-v1':
+        from extensions.completed_unittest959_activation_v1.identity_roles import DirectCapture
+        producer = DirectCapture(api, manifest, data, obj)
+        return finite_core(
+            api, family, source, binding, file, data, text, producer.object, producer.context(entry),
+        )
     if manifest.get('identity',{}).get('capture_format')=='held-supervised-v1':
         from extensions.data_resource959_v1.identity_roles import HeldCapture
-        producer=HeldCapture(api,manifest,data,obj);context=producer.context(entry,binding)
+        producer = HeldCapture(api, manifest, data, obj)
+        context = {**producer.context(entry, binding), 'completion': binding.get('completion')}
         return finite_core(api,family,source,binding,file,data,text,producer.object,context)
     from extensions.successor959_v1 import authority as successor
     require=api.require;raw_obj=obj;obj,run=finite_identity_normalize(api,manifest,raw_obj,data);assessment=obj('assessment');require(source==manifest['source'] and binding['source_leaf']==source['path'] and run['family']==family and run['revision']==assessment['revision']==api.COHORT['imre_revision'] and assessment['canonical_denominator']==manifest['canonical_denominator'] and assessment['observed_originals']==manifest['observed_originals'] and assessment['other_originals_not_run']==manifest['other_originals_not_run'], 'finite source/denominator/revision differs');validate_stock_source(file('stock_source'),None,source,None,require);successor.donor(api,entry,assessment['product']);require(sha(data('positive_launcher'))==assessment['launcher_sha256'] and assessment['stock_python_version']=='Python '+api.COHORT['cpython_version'], 'finite launcher/stock identity differs');identity=binding['stock_interpreter'];expected=successor.predecessor_stock(api);require((identity['sha256'],identity['version'])==(assessment['stock_python_sha256'],assessment['stock_python_version'])==expected and Path(identity['path']).is_absolute(), 'finite stock identity differs from public predecessor');probe=obj('gate_probe_build');require(probe['source_sha256']==sha(data('gate_probe_source')), 'finite gate probe source differs')
-    return finite_core(api,family,source,binding,file,data,text,obj,{'legacy':False,'run':run,'platform':dict(api.COHORT['platform']),'gate_tiers':('O0','O3'),'poison_module':binding['poison_module'],'operations':binding['gate_operations'],'probe':probe,'observed':manifest['observed_originals'],'withdrawal':binding['withdrawal'],'stock_interpreter':identity,'identity':manifest['identity'],'roles':manifest['roles'],'join_modes':manifest['identity']['join_modes'],'raw_obj':raw_obj,'product':assessment['product'],'source':source})
+    context = {
+        'legacy': False,
+        'run': run,
+        'platform': dict(api.COHORT['platform']),
+        'gate_tiers': ('O0', 'O3'),
+        'poison_module': binding['poison_module'],
+        'operations': binding['gate_operations'],
+        'probe': probe,
+        'observed': manifest['observed_originals'],
+        'withdrawal': binding['withdrawal'],
+        'stock_interpreter': identity,
+        'identity': manifest['identity'],
+        'roles': manifest['roles'],
+        'join_modes': manifest['identity']['join_modes'],
+        'raw_obj': raw_obj,
+        'product': assessment['product'],
+        'source': source,
+        'completion': binding.get('completion'),
+        'ordered_originals': [(row['id'], row['occurrence']) for row in manifest['originals']],
+    }
+    return finite_core(api, family, source, binding, file, data, text, obj, context)
 
 
 @lru_cache(maxsize=None)
@@ -1078,7 +1386,8 @@ def adapt(api, family, locator, digest, source_json, activation_digest, cohort, 
 
 
 def validate_record(api, r, eligible, check, entry):
-    versioned=entry.get('adapter') in {'raw-control-v2','raw-control-v3'};locator=entry.get('binding') if versioned else entry.get('sources',{}).get('binding')
+    versioned = entry.get('adapter') in {'raw-control-v2', 'raw-control-v3', 'raw-control-v4'}
+    locator = entry.get('binding') if versioned else entry.get('sources', {}).get('binding')
     check(isinstance(locator,str), 'missing normalized raw-control binding')
     digest = api.binding_digest(entry, locator)
     activation_digest = sha(json.dumps(entry, sort_keys=True).encode())
