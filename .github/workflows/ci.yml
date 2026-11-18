@@ -459,17 +459,6 @@ jobs:
             python3 benchmarks/cpython_stdlib/full/logging/native_handlers.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-handlers-O$opt.json"
             python3 benchmarks/cpython_stdlib/full/logging/descriptor_seek.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --opt-level "$opt" --result "$RUNNER_TEMP/logging-descriptor-seek-O$opt.json"
           done
-      - name: Replay every pinned Linux logging occurrence
-        if: github.event_name == 'workflow_dispatch' && inputs.logging_evidence
-        run: |
-          python3 benchmarks/cpython_stdlib/full/logging/evidence.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/logging-evidence-linux.json"
-          python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/logging/reference-linux.json "$RUNNER_TEMP/logging-evidence-linux.json"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: github.event_name == 'workflow_dispatch' && inputs.logging_evidence && !cancelled()
-        with:
-          name: cpython-logging-evidence-linux
-          path: ${{ runner.temp }}/logging-evidence-linux.json
-          if-no-files-found: error
       - &install-wheel-tools
         name: Install the wheel test dependencies
         run: python3 -m pip install "wheel==0.45.1" "packaging==25.0" "build==1.3.0" "setuptools==81.0.0"
@@ -666,6 +655,48 @@ jobs:
           target/release/imre build examples/memory_report/compute.py --module-root examples --runtime target/release/libimre_runtime.a --clang clang-18 --opt-level 3 -o /tmp/memory-report-compute
           python3 benchmarks/reference/memory_report/build.py --artifact-dir /tmp/imre-memory-reference
           python3 benchmarks/memory_validate.py --python python3 --binary /tmp/memory-report --compute-binary /tmp/memory-report-compute --rust /tmp/imre-memory-reference/memory-report-reference
+
+  logging-evidence:
+    if: github.event_name == 'workflow_dispatch' && inputs.logging_evidence && !inputs.sys_source && !inputs.unittest_source
+    runs-on: *linux-x64
+    timeout-minutes: 120
+    env: *wheel-env
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - *setup-python
+      - name: Install the pinned Rust toolchain
+        run: rustup show
+      - name: Install LLVM 18 and the CRC32C build tools
+        run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18 libclang-rt-18-dev patchelf cmake valgrind
+      - run: cargo build --workspace --release --locked --features imre-compiler/verify-ir
+      - name: Build the bundled standard library providers for native suites
+        run: python3 scripts/build-bundled-providers.py target/release/imre --clang /usr/bin/clang-18
+      - *cpython-reference
+      - name: Test the suite evidence validator
+        run: python3 benchmarks/cpython_stdlib/test_suite_evidence.py
+      - name: Replay every pinned Linux logging occurrence
+        id: logging_evidence
+        run: |
+          python3 benchmarks/cpython_stdlib/full/logging/evidence.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference --result "$RUNNER_TEMP/logging-evidence-linux.json"
+          python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/logging/reference-linux.json "$RUNNER_TEMP/logging-evidence-linux.json"
+      - name: Locate the logging evidence report
+        id: logging_report
+        if: ${{ !cancelled() && (steps.logging_evidence.outcome == 'success' || steps.logging_evidence.outcome == 'failure') }}
+        env:
+          REPLAY_OUTCOME: ${{ steps.logging_evidence.outcome }}
+        run: |
+          if test -f "$RUNNER_TEMP/logging-evidence-linux.json"; then
+            echo 'present=true' >> "$GITHUB_OUTPUT"
+          elif test "$REPLAY_OUTCOME" = success; then
+            echo 'Logging replay succeeded without producing a report' >&2
+            exit 1
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() && steps.logging_report.outputs.present == 'true' }}
+        with:
+          name: cpython-logging-evidence-linux
+          path: ${{ runner.temp }}/logging-evidence-linux.json
+          if-no-files-found: error
 
   asan:
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.sys_source && !inputs.unittest_source)
