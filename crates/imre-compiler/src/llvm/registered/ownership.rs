@@ -13,6 +13,7 @@ pub(super) const ABI: &str = concat!(
     "declare void @imre_dyn_replacement_assignment_target_at(ptr, i64, ptr, i64, i64, ptr, ptr)\n",
     "declare void @imre_dyn_replacement_commit(ptr, i64, ptr, i64, i64, ptr, i64, ptr, ptr)\n",
     "declare i64 @imre_dyn_replacement_positional_call_at(ptr, i64, ptr, i64, i64, ptr, i64, ptr, ptr)\n",
+    "declare i64 @imre_dyn_replacement_initial_call_at(ptr, i64, ptr, i64, i64, ptr, i64, ptr)\n",
     "declare void @imre_dyn_replacement_statement(ptr, i64, ptr, i64, ptr, i32, i64, ptr)\n",
 );
 
@@ -22,6 +23,7 @@ pub(super) struct Replacement {
     pub(super) item: usize,
     pub(super) cursor: usize,
     pub(super) position: TextRange,
+    pub(super) initial_position: TextRange,
 }
 
 fn direct_call(value: &Expr) -> Option<(&str, usize)> {
@@ -73,7 +75,7 @@ pub(super) fn replacement(
     is_fast_local: impl Fn(&str) -> bool,
 ) -> Option<Replacement> {
     let [
-        Statement::Position(..),
+        Statement::Position(initial_position, _),
         Statement::Assign(result, initial),
         Statement::Position(..),
         Statement::Scope { body, clear },
@@ -156,5 +158,6 @@ pub(super) fn replacement(
         item: *item,
         cursor: *cursor,
         position: *position,
+        initial_position: *initial_position,
     })
 }

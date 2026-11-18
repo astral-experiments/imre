@@ -3213,6 +3213,38 @@ pub(super) unsafe extern "C" fn imre_dyn_positional_call_at(
     }
 }
 
+/// Run the initial source call normally and record only whether its already
+/// evaluated callable was the authenticated pickle body. No result witness is minted.
+///
+/// # Safety
+/// The compiler supplies the ordinary positional-call operands and a writable,
+/// independent caller-local boolean for this synchronous invocation.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn imre_dyn_replacement_initial_call_at(
+    ctx: *mut Context,
+    callable: Id,
+    values: *const Id,
+    count: usize,
+    mark: usize,
+    span: *const [u32; 4],
+    scope: Id,
+    eligible: *mut bool,
+) -> Id {
+    let admitted = {
+        // SAFETY: the compiler owns the live context until this synchronous call returns.
+        let context = unsafe { &*ctx };
+        context.heap.execution.pending.is_none()
+            && count == 1
+            && context.direct_pickle_call_target(callable).is_some()
+    };
+    // SAFETY: the compiler owns the independent boolean and the ordinary call
+    // operands; the immutable context borrow ended before entering the callee.
+    unsafe {
+        eligible.write(admitted);
+        imre_dyn_positional_call_at(ctx, callable, values, count, mark, span, scope)
+    }
+}
+
 /// Execute one authenticated direct pickle invocation and return a witness for
 /// that invocation only. A miss clears the old witness before the generic binder
 /// or source fallback can run; nested calls therefore cannot mint this receipt.
@@ -5187,6 +5219,30 @@ mod tests {
         assert_eq!(proof, NONE);
         assert_eq!(item, data);
         assert!(ctx.heap.is_fresh_text_list(old));
+    }
+
+    #[test]
+    fn initial_generic_call_uses_ordinary_dispatch_without_admission() {
+        let (mut ctx, scope) = replacement_context();
+        let callable = ctx.builtin("len");
+        let argument = ctx.alloc(Value::Bytes(vec![1, 2, 3]));
+        let mark = ctx.heap.temporary_mark();
+        let mut eligible = true;
+        // SAFETY: the test owns the live argument, active context and admission word.
+        let result = unsafe {
+            imre_dyn_replacement_initial_call_at(
+                &mut ctx,
+                callable,
+                &argument,
+                1,
+                mark,
+                std::ptr::null(),
+                scope,
+                &mut eligible,
+            )
+        };
+        assert!(!eligible);
+        assert!(matches!(ctx.heap.get(result), Value::Int(n) if n.as_small() == Some(3)));
     }
 
     #[test]
