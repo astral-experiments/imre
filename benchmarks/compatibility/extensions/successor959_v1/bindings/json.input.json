@@ -1,0 +1,336 @@
+{
+  "canonical_denominator": 216,
+  "closed_environment": {
+    "IMREFLAGS": [
+      "--opt-level 0",
+      "--opt-level 3"
+    ],
+    "IMRE_PYTHON": [
+      "/workspace/scratch/imre-95908-transferred-stdlib-v1/product/imre"
+    ],
+    "IMRE_WITHDRAW_ARCHIVE": [
+      "/workspace/scratch/json-decode-959-replay-v1/launch/stock.source.py"
+    ],
+    "IMRE_WITHDRAW_LAUNCHER": [
+      "/workspace/scratch/json-decode-959-replay-v1/launch/launcher.py"
+    ],
+    "NO_COLOR": [
+      "1"
+    ],
+    "PATH": [
+      "/workspace/scratch/imre-95908-transferred-stdlib-v1/product/imre-toolchain/bin",
+      "/workspace/scratch/imre-95908-transferred-stdlib-v1/product/imre-toolchain/bin:/usr/bin"
+    ],
+    "PYTHONDONTWRITEBYTECODE": [
+      "1"
+    ],
+    "PYTHONPATH": [
+      "/workspace/scratch/json-decode-959-replay-v1/fixtures/Lib"
+    ],
+    "PYTHON_COLORS": [
+      "0"
+    ],
+    "TMPDIR": [
+      "/workspace/scratch/fnmatch-95908-replay-v1/correction-v2",
+      "/workspace/scratch/json-decode-959-replay-v1/tmp"
+    ]
+  },
+  "cohort": "finite-decode",
+  "cohorts": {
+    "finite-decode": {
+      "gate_operations": {
+        "direct": {
+          "after": "import unittest\n",
+          "line": "status: int = True\n",
+          "negative_sha256": "30900c895a79ddd78645ed525502c72a1d6005125cafa5bdbecd9b822e538265",
+          "op": "insert-after-unique-line"
+        },
+        "imported": {
+          "after": "import unittest\n",
+          "line": "import json_decode_gate_poison\n",
+          "negative_sha256": "2236a6f312dfd51d6e41681e92550091badbecb73861907539341de696199c5d",
+          "op": "insert-after-unique-line"
+        }
+      },
+      "kind": "finite-selected-v1",
+      "poison_module": "json_decode_gate_poison",
+      "source_leaf": "Lib/test/test_json/test_decode.py",
+      "stock_interpreter": {
+        "path": "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+        "version": "Python 3.14.5"
+      },
+      "strict_source_control": "native-content-v1",
+      "withdrawal": {
+        "archive_relative_to_launcher": "stock.source.py",
+        "tree_relative_to_extension": "test",
+        "tree_stash_suffix": ".raw-control-stash"
+      }
+    }
+  },
+  "credit": 0,
+  "donor_tuple": "ruff_b",
+  "family": "json",
+  "gate_operations": {
+    "direct": {
+      "after": "import unittest\n",
+      "line": "status: int = True\n",
+      "negative_sha256": "30900c895a79ddd78645ed525502c72a1d6005125cafa5bdbecd9b822e538265",
+      "op": "insert-after-unique-line"
+    },
+    "imported": {
+      "after": "import unittest\n",
+      "line": "import json_decode_gate_poison\n",
+      "negative_sha256": "2236a6f312dfd51d6e41681e92550091badbecb73861907539341de696199c5d",
+      "op": "insert-after-unique-line"
+    }
+  },
+  "identity_blocker": "blocked: no independent as-used stock executable or positive/gate compiler/runtime/clang byte identity at the traced paths",
+  "kind": "stdlib",
+  "observed_originals": 30,
+  "originals": [
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_bytes",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_constant_invalid_case",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_decimal",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_decoder_optimizations",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_empty_objects",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_extra_data",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_float",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_invalid_escape",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_invalid_input_type",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_keys_reuse",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_limit_int",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_negative_index",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_nonascii_digits_rejected",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_parse_constant",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestCDecode.test_string_with_utf8_bom",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_bytes",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_constant_invalid_case",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_decimal",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_decoder_optimizations",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_empty_objects",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_extra_data",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_float",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_invalid_escape",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_invalid_input_type",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_keys_reuse",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_limit_int",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_negative_index",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_nonascii_digits_rejected",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_parse_constant",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_json.test_decode.TestPyDecode.test_string_with_utf8_bom",
+      "launcher_cohort": "finite-decode",
+      "occurrence": 1
+    }
+  ],
+  "other_originals_not_run": 186,
+  "poison_module": "json_decode_gate_poison",
+  "roles": {
+    "O0_build_json": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O0.build.json",
+    "O0_effects_after": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O0.effects.after.json",
+    "O0_effects_before": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O0.effects.before.json",
+    "O0_meta": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O0.json",
+    "O0_stderr": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O0.stderr",
+    "O0_stdout": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O0.stdout",
+    "O0_trace": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O0.trace",
+    "O3_build_json": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O3.build.json",
+    "O3_effects_after": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O3.effects.after.json",
+    "O3_effects_before": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O3.effects.before.json",
+    "O3_meta": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O3.json",
+    "O3_stderr": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O3.stderr",
+    "O3_stdout": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O3.stdout",
+    "O3_trace": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O3.trace",
+    "assessment": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/assessment.json",
+    "controller.py": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/controller.py",
+    "direct_launcher": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/negative/direct.launcher.py",
+    "gate-correction-v2/COMPLETE.json": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/COMPLETE.json",
+    "gate-correction-v2/controller.py": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/controller.py",
+    "gate-correction-v2/export-manifest.json": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/export-manifest.json",
+    "gate-correction-v2/raw/O0.direct.effects.after.json": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O0.direct.effects.after.json",
+    "gate-correction-v2/raw/O0.direct.effects.before.json": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O0.direct.effects.before.json",
+    "gate-correction-v2/raw/O0.imported.effects.after.json": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O0.imported.effects.after.json",
+    "gate-correction-v2/raw/O0.imported.effects.before.json": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O0.imported.effects.before.json",
+    "gate-correction-v2/raw/O3.direct.effects.after.json": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O3.direct.effects.after.json",
+    "gate-correction-v2/raw/O3.direct.effects.before.json": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O3.direct.effects.before.json",
+    "gate-correction-v2/raw/O3.imported.effects.after.json": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O3.imported.effects.after.json",
+    "gate-correction-v2/raw/O3.imported.effects.before.json": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O3.imported.effects.before.json",
+    "gate-correction-v2/summary.json": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/summary.json",
+    "gate_O0_direct_meta": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O0.direct.json",
+    "gate_O0_direct_stderr": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O0.direct.stderr",
+    "gate_O0_direct_stdout": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O0.direct.stdout",
+    "gate_O0_direct_trace": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O0.direct.trace",
+    "gate_O0_imported_meta": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O0.imported.json",
+    "gate_O0_imported_stderr": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O0.imported.stderr",
+    "gate_O0_imported_stdout": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O0.imported.stdout",
+    "gate_O0_imported_trace": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O0.imported.trace",
+    "gate_O3_direct_meta": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O3.direct.json",
+    "gate_O3_direct_stderr": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O3.direct.stderr",
+    "gate_O3_direct_stdout": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O3.direct.stdout",
+    "gate_O3_direct_trace": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O3.direct.trace",
+    "gate_O3_imported_meta": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O3.imported.json",
+    "gate_O3_imported_stderr": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O3.imported.stderr",
+    "gate_O3_imported_stdout": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O3.imported.stdout",
+    "gate_O3_imported_trace": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O3.imported.trace",
+    "gate_probe_build": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/probe-build.json",
+    "gate_probe_source": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/probe-source.c",
+    "imported_launcher": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/negative/imported.launcher.py",
+    "observed": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/observed.jsonl",
+    "originals": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/originals.json",
+    "poison": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/negative/poison.py",
+    "policy": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/native-open-policy.json",
+    "positive_launcher": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/launch/launcher.py",
+    "raw/O0.build.effects.after.json": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O0.build.effects.after.json",
+    "raw/O0.build.effects.before.json": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O0.build.effects.before.json",
+    "raw/O0.build.stderr": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O0.build.stderr",
+    "raw/O0.build.stdout": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O0.build.stdout",
+    "raw/O3.build.effects.after.json": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O3.build.effects.after.json",
+    "raw/O3.build.effects.before.json": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O3.build.effects.before.json",
+    "raw/O3.build.stderr": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O3.build.stderr",
+    "raw/O3.build.stdout": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O3.build.stdout",
+    "run": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/run.json",
+    "selected-evidence-v1.json": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/selected-evidence-v1.json",
+    "stock_effects_after": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/stock.effects.after.json",
+    "stock_effects_before": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/stock.effects.before.json",
+    "stock_meta": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/stock.json",
+    "stock_source": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/fixtures/Lib/test/test_json/test_decode.py",
+    "stock_stderr": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/stock.stderr",
+    "stock_stdout": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/stock.stdout",
+    "stock_trace": "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/stock.trace"
+  },
+  "schema": "imre.compatibility.successor-input.v1",
+  "scope": "benchmarks/compatibility/extensions/successor959_v1/evidence/json",
+  "shared_roles": [
+    "donor_generated",
+    "donor_log",
+    "donor_cli_dep",
+    "donor_runtime_dep",
+    "donor_setup",
+    "donor_transfer",
+    "selected_archive"
+  ],
+  "source": {
+    "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "git_blob": "2250af964c022bf4fc3d95ee2238502e7fe0b51b",
+    "path": "Lib/test/test_json/test_decode.py",
+    "repo": "https://github.com/python/cpython",
+    "sha256": "7905c620f00c028e1b28ea27656b66d14584fa809206d3eb996fac5dbee2546c"
+  },
+  "source_leaf": "Lib/test/test_json/test_decode.py"
+}
