@@ -263,8 +263,13 @@ impl Handle {
         self.state.lock().unwrap().worker_pending()
     }
 
-    pub(super) fn join_pending(&self) -> bool {
-        self.state.lock().unwrap().join_pending()
+    /// Public joiners may pass a detached handle; shutdown still waits for its worker.
+    pub(super) fn completion_pending(&self, completion: Completion) -> bool {
+        let state = *self.state.lock().unwrap();
+        match completion {
+            Completion::Join => state.join_pending(),
+            Completion::Shutdown => state.worker_pending(),
+        }
     }
 
     pub(super) fn set_done(&self) -> Result<()> {
