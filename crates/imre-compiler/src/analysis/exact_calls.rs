@@ -370,6 +370,8 @@ struct FunctionEscapes<'db> {
 fn escaped_functions<'db>(db: &'db dyn Db, file: File) -> FunctionEscapes<'db> {
     struct Escapes<'db> {
         model: SemanticModel<'db>,
+        index: &'db SemanticIndex<'db>,
+        unreachable: Vec<TextRange>,
         facts: FunctionEscapes<'db>,
     }
     impl Escapes<'_> {
@@ -398,6 +400,15 @@ fn escaped_functions<'db>(db: &'db dyn Db, file: File) -> FunctionEscapes<'db> {
         fn visit_annotation(&mut self, _: &'ast Expr) {}
         fn visit_type_params(&mut self, _: &'ast TypeParams) {}
         fn visit_expr(&mut self, expr: &'ast Expr) {
+            let range = expr.range();
+            if self.unreachable.iter().any(|r| r.contains_range(range))
+                || self
+                    .index
+                    .try_expression_scope_id(expr)
+                    .is_some_and(|scope| self.index.is_in_type_checking_block(scope, range))
+            {
+                return;
+            }
             if let Expr::Call(call) = expr {
                 if let [receiver, name, ..] = call.arguments.args.as_ref()
                     && name
@@ -448,6 +459,11 @@ fn escaped_functions<'db>(db: &'db dyn Db, file: File) -> FunctionEscapes<'db> {
     let parsed = ruff_db::parsed::parsed_module(db, source.python_file(db)).load(db);
     let mut escapes = Escapes {
         model: SemanticModel::new(db, source),
+        index: ty_python_core::semantic_index(db, source),
+        unreachable: ty_python_semantic::types::ide_support::unreachable_ranges(db, source)
+            .iter()
+            .map(|r| r.range)
+            .collect(),
         facts: FunctionEscapes {
             functions: HashSet::new(),
             unresolved_code_write: false,
@@ -479,7 +495,11 @@ mod tests {
                 "{mutation}: {error}"
             );
         }
-        for passive in ["", "saved_code = die.__code__\n"] {
+        for passive in [
+            "",
+            "saved_code = die.__code__\n",
+            "if False:\n    alias = die\n    alias.__code__ = replacement.__code__\n",
+        ] {
             std::fs::write(&path, format!("{prefix}{passive}take(die(), True)\n")).unwrap();
             crate::check_file(&path, None).unwrap();
         }
