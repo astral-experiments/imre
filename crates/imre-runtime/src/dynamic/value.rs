@@ -3264,6 +3264,7 @@ enum Finalization {
 enum SlotShape {
     Vacant,
     Other,
+    FreshTextList,
     ScalarLeaf,
     AsciiStr,
 }
@@ -3272,6 +3273,10 @@ impl SlotShape {
     /// Both scalar shapes can be marked without visiting children.
     fn is_scalar_leaf(self) -> bool {
         matches!(self, Self::ScalarLeaf | Self::AsciiStr)
+    }
+
+    fn may_have_children(self) -> bool {
+        matches!(self, Self::Other | Self::FreshTextList)
     }
 
     fn text(value: &str) -> Self {
@@ -4750,6 +4755,16 @@ impl Heap {
         id
     }
 
+    /// Record a decoder result whose non-singleton text children were allocated afresh.
+    /// The decoder must not apply this shape to a memo-get or self-referential result.
+    pub(super) fn mark_fresh_text_list(&mut self, id: Id) {
+        debug_assert!(
+            matches!(self.get(id), Value::List(items) if items.iter().all(|&child| matches!(self.get(child), Value::Str(_))))
+        );
+        debug_assert!(self.slot_shapes[id as usize] == SlotShape::Other);
+        self.slot_shapes[id as usize] = SlotShape::FreshTextList;
+    }
+
     /// Cached integers are permanent. A fresh slot roots the integer in the active frame.
     pub(super) fn owned_integer(&mut self, integer: crate::Int) -> Id {
         integer
@@ -4999,7 +5014,7 @@ impl Heap {
             self.slots.push(Slot::new(value()));
             self.slots.len() - 1
         };
-        if shape == SlotShape::Other {
+        if shape.may_have_children() {
             self.generator_owners.reconsider(index);
         }
         // Only objects with children or a Python GC header participate in
@@ -5186,7 +5201,10 @@ impl Heap {
     ) -> Option<(&Value, &mut Value)> {
         let target_id = target as usize;
         self.invalidate_stream_bindings(target_id);
-        if source != target && self.slot_shapes.get(target_id)?.is_scalar_leaf() {
+        if source != target
+            && let shape = *self.slot_shapes.get(target_id)?
+            && (shape.is_scalar_leaf() || shape == SlotShape::FreshTextList)
+        {
             self.slots.get(source as usize)?.value.as_ref()?;
             self.prepare_slot_write(target_id);
         }
@@ -5222,6 +5240,10 @@ impl Heap {
         self.root_trace.changed(index);
         self.invalidate_stream_bindings(index);
         self.generator_owners.reconsider(index);
+        if self.slot_shapes[index] == SlotShape::FreshTextList {
+            self.slot_shapes[index] = SlotShape::Other;
+            return;
+        }
         if !self.slot_shapes[index].is_scalar_leaf() {
             return;
         }
@@ -6577,7 +6599,7 @@ impl Heap {
                 if id == iterator as usize {
                     continue;
                 }
-                if self.slot_shapes[id] == SlotShape::Other {
+                if self.slot_shapes[id].may_have_children() {
                     let value = self.get(id as Id);
                     if value.try_children(&mut incoming).is_err() || incoming.found {
                         return false;
@@ -7212,7 +7234,7 @@ impl Heap {
         for gap in RootTrace::gaps(runs, self.slots.len()) {
             let shapes = &self.slot_shapes[gap.clone()];
             for (offset, (mark, shape)) in self.traces[gap.clone()].iter().zip(shapes).enumerate() {
-                if mark.get() == UNMARKED && *shape == SlotShape::Other {
+                if mark.get() == UNMARKED && shape.may_have_children() {
                     if slots.len() == limit {
                         return None;
                     }
@@ -7488,7 +7510,7 @@ impl Heap {
         // Only the scalars retained by a surviving cycle join its isolate.
         if cyclic {
             for id in 0..cycles.incoming.len() {
-                if cycles.incoming[id] != 0 && self.slot_shapes[id] == SlotShape::Other {
+                if cycles.incoming[id] != 0 && self.slot_shapes[id].may_have_children() {
                     self.unreachable_children(
                         self.slots[id].value.as_ref().unwrap(),
                         MarkMode::All,
@@ -7521,7 +7543,7 @@ impl Heap {
         unowned.clear();
         for index in candidates {
             let id = slot_at(index);
-            if self.traces[id].get() == UNMARKED && self.slot_shapes[id] == SlotShape::Other {
+            if self.traces[id].get() == UNMARKED && self.slot_shapes[id].may_have_children() {
                 let value = self.slots[id]
                     .value
                     .as_ref()
@@ -7965,6 +7987,40 @@ impl Heap {
             .max(BYTE_BUFFER_FLOOR)
     }
 
+    /// Recycle one occupied slot after its owner has proved it unreachable.
+    fn retire_slot(&mut self, id: usize) {
+        let shape = std::mem::replace(&mut self.slot_shapes[id], SlotShape::Vacant);
+        debug_assert!(shape != SlotShape::Vacant);
+        debug_assert_eq!(self.traces[id].get(), UNMARKED);
+        self.traces[id].set(UNMARKED);
+        if self.slots[id].gc_prev.get() != UNMARKED {
+            self.gc_order.remove(id, &self.slots);
+        }
+        // Only compound values can own a recorded Python hash.
+        if !shape.is_scalar_leaf() {
+            if self.latest_generator == Some(id as Id) {
+                self.latest_generator = None;
+                self.latest_generator_loop = None;
+            } else if self.latest_generator_loop == Some(id as Id) {
+                self.latest_generator_loop = None;
+            }
+            self.immutable_hashes.remove(&(id as Id));
+        }
+        if self.text_position.get().slot == id as Id {
+            self.text_position.set(TextPosition::default());
+        }
+        self.root_trace.recycled(id);
+        self.invalidate_stream_bindings(id);
+        let slot = &mut self.slots[id];
+        if slot.has_gc_header {
+            self.gc_schedule.freed();
+        }
+        slot.value = None;
+        slot.gc_next.set(self.free_head);
+        self.free_head = id;
+        self.free_count += 1;
+    }
+
     /// Recycle unmarked slots in a span which can contain unreachable values.
     fn sweep_slots(&mut self, span: Range<usize>) {
         // Vacant slots supply their own free-list links. A sweep can therefore
@@ -7973,35 +8029,89 @@ impl Heap {
             if self.traces[id].replace(UNMARKED) == UNMARKED
                 && self.slot_shapes[id] != SlotShape::Vacant
             {
-                let shape = std::mem::replace(&mut self.slot_shapes[id], SlotShape::Vacant);
-                if self.slots[id].gc_prev.get() != UNMARKED {
-                    self.gc_order.remove(id, &self.slots);
-                }
-                // Only compound values can own a recorded Python hash.
-                if !shape.is_scalar_leaf() {
-                    if self.latest_generator == Some(id as Id) {
-                        self.latest_generator = None;
-                        self.latest_generator_loop = None;
-                    } else if self.latest_generator_loop == Some(id as Id) {
-                        self.latest_generator_loop = None;
-                    }
-                    self.immutable_hashes.remove(&(id as Id));
-                }
-                if self.text_position.get().slot == id as Id {
-                    self.text_position.set(TextPosition::default());
-                }
-                self.root_trace.recycled(id);
-                self.invalidate_stream_bindings(id);
-                let slot = &mut self.slots[id];
-                if slot.has_gc_header {
-                    self.gc_schedule.freed();
-                }
-                slot.value = None;
-                slot.gc_next.set(self.free_head);
-                self.free_head = id;
-                self.free_count += 1;
+                self.retire_slot(id);
             }
         }
+    }
+
+    /// Retire a decoder-owned exact list and its fresh text leaves without tracing the heap.
+    ///
+    /// # Safety
+    /// The caller must provide a compiler-certified proof that the list and every
+    /// non-singleton child have no remaining aliases or roots after a successful
+    /// binding replacement, and that no callback, signal dispatch, collection, or
+    /// other Python observer can run until this method returns. The slot shape is
+    /// producer provenance only; it is not a uniqueness proof. Failed verification
+    /// leaves every slot unchanged.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "awaiting compiler ownership proof")
+    )]
+    pub(super) unsafe fn retire_proven_fresh_text_list(&mut self, id: Id) -> bool {
+        let Ok(index) = usize::try_from(id) else {
+            return false;
+        };
+        if index < FIRST_DYNAMIC_SLOT
+            || self.full_collection_active()
+            || self.allocation_traces.is_tracing()
+            || self.slot_shapes.get(index) != Some(&SlotShape::FreshTextList)
+            || self.traces[index].get() != UNMARKED
+        {
+            return false;
+        }
+        let slot = &self.slots[index];
+        if !slot.has_gc_header || slot.finalization != Finalization::None {
+            return false;
+        }
+        let Some(Value::List(items)) = slot.value.as_ref() else {
+            return false;
+        };
+        for &child in items {
+            let Ok(child_index) = usize::try_from(child) else {
+                return false;
+            };
+            let Some(&shape) = self.slot_shapes.get(child_index) else {
+                return false;
+            };
+            let child_slot = &self.slots[child_index];
+            if child_index < FIRST_DYNAMIC_SLOT
+                || !shape.is_scalar_leaf()
+                || self.traces[child_index].get() != UNMARKED
+                || child_slot.has_gc_header
+                || child_slot.finalization != Finalization::None
+            {
+                return false;
+            }
+            let Some(Value::Str(text)) = child_slot.value.as_ref() else {
+                return false;
+            };
+            if let Some(short) = crate::objects::short_index(text)
+                && self
+                    .short_strings
+                    .get(&short)
+                    .is_none_or(|entry| entry.id != child || !entry.literal)
+            {
+                return false;
+            }
+        }
+        let count = items.len();
+        for position in (0..count).rev() {
+            let Value::List(items) = self.slots[index].value.as_ref().unwrap() else {
+                unreachable!()
+            };
+            let child = items[position] as usize;
+            if self.slot_shapes[child] == SlotShape::Vacant {
+                continue;
+            }
+            let Some(Value::Str(text)) = self.slots[child].value.as_ref() else {
+                unreachable!()
+            };
+            if crate::objects::short_index(text).is_none() {
+                self.retire_slot(child);
+            }
+        }
+        self.retire_slot(index);
+        true
     }
 
     fn sweep(&mut self, runs: &[Range<usize>]) -> Option<WeakCallbacks> {
@@ -8090,6 +8200,128 @@ impl Heap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fresh_text_list(heap: &mut Heap, texts: &[(&str, bool)]) -> (Id, Vec<Id>) {
+        heap.reserve_unobserved_texts(texts.len()).unwrap();
+        let children = texts
+            .iter()
+            .map(|&(text, ascii)| heap.unobserved_text(text, ascii))
+            .collect::<Vec<_>>();
+        let list = heap.alloc(Value::List(children.clone()));
+        heap.mark_fresh_text_list(list);
+        (list, children)
+    }
+
+    #[test]
+    fn proven_fresh_text_retirement_reuses_slots_and_preserves_dynamic_singletons() {
+        let mut heap = Heap::new();
+        heap.gc_schedule.start_collection(0);
+        heap.set_gc_thresholds(&[1, 10, 10]);
+        let mark = heap.temporary_mark();
+        let (list, children) = fresh_text_list(
+            &mut heap,
+            &[
+                ("alpha", true),
+                ("", true),
+                ("é", false),
+                ("A", true),
+                ("A", true),
+                ("éclair", false),
+                ("a long owned text leaf beyond inline capacity", true),
+            ],
+        );
+        heap.alloc(Value::List(Vec::new()));
+        assert!(
+            heap.gc_schedule
+                .generation_if_due(&heap.gc_settings)
+                .is_some()
+        );
+        heap.release_temporaries_since(mark);
+        let free = heap.free_count;
+        // SAFETY: the test removed all temporary roots and did not publish the result.
+        assert!(unsafe { heap.retire_proven_fresh_text_list(list) });
+        assert_eq!(heap.free_count, free + 4);
+        assert_eq!(heap.free_head, list as usize);
+        assert!(
+            heap.gc_schedule
+                .generation_if_due(&heap.gc_settings)
+                .is_none()
+        );
+        assert_eq!(children[3], children[4]);
+        for &child in &[children[1], children[2], children[3]] {
+            assert!(matches!(heap.get(child), Value::Str(_)));
+        }
+        for &child in &[children[0], children[5], children[6]] {
+            assert!(heap.slot_shapes[child as usize] == SlotShape::Vacant);
+            assert_eq!(heap.traces[child as usize].get(), UNMARKED);
+        }
+        // SAFETY: the retired handle is rejected before any slot is changed.
+        assert!(!unsafe { heap.retire_proven_fresh_text_list(list) });
+        heap.reserve_unobserved_texts(1).unwrap();
+        let reused = heap.unobserved_text("replacement", true);
+        assert_eq!(reused, list);
+        heap.collect(std::iter::once(reused));
+        assert!(matches!(heap.get(reused), Value::Str(text) if text == "replacement"));
+        assert_eq!(heap.short_string("é"), Some(children[2]));
+    }
+
+    #[test]
+    fn fresh_text_retirement_verifies_every_child_before_changing_slots() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        heap.reserve_unobserved_texts(1).unwrap();
+        let valid = heap.unobserved_text("valid", true);
+        let noncanonical = heap.fresh_string(Value::Str("x".into())).unwrap();
+        let list = heap.alloc(Value::List(vec![valid, noncanonical]));
+        heap.mark_fresh_text_list(list);
+        heap.release_temporaries_since(mark);
+        let free = heap.free_count;
+        // SAFETY: all temporary roots were removed; invalid singleton provenance rejects the graph.
+        assert!(!unsafe { heap.retire_proven_fresh_text_list(list) });
+        assert_eq!(heap.free_count, free);
+        assert!(matches!(heap.get(valid), Value::Str(text) if text == "valid"));
+        assert!(heap.slot_shapes[list as usize] == SlotShape::FreshTextList);
+
+        let (other, children) = fresh_text_list(&mut heap, &[("another", true)]);
+        heap.release_temporaries_since(mark);
+        heap.traces[children[0] as usize].set(END);
+        // SAFETY: the graph has no roots or aliases; the active mark rejects retirement.
+        assert!(!unsafe { heap.retire_proven_fresh_text_list(other) });
+        assert!(heap.slot_shapes[other as usize] == SlotShape::FreshTextList);
+        heap.traces[children[0] as usize].set(UNMARKED);
+        heap.allocation_traces.start(1);
+        // SAFETY: the graph is isolated; active allocation tracing rejects retirement.
+        assert!(!unsafe { heap.retire_proven_fresh_text_list(other) });
+        heap.allocation_traces.stop();
+        // SAFETY: the isolated graph is unmarked and no observer is active.
+        assert!(unsafe { heap.retire_proven_fresh_text_list(other) });
+    }
+
+    #[test]
+    fn mutating_a_fresh_text_list_invalidates_retirement_provenance() {
+        let mut heap = Heap::new();
+        let (first, children) = fresh_text_list(&mut heap, &[("first", true)]);
+        let Value::List(items) = heap.get_mut(first) else {
+            unreachable!()
+        };
+        items.push(children[0]);
+        assert!(heap.slot_shapes[first as usize] == SlotShape::Other);
+        heap.release_temporaries_since(0);
+        // SAFETY: mutable access invalidated the shape, so verification rejects the handle.
+        assert!(!unsafe { heap.retire_proven_fresh_text_list(first) });
+
+        let (second, children) = fresh_text_list(&mut heap, &[("second", true)]);
+        let (_, Value::List(items)) = heap.source_and_target(children[0], second).unwrap() else {
+            unreachable!()
+        };
+        items.push(children[0]);
+        assert!(heap.slot_shapes[second as usize] == SlotShape::Other);
+        heap.release_temporaries_since(0);
+        // SAFETY: mutable access invalidated the shape, so verification rejects the handle.
+        assert!(!unsafe { heap.retire_proven_fresh_text_list(second) });
+        heap.collect([first, second].into_iter());
+        assert!(matches!(heap.get(children[0]), Value::Str(text) if text == "second"));
+    }
 
     #[test]
     fn reserved_text_leaves_reuse_slots_and_remain_reachable_through_a_list() {

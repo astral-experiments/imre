@@ -300,6 +300,9 @@ fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
         }
     }
     let result = ctx.alloc(Value::List(values));
+    if !layout.has_get {
+        ctx.heap.mark_fresh_text_list(result);
+    }
     if layout.has_get
         && let Value::List(values) = ctx.heap.get_mut(result)
     {
