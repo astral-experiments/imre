@@ -27,7 +27,7 @@ on:
         type: boolean
         default: false
       native_shard:
-        description: Run one original native validation group and retain independent failures
+        description: Select a native validation group or verify the public Ruff source graph
         type: choice
         default: standard
         options:
@@ -36,6 +36,7 @@ on:
           - stdlib-b
           - integration
           - programs
+          - public-ruff-graph
       full_thinlto:
         description: Run all ThinLTO suites instead of the linking smoke test
         type: boolean
@@ -231,8 +232,82 @@ jobs:
       # The native runtime depends on POSIX process and filesystem APIs.
       - run: cargo test -p imre-compiler --lib --locked
 
+  public-ruff-graph:
+    if: github.event_name == 'workflow_dispatch' && inputs.native_shard == 'public-ruff-graph'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CARGO_HOME: ${{ runner.temp }}/public-cargo-home
+      RUFF_SOURCE_REV: 0be08a206f9c3180afd3e93bcc792ed5cb1f4db1
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Verify the public inputs and prepare the source patches
+        run: |
+          python3 - <<'PY'
+          import hashlib, os, pathlib, re, tomllib
+          manifest = pathlib.Path('Cargo.toml')
+          lock = pathlib.Path('Cargo.lock')
+          original = manifest.read_text()
+          revision = os.environ['RUFF_SOURCE_REV']
+          names = '''ruff_annotate_snippets ruff_db ruff_diagnostics ruff_index ruff_macros ruff_memory_usage ruff_notebook ruff_python_ast ruff_python_codegen ruff_python_edits ruff_python_importer ruff_python_literal ruff_python_parser ruff_python_stdlib ruff_python_trivia ruff_ranged_value ruff_source_file ruff_text_size ty_combine ty_module_resolver ty_python_core ty_python_semantic ty_site_packages ty_static ty_vendored'''.split()
+          if not re.fullmatch('[0-9a-f]{40}', revision) or len(names) != 25 or len(set(names)) != 25:
+              raise SystemExit('invalid public source revision or package inventory')
+          if hashlib.sha256(lock.read_bytes()).hexdigest() != '07e72b769bef48e18ebbaf02d58b2d3d5d4df5dd045a7aa63e3fd9e7e07fd04c':
+              raise SystemExit('original lockfile changed')
+          if 'patch' in tomllib.loads(original):
+              raise SystemExit('unexpected existing patch section')
+          packages = tomllib.loads(lock.read_text())['package']
+          original_names = {p['name'] for p in packages if p['name'].startswith(('ruff_', 'ty_'))}
+          if original_names != set(names) or any(p['version'] != '0.0.15' or p.get('source') != 'registry+https://github.com/rust-lang/crates.io-index' for p in packages if p['name'] in names):
+              raise SystemExit('original Ruff package inventory changed')
+          lines = [f'{name} = {{ git = "https://github.com/astral-sh/ruff.git", rev = "{revision}" }}' for name in names]
+          manifest.write_text(original.rstrip() + '\n\n[patch.crates-io]\n' + '\n'.join(lines) + '\n')
+          pathlib.Path(os.environ['RUNNER_TEMP'], 'public-ruff-names.txt').write_text('\n'.join(names) + '\n')
+          PY
+      - name: Install the repository's pinned toolchain
+        run: rustup show
+      - name: Resolve the public dependencies and verify the lockfile offline
+        run: |
+          mkdir -p "$CARGO_HOME"
+          env -i PATH="$PATH" CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="${RUSTUP_HOME:-/home/runner/.rustup}" TMPDIR="$RUNNER_TEMP" cargo metadata --format-version 1 > "$RUNNER_TEMP/public-metadata.json"
+          env -i PATH="$PATH" CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="${RUSTUP_HOME:-/home/runner/.rustup}" TMPDIR="$RUNNER_TEMP" cargo metadata --locked --offline --format-version 1 > "$RUNNER_TEMP/public-metadata-locked.json"
+      - name: Verify every Ruff and Ty package has the exact public Git source
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, tomllib
+          tmp = pathlib.Path(os.environ['RUNNER_TEMP'])
+          names = set((tmp / 'public-ruff-names.txt').read_text().splitlines())
+          revision = os.environ['RUFF_SOURCE_REV']
+          source = f'git+https://github.com/astral-sh/ruff.git?rev={revision}#{revision}'
+          metadata = json.loads((tmp / 'public-metadata.json').read_text())
+          locked = json.loads((tmp / 'public-metadata-locked.json').read_text())
+          lock = tomllib.loads(pathlib.Path('Cargo.lock').read_text())
+          def inventory(packages):
+              selected = [p for p in packages if p['name'].startswith(('ruff_', 'ty_'))]
+              if len(selected) != 25 or {p['name'] for p in selected} != names or any(p['version'] != '0.0.15' or p.get('source') != source for p in selected):
+                  raise SystemExit('public Ruff source identity or package inventory mismatch')
+              return sorted((p['name'], p['version'], p['source']) for p in selected)
+          if inventory(metadata['packages']) != inventory(locked['packages']) or inventory(metadata['packages']) != inventory(lock['package']):
+              raise SystemExit('locked and unlocked dependency graphs differ')
+          summary = {'result': 'PASS', 'ruff_source': source, 'ruff_package_count': len(names), 'cargo_lock_sha256': hashlib.sha256(pathlib.Path('Cargo.lock').read_bytes()).hexdigest(), 'metadata_package_count': len(metadata['packages']), 'original_lock_sha256': '07e72b769bef48e18ebbaf02d58b2d3d5d4df5dd045a7aa63e3fd9e7e07fd04c'}
+          artifact = tmp / 'public-ruff-source-graph'
+          artifact.mkdir()
+          (artifact / 'Cargo.toml').write_bytes(pathlib.Path('Cargo.toml').read_bytes())
+          (artifact / 'Cargo.lock').write_bytes(pathlib.Path('Cargo.lock').read_bytes())
+          (artifact / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - name: Upload the public source manifest, lockfile and verification summary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: public-ruff-source-graph
+          path: ${{ runner.temp }}/public-ruff-source-graph/
+          if-no-files-found: error
+
   check:
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && ((!inputs.sys_source && !inputs.unittest_source) || (inputs.native_shard && inputs.native_shard != 'standard')))
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.native_shard != 'public-ruff-graph' && ((!inputs.sys_source && !inputs.unittest_source) || (inputs.native_shard && inputs.native_shard != 'standard')))
     runs-on: *linux-x64
     timeout-minutes: 120
     env: &wheel-env
