@@ -1,0 +1,70 @@
+{
+  "bindings": {
+    "configparser": {
+      "adapter": "raw-control-v3",
+      "binding": "benchmarks/compatibility/extensions/data_resource959_v1/bindings/configparser.json",
+      "receipt": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/verified/data-resource-v1/stdlib/configparser.jsonl",
+      "staged_receipt": "benchmarks/compatibility/extensions/data_resource959_v1/templates/configparser.jsonl"
+    }
+  },
+  "credit": 0,
+  "files": {
+    "benchmarks/compatibility/extensions/data_resource959_v1/authority.py": "4de58c8c630a41b771b5023457c469419585f4afe4159a2a6af8d284ccc34a4c",
+    "benchmarks/compatibility/extensions/data_resource959_v1/bindings/configparser.json": "b0e3a10a6459edda126d58cfddfc95062bcb94a12c9e9b59b5196e7bcab1d7b8",
+    "benchmarks/compatibility/extensions/data_resource959_v1/evidence/elf/O0.stdout": "9eff85f88a101229a3bc3d29722d4f9053d9525342b6ee708b299d716a93cfbc",
+    "benchmarks/compatibility/extensions/data_resource959_v1/evidence/elf/O3.stdout": "c7cfdcb7a3d17f68f2afd3d416849831e54d7bfa6efdca18fb72057b919b5da2",
+    "benchmarks/compatibility/extensions/data_resource959_v1/evidence/elf/capture.json": "f54d7a02029ce564dc2572e872188bede5292241ed3050a1c448eb477f1658d2",
+    "benchmarks/compatibility/extensions/data_resource959_v1/evidence/elf/capture.py": "b4d095a94a745f324c9ef9d69c0b83eeb33ca87a1130dbc9bea861284fc14b88",
+    "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz": "0aaf6be3143875bfcf63262c8c0ecdee05911f21919d8100c63fbcefcf0fdfbd",
+    "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/seal.json": "37f72d65b88c1befe7aa9771ac58fc4f235edebf62df7184b88cae8f9481a294",
+    "benchmarks/compatibility/extensions/data_resource959_v1/evidence/stock/COMPLETE.json": "c9054988afb35f22eeed491b2b0dcba51796c313a741e02769753ee07c523039",
+    "benchmarks/compatibility/extensions/data_resource959_v1/evidence/stock/configparser959-held-stock-absolute240-v3.tar.gz": "b33d384bbe081cb148d0650fb6cd56d8859e8e619620de8126967eaa5bc075fc",
+    "benchmarks/compatibility/extensions/data_resource959_v1/evidence/supplement/private-supplement.tar.gz": "bf77d75329502e6a4892a1b9f8dc78a0774304ab64bb5979302f97e56994bb42",
+    "benchmarks/compatibility/extensions/data_resource959_v1/evidence/supplement/seal.json": "629c84a7e58c26232137ac79ea08c11ae98787cd9f6d4549909ad787bd79d450",
+    "benchmarks/compatibility/extensions/data_resource959_v1/evidence/withdrawal/COMPLETE.json": "c66975bc5201bf24177753b8e88f6fcfc92d3a3fe383114a536c734aae31b66c",
+    "benchmarks/compatibility/extensions/data_resource959_v1/evidence/withdrawal/withdrawal-o3.tar.gz": "ec1c4f8ca431dfabe21e8548ec825ff0c7e00a328763e52daeefc38878a0c9e1",
+    "benchmarks/compatibility/extensions/data_resource959_v1/identity_roles.py": "781ef142fe6dad0cfb129be377c1b656d8d079f501f70d9b1503b3f029f5b877",
+    "benchmarks/compatibility/extensions/data_resource959_v1/patches/validators.patch": "11e08b2c103a9921af3b6fd4158bc2159240617dddca5a6420a2caf9a0fc1357",
+    "benchmarks/compatibility/extensions/data_resource959_v1/templates/configparser.jsonl": "b69316a3fd4284277c73e024ae56164cbce04a9b3420841f134097e4a17e95e4",
+    "benchmarks/compatibility/extensions/data_resource959_v1/test_stage.py": "09c10c40b946e562c581454ee39b3633b5c555cb0884b66d88df9262222586fd"
+  },
+  "imre_revision": "95908fb0acadc2a67304a8080e584deaef395746",
+  "patch": {
+    "files": [
+      {
+        "old_git_blob": "8503b09b9d1d133d8b5048535182b3249b1ac0ac",
+        "old_sha256": "097f33254ac3c0230a1bbff1f90157598d35cbd44f0f03d490dbf9ffc2cfcf34",
+        "path": "benchmarks/compatibility/raw_control.py",
+        "post_sha256": "0bf7e5356451e63133eb6adf0cfac9e7550aaefed88ddf65d5dd4f8a79e1588a"
+      },
+      {
+        "old_git_blob": "92c28f751c9b9ab47deff46688e50c154e7adf04",
+        "old_sha256": "c382ffd9d63af849ff0c97bfd8f47e48c8a9d1e0a8286cc694d28b570f002669",
+        "path": "benchmarks/compatibility/scorecard.py",
+        "post_sha256": "8e95150c1fb45bd1a75b42ee14ec9ef7683957ae9f5e4837934ce607a0c3d6df"
+      },
+      {
+        "old_git_blob": "e9f56013e897ec9d85d9d50db3d22703938d7ebf",
+        "old_sha256": "10d53687bb0e43bec4c77ea895be90e2fae13b1db9038faa532efa1483704e18",
+        "path": "benchmarks/compatibility/extensions/successor959_v1/authority.py",
+        "post_sha256": "57fea6dc567cf64c4ca9aabc5b796be5ae1d02e78972c0f4f30ace02af554e00"
+      },
+      {
+        "old_git_blob": "0c9ddedd52832fab23bf93a68f933f221cdecf49",
+        "old_sha256": "58c05819cbc7c3a7d1cc73657b253c0ff0d915006d3d9ebf7af5b5b1b61f5e0f",
+        "path": "benchmarks/compatibility/test_revision959_stage.py",
+        "post_sha256": "62b11e18151ba9a449eaf332a4e5e2833216e1f7b528941e6494a95d463aaf4a"
+      }
+    ],
+    "path": "benchmarks/compatibility/extensions/data_resource959_v1/patches/validators.patch",
+    "sha256": "11e08b2c103a9921af3b6fd4158bc2159240617dddca5a6420a2caf9a0fc1357"
+  },
+  "predecessor": {
+    "commit": "406127b2323d799789a1c2d33f5a573753f7e870",
+    "git_blob": "3ff071ee3bc586d5d606fd5854ef7323bfaa647a",
+    "manifest": "benchmarks/compatibility/extensions/successor959_v1/manifest.json",
+    "sha256": "36910bbf580e5aed8789f323a36eb6d097fe391782872b1cb5416c1ed074179c"
+  },
+  "prior_activation": "cfe668cd5b12c5678d3f9b80edc47f20d65851bf",
+  "schema": "imre.compatibility.finite-resource-stage.v1"
+}

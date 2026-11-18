@@ -65,6 +65,10 @@ def snapshot_activation():
     obj = json.loads(path.read_text())
     require(obj.get("schema") == "imre.compatibility.snapshot-activation.v1" and obj.get("imre_revision") == COHORT["imre_revision"], "invalid snapshot activation revision or schema")
     require(isinstance(obj.get("families"), dict) and isinstance(obj.get("script_shards", {}), dict), "invalid activated shards")
+    import source_stage_pins
+    if COHORT['imre_revision']=='95908fb0acadc2a67304a8080e584deaef395746' and getattr(source_stage_pins,'REVISION_959_SUCCESSOR',None) is not None:
+        from extensions.successor959_v1 import authority as successor
+        return successor.overlay(sys.modules[__name__],obj)
     return obj
 
 
@@ -72,7 +76,44 @@ def activation_entry(name, kind="stdlib"):
     return snapshot_activation().get("families" if kind == "stdlib" else "script_shards", {}).get(name)
 
 
+
+def activated_extension_entries():
+    import source_stage_pins
+    if not is_snapshot() or COHORT['imre_revision']!='95908fb0acadc2a67304a8080e584deaef395746' or getattr(source_stage_pins,'REVISION_959_SUCCESSOR',None) is None:return {}
+    from extensions.successor959_v1 import authority as successor
+    entries=dict(successor.activated_entries(sys.modules[__name__])['families'])
+    if getattr(source_stage_pins,'REVISION_959_RESOURCE',None) is not None:
+        from extensions.data_resource959_v1 import authority as resource
+        extra=resource.activated_entries(sys.modules[__name__])['families'];require(not set(entries)&set(extra),'append-only extension family collision');entries.update(extra)
+    return entries
+
+
+def successor_entry(name):return activated_extension_entries().get(name)
+
+
+def extension_authority(entry):
+    if entry.get('adapter')=='raw-control-v3':
+        from extensions.data_resource959_v1 import authority
+    else:
+        from extensions.successor959_v1 import authority
+    return authority
+
+
+def bound_artifact(entry, locator):
+    if entry.get('adapter') in {'raw-control-v2','raw-control-v3'}:
+        return extension_authority(entry).artifact(sys.modules[__name__],entry,locator)
+    return checked_file(repository_file(locator,DATA_ROOT),binding_digest(entry,locator))
+
+
+def bound_bytes(entry,locator):
+    if entry.get('adapter') in {'raw-control-v2','raw-control-v3'}:
+        return extension_authority(entry).read(sys.modules[__name__],entry,locator)
+    return bound_artifact(entry,locator).read_bytes()
+
+
 def binding_digest(entry, locator):
+    if 'files' not in entry:
+        return extension_authority(entry).digest(sys.modules[__name__],entry,locator)
     files = entry.get("files", {})
     require(isinstance(files, dict) and isinstance(files.get(locator), str) and bool(HEX64.fullmatch(files[locator])), f"snapshot file is not digest-bound: {locator}")
     return files[locator]
@@ -482,7 +523,7 @@ def successful_open_paths(text, cwd, *, preserve_traversal=False, kernel_events=
     for number,line in enumerate(text.splitlines(),1):
         pm = re.match(r"\s*(?:\[pid\s+(\d+)\]|(\d+))\s+",line)
         pid = (pm.group(1) or pm.group(2)) if pm else "main"; prior=previous.get(pid);previous[pid]=line
-        call = re.search(r"\b(open|openat|openat2|creat)\((.*)\)\s+=\s+(-?\d+)(?:<([^<>]*)>)?(?:\s|$)",line)
+        call = re.search(r"\b(open|openat|openat2|creat)\((.*)\)\s+=\s+(-?\d+)(?:<([^<>]*)(?:<char \d+:\d+>)?>)?(?:\s|$)",line)
         if kernel_events and not call and re.search(r"\b(?:open|openat|openat2|creat)\(|<\.\.\. (?:open|openat|openat2|creat) resumed>",line):
             require(bool(re.search(r"\)\s+=\s+-1\b",line)), "unresolved native open event")
         if not call or int(call[3]) < 0 or (call[1]=="creat" and not kernel_events): continue
@@ -601,7 +642,7 @@ def adapt_urllib(root, revision, source_path, source_sha, source_blob):
 
 def validate_activated_family_record(r, eligible, check, entry):
     adapter = entry.get("adapter"); source = r["source"]; family = r["family"]; d = DATA_ROOT / "evidence" / family
-    if adapter == "raw-control-v1":
+    if adapter in {'raw-control-v1','raw-control-v2','raw-control-v3'}:
         import raw_control
         return raw_control.validate_record(sys.modules[__name__], r, eligible, check, entry)
     if adapter == "shared-family-v1": return validate_family_artifact_record(r, eligible, check)
@@ -626,8 +667,9 @@ def validate_snapshot_record(r, kind, eligible, check):
     omission = r.get("omission_reason")
     if omission:
         check(kind == "stdlib" and r.get("policy_omission") == accepted_policy_locator(r) and r.get("policy_omission") is not None, "snapshot omission is not an accepted canonical policy omission")
-    entry = activation_entry(r.get("family")) if kind == "stdlib" else activation_entry(canonical_script_shards().get(r['id']), 'script')
-    if COHORT['imre_revision'] == '95908fb0acadc2a67304a8080e584deaef395746' and (kind == 'script' or r.get('family') == 'fnmatch'):
+    extension=successor_entry(r.get('family')) if kind=='stdlib' else None
+    entry = extension or (activation_entry(r.get("family")) if kind == "stdlib" else activation_entry(canonical_script_shards().get(r['id']), 'script'))
+    if COHORT['imre_revision'] == '95908fb0acadc2a67304a8080e584deaef395746' and not extension and (kind == 'script' or r.get('family') == 'fnmatch'):
         import script_control
         script_control.require_paired_authority(sys.modules[__name__],r,entry)
     if entry and kind == "stdlib":
@@ -831,7 +873,7 @@ def verify_stdlib_evidence(r):
     if vendored.is_file():
         stat = vendored.stat()
         require(source_digests(vendored, stat.st_mtime_ns, stat.st_size) == (source["sha256"], source["git_blob"]), f"{r['id']}: source hash differs from vendored upstream")
-    if is_snapshot() and (activation_entry(r["family"]) or {}).get("adapter") == "raw-control-v1":
+    if is_snapshot() and ((successor_entry(r['family']) or activation_entry(r['family']) or {}).get('adapter') in {'raw-control-v1','raw-control-v2','raw-control-v3'}):
         return  # validate_snapshot_record already verified raw finite-runner events and locators.
     module = source_module(source["path"])
     for tier, run in r["runs"].items():
@@ -915,6 +957,13 @@ def load_records(kind, names, frozen_scripts=None):
             else:
                 verify_stdlib_evidence(r)
             records.append(r)
+    if is_snapshot() and kind=='stdlib':
+        import source_stage_pins
+        if COHORT['imre_revision']=='95908fb0acadc2a67304a8080e584deaef395746' and getattr(source_stage_pins,'REVISION_959_SUCCESSOR',None) is not None:
+            for name,entry in activated_extension_entries().items():
+                path=bound_artifact(entry,entry['receipt'])
+                for line in path.read_text().splitlines():
+                    r=validate_record(json.loads(line),kind,names,frozen_scripts);key=(r['family'],r['id'],r['occurrence']);require(key not in seen and r['family']==name,'successor receipt collides or differs from its entry');seen.add(key);verify_stdlib_evidence(r);records.append(r)
     return records
 
 
@@ -965,7 +1014,7 @@ def outcome_text(counts, n):
     return ", ".join(f"{counts[k]:,} {labels[k]}" for k in labels if counts[k])
 
 
-def render(view, data=None):
+def render(view, data=None, primary=False):
     fs, scripts = summary() if data is None else data
     frozen = {n: r for n, r in fs.items() if r["cohort"] == "frozen"}
     supplemental = {n: r for n, r in fs.items() if r["cohort"] == "supplemental"}
@@ -997,12 +1046,16 @@ def render(view, data=None):
                     text = (text + '; ' if text else '') + f"{r['pending']:,} staged (unverified; outcomes not checked)"
                 outcomes.append(text)
             lines.append(f"| `{name}` | {n:,} | " + " | ".join(outcomes) + f" | {observed_cell} | {pair} | {hist} |")
-    table("Frozen cohort", frozen if view == "stdlib" else {n: r for n, r in frozen.items() if r["receipts"] or r.get("pending") or n == "argparse"})
+    table("Frozen cohort", frozen if view == "stdlib" or primary_959() else {n: r for n, r in frozen.items() if r["receipts"] or r.get("pending") or n == "argparse"})
     if supplemental: table("Supplemental pilots", supplemental)
     if view == "readme": lines += ["", "The [stdlib report](docs/stdlib.md) lists every frozen family, including those not run."]
     prefix = "../" if view == "stdlib" else ""
-    if is_snapshot(): prefix = os.path.relpath(ROOT, DATA_ROOT / "docs" if view == "stdlib" else DATA_ROOT).replace(os.sep, "/") + "/"
+    if is_snapshot() and not primary: prefix = os.path.relpath(ROOT, DATA_ROOT / "docs" if view == "stdlib" else DATA_ROOT).replace(os.sep, "/") + "/"
     lines += ["", f"An observed intersection means the same original passed stock, O0 and O3; frozen credited pairs also require the launcher to pass its imported bad-type control and any required source-withdrawal check. Script passes also require independently anchored frozen preimages and reference observations, plus exact exit, stdout, stderr and effect comparisons. Skips, omissions, unsupported diagnostics, exclusions, timeouts and non-stock successes never earn credited pairs. Historical credits come from the [frozen mixed-revision ledger]({prefix}{COHORT['historical_families']}) and are separate from the pinned result. [Receipts and replay instructions]({prefix}benchmarks/compatibility/README.md).", END]
+    if primary_959():
+        scripted=f"Scripts: **{len(scripts)} of {expected} original command IDs have receipts**; " + script_cohort_text(scripts) + f" **{expected-len(scripts)} IDs unobserved at this revision**."
+        lines=[scripted if x.startswith('Scripts: **') else x for x in lines]
+        lines.insert(-1,"Historical views: [49f pinned scorecard](https://github.com/astral-experiments/imre/blob/f1788f4337076e2a9cb8a004d601303ec1088d55/docs/stdlib.md#pinned-compatibility-scorecard); [separate 857 snapshot](https://github.com/astral-experiments/imre/blob/d0b396559a8ffda965cb495063b2967847d116aa/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/docs/stdlib.md).")
     return "\n".join(lines)
 
 
@@ -1030,6 +1083,17 @@ def script_cohort_text(scripts):
     return (f"**{len(verified):,} verified / {len(successes):,} historically reported stock-success commands** "
             f"among **{len(ids):,} original script IDs** ([public historical authority]"
             f"(https://github.com/astral-experiments/imre/commit/{SCRIPT_AUTHORITY})).")
+
+
+def primary_959():
+    import source_stage_pins
+    return is_snapshot() and COHORT['imre_revision']==REVISION_959 and getattr(source_stage_pins,'REVISION_959_SUCCESSOR',None) is not None
+
+
+def remove_revision_summary(text):
+    start,end=root_markers(REVISION_959)
+    if start not in text and end not in text:return text
+    require(text.count(start)==text.count(end)==1,'invalid redundant revision summary markers');before,rest=text.split(start);_,after=rest.split(end);return before.rstrip('\n')+'\n\n'+after.lstrip('\n')
 
 
 def root_markers(pin):
@@ -1074,6 +1138,7 @@ def main():
     if args.snapshot == '8571ca2dbecabf8d7863c369dc776611fd57d8ad':
         p.error('857 is frozen; verify it only at public checkout d0b396559a8ffda965cb495063b2967847d116aa (see benchmarks/compatibility/README.md)')
     if args.snapshot: select_snapshot(args.snapshot)
+    elif getattr(__import__('source_stage_pins'),'REVISION_959_SUCCESSOR',None) is not None:select_snapshot(REVISION_959)
     fs, scripts = summary()
     from check_omissions import validate as validate_omissions
     validate_omissions()  # Always validate the canonical omission policy and canonical receipts.
@@ -1085,7 +1150,12 @@ def main():
             new = render(view, (fs, scripts)) + "\n"
             if args.check: require(path.is_file() and path.read_text() == new, f"stale snapshot scorecard: {path.relative_to(ROOT)}")
             else: path.parent.mkdir(parents=True, exist_ok=True); path.write_text(new)
-        if args.root_summary:
+        if primary_959():
+            for path,view in ((ROOT/'README.md','readme'),(ROOT/'docs/stdlib.md','stdlib')):
+                old=path.read_text();new=replace_block(old,render(view,(fs,scripts),primary=True));new=remove_revision_summary(new) if view=='readme' else new
+                if args.check:require(old==new,f'stale primary 959 scorecard: {path.relative_to(ROOT)}')
+                else:path.write_text(new)
+        elif args.root_summary:
             path = ROOT / "README.md"; old = path.read_text(); new = replace_root_summary(old, render_root_summary(fs, scripts))
             if args.check: require(old == new, "stale current snapshot summary: README.md")
             else: path.write_text(new)

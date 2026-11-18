@@ -136,12 +136,44 @@ fn closed_return_waits_for_its_operand_and_respects_operand_masks() {
         start,
         ruff_text_size::TextSize::new(4),
     ));
-    graph
+    let owner = graph
         .session
         .closed_program_session(None, &graph.inputs)
-        .unwrap()
-        .closed_program_errors(&graph.modules, Some(&skipped), &proofs, None, None)
         .unwrap();
+    let roots = owner.closed_file_roots(&graph.modules, Some(&skipped), &proofs, None);
+    owner.closed_program_errors(&roots, None).unwrap();
+}
+
+#[test]
+fn closed_file_role_can_contribute_without_emitting_diagnostics() {
+    let root = std::path::Path::new("/project");
+    let helper = root.join("helper.py");
+    let main = root.join("main.py");
+    let mut session = super::Session::new(root, &[]).unwrap();
+    session
+        .add(
+            &helper,
+            "def take(value: int) -> int:\n    return value\nstatus: int = 'x'\n",
+            crate::SourceKind::File,
+        )
+        .unwrap();
+    session
+        .add(
+            &main,
+            "from helper import take\ntake(True)\n",
+            crate::SourceKind::File,
+        )
+        .unwrap();
+    session.set_closed_program_rules();
+    let sources = [(helper, true, None), (main, true, None)];
+    let mut roots = session.closed_file_roots(&sources, None, &[], None);
+    roots[0].diagnostic_path = None;
+    let error = session.closed_program_errors(&roots, None).unwrap_err();
+    assert!(
+        error.contains("main.py:2") && error.contains("expected int, got bool"),
+        "{error}"
+    );
+    assert!(!error.contains("invalid-assignment"), "{error}");
 }
 
 #[test]
@@ -687,10 +719,9 @@ fn closed_program_keeps_first_party_contracts_across_cached_edits() {
         let (skipped, proofs) = graph.diagnostic_scopes();
         let native = lowered.as_ref().err();
         let mut check = |cache| {
-            graph
-                .session
-                .closed_program_session(cache, &graph.inputs)?
-                .closed_program_errors(&graph.modules, skipped.as_deref(), &proofs, native, None)
+            let owner = graph.session.closed_program_session(cache, &graph.inputs)?;
+            let roots = owner.closed_file_roots(&graph.modules, skipped.as_deref(), &proofs, None);
+            owner.closed_program_errors(&roots, native)
         };
         let result = check(Some(&mut cache));
         let fresh = check(None);

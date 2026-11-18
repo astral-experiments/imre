@@ -279,13 +279,13 @@ def dispatch(command: Command, comparison: Comparison | None) -> int:
             )?;
             let (skipped, overloads) = graph.diagnostic_scopes();
             graph.session.set_closed_program_rules();
-            graph.session.closed_program_errors(
+            let roots = graph.session.closed_file_roots(
                 &graph.modules,
                 skipped.as_deref(),
                 &overloads,
                 None,
-                None,
-            )
+            );
+            graph.session.closed_program_errors(&roots, None)
         };
         let error = diagnostics(&CompileOptions::default()).unwrap_err();
         assert!(

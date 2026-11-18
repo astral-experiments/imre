@@ -1,0 +1,2041 @@
+{
+  "archives": {
+    "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz": {
+      "additional_seal": null,
+      "archive_sha256": "0aaf6be3143875bfcf63262c8c0ecdee05911f21919d8100c63fbcefcf0fdfbd",
+      "manifest_format": "members-list-v1",
+      "manifest_member": "seal-members.json",
+      "manifest_schema": null,
+      "manifest_sha256": "487ac76c2916469a1fcb44aaebbe6f3c35fa34c3949142a8e230ca000f922df0",
+      "members": 78,
+      "outer_format": "archive-fields-v1",
+      "outer_seal": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/seal.json",
+      "outer_sha256": "37f72d65b88c1befe7aa9771ac58fc4f235edebf62df7184b88cae8f9481a294"
+    },
+    "benchmarks/compatibility/extensions/data_resource959_v1/evidence/stock/configparser959-held-stock-absolute240-v3.tar.gz": {
+      "additional_seal": null,
+      "archive_sha256": "b33d384bbe081cb148d0650fb6cd56d8859e8e619620de8126967eaa5bc075fc",
+      "manifest_format": "files-map-v1",
+      "manifest_member": "COMPLETE.json",
+      "manifest_schema": "imre.configparser959.held-stock-seal.v1",
+      "manifest_sha256": "c9054988afb35f22eeed491b2b0dcba51796c313a741e02769753ee07c523039",
+      "members": 7,
+      "outer_format": "member-manifest-v1",
+      "outer_seal": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/stock/COMPLETE.json",
+      "outer_sha256": "c9054988afb35f22eeed491b2b0dcba51796c313a741e02769753ee07c523039"
+    },
+    "benchmarks/compatibility/extensions/data_resource959_v1/evidence/supplement/private-supplement.tar.gz": {
+      "additional_seal": null,
+      "archive_sha256": "bf77d75329502e6a4892a1b9f8dc78a0774304ab64bb5979302f97e56994bb42",
+      "manifest_format": "members-list-v1",
+      "manifest_member": "members.json",
+      "manifest_schema": null,
+      "manifest_sha256": "e9897dc01b07865b37edc47b6325df2194a40f0dcc94da40ca8274b56996f115",
+      "members": 23,
+      "outer_format": "archive-fields-v1",
+      "outer_seal": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/supplement/seal.json",
+      "outer_sha256": "629c84a7e58c26232137ac79ea08c11ae98787cd9f6d4549909ad787bd79d450"
+    },
+    "benchmarks/compatibility/extensions/data_resource959_v1/evidence/withdrawal/withdrawal-o3.tar.gz": {
+      "additional_seal": null,
+      "archive_sha256": "ec1c4f8ca431dfabe21e8548ec825ff0c7e00a328763e52daeefc38878a0c9e1",
+      "manifest_format": "files-map-v1",
+      "manifest_member": "COMPLETE.json",
+      "manifest_schema": "imre.compatibility.finite-sidecar-seal.v1",
+      "manifest_sha256": "c66975bc5201bf24177753b8e88f6fcfc92d3a3fe383114a536c734aae31b66c",
+      "members": 7,
+      "outer_format": "member-manifest-v1",
+      "outer_seal": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/withdrawal/COMPLETE.json",
+      "outer_sha256": "c66975bc5201bf24177753b8e88f6fcfc92d3a3fe383114a536c734aae31b66c"
+    }
+  },
+  "build_exec_policy": {
+    "path": "/usr/bin/timeout",
+    "schema": "imre.compatibility.build-timeout-chain.v1",
+    "timeout_seconds": 360
+  },
+  "canonical_denominator": 344,
+  "cohort": "finite-module",
+  "cohorts": {
+    "finite-module": {
+      "gate_operations": {
+        "direct": {
+          "after": "import unittest\n",
+          "line": "status: int = True\n",
+          "negative_sha256": "c96fa6e696ed689fb51cd987f033a2853637c78dbe2cea136caea4ce28df046e",
+          "op": "insert-after-unique-line"
+        },
+        "imported": {
+          "line": "import configparser_gate_poison\n",
+          "negative_sha256": "411b11365739df3e92a56ad301c33cca645a13ca36daa23e97089ac53861316b",
+          "op": "insert-after-first-line"
+        }
+      },
+      "gate_probe": {
+        "executable": "/workspace/scratch/configparser-959-explore-v1/gates/raw-control-probe",
+        "executable_sha256": "10cdd30ddd59ff46ea6f5c8c88bc21124fc7ceb3763daae50e883ca95f2530aa",
+        "source_sha256": "04e95dc9924a9dc72f33e7762e5cbad60af1259a195d9c25364ca90766f6ada3"
+      },
+      "kind": "finite-selected-v1",
+      "poison_module": "configparser_gate_poison",
+      "source_leaf": "Lib/test/test_configparser.py",
+      "strict_source_control": "native-content-v1"
+    }
+  },
+  "credit": 0,
+  "elf_tool_sha256": "4a387d80a70e6e97ef940a666fab59d5c38e7cf19ff907192fa983cb8505a7de",
+  "family": "configparser",
+  "identity": {
+    "capture_format": "held-supervised-v1",
+    "exec_policy": {
+      "schema": "imre.compatibility.finite-exec-policy.v1",
+      "tiers": {
+        "O0": {
+          "absent": [
+            "/workspace/scratch/configparser-959-explore-v1/fixtures/Lib/test/test_configparser.py",
+            "/workspace/scratch/configparser-959-explore-v1/fixtures/Lib/test/__pycache__",
+            "/workspace/scratch/configparser-959-explore-v1/launch/launcher.py",
+            "/workspace/scratch/cpython-3.14.5.tar.gz",
+            "/workspace/scratch/configparser-959-explore-v1/preimages/Lib/test/test_configparser.py",
+            "/workspace/scratch/configparser-959-explore-v1/fixtures/Lib/test.data-withdraw-stash",
+            "/workspace/scratch/configparser-959-explore-v1/gates/positive.launcher.py"
+          ],
+          "probe": "/workspace/scratch/configparser-959-explore-v1/withdrawal-source/raw-control-probe-data",
+          "probe_sha256": "9b3d722083c2434a8c653f31b450fd1e76a6943c129c4c0e1d7fba6ac52619e0",
+          "python_probe": {
+            "count": 1,
+            "errno": "ENOENT",
+            "operation": "statx",
+            "path": "/workspace/scratch/imre-95908-transferred-config-v1/product/imre-toolchain/bin/python3",
+            "pid": "target"
+          },
+          "schema": "imre.compatibility.withdraw-chain.bwrap-data.v1",
+          "skeleton": "/workspace/scratch/configparser-959-identity-recapture-v1/withdrawal/O0/workspace",
+          "timeout_seconds": 240,
+          "tmp": "/workspace/scratch/configparser-959-explore-v1/tmp",
+          "workspace": "/workspace",
+          "wrapper": "/usr/bin/bwrap",
+          "wrapper_sha256": "573236e5328ac2ebb08f59ae3a9805b4f8d12bdef14be8af4450d5463294985f"
+        },
+        "O3": {
+          "absent": [
+            "/workspace/scratch/configparser-959-explore-v1/fixtures/Lib/test/test_configparser.py",
+            "/workspace/scratch/configparser-959-explore-v1/fixtures/Lib/test/__pycache__",
+            "/workspace/scratch/configparser-959-explore-v1/launch/launcher.py",
+            "/workspace/scratch/cpython-3.14.5.tar.gz",
+            "/workspace/scratch/configparser-959-explore-v1/preimages/Lib/test/test_configparser.py",
+            "/workspace/scratch/configparser-959-explore-v1/fixtures/Lib/test.data-withdraw-stash",
+            "/workspace/scratch/configparser-959-explore-v1/gates/positive.launcher.py"
+          ],
+          "probe": "/workspace/scratch/configparser-959-explore-v1/withdrawal-source/raw-control-probe-data",
+          "probe_sha256": "9b3d722083c2434a8c653f31b450fd1e76a6943c129c4c0e1d7fba6ac52619e0",
+          "python_probe": {
+            "count": 1,
+            "errno": "ENOENT",
+            "operation": "statx",
+            "path": "/workspace/scratch/imre-95908-transferred-config-v1/product/imre-toolchain/bin/python3",
+            "pid": "target"
+          },
+          "schema": "imre.compatibility.withdraw-chain.bwrap-data.v1",
+          "skeleton": "/workspace/scratch/configparser-959-explore-v1/withdrawal-stage/O3/workspace",
+          "timeout_seconds": 240,
+          "tmp": "/workspace/scratch/configparser-959-explore-v1/tmp",
+          "workspace": "/workspace",
+          "wrapper": "/usr/bin/bwrap",
+          "wrapper_sha256": "573236e5328ac2ebb08f59ae3a9805b4f8d12bdef14be8af4450d5463294985f"
+        }
+      }
+    },
+    "held_proof": "invocation-bracket-v1",
+    "join_modes": {
+      "O0": "fresh-image-run",
+      "O3": "same-image-content-join"
+    },
+    "live_gate_samples": {
+      "O0": 0,
+      "O3": 1
+    },
+    "live_samples": {
+      "O0": {
+        "debt": {},
+        "success": {}
+      },
+      "O3": {
+        "debt": {
+          "clang-link": 1
+        },
+        "observer_report": "O3_observer_report",
+        "observer_source": "O3_observer_source",
+        "success": {
+          "clang": 1,
+          "cli": 1
+        }
+      }
+    },
+    "stock_unlink": {
+      "flags": null,
+      "operation": "unlink"
+    }
+  },
+  "identity_blocker": "zero-credit source stage; separate public activation and independent review required",
+  "kind": "stdlib",
+  "limitations": [
+    "Held descriptor hashes/fstat bracket the invocation; no second fstat during either hash read or independent per-call path stat was captured.",
+    "The independent baseline path witness precedes invocation. Path-based exec and after-exec live samples do not establish atomic FD exec.",
+    "O0 has no live compiler sample. O3 retains a nonmatching controller clang-link sample as debt; the independent observer matched the final linker."
+  ],
+  "observed_originals": 344,
+  "originals": [
+    {
+      "id": "test.test_configparser.BlatantOverrideConvertersTestCase.test_converters_at_init",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.BlatantOverrideConvertersTestCase.test_inheritance",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.BlatantOverrideConvertersTestCase.test_instance_assignment",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CompatibleTestCase.test_comment_handling",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserNoValueAndExtendedInterpolationTest.test_explicit_none",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserNoValueAndExtendedInterpolationTest.test_interpolation_with_allow_no_value",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_add_section_default",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_basic",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_basic_from_dict",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_boolean",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_case_sensitivity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_case_sensitivity_mapping_access",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_clear",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_default_case_sensitivity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_defaults_keyword",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_get_after_duplicate_option_error",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_interpolation",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_interpolation_missing_value",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_invalid_multiline_value",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_items",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_parse_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_popitem",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_query_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_read_returns_file_list",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_read_returns_file_list_with_bytestring_path",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_safe_interpolation",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_set_malformatted_interpolation",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_set_nonstring_types",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_set_string_types",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_setitem",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_weird_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCase.test_write",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_basic",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_basic_from_dict",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_boolean",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_case_sensitivity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_case_sensitivity_basic",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_case_sensitivity_conflicts",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_case_sensitivity_mapping_access",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_clear",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_default_case_sensitivity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_endless_loop",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_extended_interpolation",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_get_after_duplicate_option_error",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_invalid_multiline_value",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_other_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_parse_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_popitem",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_query_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_read_returns_file_list",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_read_returns_file_list_with_bytestring_path",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_set_string_types",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_setitem",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_strange_options",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_weird_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseExtendedInterpolation.test_write",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseInvalidInterpolationType.test_error_on_wrong_type_for_interpolation",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_basic",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_basic_from_dict",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_boolean",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_case_sensitivity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_case_sensitivity_mapping_access",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_clear",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_default_case_sensitivity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_empty_case",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_get_after_duplicate_option_error",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_invalid_multiline_value",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_no_interpolation",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_none_as_default_interpolation",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_parse_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_popitem",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_query_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_read_returns_file_list",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_read_returns_file_list_with_bytestring_path",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_set_string_types",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_setitem",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_weird_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoInterpolation.test_write",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_add_section_default",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_basic",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_basic_from_dict",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_boolean",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_case_sensitivity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_case_sensitivity_mapping_access",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_clear",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_default_case_sensitivity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_defaults_keyword",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_get_after_duplicate_option_error",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_interpolation",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_interpolation_missing_value",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_invalid_multiline_value",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_items",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_parse_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_popitem",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_query_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_read_returns_file_list",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_read_returns_file_list_with_bytestring_path",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_safe_interpolation",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_set_malformatted_interpolation",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_set_nonstring_types",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_set_string_types",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_setitem",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_weird_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNoValue.test_write",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_add_section_default",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_basic",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_basic_from_dict",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_boolean",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_case_sensitivity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_case_sensitivity_mapping_access",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_clear",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_default_case_sensitivity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_defaults_keyword",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_get_after_duplicate_option_error",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_interpolation",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_interpolation_missing_value",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_invalid_multiline_value",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_items",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_parse_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_popitem",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_query_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_read_returns_file_list",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_read_returns_file_list_with_bytestring_path",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_safe_interpolation",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_set_malformatted_interpolation",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_set_nonstring_types",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_set_string_types",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_setitem",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_weird_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDefaultSection.test_write",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_add_section_default",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_basic",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_basic_from_dict",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_boolean",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_case_sensitivity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_case_sensitivity_mapping_access",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_clear",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_default_case_sensitivity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_defaults_keyword",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_get_after_duplicate_option_error",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_interpolation",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_interpolation_missing_value",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_invalid_multiline_value",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_items",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_parse_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_popitem",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_query_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_read_returns_file_list",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_read_returns_file_list_with_bytestring_path",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_safe_interpolation",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_set_malformatted_interpolation",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_set_nonstring_types",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_set_string_types",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_setitem",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_weird_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseNonStandardDelimiters.test_write",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseTrickyFile.test_cfgparser_dot_3",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConfigParserTestCaseTrickyFile.test_unicode_failure",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_basic",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_basic_from_dict",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_boolean",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_case_sensitivity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_case_sensitivity_mapping_access",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_clear",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_converters",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_default_case_sensitivity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_get_after_duplicate_option_error",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_invalid_multiline_value",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_parse_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_popitem",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_query_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_read_returns_file_list",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_read_returns_file_list_with_bytestring_path",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_set_string_types",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_setitem",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_weird_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ConvertersTestCase.test_write",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_basic",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_basic_from_dict",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_boolean",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_case_sensitivity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_case_sensitivity_mapping_access",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_clear",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_default_case_sensitivity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_get_after_duplicate_option_error",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_invalid_multiline_value",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_parse_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_popitem",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_query_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_read_returns_file_list",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_read_returns_file_list_with_bytestring_path",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_set_string_types",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_setitem",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_weird_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CopyTestCase.test_write",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CoverageOneHundredTestCase.test_duplicate_option_error",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CoverageOneHundredTestCase.test_inconsistent_converters_state",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CoverageOneHundredTestCase.test_interpolation_depth_error",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CoverageOneHundredTestCase.test_interpolation_validation",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CoverageOneHundredTestCase.test_parsing_error",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.CoverageOneHundredTestCase.test_sectionproxy_repr",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionContextTestCase.test_get_basic_interpolation",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionContextTestCase.test_get_extended_interpolation",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionContextTestCase.test_missing_options",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionContextTestCase.test_missing_section",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionContextTestCase.test_remove_option",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionPicklingTestCase.test_combine_error_linear_complexity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionPicklingTestCase.test_duplicateoptionerror",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionPicklingTestCase.test_duplicatesectionerror",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionPicklingTestCase.test_error",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionPicklingTestCase.test_interpolationdeptherror",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionPicklingTestCase.test_interpolationerror",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionPicklingTestCase.test_interpolationmissingoptionerror",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionPicklingTestCase.test_interpolationsyntaxerror",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionPicklingTestCase.test_missingsectionheadererror",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionPicklingTestCase.test_nooptionerror",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionPicklingTestCase.test_nosectionerror",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ExceptionPicklingTestCase.test_parsingerror",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.InlineCommentStrippingTestCase.test_stripping",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.InvalidInputTestCase.test_delimiter_in_key",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.InvalidInputTestCase.test_section_bracket_in_key",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.Issue7005TestCase.test_none_as_value_stringified",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.Issue7005TestCase.test_none_as_value_stringified_raw",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MiscTestCase.test__all__",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_basic",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_basic_from_dict",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_boolean",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_case_sensitivity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_case_sensitivity_mapping_access",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_clear",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_default_case_sensitivity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_dominating_multiline_values",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_get_after_duplicate_option_error",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_invalid_multiline_value",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_parse_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_popitem",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_query_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_read_returns_file_list",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_read_returns_file_list_with_bytestring_path",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_set_string_types",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_setitem",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_weird_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.MultilineValuesTestCase.test_write",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserNoValueAndExtendedInterpolationTest.test_explicit_none",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserNoValueAndExtendedInterpolationTest.test_interpolation_with_allow_no_value",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_basic",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_basic_from_dict",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_boolean",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_case_sensitivity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_case_sensitivity_mapping_access",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_clear",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_default_case_sensitivity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_defaults_keyword",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_get_after_duplicate_option_error",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_interpolation",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_invalid_multiline_value",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_items",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_parse_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_popitem",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_query_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_read_returns_file_list",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_read_returns_file_list_with_bytestring_path",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_set_nonstring_types",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_set_string_types",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_setitem",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_weird_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCase.test_write",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_basic",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_basic_from_dict",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_boolean",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_case_sensitivity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_case_sensitivity_mapping_access",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_clear",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_default_case_sensitivity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_defaults_keyword",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_get_after_duplicate_option_error",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_interpolation",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_invalid_multiline_value",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_items",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_parse_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_popitem",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_query_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_read_returns_file_list",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_read_returns_file_list_with_bytestring_path",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_set_nonstring_types",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_set_string_types",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_setitem",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_weird_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestCaseNonStandardDelimiters.test_write",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.RawConfigParserTestSambaConf.test_reading",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ReDoSTestCase.test_option_regex_does_not_backtrack",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ReDoSTestCase.test_option_regex_no_value_does_not_backtrack",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ReadFileTestCase.test_file",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ReadFileTestCase.test_iterable",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ReadFileTestCase.test_keys_without_value_with_extra_whitespace",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ReadFileTestCase.test_readline_generator",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.ReadFileTestCase.test_source_as_bytes",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SectionlessTestCase.test_add_section",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SectionlessTestCase.test_disabled_error",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SectionlessTestCase.test_empty_unnamed_section",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SectionlessTestCase.test_multiple_configs",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SectionlessTestCase.test_no_first_section",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SectionlessTestCase.test_no_section",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_basic",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_basic_from_dict",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_boolean",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_case_sensitivity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_case_sensitivity_mapping_access",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_clear",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_default_case_sensitivity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_defaults_keyword",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_get_after_duplicate_option_error",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_interpolation",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_invalid_multiline_value",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_items",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_parse_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_popitem",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_query_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_read_returns_file_list",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_read_returns_file_list_with_bytestring_path",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_set_nonstring_types",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_set_string_types",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_setitem",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_sorted",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_weird_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.SortedTestCase.test_write",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_basic",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_basic_from_dict",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_boolean",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_case_sensitivity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_case_sensitivity_mapping_access",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_clear",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_default_case_sensitivity",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_get_after_duplicate_option_error",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_invalid_multiline_value",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_parse_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_popitem",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_query_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_read_returns_file_list",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_read_returns_file_list_with_bytestring_path",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_set_string_types",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_setitem",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_weird_errors",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_configparser.StrictTestCase.test_write",
+      "launcher_cohort": "finite-module",
+      "occurrence": 1
+    }
+  ],
+  "other_originals_not_run": 0,
+  "resource_roles": {
+    "Lib/test/configdata/cfgparser.1": "resource_0",
+    "Lib/test/configdata/cfgparser.2": "resource_1",
+    "Lib/test/configdata/cfgparser.3": "resource_2"
+  },
+  "roles": {
+    "O0_build_controller": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!capture.O0.py",
+    "O0_build_json": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!O0/capture.json",
+    "O0_cleanup": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!withdrawal/O0/cleanup.json",
+    "O0_effects_after": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!withdrawal/O0/after.json#/effects",
+    "O0_effects_before": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!withdrawal/O0/before.json#/effects",
+    "O0_gate_bracket": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!gates/O0.json",
+    "O0_gate_controller": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!controllers/gates.py",
+    "O0_meta": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!withdrawal/O0/capture.json",
+    "O0_positive_effects_after": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!fixture.after.json",
+    "O0_positive_effects_before": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!fixture.before.json",
+    "O0_positive_stderr": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!O0/stderr",
+    "O0_positive_stdout": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!O0/stdout",
+    "O0_positive_trace": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!O0/run.trace",
+    "O0_readelf": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/elf/O0.stdout",
+    "O0_skeleton_manifest": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!as-used/withdrawal-skeleton.json",
+    "O0_source_after": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!withdrawal/O0/after.json",
+    "O0_source_before": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!withdrawal/O0/before.json",
+    "O0_stderr": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!withdrawal/O0/stderr",
+    "O0_stdout": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!withdrawal/O0/stdout",
+    "O0_trace": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!withdrawal/O0/run.trace",
+    "O0_withdraw_capture": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!withdrawal/O0/capture.json",
+    "O0_withdraw_controller": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!controllers/withdraw.py",
+    "O3_build_controller": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!capture.py",
+    "O3_build_json": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!O3/capture.json",
+    "O3_cleanup": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/withdrawal/withdrawal-o3.tar.gz!cleanup.json",
+    "O3_effects_after": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/withdrawal/withdrawal-o3.tar.gz!source-state.json#/effects",
+    "O3_effects_before": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/withdrawal/withdrawal-o3.tar.gz!source-state.json#/effects",
+    "O3_gate_bracket": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/supplement/private-supplement.tar.gz!O3.gates.json",
+    "O3_gate_controller": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/supplement/private-supplement.tar.gz!gates.py",
+    "O3_gate_fd_after": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/supplement/private-supplement.tar.gz!fd.after.json",
+    "O3_gate_fd_before": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/supplement/private-supplement.tar.gz!fd.before.json",
+    "O3_meta": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/withdrawal/withdrawal-o3.tar.gz!capture.json",
+    "O3_observer_report": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!supplemental/report.json",
+    "O3_observer_source": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!supplemental/capture.py",
+    "O3_positive_effects_after": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!fixture.after.json",
+    "O3_positive_effects_before": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!fixture.before.json",
+    "O3_positive_stderr": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!O3/stderr",
+    "O3_positive_stdout": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!O3/stdout",
+    "O3_positive_trace": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!O3/run.trace",
+    "O3_readelf": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/elf/O3.stdout",
+    "O3_skeleton_manifest": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/withdrawal/withdrawal-o3.tar.gz!skeleton.json",
+    "O3_source_after": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/withdrawal/withdrawal-o3.tar.gz!source-state.json",
+    "O3_source_before": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/withdrawal/withdrawal-o3.tar.gz!source-state.json",
+    "O3_source_join": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/withdrawal/withdrawal-o3.tar.gz!join.json",
+    "O3_stderr": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/withdrawal/withdrawal-o3.tar.gz!stderr",
+    "O3_stdout": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/withdrawal/withdrawal-o3.tar.gz!stdout",
+    "O3_trace": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/supplement/private-supplement.tar.gz!authority/original.O3.withdrawal.trace",
+    "O3_withdraw_capture": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/withdrawal/withdrawal-o3.tar.gz!capture.json",
+    "O3_withdraw_controller": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!as-used/reviewed/controller.py",
+    "assessment": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!as-used/original/identity.json",
+    "capture_before": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!before.json",
+    "direct_launcher": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!as-used/gate/O0.direct.launcher.py",
+    "elf_capture": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/elf/capture.json",
+    "elf_controller": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/elf/capture.py",
+    "fixture_manifest": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!fixture.before.json",
+    "gate_O0_direct_meta": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!gates/O0.json#/controls/0",
+    "gate_O0_direct_stderr": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!gates/O0.direct.stderr",
+    "gate_O0_direct_stdout": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!gates/O0.direct.stdout",
+    "gate_O0_direct_trace": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!gates/O0.direct.trace",
+    "gate_O0_imported_meta": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!gates/O0.json#/controls/1",
+    "gate_O0_imported_stderr": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!gates/O0.imported.stderr",
+    "gate_O0_imported_stdout": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!gates/O0.imported.stdout",
+    "gate_O0_imported_trace": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!gates/O0.imported.trace",
+    "gate_O3_direct_meta": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/supplement/private-supplement.tar.gz!O3.gates.json#/controls/0",
+    "gate_O3_direct_stderr": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/supplement/private-supplement.tar.gz!O3.direct.stderr",
+    "gate_O3_direct_stdout": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/supplement/private-supplement.tar.gz!O3.direct.stdout",
+    "gate_O3_direct_trace": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/supplement/private-supplement.tar.gz!O3.direct.trace",
+    "gate_O3_imported_meta": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/supplement/private-supplement.tar.gz!O3.gates.json#/controls/1",
+    "gate_O3_imported_stderr": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/supplement/private-supplement.tar.gz!O3.imported.stderr",
+    "gate_O3_imported_stdout": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/supplement/private-supplement.tar.gz!O3.imported.stdout",
+    "gate_O3_imported_trace": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/supplement/private-supplement.tar.gz!O3.imported.trace",
+    "gate_probe_binary": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!as-used/gate/raw-control-probe",
+    "gate_probe_source": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!as-used/gate/raw_control_probe.c",
+    "imported_launcher": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!as-used/gate/O0.imported.launcher.py",
+    "native_controller": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!controllers/withdraw.py",
+    "originals": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!as-used/original/canonical-inventory.json",
+    "poison": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!as-used/gate/poison.source.py",
+    "policy": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!as-used/reviewed/data-only.policy.json",
+    "positive_launcher": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!as-used/original/launcher.py",
+    "prior_O0_build_json": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!as-used/original/O0.build.json",
+    "prior_O0_meta": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!as-used/original/O0.json",
+    "prior_O3_build_json": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!as-used/original/O3.build.json",
+    "prior_O3_meta": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!as-used/original/O3.json",
+    "prior_stock_meta": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!as-used/original/stock.json",
+    "prior_stock_stderr": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!stock/stderr",
+    "resource_0": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!as-used/preimages/Lib/test/configdata/cfgparser.1",
+    "resource_1": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!as-used/preimages/Lib/test/configdata/cfgparser.2",
+    "resource_2": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!as-used/preimages/Lib/test/configdata/cfgparser.3",
+    "resource_archive_proof": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!as-used/archive-proof.json",
+    "stock_controller": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/stock/configparser959-held-stock-absolute240-v3.tar.gz!capture.py",
+    "stock_effects_after": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/stock/configparser959-held-stock-absolute240-v3.tar.gz!effects.after.json",
+    "stock_effects_before": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/stock/configparser959-held-stock-absolute240-v3.tar.gz!effects.before.json",
+    "stock_meta": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/stock/configparser959-held-stock-absolute240-v3.tar.gz!stock.json",
+    "stock_source": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!as-used/preimages/Lib/test/test_configparser.py",
+    "stock_stderr": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/stock/configparser959-held-stock-absolute240-v3.tar.gz!stock.stderr",
+    "stock_stdout": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/stock/configparser959-held-stock-absolute240-v3.tar.gz!stock.stdout",
+    "stock_trace": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/stock/configparser959-held-stock-absolute240-v3.tar.gz!stock.trace",
+    "transfer": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!as-used/donor/transfer-provenance.json",
+    "withdraw_probe_binary": "benchmarks/compatibility/extensions/data_resource959_v1/evidence/first/private-identity-recapture.tar.gz!as-used/reviewed/raw-control-probe-data"
+  },
+  "schema": "imre.compatibility.successor-input.v1",
+  "source": {
+    "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "git_blob": "8d8dd2a2bf27fbf358489850dcb22cbc7af46845",
+    "path": "Lib/test/test_configparser.py",
+    "repo": "https://github.com/python/cpython",
+    "sha256": "6b82ad0b279850f3081c84c3fc459cb16afc8d11a4d14783c4f017e095974df4"
+  },
+  "stock_interpreter": {
+    "path": "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+    "version": "Python 3.14.5"
+  },
+  "tier_environment": {
+    "schema": "imre.compatibility.finite-tier-environment.v1",
+    "tiers": {
+      "O0": "stock-unchanged",
+      "O3": "stock-unchanged"
+    }
+  },
+  "withdrawal": {
+    "tree_relative_to_extension": "test",
+    "tree_stash_suffix": ".data-withdraw-stash"
+  }
+}
