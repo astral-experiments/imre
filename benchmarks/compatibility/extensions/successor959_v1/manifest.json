@@ -1,0 +1,156 @@
+{
+  "bindings": {
+    "stdlib": {
+      "json": {
+        "adapter": "raw-control-v2",
+        "binding": "benchmarks/compatibility/extensions/successor959_v1/bindings/json.input.json",
+        "receipt": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/verified/successor-v1/stdlib/json.jsonl",
+        "staged_receipt": "benchmarks/compatibility/extensions/successor959_v1/templates/stdlib/json.jsonl"
+      }
+    }
+  },
+  "evidence_status": {
+    "json": "30 observed passing occurrences; strict credit blocked by missing independently authenticated executable/tool path identities"
+  },
+  "files": {
+    "benchmarks/compatibility/extensions/successor959_v1/DESIGN.md": "e3089546ea43b646755ddd304a8df62e2c5c0e9a8a535a85660cf54bf8779bb3",
+    "benchmarks/compatibility/extensions/successor959_v1/__init__.py": "2cfffed82fd1476b705330c3695edec33928e3910a98d80d6a76c8102d711eb5",
+    "benchmarks/compatibility/extensions/successor959_v1/authority.py": "cca76bf959b9e950052b18bd505b9f387053b0e9cfba552497b58e0ad6c07463",
+    "benchmarks/compatibility/extensions/successor959_v1/bindings/json.input.json": "62bbfdc6858ea51f49235bb667486794555c91d2f75f3356e76b79fc5033c21d",
+    "benchmarks/compatibility/extensions/successor959_v1/check_stage.py": "2856bcf55e1e42018d615170426cf6e6b108cc0d2ed86299df675775e96a3941",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/assessment.json": "fa010dd280e6bc0e1ccab91432b44d5c201607d176e9fab8d9a7b7a5cefcdd13",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/controller.py": "7bf597a897abc8170733bed00536adb6b97cb2477549ae30b7a1bc3c2c13cde5",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/fixtures/Lib/test/test_json/test_decode.py": "7905c620f00c028e1b28ea27656b66d14584fa809206d3eb996fac5dbee2546c",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/COMPLETE.json": "628811111127e0c18beb17c12f9ee4ee1e2e1cac04cfab763724a6ce0f468eca",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/controller.py": "2373655aaaddea78072a54a260914662c23bf0df7203cb932628802f9b764f65",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/export-manifest.json": "113ddb7d936dd769ce68ad38a1d87f26e69e93530b8e187abb52b9f6091070ff",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/negative/direct.launcher.py": "30900c895a79ddd78645ed525502c72a1d6005125cafa5bdbecd9b822e538265",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/negative/imported.launcher.py": "2236a6f312dfd51d6e41681e92550091badbecb73861907539341de696199c5d",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/negative/poison.py": "14841721c7b84f57d26a6a38a53827c683daf10930b9f297cfc15335bd1257b5",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/probe-build.json": "6797f488080f3f69a1c157e460fd385e9df2650bb01fa53abe3dd05855dc656c",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/probe-source.c": "5e850ab6d1c977d4dae2a4949e7221b518fade280af57b25ff0f3dcc21ceaf3d",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O0.direct.effects.after.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O0.direct.effects.before.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O0.direct.json": "49cfeead06261a71d6967cc91ee04418e0cd39c0dc069a50fbeffac4ab1aceaf",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O0.direct.stderr": "a14d2e3649d297a23b58fe085f54f4b3a825e70c5f3ba720f361c4d43088be6c",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O0.direct.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O0.direct.trace": "b5490202db6b85ff07818e1fbf1c1bc28c18f9d93f8315a948ac79a71b68bcb0",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O0.imported.effects.after.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O0.imported.effects.before.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O0.imported.json": "4d207715b88a23ce221469c9663555a42a8628afcdb929022366d61f6d2e68df",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O0.imported.stderr": "88158833a5bcf9987ec34c406e13e6ef0f9bc1af40c80c76fa7b0ea5fa4027d7",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O0.imported.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O0.imported.trace": "5fc12d9b6356298fdec18c7a6b4e28797e36720d20e1c4a70e356bc87c456d0f",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O3.direct.effects.after.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O3.direct.effects.before.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O3.direct.json": "4519c93474e1855259eadfd91983abb47edb0b15255ad609fd0a2ba63cbbb8b6",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O3.direct.stderr": "a14d2e3649d297a23b58fe085f54f4b3a825e70c5f3ba720f361c4d43088be6c",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O3.direct.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O3.direct.trace": "9f2d34cf26a47943f9473384eaef81f1418c69313d6605080a2b54021393467c",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O3.imported.effects.after.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O3.imported.effects.before.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O3.imported.json": "c446f887e5728bafc49e34e8b107f8433e34b17366bee4a706b6b517bb9a1352",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O3.imported.stderr": "88158833a5bcf9987ec34c406e13e6ef0f9bc1af40c80c76fa7b0ea5fa4027d7",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O3.imported.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/raw/O3.imported.trace": "e7b92876e46d3857494ccf35b4f882781474063f9648bb35da6ec35c1d69bb83",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/gate-correction-v2/summary.json": "1ba1ed4a513ac66c326890daed775da44163d3d84bb05e4c454e252932d9380c",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/launch/launcher.py": "55367f06f64b7441708387dba7625753f4312e0a70fdf5b37208e40dd35fee0b",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/native-open-policy.json": "020993d9256fc91a96aba1cf4e4817876a2a524fb921b62be50709bdcca560b5",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/observed.jsonl": "753df602b003e63e389532f488cc80f6a61dc593201ed237a74cdebc84a3bbcc",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/originals.json": "c62748e38a119d29983e24be1c652881e34e9c78a93f318c30260666e27e1e3b",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O0.build.effects.after.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O0.build.effects.before.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O0.build.json": "c6696129c2b55fda532d1eefe32d0c451d47600ea805ebbec871b929634cd51f",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O0.build.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O0.build.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O0.effects.after.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O0.effects.before.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O0.json": "a94b73b09824fe8cc73fed6bd57346015575386abcf0dbcc9c113b94d70aacda",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O0.stderr": "06402e2bb7a8437039446c32db1408641a779e6ca18d054b6bc1670d7e157d92",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O0.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O0.trace": "e5ca775fa75359c3a158cfdd9fe81ef46671b8cf3276491327bca90c98aed5a5",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O3.build.effects.after.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O3.build.effects.before.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O3.build.json": "d96e7b76fe7cc8f00ef6c11dba8a18909f63e8a82a8dba83ce9ce1e3b3022f93",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O3.build.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O3.build.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O3.effects.after.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O3.effects.before.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O3.json": "f34f2326894dbf7eba13d780023aa0a533da44e18946f724b80a71f7f7e8b8de",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O3.stderr": "06402e2bb7a8437039446c32db1408641a779e6ca18d054b6bc1670d7e157d92",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O3.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/O3.trace": "db6eb54cc32ad0ac9a7c0d0cc61a700354a3ff60409312c35ff89ef896186206",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/stock.effects.after.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/stock.effects.before.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/stock.json": "58a9b7cdf055bc38b61b50280a50d47213da9476aa6bb1d13ed178d4c0f31325",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/stock.stderr": "06402e2bb7a8437039446c32db1408641a779e6ca18d054b6bc1670d7e157d92",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/stock.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/raw/stock.trace": "abc2a513e60d4847a44df7bb1a53fc0ca3b3a0fbedd47e68c76e5ccc24acdf40",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/run.json": "9e866d6e77c9a824c969031d9d692bc0c8cb8a5c384f8c008f60862f99cd4fa3",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/json/selected-evidence-v1.json": "8b792a4a655706afdc346b10b74227800a08751d6edf3ee1716552c29334f893",
+    "benchmarks/compatibility/extensions/successor959_v1/evidence/sealed/json-decode-959-selected-v1.tar.gz": "fae5b50a20c65bb58f960fc230491469b8e7266e6ff53f25e39305b4b72fe91b",
+    "benchmarks/compatibility/extensions/successor959_v1/generate.py": "bf1151e8866dba210cbe2b05a51209d272b6f74f6031a8c997d6c78fddc6f842",
+    "benchmarks/compatibility/extensions/successor959_v1/patches/validators.patch": "2bef8f9cf24111a04eb33bd98ec0f42baa2e4646c13ff497aacd4bc267019029",
+    "benchmarks/compatibility/extensions/successor959_v1/templates/stdlib/json.jsonl": "26431dc508c2bf06dee85016726526066d178065e23263460fff9126d9db2c1f"
+  },
+  "imre_revision": "95908fb0acadc2a67304a8080e584deaef395746",
+  "inputs": {
+    "stdlib/json": "benchmarks/compatibility/extensions/successor959_v1/bindings/json.input.json"
+  },
+  "patches": [
+    {
+      "files": [
+        {
+          "old_git_blob": "a9f8cd25c26d16f3f7925bec5fae3e7ce901b1f9",
+          "old_sha256": "24fc1f25516cc6da3d6648505af55fae2b22ddf22188bc5877b8950a7c46130e",
+          "path": "benchmarks/compatibility/scorecard.py",
+          "post_sha256": "66c69e60099b89ec19b5e8301df25f920b453ab1bb6d7924815c3585d7643ef1"
+        },
+        {
+          "old_git_blob": "dc53f7068385ec0a7840310f087570fa9a7c6a73",
+          "old_sha256": "9edb18699cd0a2a30dc51db20ab668a3e81e1cd36209e0ec82af767678cbfcbb",
+          "path": "benchmarks/compatibility/raw_control.py",
+          "post_sha256": "b4a43319ec80bd3ed88cc2c9015076bbd928b1d32f9475dabe7c51777c9e160f"
+        },
+        {
+          "old_git_blob": "f26b024fe2dd80e61e6f2aa7a7fc0eae2e0aa4c5",
+          "old_sha256": "041ea8b428a6564b6fc38f4d3c52b12583a2b3ad7475aaf5cd3e827c92943c0a",
+          "path": "benchmarks/compatibility/script_control.py",
+          "post_sha256": "998a04eda29d36c97dc3b34a794d5b10232608f2f9c45958ad14026d1c4a7ddd"
+        },
+        {
+          "old_git_blob": "1a76bbc98d4709d24b291d410f6a78713db5e077",
+          "old_sha256": "29c0f6440767bf697165d6123028768cd65cf2b50c3f3f7983bd1b9ed8db8c93",
+          "path": "benchmarks/compatibility/test_revision959_stage.py",
+          "post_sha256": "58c05819cbc7c3a7d1cc73657b253c0ff0d915006d3d9ebf7af5b5b1b61f5e0f"
+        }
+      ],
+      "path": "benchmarks/compatibility/extensions/successor959_v1/patches/validators.patch",
+      "sha256": "2bef8f9cf24111a04eb33bd98ec0f42baa2e4646c13ff497aacd4bc267019029"
+    }
+  ],
+  "predecessor": {
+    "commit": "956047d40b9f74b05b005beb0b8bb179abe37818",
+    "git_blob": "936fdf2ded35588b6e3fcb5c22d9e234b12b5aab",
+    "manifest": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/controls/unified-source-stage.json",
+    "sha256": "d885e272968c9e831bead7b80e1757c70fbe215d4e979a8851e7c658e824e5b2"
+  },
+  "prior_activation": {
+    "commit": "7c41f0b1456582d754a0182af2ecb823b314e2ed",
+    "git_blob": "8ab3988a05858946ffafdc7f3cf019abd44020b5",
+    "path": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/activation.json",
+    "sha256": "1589c0325906beb2c523dec266084c2a621b2e34d05dd9c7f5e430d3f10dfba6"
+  },
+  "schema": "imre.compatibility.successor-stage.v1",
+  "shared_roles": {
+    "donor_cli_dep": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/custody/ruff-b/imre.d",
+    "donor_generated": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/custody/generated-inputs.json",
+    "donor_log": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/custody/ruff-b/build.log",
+    "donor_runtime_dep": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/custody/ruff-b/libimre_runtime.d",
+    "donor_setup": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/custody/ruff-b/setup.json",
+    "donor_transfer": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/custody/ruff-b/transfer-provenance.json",
+    "selected_archive": "benchmarks/compatibility/extensions/successor959_v1/evidence/sealed/json-decode-959-selected-v1.tar.gz"
+  },
+  "status": "inactive-source-only",
+  "strict_credit": 0
+}
