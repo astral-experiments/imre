@@ -145,6 +145,53 @@ fn dense_text_is_ascii(bytes: &[u8]) -> bool {
     bits & 0x80 == 0
 }
 
+/// Consume consecutive equal-width short ASCII strings directly from the frame.
+/// Header bytes, payload high bits and the memo opcode share one packed comparison.
+#[inline(always)]
+fn dense_text_run<const WIDTH: usize>(data: &[u8], mut at: usize, end: usize) -> (usize, usize) {
+    debug_assert!((3..=8).contains(&WIDTH));
+    let start = at;
+    let stride = WIDTH + 3;
+    while end - at >= stride {
+        if end - at < 8 {
+            let text_end = at + WIDTH + 2;
+            if data[at] == SHORT_BINUNICODE
+                && data[at + 1] == WIDTH as u8
+                && data[text_end] == MEMOIZE
+                && dense_text_is_ascii(&data[at + 2..text_end])
+            {
+                at += stride;
+            }
+            break;
+        }
+        let word = u64::from_le_bytes(data[at..at + 8].try_into().unwrap());
+        let payload = match WIDTH {
+            3 => 0x0000_0080_8080_0000,
+            4 => 0x0000_8080_8080_0000,
+            5 => 0x0080_8080_8080_0000,
+            _ => 0x8080_8080_8080_0000,
+        };
+        let mut mask = payload | 0xffff;
+        let mut expected = u64::from(SHORT_BINUNICODE) | ((WIDTH as u64) << 8);
+        if WIDTH <= 5 {
+            mask |= 0xffu64 << ((WIDTH + 2) * 8);
+            expected |= u64::from(MEMOIZE) << ((WIDTH + 2) * 8);
+        }
+        if word & mask != expected {
+            break;
+        }
+        if WIDTH >= 6
+            && ((WIDTH >= 7 && data[at + 8] & 0x80 != 0)
+                || (WIDTH >= 8 && data[at + 9] & 0x80 != 0)
+                || data[at + WIDTH + 2] != MEMOIZE)
+        {
+            break;
+        }
+        at += stride;
+    }
+    (at, (at - start) / stride)
+}
+
 /// Validate the accepted grammar and UTF-8 before publishing Python objects;
 /// retain only packed positions into the immutable input, not copies of text.
 fn preflight(data: &[u8]) -> Option<Layout> {
@@ -168,6 +215,23 @@ fn preflight(data: &[u8]) -> Option<Layout> {
         let Some(&length) = data.get(cursor.at.checked_add(1)?) else {
             break;
         };
+        let run = match length {
+            3 => Some(dense_text_run::<3>(data, cursor.at, end)),
+            4 => Some(dense_text_run::<4>(data, cursor.at, end)),
+            5 => Some(dense_text_run::<5>(data, cursor.at, end)),
+            6 => Some(dense_text_run::<6>(data, cursor.at, end)),
+            7 => Some(dense_text_run::<7>(data, cursor.at, end)),
+            8 => Some(dense_text_run::<8>(data, cursor.at, end)),
+            _ => None,
+        };
+        if let Some((next, count)) = run {
+            if count == 0 {
+                break;
+            }
+            cursor.at = next;
+            dense_prefix = dense_prefix.checked_add(count)?;
+            continue;
+        }
         let start = cursor.at.checked_add(2)?;
         let text_end = start.checked_add(usize::from(length))?;
         if text_end >= end
@@ -520,6 +584,43 @@ fn attempt_data(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn packed_dense_runs_validate_every_width_and_payload_bit() {
+        fn framed(payload: &[u8]) -> Vec<u8> {
+            let mut data = vec![PROTO, 5, FRAME];
+            data.extend_from_slice(&(payload.len() as u64).to_le_bytes());
+            data.extend_from_slice(payload);
+            data
+        }
+        for width in 3usize..=8 {
+            let mut payload = vec![EMPTY_LIST, MEMOIZE, MARK];
+            for _ in 0..3 {
+                payload.extend([SHORT_BINUNICODE, width as u8]);
+                payload.extend(std::iter::repeat_n(b'a', width));
+                payload.push(MEMOIZE);
+            }
+            payload.extend([APPENDS, STOP]);
+            assert_eq!(preflight(&framed(&payload)).unwrap().dense_prefix, 3);
+            let second_payload = 3 + (width + 3) + 2;
+            for position in 0..width {
+                payload[second_payload + position] = 0x80;
+                assert!(
+                    preflight(&framed(&payload)).is_none(),
+                    "width {width}, position {position}"
+                );
+                payload[second_payload + position] = b'a';
+            }
+        }
+        let mut payload = vec![EMPTY_LIST, MEMOIZE, MARK];
+        for width in [3u8, 8, 5, 1, 6, 0, 7, 4, 9, 2, 255] {
+            payload.extend([SHORT_BINUNICODE, width]);
+            payload.extend(std::iter::repeat_n(b'a', usize::from(width)));
+            payload.push(MEMOIZE);
+        }
+        payload.extend([APPENDS, STOP]);
+        assert_eq!(preflight(&framed(&payload)).unwrap().dense_prefix, 11);
+    }
 
     #[test]
     fn bounded_dense_ascii_checks_every_payload_byte_and_falls_back_at_boundaries() {
