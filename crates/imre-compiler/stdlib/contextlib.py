@@ -1,7 +1,10 @@
 from abc import ABC, abstractmethod
+import _collections_abc
+from types import GenericAlias
 
 
 class AbstractContextManager(ABC):
+    __class_getitem__ = classmethod(GenericAlias)
     __slots__ = ()
 
     def __enter__(self) -> "AbstractContextManager":
@@ -10,3 +13,9 @@ class AbstractContextManager(ABC):
     @abstractmethod
     def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
         pass
+
+    @classmethod
+    def __subclasshook__(cls, C):
+        if cls is AbstractContextManager:
+            return _collections_abc._check_methods(C, "__enter__", "__exit__")
+        return NotImplemented

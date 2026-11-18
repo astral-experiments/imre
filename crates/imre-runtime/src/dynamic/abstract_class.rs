@@ -233,15 +233,6 @@ impl Context {
         }
     }
 
-    pub(super) fn structural_context_manager(&self, class: Id, target: Id) -> bool {
-        matches!(self.heap.get(target), Value::Class { name, .. } if name == "AbstractContextManager")
-            && self.module_value("contextlib", "AbstractContextManager") == Some(target)
-            && ["__enter__", "__exit__"].iter().all(|name| {
-                self.class_attr(class, name)
-                    .is_some_and(|value| value != NONE)
-            })
-    }
-
     /// Read the marker using Python lookup and truth testing, including descriptor errors.
     pub(super) fn is_abstract_method(&mut self, value: Id) -> Result<bool> {
         self.with_slot_depth("maximum recursion depth exceeded", |ctx| {
