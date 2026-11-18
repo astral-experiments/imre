@@ -6036,6 +6036,24 @@ second = (lambda data: data)(t'{client.lookup(*args)}{(lambda v: v)(values)}')",
     }
 
     #[test]
+    fn constrained_bundled_definitions_keep_their_source_entry() {
+        let mut prepared = PreparedBody::module(
+            "pickle",
+            Path::new("<imre stdlib>/pickle.py"),
+            "def loads(data):\n    return data\n",
+            0,
+            ModuleOrigin::Bundled(None),
+        )
+        .unwrap();
+        let (_, ordinary) = prepared.standalone().unwrap();
+        assert!(ordinary.contains("call i64 @imre_dyn_pickle_loads("));
+        prepared.source.profile_constrained = true;
+        let (_, constrained) = prepared.standalone().unwrap();
+        assert!(!constrained.contains("call i64 @imre_dyn_pickle_loads("));
+        assert!(!constrained.lines().any(|line| line.ends_with(", i32 11 }")));
+    }
+
+    #[test]
     fn physical_worker_targets_use_checked_method_invocations() {
         use crate::ir::{self, RegisteredCallTarget};
         use serde_json::json;

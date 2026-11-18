@@ -548,10 +548,13 @@ fn attempt(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     let Value::Bytes(bytes) = ctx.heap.get(data) else {
         return Ok(None);
     };
+    if !unobserved(ctx) {
+        return Ok(None);
+    }
     let Some(layout) = preflight(bytes) else {
         return Ok(None);
     };
-    if !unobserved(ctx) || !environment(ctx, root, layout.used) {
+    if !environment(ctx, root, layout.used) {
         return Ok(None);
     }
     decode(ctx, data, layout).map(Some)
