@@ -1,16 +1,17 @@
-//! Enforce exact scalar argument representations when a first-party graph needs fallback.
+//! Enforce exact scalar argument and return representations when a graph needs fallback.
 
 use super::{
     CheckedError, DeclaredSignatures, Session, annotation_type, changed_module_binding,
-    function_layout_writes, resolved_name_definition,
+    function_layout_writes, resolved_name_definition, return_scope,
 };
+use ruff_db::files::File;
 use ruff_python_ast::{
-    Expr, ExprCall, Stmt, TypeParams,
+    Expr, ExprCall, Stmt, StmtReturn, TypeParams,
     visitor::{self, Visitor},
 };
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use std::path::Path;
-use ty_python_core::{SemanticIndex, definition::DefinitionKind};
+use ty_python_core::{SemanticIndex, definition::DefinitionKind, scope::FileScopeId};
 use ty_python_semantic::{
     Db, HasType, SemanticModel,
     types::{Type, TypeDefinition, ide_support::ImportAliasResolution},
@@ -22,21 +23,24 @@ impl Session {
     /// representation contract, for example `take(True)` where `take` expects `int`.
     pub(super) fn exact_scalar_calls(
         &self,
-        module: usize,
+        file: File,
         path: &Path,
         declarations: DeclaredSignatures<'_>,
+        returns: &[FileScopeId],
         skipped: &[TextRange],
         ty_errors: &[CheckedError],
         errors: &mut Vec<(TextSize, String)>,
     ) {
         let db = &self.db;
-        let source = db.program_file(self.files[module]);
-        let parsed = self.parsed(self.files[module]);
+        let source = db.program_file(file);
+        let parsed = self.parsed(file);
         let mut calls = Calls {
             session: self,
+            file,
             model: SemanticModel::new(db, source),
             index: ty_python_core::semantic_index(db, source),
             declarations,
+            returns,
             skipped,
             unreachable: ty_python_semantic::types::ide_support::unreachable_ranges(db, source)
                 .iter()
@@ -52,9 +56,11 @@ impl Session {
 
 struct Calls<'db, 'a> {
     session: &'db Session,
+    file: File,
     model: SemanticModel<'db>,
     index: &'db SemanticIndex<'db>,
     declarations: DeclaredSignatures<'db>,
+    returns: &'a [FileScopeId],
     skipped: &'a [TextRange],
     unreachable: Vec<TextRange>,
     ty_errors: &'a [CheckedError],
@@ -253,13 +259,58 @@ impl Calls<'_, '_> {
         }
         true
     }
+
+    /// Supplement assignability for scalar literal returns after checking the operand.
+    /// Effectful operands need a sound nonreturning/evaluation proof before widening this cut.
+    fn check_return(&mut self, ret: &StmtReturn) {
+        let Some(value) = ret.value.as_deref() else {
+            return;
+        };
+        if self.excluded(value) {
+            return;
+        }
+        let before = self.errors.len();
+        self.visit_expr(value);
+        if self.failed(value, before) || !value.is_literal_expr() {
+            return;
+        }
+        let db = &self.session.db;
+        let Some(scope) = return_scope(db, self.file, value.range()) else {
+            return;
+        };
+        if self.returns.binary_search(&scope).is_err() {
+            return;
+        }
+        let ty_python_core::scope::NodeWithScopeKind::Function(node) =
+            self.index.scope(scope).node()
+        else {
+            return;
+        };
+        let parsed = self.session.parsed(self.file);
+        let function = node.node(&parsed);
+        let Some(annotation) = function.returns.as_deref() else {
+            return;
+        };
+        if let Some(expected) = annotation_type(db, &self.model, annotation)
+            && let Some(actual) = value.inferred_type(&self.model)
+            && actual.is_assignable_to(db, &self.model.program_environment(), expected)
+            && !Session::written_scalar_union_accepts(&self.model, annotation, actual)
+            && let Some(error) =
+                Session::scalar_contract_error(&self.model, expected, value, actual, || true)
+        {
+            self.errors
+                .push((value.start(), error.with_path(self.path).to_string()));
+        }
+    }
 }
 
 impl<'ast> Visitor<'ast> for Calls<'_, '_> {
     fn visit_annotation(&mut self, _: &'ast Expr) {}
     fn visit_type_params(&mut self, _: &'ast TypeParams) {}
     fn visit_stmt(&mut self, stmt: &'ast Stmt) {
-        if !matches!(stmt, Stmt::TypeAlias(_)) {
+        if let Stmt::Return(ret) = stmt {
+            self.check_return(ret);
+        } else if !matches!(stmt, Stmt::TypeAlias(_)) {
             visitor::walk_stmt(self, stmt);
         }
     }

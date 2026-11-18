@@ -553,7 +553,6 @@ pub unsafe extern "C" fn imre_tempdir_cleanup(name: *const Str) {
 /// are removed on explicit exit or on the last owner's release before exit.
 pub(super) struct DirectoryContext {
     value: super::words::OwnedWord,
-    temporary: bool,
     armed: std::cell::Cell<bool>,
 }
 
@@ -563,12 +562,9 @@ impl DirectoryContext {
     }
 
     fn remove(&self) -> Result<()> {
-        if self.temporary {
-            self.armed.set(false);
-            // SAFETY: a temporary context always owns a tagged string (tag zero).
-            cleanup(unsafe { &*(self.value.word as *const Str) })?;
-        }
-        Ok(())
+        self.armed.set(false);
+        // SAFETY: a temporary context owns a tagged string (tag zero).
+        cleanup(unsafe { &*(self.value.word as *const Str) })
     }
 }
 
@@ -582,20 +578,14 @@ impl Drop for DirectoryContext {
 }
 
 /// # Safety
-/// The tagged word is a rooted str, Path, or absent value. Temporary creation
-/// has already succeeded and provides the exact directory name as a string.
+/// The tagged word is the rooted directory name supplied by successful temporary creation.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_directory_context_new(
-    value: usize,
-    temporary: u32,
-) -> *const super::Object {
-    // SAFETY: the compiler restricts the payload to nullable str | Path.
+pub unsafe extern "C" fn imre_directory_context_new(value: usize) -> *const super::Object {
+    // SAFETY: the compiler supplies the tagged string arm of nullable str | Path.
     let value = unsafe { super::words::WordKind::new(256 | 9).acquire(value) };
-    let temporary = temporary != 0;
     let manager = DirectoryContext {
         value,
-        temporary,
-        armed: std::cell::Cell::new(temporary),
+        armed: std::cell::Cell::new(true),
     };
     crate::ObjectOwner::into_raw(crate::ObjectOwner::new(super::Object(
         super::StorageCell::new(super::Storage::DirectoryContext(manager)),

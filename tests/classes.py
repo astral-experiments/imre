@@ -62,6 +62,8 @@ INVALID_OBJECT_BASES = {
 
 
 REJECTED = {
+    "contextlib_dormant_bad_annotation": "from contextlib import ExitStack\ndef dormant():\n    status: int = True\n",
+    "contextlib_wrong_instance": "from contextlib import ExitStack\ndef consume(stack: ExitStack): pass\nconsume(True)\n",
     "early_class_alias_default": "class Message: pass\ndef create(factory=Alias): return factory()\nAlias = Message\n",
     "nested_class_bad_return": "class Outer:\n    class Inner:\n        def label(self) -> str:\n            return 42\n",
     "nested_class_with_invalid_sibling": "class Outer:\n    class Inner: pass\n    x: int\n    x: str\n",
@@ -217,6 +219,10 @@ CHECKED = {
 }
 
 IMPORTED_REJECTIONS = {
+    "contextlib_imported_bad_annotation": {
+        "main.py": "from contextlib import ExitStack\nimport model\n",
+        "model.py": "status: int = True\n",
+    },
     "imported_nominal_mismatch": {
         "main.py": "from first import Cell as First\nfrom second import Cell as Second\ndef consume(value: First) -> int:\n    return value.value\nconsume(Second(1))\n",
         "first.py": CELL,
@@ -331,7 +337,7 @@ def main() -> None:
         verify_upstream_definitions()
         class_sources = write_class_data_sources(project, PROJECT / "benchmarks/cpython_stdlib/full")
         runtime_type_errors = ("inherited_copy_reduction.py", "copy_custom_getstate.py", "abc_meta_with_keywords.py")
-        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "reassigned_class_string.py", "class_namespace.py", "factory_identity.py", "factory_default.py", "mutable_class_tuple.py", "nested_class_body.py", "class_data_setup.py", "class_scope_default.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "conditional_methods/main.py", "uv_variant.py", "fixed_lineage.py", "object_base.py", "super_subclass.py", "local_super_subclass.py", "published_local_class.py", "instance_layout.py", "subclass_guard_fields.py", "property_setters.py", "initializer_hook.py", "constructor_fields.py", "constructor_locals.py", "direct_base_initializer.py", "weak_proxy.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", *runtime_type_errors, "abstract_context_manager.py", "abc_metaclass.py", "mapping_abc.py", "mapping_alias.py", "mapping_class_values.py", "collections_storage_bases.py", "local_collections_storage.py", "nested_class_with_type_params.py", "generic_parameter_tuple.py", *class_sources]:
+        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "reassigned_class_string.py", "class_namespace.py", "factory_identity.py", "factory_default.py", "mutable_class_tuple.py", "nested_class_body.py", "class_data_setup.py", "class_scope_default.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "conditional_methods/main.py", "uv_variant.py", "fixed_lineage.py", "object_base.py", "super_subclass.py", "local_super_subclass.py", "published_local_class.py", "instance_layout.py", "subclass_guard_fields.py", "property_setters.py", "initializer_hook.py", "constructor_fields.py", "constructor_locals.py", "direct_base_initializer.py", "weak_proxy.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", *runtime_type_errors, "abstract_context_manager.py", "contextlib_exitstack.py", "abc_metaclass.py", "mapping_abc.py", "mapping_alias.py", "mapping_class_values.py", "collections_storage_bases.py", "local_collections_storage.py", "nested_class_with_type_params.py", "generic_parameter_tuple.py", *class_sources]:
             source = project / relative
             reference = run([python, "-E", str(source)], temporary)
             if relative in runtime_type_errors:
