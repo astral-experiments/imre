@@ -130,6 +130,27 @@ impl<'a> Cursor<'a> {
     }
 }
 
+/// Check a validated payload while ignoring high opcode bytes after its end.
+/// A complete word is read only inside the frame; longer or near-end payloads
+/// retain the ordinary slice check.
+#[inline(always)]
+fn payload_is_ascii(data: &[u8], start: usize, text_end: usize, frame_end: usize) -> bool {
+    debug_assert!(start <= text_end && text_end <= frame_end && frame_end <= data.len());
+    let length = text_end - start;
+    if length == 0 {
+        return true;
+    }
+    if length <= 8
+        && let Some(word_end) = start.checked_add(8)
+        && word_end <= frame_end
+    {
+        let word = u64::from_le_bytes(data[start..word_end].try_into().unwrap());
+        let mask = 0x8080_8080_8080_8080u64 >> ((8 - length) * 8);
+        return word & mask == 0;
+    }
+    data[start..text_end].is_ascii()
+}
+
 /// Validate the accepted grammar and UTF-8 before publishing Python objects;
 /// retain only packed positions into the immutable input, not copies of text.
 fn preflight(data: &[u8]) -> Option<Layout> {
@@ -149,13 +170,18 @@ fn preflight(data: &[u8]) -> Option<Layout> {
     // ASCII text. Keep that prefix in place even if a later item needs the
     // general grammar; only the remaining pushes need packed descriptors.
     let mut dense_prefix = 0usize;
+    let mut first_non_ascii = false;
     while cursor.at < end && data[cursor.at] == SHORT_BINUNICODE {
         let Some(&length) = data.get(cursor.at.checked_add(1)?) else {
             break;
         };
         let start = cursor.at.checked_add(2)?;
         let text_end = start.checked_add(usize::from(length))?;
-        if text_end >= end || data[text_end] != MEMOIZE || !data[start..text_end].is_ascii() {
+        if text_end >= end || data[text_end] != MEMOIZE {
+            break;
+        }
+        if !payload_is_ascii(data, start, text_end, end) {
+            first_non_ascii = true;
             break;
         }
         cursor.at = text_end + 1;
@@ -171,12 +197,13 @@ fn preflight(data: &[u8]) -> Option<Layout> {
     let mut prefix_extra_memo = 0usize;
     loop {
         let op = cursor.byte()?;
+        debug_assert!(!first_non_ascii || op == SHORT_BINUNICODE);
         match op {
             SHORT_BINUNICODE => {
                 let length = cursor.byte()?;
                 let offset = cursor.at;
                 let bytes = cursor.take(usize::from(length))?;
-                let ascii = bytes.is_ascii();
+                let ascii = !std::mem::take(&mut first_non_ascii) && bytes.is_ascii();
                 if !ascii {
                     std::str::from_utf8(bytes).ok()?;
                 }
@@ -586,5 +613,42 @@ mod tests {
         assert!(preflight(&bytes[..bytes.len() - 1]).is_none());
         let no_memo = frame(b"]\x94(\x8c\x03abce.");
         assert_eq!(preflight(&no_memo).unwrap().dense_prefix, 0);
+
+        let unicode_tail = frame(b"]\x94(\x8c\x05name0\x94\x8c\x02\xc3\xa9\x94\x8c\x01x\x94e.");
+        let layout = preflight(&unicode_tail).unwrap();
+        assert_eq!(layout.dense_prefix, 1);
+        assert_eq!(layout.items.len(), 2);
+        assert!(!layout.items[0].is_ascii());
+        assert!(layout.items[1].is_ascii());
+        let invalid_tail = frame(b"]\x94(\x8c\x05name0\x94\x8c\x01\xff\x94e.");
+        assert!(preflight(&invalid_tail).is_none());
+    }
+
+    #[test]
+    fn short_ascii_word_masks_only_payload_bytes_and_respects_frame_end() {
+        for length in 0..=9 {
+            let start = 3;
+            let text_end = start + length;
+            let mut data = vec![0xff; start];
+            data.extend(std::iter::repeat_n(0x7f, length));
+            data.extend_from_slice(&[
+                MEMOIZE,
+                SHORT_BINUNICODE,
+                0xff,
+                0x80,
+                0x94,
+                0x8c,
+                0x80,
+                0xff,
+            ]);
+            assert!(payload_is_ascii(&data, start, text_end, data.len()));
+            assert!(payload_is_ascii(&data, start, text_end, text_end));
+            for at in start..text_end {
+                data[at] = 0x80;
+                assert!(!payload_is_ascii(&data, start, text_end, data.len()));
+                assert!(!payload_is_ascii(&data, start, text_end, text_end));
+                data[at] = 0x7f;
+            }
+        }
     }
 }
