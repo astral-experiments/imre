@@ -3903,6 +3903,8 @@ pub(super) struct Heap {
     // Weak loader identities. The executable owns the initializer and any embedded bytes.
     pub(super) linked_sources: HashMap<Id, super::LinkedSource>,
     pub(super) execution: ExecutionState,
+    // Empty root storage can be reused by any execution on this heap.
+    spare_frame_roots: Vec<Id>,
     parked_executions: Vec<Option<ExecutionState>>,
     #[cfg(test)]
     pub(super) parked_count_probe: Option<Arc<std::sync::atomic::AtomicUsize>>,
@@ -4016,8 +4018,8 @@ pub(super) struct ExecutionState {
     pub(super) suspended_typing_frames: usize,
     // Fallback for targets whose native stack bounds cannot be queried.
     pub(super) slot_depth: usize,
-    // Empty storage that the next native activation can reuse.
-    spare_frame_roots: Vec<Id>,
+    // Dynamic guards for overridable sends invoked by socket.sendfile.
+    pub(super) sendfile_writes: Vec<(Id, crate::objects::socket::SendfileIdentity, Id)>,
 }
 
 impl ExecutionState {
@@ -4044,6 +4046,11 @@ impl ExecutionState {
             .chain(&self.buffer_exports)
             .copied()
             .chain(self.asyncgen_hooks)
+            .chain(
+                self.sendfile_writes
+                    .iter()
+                    .flat_map(|&(receiver, _, session)| [receiver, session]),
+            )
             .chain(self.pending.iter().flat_map(Error::roots))
             .chain(
                 self.frames
@@ -4334,6 +4341,7 @@ impl Heap {
             text_position: Cell::default(),
             linked_sources: HashMap::new(),
             execution: ExecutionState::new(reserved),
+            spare_frame_roots: Vec::new(),
             parked_executions: Vec::new(),
             #[cfg(test)]
             parked_count_probe: None,
@@ -5151,7 +5159,7 @@ impl Heap {
     }
     pub fn enter(&mut self, scope: Id, code: Id, owner: FrameOwner) {
         let mut activation = Frame::new(scope, code, owner, self.active_exception());
-        activation.live = std::mem::take(&mut self.execution.spare_frame_roots);
+        activation.live = std::mem::take(&mut self.spare_frame_roots);
         if let FrameOwner::Generator(id) = owner {
             let Value::Generator { frame, .. } = self.get(id) else {
                 unreachable!()
@@ -5286,9 +5294,9 @@ impl Heap {
             }
         }
         // Bound the retained allocation even after a call with many live temporaries.
-        if self.execution.spare_frame_roots.capacity() == 0 && frame.live.capacity() <= 64 {
+        if self.spare_frame_roots.capacity() == 0 && frame.live.capacity() <= 64 {
             frame.live.clear();
-            self.execution.spare_frame_roots = frame.live;
+            self.spare_frame_roots = frame.live;
         }
         self.keep(value);
         finalizer_released
@@ -8024,6 +8032,34 @@ mod tests {
     }
 
     #[test]
+    fn parked_sendfile_guards_root_only_their_own_execution() {
+        let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let mark = ctx.heap.temporary_mark();
+        let receiver = ctx.alloc(Value::List(Vec::new()));
+        let session = ctx.alloc(Value::List(Vec::new()));
+        ctx.heap
+            .execution
+            .sendfile_writes
+            .push((receiver, [0; 24], session));
+        ctx.heap.release_temporaries_since(mark);
+        let slot = ctx.heap.park_execution().unwrap();
+        ctx.heap.execution = ExecutionState::new(None);
+        assert!(ctx.heap.execution.sendfile_writes.is_empty());
+        ctx.collect_generation(2).unwrap();
+        assert!(matches!(ctx.heap.get(receiver), Value::List(_)));
+        assert!(matches!(ctx.heap.get(session), Value::List(_)));
+        ctx.heap.execution = ExecutionState::default();
+        ctx.heap.resume_execution(slot);
+        assert_eq!(
+            ctx.heap.execution.sendfile_writes.pop(),
+            Some((receiver, [0; 24], session))
+        );
+        ctx.collect_generation(2).unwrap();
+        assert!(ctx.heap.slots[receiver as usize].value.is_none());
+        assert!(ctx.heap.slots[session as usize].value.is_none());
+    }
+
+    #[test]
     fn parked_executions_keep_their_context_variable_bindings() {
         let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
         let name = ctx.text("value");
@@ -8974,7 +9010,7 @@ mod tests {
         assert_eq!(heap.execution.current().live.as_ptr(), allocation);
         heap.reserve_temporaries(1024).unwrap();
         heap.leave(NONE, true);
-        assert_eq!(heap.execution.spare_frame_roots.capacity(), 0);
+        assert_eq!(heap.spare_frame_roots.capacity(), 0);
     }
 
     #[test]
