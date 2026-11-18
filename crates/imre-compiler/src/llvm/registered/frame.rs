@@ -161,6 +161,10 @@ pub(crate) struct RegisteredFrame<'a, 'p> {
     pub(crate) simple_call: Option<TextRange>,
     pub(super) position: SourcePosition,
     pub(crate) native_suspension: bool,
+    /// Compiler-only state for a closed private-local replacement region.
+    pub(super) replacement: Option<super::ownership::Replacement>,
+    pub(in crate::llvm) replacement_rhs: bool,
+    pub(in crate::llvm) replacement_initial: bool,
 }
 
 impl<'a, 'p> RegisteredFrame<'a, 'p> {
@@ -207,6 +211,9 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             simple_call: None,
             position: SourcePosition::statement(0),
             native_suspension,
+            replacement: None,
+            replacement_rhs: false,
+            replacement_initial: false,
         }
     }
 
@@ -324,6 +331,12 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             self.body
                 .entry_slot(format_args!("%int_owner{slot}"), "i64", Some("1"));
         }
+        if self.replacement.is_some() {
+            self.body.entry_slot("%replacement_proof", "i64", Some("0"));
+            self.body.entry_slot("%replacement_next", "i64", Some("0"));
+            self.body
+                .entry_slot("%replacement_initial", "i1", Some("false"));
+        }
         // A loaded code object owns its identifier-like strings before any statement runs.
         if module && !self.output.interned_identifiers.is_empty() {
             let names = std::mem::take(&mut self.output.interned_identifiers)
@@ -340,10 +353,12 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         }
         for ((start, target), (end, label)) in std::mem::take(&mut self.integer_unwinds) {
             self.body.start(&label);
+            self.invalidate_replacement();
             self.release_integer_owners(start..end, true);
             self.body.jump(&target);
         }
         self.body.start("failed");
+        self.invalidate_replacement();
         self.release_integer_owners(0..self.integer_owners, false);
         self.return_value("0");
         let offset = self.output.functions.len();
@@ -713,6 +728,10 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         self.take_matching_check();
         if matches!(op, "lookup" | "lookup_local") {
             let data = self.output.data(name.as_bytes());
+            if self.replacement_rhs {
+                let local = op == "lookup_local";
+                return self.checked(&format!("call i64 @imre_dyn_replacement_lookup(ptr %ctx, i64 {receiver}, ptr {data}, i64 {}, i1 {local}, ptr %replacement_proof)", name.len()));
+            }
             return self.checked(&format!(
                 "call i64 @imre_dyn_{op}(ptr %ctx, i64 {receiver}, ptr {data}, i64 {})",
                 name.len()
@@ -757,6 +776,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         let ready = self.name("b");
         self.jump(&ready);
         self.label(&failed);
+        self.invalidate_replacement();
         release(self);
         self.jump(&outer);
         self.label(&ready);
@@ -867,7 +887,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
     }
 
     /// Pass consecutive private roots in place. Mixed or discontiguous roots need a snapshot.
-    fn live_handles(&mut self, trailing: &[&str]) -> (Cow<'static, str>, usize) {
+    pub(super) fn live_handles(&mut self, trailing: &[&str]) -> (Cow<'static, str>, usize) {
         if trailing.is_empty()
             && self.live.is_empty()
             && let Some((&first, rest)) = self.live_slots.split_first()
@@ -942,7 +962,19 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         let (ptr, count) = self.live_handles(trailing);
         let line = self.positions.line(range.start());
         self.position = SourcePosition::statement(line);
-        let caught = self.caught.last().map_or("0", String::as_str);
+        let caught = self.caught.last().cloned().unwrap_or_else(|| "0".into());
+        if self
+            .replacement
+            .as_ref()
+            .is_some_and(|plan| plan.position == range)
+        {
+            let file = self.positions.file.unwrap_or("null");
+            let scope = self.scope.clone();
+            self.line(&format!("call void @imre_dyn_replacement_statement(ptr %ctx, i64 {scope}, ptr {ptr}, i64 {count}, ptr {file}, i32 {line}, i64 {caught}, ptr %replacement_proof)"));
+            self.check_error();
+            return;
+        }
+        self.invalidate_replacement();
         match self.positions.file {
             Some(file) if count == 0 && self.caught.is_empty() => self.line(&format!(
                 "call void @imre_dyn_statement_at(ptr %ctx, ptr {file}, i32 {line})"
@@ -1047,7 +1079,11 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
                 count,
                 receiver_slot,
             } => (
-                if receiver_slot {
+                if self.replacement_initial && !receiver_slot && count == 1 {
+                    "imre_dyn_replacement_initial_call_at"
+                } else if self.replacement_rhs && !receiver_slot && count == 1 {
+                    "imre_dyn_replacement_positional_call_at"
+                } else if receiver_slot {
                     "imre_dyn_positional_method_at"
                 } else {
                     "imre_dyn_positional_call_at"
@@ -1055,18 +1091,36 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
                 format!("ptr {ptr}, i64 {count}"),
             ),
         };
-        let scope = scope.unwrap_or(&self.scope);
-        self.checked(&format!("call i64 @{function}(ptr %ctx, i64 {callable}, {args}, i64 {mark}, ptr {position}, i64 {scope})"))
+        let scope = scope.map_or_else(|| self.scope.to_string(), str::to_owned);
+        let proof = if function == "imre_dyn_replacement_initial_call_at" {
+            ", ptr %replacement_initial"
+        } else if function == "imre_dyn_replacement_positional_call_at" {
+            ", ptr %replacement_proof, ptr %replacement_next"
+        } else {
+            if self.replacement_rhs {
+                self.invalidate_replacement();
+            }
+            ""
+        };
+        self.checked(&format!("call i64 @{function}(ptr %ctx, i64 {callable}, {args}, i64 {mark}, ptr {position}, i64 {scope}{proof})"))
     }
 
     pub(crate) fn assign_owned_name(&mut self, scope: &str, name: &str, value: &str) {
         self.output.intern_identifier(name);
         let data = self.output.data(name.as_bytes());
         self.take_matching_check();
-        let replaced = self.checked(&format!(
-            "call i64 @imre_dyn_assign_target(ptr %ctx, i64 {scope}, ptr {data}, i64 {}, i64 {value})",
-            name.len()
-        ));
+        let call = if self.replacement.is_some() && !self.replacement_initial {
+            format!(
+                "call i64 @imre_dyn_replacement_assign_target(ptr %ctx, i64 {scope}, ptr {data}, i64 {}, i64 {value}, ptr %replacement_proof, ptr %replacement_next)",
+                name.len()
+            )
+        } else {
+            format!(
+                "call i64 @imre_dyn_assign_target(ptr %ctx, i64 {scope}, ptr {data}, i64 {}, i64 {value})",
+                name.len()
+            )
+        };
+        let replaced = self.checked(&call);
         self.release_store(&replaced);
     }
 
@@ -1090,9 +1144,29 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
     fn release_store(&mut self, replaced: &str) {
         let (ptr, count) = self.live_handles(&[]);
         let mark = self.iteration.expression_mark.as_deref().unwrap_or("0");
-        self.line(&format!(
-            "call void @imre_dyn_assignment_target_at(ptr %ctx, i64 {mark}, ptr {ptr}, i64 {count}, i64 {replaced})"
-        ));
+        if self.replacement.is_some() && !self.replacement_initial {
+            self.line(&format!("call void @imre_dyn_replacement_assignment_target_at(ptr %ctx, i64 {mark}, ptr {ptr}, i64 {count}, i64 {replaced}, ptr %replacement_proof, ptr %replacement_next)"));
+        } else {
+            self.line(&format!("call void @imre_dyn_assignment_target_at(ptr %ctx, i64 {mark}, ptr {ptr}, i64 {count}, i64 {replaced})"));
+        }
+    }
+
+    pub(in crate::llvm) fn invalidate_replacement(&mut self) {
+        if self.replacement.is_some() {
+            self.line("store i64 0, ptr %replacement_proof");
+            self.line("store i64 0, ptr %replacement_next");
+        }
+    }
+
+    pub(in crate::llvm) fn begin_replacement_assignment(&mut self, slot: usize) {
+        self.replacement_rhs = self
+            .replacement
+            .as_ref()
+            .is_some_and(|plan| plan.result == slot && plan.position == self.current_range);
+        self.replacement_initial = self
+            .replacement
+            .as_ref()
+            .is_some_and(|plan| plan.result == slot && plan.initial_position == self.current_range);
     }
 }
 
@@ -1255,15 +1329,30 @@ impl<'p> RegisteredFrame<'_, 'p> {
     }
 
     /// Pull directly into the checked loop's private root on the successful edge.
-    pub(super) fn sync_item(&mut self, cursor: &str, key: usize, has_else: bool, exhausted: &str) {
+    pub(super) fn sync_item(
+        &mut self,
+        cursor: &str,
+        key: usize,
+        has_else: bool,
+        exhausted: &str,
+        replacement: bool,
+    ) {
         let physical = self
             .iteration
             .physical_slot(key)
             .expect("checked private slot");
         let item = self.name("b");
-        let status = self.checked(&format!(
-            "call i32 @imre_dyn_pull_item(ptr %ctx, i64 {cursor}, ptr %ir_slot{physical}, i1 {has_else})"
-        ));
+        let call = if replacement {
+            format!(
+                "call i32 @imre_dyn_replacement_pull_item(ptr %ctx, i64 {cursor}, ptr %ir_slot{physical}, i1 {has_else}, i64 {}, ptr %replacement_proof)",
+                self.scope
+            )
+        } else {
+            format!(
+                "call i32 @imre_dyn_pull_item(ptr %ctx, i64 {cursor}, ptr %ir_slot{physical}, i1 {has_else})"
+            )
+        };
+        let status = self.checked(&call);
         let ready = self.value(&format!("icmp ne i32 {status}, 0"));
         self.branch(&ready, &item, exhausted);
         self.label(&item);

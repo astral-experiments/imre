@@ -15,7 +15,7 @@ impl Checker<'_> {
         let name = attr.attr.as_str();
         if !matches!(
             name,
-            "assertEqual" | "assertListEqual" | "assertRaises" | "assertIs" | "assertIsNot"
+            "assertListEqual" | "assertRaises" | "assertIs" | "assertIsNot"
         ) || !self.unittest_case(class)
         {
             return None;
@@ -37,7 +37,6 @@ impl Checker<'_> {
             return None;
         }
         match record.name.as_str() {
-            "_BoundEqual" => Some("assertEqual"),
             "_BoundListEqual" => Some("assertListEqual"),
             "_BoundRaises" => Some("assertRaises"),
             "_BoundIs" => Some("assertIs"),

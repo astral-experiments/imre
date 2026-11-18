@@ -17475,18 +17475,20 @@ print(get_indent("  source"))
     }
 
     #[test]
-    fn boxed_open_places_the_original_callable_and_stream() {
-        use crate::frontend::fixed_body_source::FixedAttribute;
-        use crate::ir::{ExprKind, Type};
+    fn boxed_open_retains_the_original_callable_and_stream() {
+        use crate::ir::{Builtin, ExprKind, Node, RegisteredArguments, RegisteredCallTarget, Type};
         use crate::modules::SourceGraph;
+        use ruff_text_size::TextRange;
 
-        for (import, written) in [
-            ("", "open(args.file)"),
+        for (import, written, positional, keywords) in [
+            ("", "open(args.file)", 1, &[][..]),
             (
                 "from builtins import open as selected\n",
                 "selected(args.file, 'r', encoding='utf-8', newline='')",
+                2,
+                &["encoding", "newline"][..],
             ),
-            ("import builtins\n", "builtins.open(args.file)"),
+            ("import builtins\n", "builtins.open(args.file)", 1, &[][..]),
         ] {
             let source = format!(
                 "import argparse\n{import}def options() -> argparse.Namespace:\n    parser = argparse.ArgumentParser()\n    parser.add_argument('file', type=str)\n    parser.add_argument('--benchmark', action='append')\n    return parser.parse_args()\ndef main():\n    args = options()\n    with {written} as f:\n        for line in f: print(line.rstrip())\nmain()\n"
@@ -17494,17 +17496,63 @@ print(get_indent("  source"))
             let mut graph = SourceGraph::single(&source).unwrap();
             crate::checked_lower(&mut graph).unwrap();
             let (functions, _) = graph.take_registered_functions();
-            let boxed = functions[&graph.entry].values().any(|body| {
-                body.fixed_attributes.as_deref().is_some_and(|attributes| {
-                    attributes.iter().any(|(range, attribute)| {
-                        &source[*range] == written
-                            && matches!(attribute, FixedAttribute::CallValue { checked, placed: true }
-                                if checked.call.ty == Type::PythonObject
-                                    && matches!(&checked.call.kind, ExprKind::Invoke { .. }))
-                    })
-                })
-            });
-            assert!(boxed, "{written}");
+            let mut found = 0;
+            for body in functions[&graph.entry].values() {
+                crate::ir::walk_nodes(&body.function.body, &mut |node, _| {
+                    let Node::Expression(value) = node else {
+                        return;
+                    };
+                    let ExprKind::Invoke { callable, args } = &value.kind else {
+                        return;
+                    };
+                    let Some(site) = value.python_call() else {
+                        return;
+                    };
+                    if &source[site.range] != written {
+                        return;
+                    }
+                    found += 1;
+                    assert_eq!(value.ty, Type::PythonObject, "{written} stream");
+                    assert_eq!(callable.ty, Type::PythonObject, "{written} callable");
+                    assert!(
+                        matches!(site.target, RegisteredCallTarget::Callable { .. }),
+                        "{written}"
+                    );
+                    let target = &source[TextRange::new(site.range.start(), site.target.end())];
+                    assert_eq!(target, written.split_once('(').unwrap().0);
+                    match &callable.without_location().kind {
+                        ExprKind::Builtin(Builtin::RegisteredName(name), _) => {
+                            assert_eq!(name.as_str(), target)
+                        }
+                        ExprKind::Builtin(Builtin::RegisteredAttribute { name, .. }, _) => {
+                            assert_eq!(name.as_str(), target.rsplit('.').next().unwrap());
+                        }
+                        _ => panic!("{written}: original callable was not retained"),
+                    }
+                    assert_eq!(args.values.len(), positional + keywords.len(), "{written}");
+                    assert_eq!(args.values[0].ty, Type::PythonObject, "{written} path");
+                    match &site.arguments {
+                        RegisteredArguments::Positional => {
+                            assert!(keywords.is_empty(), "{written}")
+                        }
+                        RegisteredArguments::Keywords {
+                            positional: actual,
+                            names,
+                        } => {
+                            assert_eq!(*actual, positional, "{written}");
+                            assert!(
+                                names
+                                    .iter()
+                                    .map(|name| name.as_str())
+                                    .eq(keywords.iter().copied()),
+                                "{written}"
+                            );
+                        }
+                        _ => panic!("{written}: unexpected argument layout"),
+                    }
+                });
+            }
+            assert_eq!(found, 1, "{written}");
         }
         assert!(
             crate::check("open([1])\n")

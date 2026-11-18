@@ -5,3 +5,10 @@ REVISION_959 = {'commit': '956047d40b9f74b05b005beb0b8bb179abe37818', 'manifest'
 REVISION_959_SUCCESSOR = {'commit': '406127b2323d799789a1c2d33f5a573753f7e870', 'manifest': 'benchmarks/compatibility/extensions/successor959_v1/manifest.json', 'git_blob': '3ff071ee3bc586d5d606fd5854ef7323bfaa647a', 'sha256': '36910bbf580e5aed8789f323a36eb6d097fe391782872b1cb5416c1ed074179c'}
 
 REVISION_959_RESOURCE = {'commit': '87ddd30c85531de67f6edb0bcf54d8ac49239b75', 'manifest': 'benchmarks/compatibility/extensions/data_resource959_v1/manifest.json', 'git_blob': '3a71841769cd4eb75c54cb986db1d6eaf6b6c302', 'sha256': '87e5a165330cf2779cdd1d112071236244554549324eaf7c1572226747cfcda7'}
+
+REVISION_959_COMPLETED = {
+    'commit': 'd9d4e41acd858321f034fac16177ebe860064c87',
+    'manifest': 'benchmarks/compatibility/extensions/completed_unittest959_activation_v1/manifest.json',
+    'git_blob': '728994a20fc65848388e0988a864599be37644e0',
+    'sha256': '1e9169a7c868e8a30b9f6c62d0c65d9b7e23e6072462becf59a90e042b698922',
+}

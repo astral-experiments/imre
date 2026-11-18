@@ -31,3 +31,18 @@ pub(crate) const DIFFLIB_GET_BLOCKS_BODY: u32 = 7;
 pub(crate) const COLLECTIONS_NAMEDTUPLE_MAKE_BODY: u32 = 8;
 pub(crate) const DIFFLIB_RATIO_BODY: u32 = 9;
 pub(crate) const DIFFLIB_CALCULATE_RATIO_BODY: u32 = 10;
+
+/// Authenticated bundled pickle reader definitions.
+pub(crate) const PICKLE_LOADS_BODY: u32 = 11;
+
+/// Authenticated bundled pathlib definitions used by whole-file reads.
+pub(crate) const PATH_READ_BYTES_BODY: u32 = 100;
+pub(crate) const PATH_OPEN_BODY: u32 = 101;
+pub(crate) const PATH_FSPATH_BODY: u32 = 102;
+pub(crate) const PATH_STR_BODY: u32 = 103;
+pub(crate) const PATH_PARSE_BODY: u32 = 104;
+pub(crate) const PATH_FORMAT_BODY: u32 = 105;
+pub(crate) const PATH_RAW_BODY: u32 = 106;
+pub(crate) const PATH_DRIVE_BODY: u32 = 107;
+pub(crate) const PATH_ROOT_BODY: u32 = 108;
+pub(crate) const PATH_TAIL_BODY: u32 = 109;

@@ -1,0 +1,1561 @@
+{
+  "archives": {
+    "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/second-builds.tar.gz": {
+      "archive_sha256": "e5aac60a4de8da96c191b69d558e46fb37c71598e785de6629727b5aa9ec2b75",
+      "manifest_format": "files-map-v1",
+      "manifest_schema": "imre.compatibility.capture-seal.v1",
+      "members": 21,
+      "outer_format": "external-files-map-v1",
+      "outer_seal": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/second-builds.COMPLETE.json",
+      "outer_sha256": "284043fc6b4773df09b23de9f0ee373f3f89d72ce93ab4090d9a0f63de4ca4f2"
+    },
+    "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/dataclasses-959.tar.gz": {
+      "archive_sha256": "02e8924aa17e58de615b5f3e70e1e8ed6b19828b8cbc2c2b567f0a7a97bbc7d8",
+      "manifest_format": "files-map-v1",
+      "manifest_schema": "imre.compatibility.capture-seal.v1",
+      "members": 70,
+      "outer_format": "external-files-map-v1",
+      "outer_seal": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/COMPLETE.json",
+      "outer_sha256": "d52af675171cdc42c1b3a7767d9a76494ec2d1a214e2805ce254e5bbf461afd0"
+    },
+    "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz": {
+      "archive_sha256": "c6297af57dfe72050df1e6bfbb71506c10ec95d4544e0ff9bfc050c788d848e3",
+      "manifest_format": "files-map-v1",
+      "manifest_schema": "imre.compatibility.evidence-seal.v1",
+      "members": 40,
+      "outer_format": "external-files-map-v1",
+      "outer_seal": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.COMPLETE.json",
+      "outer_sha256": "c956e64b7009019beddf0fa6c06111e6bfe4c0e278dc73a7a3b37e1a26bdecd7"
+    }
+  },
+  "canonical_denominator": 276,
+  "cohort": "finite-full",
+  "cohorts": {
+    "finite-full": {
+      "kind": "finite-selected-v1",
+      "strict_source_control": "native-content-v1"
+    }
+  },
+  "credit": 0,
+  "family": "dataclasses",
+  "identity": {
+    "capture_format": "held-direct-v1"
+  },
+  "identity_blocker": "zero-credit stage; completed nonzero unittest policy and independent source review required",
+  "join_modes": {
+    "O0": "fresh-image-run",
+    "O3": "same-image-content-join"
+  },
+  "kind": "stdlib",
+  "observed_originals": 276,
+  "operations": {
+    "direct": {
+      "after": "import unittest\n",
+      "line": "status: int = True\n",
+      "negative_sha256": "215cd70f18978a9605616a6a6e03b70e7f5a83ff1f612d3be359701ea23300e0",
+      "op": "insert-after-unique-line"
+    },
+    "imported": {
+      "line": "import dataclasses_gate_poison\n",
+      "negative_sha256": "5100d217bface70602d226933cb654ab7751c60c7a903402ca65c40dfe8cf2f1",
+      "op": "insert-after-first-line"
+    }
+  },
+  "originals": [
+    {
+      "id": "test.test_dataclasses.TestAbstract.test_abc_implementation",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestAbstract.test_maintain_abc",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_0_field_compare",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_1_field_compare",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_alternate_classmethod_constructor",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_class_attrs",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_class_marker",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_class_var",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_class_var_default_factory",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_class_var_frozen",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_class_var_no_default",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_class_var_with_default",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_classvar_default_factory",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_clean_traceback_from_fields_exception",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_compare_subclasses",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_dataclass_params_repr",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_dataclass_params_signature",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_dataclasses_pickleable",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_dataclasses_qualnames",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_default_factory",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_default_factory_derived",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_default_factory_not_called_if_value_given",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_default_factory_with_no_init",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_deliberately_mutable_defaults",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_disallowed_mutable_defaults",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_dont_include_other_annotations",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_dynamic_class_creation",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_dynamic_class_creation_using_field",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_eq_order",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_default",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_default_default_factory_error",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_metadata_custom_mapping",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_metadata_default",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_metadata_mapping",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_named_BUILTINS_frozen",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_named_like_builtin",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_named_like_builtin_frozen",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_named_object",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_named_object_frozen",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_named_self",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_no_default",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_order",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_recursive_repr",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_repr",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_field_with_special_single_underscore_names",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_function_annotations",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_generic_dataclasses",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_generic_dynamic",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_generic_extending",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_hash_field_rules",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_asdict",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_asdict_builtin_containers",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_asdict_builtin_object_containers",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_asdict_copy_values",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_asdict_defaultdict",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_asdict_factory",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_asdict_namedtuple",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_asdict_namedtuple_derived",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_asdict_namedtuple_key",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_asdict_nested",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_asdict_raises_on_classes",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_astuple",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_astuple_builtin_containers",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_astuple_builtin_object_containers",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_astuple_copy_values",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_astuple_defaultdict",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_astuple_factory",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_astuple_namedtuple",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_astuple_nested",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_astuple_raises_on_classes",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_fields_exception",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_helper_fields_with_class_instance",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_incomplete_annotations",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_init_false_no_default",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_init_in_order",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_init_var",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_init_var_default_factory",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_init_var_inheritance",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_init_var_name_shadowing",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_init_var_no_default",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_init_var_preserve_type",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_init_var_with_default",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_intermediate_non_dataclass",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_is_dataclass",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_is_dataclass_genericalias",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_is_dataclass_inheritance",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_is_dataclass_when_getattr_always_returns",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_items_in_dicts",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_missing_default",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_missing_default_factory",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_missing_repr",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_named_init_params",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_no_fields",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_no_fields_but_member_variable",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_no_options",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_no_unhashable_default",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_not_in_compare",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_not_in_repr",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_not_other_dataclass",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_not_tuple",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_one_field_no_default",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_overwrite_fields_in_derived_class",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_overwrite_hash",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_post_init",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_post_init_classmethod",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_post_init_not_auto_added",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_post_init_staticmethod",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_post_init_super",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_recursive_annotation",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_simple_compare",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestCase.test_two_fields_one_default",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestDescriptors.test_default_value",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestDescriptors.test_getting_field_calls_get",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestDescriptors.test_init_calls_set",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestDescriptors.test_lookup_on_class",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestDescriptors.test_lookup_on_instance",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestDescriptors.test_no_default_value",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestDescriptors.test_non_descriptor",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestDescriptors.test_set_name",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestDescriptors.test_setting_field_calls_set",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestDescriptors.test_setting_uninitialized_descriptor_field",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_docstring_deque_field",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_docstring_deque_field_with_default_factory",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_docstring_list_field",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_docstring_list_field_with_default_factory",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_docstring_no_fields",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_docstring_one_field",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_docstring_one_field_with_default",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_docstring_one_field_with_default_none",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_docstring_three_fields",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_docstring_two_fields",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_docstring_undefined_name",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_docstring_with_no_signature",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_docstring_with_unsolvable_forward_ref_in_init",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestDocString.test_existing_docstring_not_overridden",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestEq.test_no_eq",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestEq.test_overwriting_eq",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestEq.test_recursive_eq",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestFieldNoAnnotation.test_field_without_annotation",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestFieldNoAnnotation.test_field_without_annotation_but_annotation_in_base",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestFieldNoAnnotation.test_field_without_annotation_but_annotation_in_base_not_dataclass",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_frozen",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_frozen_deepcopy_with_slots",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_frozen_deepcopy_without_slots",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_frozen_empty",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_frozen_hash",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_inherit",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_inherit_from_normal_class",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_inherit_frozen_from_nonfrozen",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_inherit_frozen_mutliple_inheritance",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_inherit_frozen_mutliple_inheritance_regular_mixins",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_inherit_nonfrozen_from_empty",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_inherit_nonfrozen_from_empty_frozen",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_inherit_nonfrozen_from_frozen",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_multiple_frozen_dataclasses_inheritance",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_non_frozen_normal_derived",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_non_frozen_normal_derived_from_empty_frozen",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestFrozen.test_overwriting_frozen",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestHash.test_0_field_hash",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestHash.test_1_field_hash",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestHash.test_eq_only",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestHash.test_hash_no_args",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestHash.test_hash_rules",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestHash.test_unsafe_hash",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestInit.test_base_has_init",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestInit.test_inherit_from_protocol",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestInit.test_no_init",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestInit.test_overwriting_init",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestInitAnnotate.test_annotate_function",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestInitAnnotate.test_annotate_function_contains_forwardref",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestInitAnnotate.test_annotate_function_forwardref",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestInitAnnotate.test_annotate_function_init_false",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestInitAnnotate.test_annotate_function_not_replaced",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestInitAnnotate.test_init_false_forwardref",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestInitAnnotate.test_slots_true_init_false",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestKeywordArgs.test_KW_ONLY",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestKeywordArgs.test_KW_ONLY_as_string",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestKeywordArgs.test_KW_ONLY_twice",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestKeywordArgs.test_defaults",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestKeywordArgs.test_deferred_annotations",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestKeywordArgs.test_field_marked_as_kwonly",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestKeywordArgs.test_make_dataclass",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestKeywordArgs.test_match_args",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestKeywordArgs.test_no_classvar_kwarg",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestKeywordArgs.test_post_init",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_base",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_base_dataclass",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_cannot_be_pickled",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_class_var",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_dataclass_custom_decorator",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_dataclass_decorator_default",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_duplicate_field_names",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_funny_class_names_names",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_init_var",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_invalid_type_specification",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_keyword_field_names",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_module_attr",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_no_mutate_namespace",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_no_types",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_no_types_get_annotations",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_no_types_no_typing_import",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_non_identifier_field_names",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_other_params",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_pickle_support",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_simple",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestMakeDataclass.test_underscore_field_names",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestMatchArgs.test_bpo_43764",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestMatchArgs.test_explicit_match_args",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestMatchArgs.test_make_dataclasses",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestMatchArgs.test_match_args",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestMatchArgs.test_match_args_argument",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestOrdering.test_functools_total_ordering",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestOrdering.test_no_order",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestOrdering.test_overwriting_order",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestReplace.test",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestReplace.test_classvar",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestReplace.test_frozen",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestReplace.test_initvar_is_specified",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestReplace.test_initvar_with_default_value",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestReplace.test_invalid_field_name",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestReplace.test_invalid_object",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestReplace.test_no_init",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestReplace.test_recursive_repr",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestReplace.test_recursive_repr_indirection",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestReplace.test_recursive_repr_indirection_two",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestReplace.test_recursive_repr_misc_attrs",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestReplace.test_recursive_repr_two_attrs",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestRepr.test_no_repr",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestRepr.test_overwriting_repr",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestRepr.test_repr",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_add_slots_when_slots_exists",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_cant_inherit_from_iterator_slots",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_dataclass_derived_generic",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_dataclass_derived_generic_from_base",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_dataclass_derived_generic_from_slotted_base",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_dataclass_derived_generic_from_slotted_base_with_weakref",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_dataclass_derived_weakref_slot",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_dataclass_slot_dict",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_dataclass_slot_dict_ctype",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_derived_added_field",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_frozen_pickle",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_frozen_slots_pickle_custom_state",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_generated_slots",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_generated_slots_value",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_original_class_is_gced",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_returns_new_class",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_simple",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_slots_no_weakref",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_slots_weakref",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_slots_weakref_base_str",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_slots_weakref_base_tuple",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_slots_with_default_factory_no_init",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_slots_with_default_no_init",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_slots_with_docs",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_slots_with_wrong_init_subclass",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_weakref_slot_make_dataclass",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_weakref_slot_normal_base_weakref_slot",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_weakref_slot_subclass_no_weakref_slot",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_weakref_slot_subclass_weakref_slot",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestSlots.test_weakref_slot_without_slot",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestStringAnnotations.test_classvar",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestStringAnnotations.test_classvar_module_level_import",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestStringAnnotations.test_initvar",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestStringAnnotations.test_isnt_classvar",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestStringAnnotations.test_isnt_initvar",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestStringAnnotations.test_text_annotations",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_class_cell_from_other_class",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_dunder_class_with_new_property",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_dunder_class_with_old_property",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_empty_class_cell",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_remembered_class",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_slots_dunder_class_property_deleter",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_slots_dunder_class_property_getter",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_slots_dunder_class_property_setter",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_wrapped",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    },
+    {
+      "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_zero_argument_super",
+      "launcher_cohort": "finite-full",
+      "occurrence": 1
+    }
+  ],
+  "other_originals_not_run": 0,
+  "poison_module": "dataclasses_gate_poison",
+  "probe": {
+    "executable": "/workspace/scratch/dataclasses-959-replay-v1/probe",
+    "executable_sha256": "a4686257bc9fda18820da4a774e2b4d3340eb216082615e2bc9be5012a00f9b9",
+    "source_sha256": "5e850ab6d1c977d4dae2a4949e7221b518fade280af57b25ff0f3dcc21ceaf3d"
+  },
+  "product": {
+    "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+    "cli": "e2d0886948f766332df6370a2e3140a5be5c8b0fc108224ef7242fc38fc58bd4",
+    "runtime": "33ae5dfef5eff3c1fac5e0a5e19263daa980d7d80a5917979b426e85fa128c5c"
+  },
+  "revision": "95908fb0acadc2a67304a8080e584deaef395746",
+  "roles": {
+    "O0_build_controller": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/second-builds.tar.gz!capture.py",
+    "O0_build_json": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/second-builds.tar.gz!O0/positive.json",
+    "O0_effects_after": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/second-builds.tar.gz!O0.native/effects.after.json",
+    "O0_effects_before": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/second-builds.tar.gz!O0.native/effects.before.json",
+    "O0_meta": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/second-builds.tar.gz!O0.native/result.json",
+    "O0_positive_effects_after": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/second-builds.tar.gz!O0/effects.after.json",
+    "O0_positive_effects_before": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/second-builds.tar.gz!O0/effects.before.json",
+    "O0_positive_stderr": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/second-builds.tar.gz!O0/stderr",
+    "O0_positive_stdout": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/second-builds.tar.gz!O0/stdout",
+    "O0_positive_trace": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/second-builds.tar.gz!O0/positive.trace",
+    "O0_stderr": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/second-builds.tar.gz!O0.native/stderr",
+    "O0_stdout": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/second-builds.tar.gz!O0.native/stdout",
+    "O0_trace": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/second-builds.tar.gz!O0.native/run.trace",
+    "O3_build_controller": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/second-builds.tar.gz!capture.v2.py",
+    "O3_build_json": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/second-builds.tar.gz!O3/positive.json",
+    "O3_effects_after": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!O3/effects.after.json",
+    "O3_effects_before": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!O3/effects.before.json",
+    "O3_meta": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!O3/result.json",
+    "O3_positive_effects_after": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/second-builds.tar.gz!O3/effects.after.json",
+    "O3_positive_effects_before": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/second-builds.tar.gz!O3/effects.before.json",
+    "O3_positive_stderr": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/second-builds.tar.gz!O3/stderr",
+    "O3_positive_stdout": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/second-builds.tar.gz!O3/stdout",
+    "O3_positive_trace": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/second-builds.tar.gz!O3/positive.trace",
+    "O3_stderr": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!O3/stderr",
+    "O3_stdout": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!O3/stdout",
+    "O3_trace": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!O3/run.trace",
+    "assessment": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/dataclasses-959.tar.gz!identity.json",
+    "capture_before": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!before.json",
+    "direct_launcher": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/direct.launcher.py",
+    "fixture_manifest": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/dataclasses-959.tar.gz!fixtures.before.json",
+    "gate_O0_direct_meta": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!gates/gate.O0.direct.json",
+    "gate_O0_direct_stderr": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!gates/gate.O0.direct.stderr",
+    "gate_O0_direct_stdout": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!gates/gate.O0.direct.stdout",
+    "gate_O0_direct_trace": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!gates/gate.O0.direct.trace",
+    "gate_O0_imported_meta": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!gates/gate.O0.imported.json",
+    "gate_O0_imported_stderr": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!gates/gate.O0.imported.stderr",
+    "gate_O0_imported_stdout": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!gates/gate.O0.imported.stdout",
+    "gate_O0_imported_trace": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!gates/gate.O0.imported.trace",
+    "gate_O3_direct_meta": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!gates/gate.O3.direct.json",
+    "gate_O3_direct_stderr": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!gates/gate.O3.direct.stderr",
+    "gate_O3_direct_stdout": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!gates/gate.O3.direct.stdout",
+    "gate_O3_direct_trace": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!gates/gate.O3.direct.trace",
+    "gate_O3_imported_meta": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!gates/gate.O3.imported.json",
+    "gate_O3_imported_stderr": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!gates/gate.O3.imported.stderr",
+    "gate_O3_imported_stdout": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!gates/gate.O3.imported.stdout",
+    "gate_O3_imported_trace": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!gates/gate.O3.imported.trace",
+    "gate_bracket": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!gates/bracket.json",
+    "gate_controller": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!gate_capture.py",
+    "gate_probe_binary": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/dataclasses-959.tar.gz!probe",
+    "gate_probe_source": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/dataclasses-959.tar.gz!probe.c",
+    "imported_launcher": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/imported.launcher.py",
+    "native_controller": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/second-builds.tar.gz!native_capture.py",
+    "poison": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/poison.py",
+    "policy": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/native-open-policy.json",
+    "positive_launcher": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/dataclasses-959.tar.gz!launch/launcher.py",
+    "post_custody": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/post-custody.json",
+    "prior_O0_build_json": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/dataclasses-959.tar.gz!raw/O0.build.json",
+    "prior_O0_meta": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/dataclasses-959.tar.gz!raw/O0.json",
+    "prior_O3_build_json": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/dataclasses-959.tar.gz!raw/O3.build.json",
+    "prior_O3_meta": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/dataclasses-959.tar.gz!raw/O3.json",
+    "prior_gate_O0_direct_meta": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/dataclasses-959.tar.gz!raw/gate.O0.direct.json",
+    "prior_gate_O0_imported_meta": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/dataclasses-959.tar.gz!raw/gate.O0.imported.json",
+    "prior_gate_O3_direct_meta": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/dataclasses-959.tar.gz!raw/gate.O3.direct.json",
+    "prior_gate_O3_imported_meta": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/dataclasses-959.tar.gz!raw/gate.O3.imported.json",
+    "prior_stock_meta": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/dataclasses-959.tar.gz!raw/stock.json",
+    "prior_stock_stderr": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/dataclasses-959.tar.gz!raw/stock.stderr",
+    "prior_stock_stdout": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/dataclasses-959.tar.gz!raw/stock.stdout",
+    "stock_controller": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!capture.py",
+    "stock_effects_after": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!stock/effects.after.json",
+    "stock_effects_before": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!stock/effects.before.json",
+    "stock_meta": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!stock/result.json",
+    "stock_source": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/dataclasses-959.tar.gz!launch/stock.source.py",
+    "stock_stderr": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!stock/stderr",
+    "stock_stdout": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!stock/stdout",
+    "stock_trace": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz!stock/run.trace"
+  },
+  "schema": "imre.compatibility.successor-input.v1",
+  "source": {
+    "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "git_blob": "fed32260c792707dbe9f43b7da4b99dd8ebcea2d",
+    "path": "Lib/test/test_dataclasses/__init__.py",
+    "repo": "https://github.com/python/cpython",
+    "sha256": "725ec19fa8c47f91b7aed7a8f2b1f3e74e6454647efd11e9a3e0e29245605af0"
+  },
+  "stock_interpreter": {
+    "path": "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+    "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+    "version": "Python 3.14.5"
+  },
+  "withdrawal": {
+    "archive_relative_to_launcher": "stock.source.py",
+    "python_probe": {
+      "count": 1,
+      "errno": "ENOENT",
+      "operation": "statx",
+      "path": "/workspace/scratch/imre-95908-transferred-config-v1/product/imre-toolchain/bin/python3",
+      "pid": "target"
+    },
+    "tree_relative_to_extension": "test",
+    "tree_stash_suffix": ".raw-control-stash"
+  }
+}

@@ -207,6 +207,19 @@ jobs:
       IMRE_REAL_WHEEL: .cpython-stdlib-reference/Lib/ensurepip/_bundled/pip-26.1.1-py3-none-any.whl
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - &prepare-scorecard-history
+        name: Prepare public scorecard source history
+        run: |
+          case "$(git remote get-url origin)" in
+            https://github.com/astral-experiments/imre)
+              git remote set-url origin https://github.com/astral-experiments/imre.git
+              ;;
+            https://github.com/astral-experiments/imre.git|git@github.com:astral-experiments/imre.git) ;;
+            *) echo "unexpected origin for scorecard provenance" >&2; exit 1 ;;
+          esac
+          git fetch --no-tags --filter=blob:none --unshallow origin \
+            "+${GITHUB_REF}:refs/remotes/origin/ci-scorecard-head" \
+            "+refs/heads/main:refs/remotes/origin/main"
       - &setup-python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
@@ -713,6 +726,7 @@ jobs:
     env: *wheel-env
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - *prepare-scorecard-history
       - *setup-python
       - *install-wheel-tools
       - *cpython-reference

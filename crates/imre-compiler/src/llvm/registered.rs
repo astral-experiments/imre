@@ -4,6 +4,7 @@ mod abi;
 pub(crate) mod context;
 mod frame;
 mod handlers;
+mod ownership;
 pub(crate) mod patterns;
 mod sequences;
 pub(crate) use sequences::permanent_handle;
@@ -528,6 +529,10 @@ pub(super) struct ExpressionScope {
 pub(crate) trait PreparedSuiteEmitter<'a, 'p>:
     std::ops::DerefMut<Target = RegisteredFrame<'a, 'p>>
 {
+    /// Source provenance is only a performance admission bound; runtime authentication remains required.
+    fn imports_pickle_loads(&self) -> bool {
+        false
+    }
     fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites<'p>);
     fn place_declaration(&mut self, site: TextSize);
     fn class_namespace(&mut self, site: TextSize) -> CompiledClassNamespace<'p>;
@@ -576,15 +581,59 @@ impl<'p> RegisteredBody<'p> {
         let Some(enclosing) = code.enter_checked_slots(checked.region()) else {
             return;
         };
+        if suite.is_none()
+            && !code.native_suspension
+            && code.imports_pickle_loads()
+            && let Some(plan) = ownership::replacement(checked, |name| code.is_fast_local(name))
+        {
+            code.output.declare(
+                |declarations| &mut declarations.replacement_region,
+                ownership::ABI,
+            );
+            code.replacement = Some(plan);
+        }
         let next = Cell::new(0);
-        let frame = Frame {
+        let mut frame = Frame {
             code,
             names: Some(&checked.local_names),
             inputs,
             suite,
             fixed_sites: (!checked.fixed_sites.is_empty()).then_some((checked, &next)),
         };
-        CheckedBody::registered(frame).emit_function(&checked.function);
+        if frame.code.replacement.is_some() {
+            // The closed selector proves that the first two statements are the
+            // initial position and ordinary result assignment. Its call records
+            // whether the already-evaluated callable was the authenticated body;
+            // the initial result itself never receives an ownership witness.
+            let (initial, continuation) = checked.function.body.split_at(2);
+            CheckedBody::registered(frame.reborrow()).emit_block(initial);
+            if !frame.code.body.terminated {
+                let fixed_start = next.get();
+                let enabled = frame
+                    .code
+                    .body
+                    .instruction("load i1, ptr %replacement_initial");
+                let proof = frame.code.name("b");
+                let ordinary = frame.code.name("b");
+                frame.code.branch(&enabled, &proof, &ordinary);
+
+                frame.code.label(&proof);
+                CheckedBody::registered(frame.reborrow()).emit_block(continuation);
+                let fixed_end = next.get();
+
+                // The ordinary continuation is the original checked body, with
+                // replacement emission disabled. It consumes the same fixed
+                // source sites independently and owns its own loop/cleanup blocks.
+                let plan = frame.code.replacement.take();
+                next.set(fixed_start);
+                frame.code.label(&ordinary);
+                CheckedBody::registered(frame.reborrow()).emit_block(continuation);
+                debug_assert_eq!(next.get(), fixed_end);
+                frame.code.replacement = plan;
+            }
+        } else {
+            CheckedBody::registered(frame).emit_function(&checked.function);
+        }
         code.restore_checked_slots(enclosing);
     }
 }
@@ -814,7 +863,29 @@ impl<'f> Frame<'f, '_, '_> {
             return;
         }
         let (scope, name) = self.assignment_name(slot);
+        let result = self.code.replacement_rhs
+            && self
+                .code
+                .replacement
+                .as_ref()
+                .is_some_and(|plan| plan.result == slot);
+        let item = self
+            .code
+            .replacement
+            .as_ref()
+            .is_some_and(|plan| plan.item == slot);
+        let data = (result || item).then(|| self.code.output.data(name.as_bytes()));
+        if item {
+            self.code.line(&format!("call void @imre_dyn_replacement_guard_item_store(ptr %ctx, i64 {scope}, ptr {}, i64 {}, ptr %replacement_proof)", data.as_deref().unwrap(), name.len()));
+        }
+        if result {
+            self.code.line(&format!("call void @imre_dyn_replacement_guard_result_store(ptr %ctx, i64 {scope}, ptr {}, i64 {}, i64 {handle}, ptr %replacement_proof, ptr %replacement_next)", data.as_deref().unwrap(), name.len()));
+        }
         self.code.assign_owned_name(&scope, name, &handle);
+        if result {
+            let (live, count) = self.code.live_handles(&[]);
+            self.code.line(&format!("call void @imre_dyn_replacement_commit(ptr %ctx, i64 {scope}, ptr {}, i64 {}, i64 {handle}, ptr {live}, i64 {count}, ptr %replacement_proof, ptr %replacement_next)", data.as_deref().unwrap(), name.len()));
+        }
     }
 
     fn assignment_name(&mut self, slot: usize) -> (Cow<'static, str>, &'f str) {
@@ -1075,7 +1146,7 @@ impl<'f> Frame<'f, '_, '_> {
         let [iterator, item] = input.slots;
         self.code.set_statement_at(input.range.start());
         let cursor = self.load_private(iterator);
-        self.code.sync_item(&cursor, item, false, exhausted);
+        self.code.sync_item(&cursor, item, false, exhausted, false);
         let value = self.load_private(item);
         self.assign(input.target, CheckedValue::handle(value));
         self.clear_slots(&[item]);
@@ -1138,7 +1209,15 @@ impl<'f> Frame<'f, '_, '_> {
                 let second = second.expect("checked Python pair output");
                 self.pull_pair(&cursor, has_else, target, [key, second], empty);
             }
-            ir::IterNextKind::Generic => self.code.sync_item(&cursor, key, has_else, empty),
+            ir::IterNextKind::Generic => {
+                let replacement = self
+                    .code
+                    .replacement
+                    .as_ref()
+                    .is_some_and(|plan| plan.cursor == iterator);
+                self.code
+                    .sync_item(&cursor, key, has_else, empty, replacement);
+            }
             ir::IterNextKind::Async(pull) => {
                 let landed = self.code.name("b");
                 let item = self.code.async_pull(&cursor, pull, &landed, empty);
@@ -1162,6 +1241,7 @@ impl<'f> Frame<'f, '_, '_> {
         self.code.jump(&done);
         if let Some((label, edge)) = exhausted {
             self.code.label(&label);
+            self.code.invalidate_replacement();
             if reset_on_exhaustion {
                 self.store_private(ready, &permanent::FALSE.to_string());
             }
@@ -1891,6 +1971,13 @@ impl RegisteredFrame<'_, '_> {
     }
 
     pub(crate) fn clear_slots(&mut self, slots: &[usize]) {
+        if self
+            .replacement
+            .as_ref()
+            .is_some_and(|plan| slots.contains(&plan.cursor))
+        {
+            self.invalidate_replacement();
+        }
         for &slot in slots {
             let Some(physical) = self.iteration.physical_slot(slot) else {
                 continue;

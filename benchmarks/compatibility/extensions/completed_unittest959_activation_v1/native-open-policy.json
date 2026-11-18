@@ -1,0 +1,82 @@
+{
+  "directory_flags": [
+    "O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY"
+  ],
+  "families": {
+    "dataclasses": {
+      "directories": 2,
+      "image_reads": 7,
+      "opens": 22
+    }
+  },
+  "fixture": {
+    "directories": [],
+    "each_count": 0,
+    "root": "unused-{pid}",
+    "writes": []
+  },
+  "readonly_flags": "O_RDONLY|O_CLOEXEC",
+  "schema": "imre.compatibility.native-content-policy.v1",
+  "system_common": [
+    {
+      "count": 1,
+      "kernel": "/etc/ld.so.cache",
+      "lexical": "/etc/ld.so.cache"
+    },
+    {
+      "count": 1,
+      "kernel": "/usr/lib/x86_64-linux-gnu/libm.so.6",
+      "lexical": "/lib/x86_64-linux-gnu/libm.so.6"
+    },
+    {
+      "count": 1,
+      "kernel": "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
+      "lexical": "/lib/x86_64-linux-gnu/libgcc_s.so.1"
+    },
+    {
+      "count": 1,
+      "kernel": "/usr/lib/x86_64-linux-gnu/libc.so.6",
+      "lexical": "/lib/x86_64-linux-gnu/libc.so.6"
+    },
+    {
+      "count": 1,
+      "kernel": "/etc/nsswitch.conf",
+      "lexical": "/etc/nsswitch.conf"
+    },
+    {
+      "count": 2,
+      "kernel": "/etc/passwd",
+      "lexical": "/etc/passwd"
+    },
+    {
+      "count": 1,
+      "kernel": "/usr/lib/locale/C.utf8/LC_CTYPE",
+      "lexical": "/usr/lib/locale/C.utf8/LC_CTYPE"
+    },
+    {
+      "count": 1,
+      "kernel": "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache",
+      "lexical": "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache"
+    },
+    {
+      "count": 1,
+      "kernel": "/proc/{pid}/maps",
+      "lexical": "/proc/self/maps"
+    },
+    {
+      "count": 1,
+      "kernel": "/proc/{pid}/cgroup",
+      "lexical": "/proc/self/cgroup"
+    },
+    {
+      "count": 1,
+      "kernel": "/sys/fs/cgroup/cpu.max",
+      "lexical": "/sys/fs/cgroup/cpu.max"
+    },
+    {
+      "count": 1,
+      "kernel": "/usr/share/zoneinfo/America/New_York",
+      "lexical": "/etc/localtime"
+    }
+  ]
+}

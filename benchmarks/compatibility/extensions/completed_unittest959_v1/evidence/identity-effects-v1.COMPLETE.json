@@ -1,0 +1,170 @@
+{
+  "archive_bytes": 221338,
+  "archive_sha256": "c6297af57dfe72050df1e6bfbb71506c10ec95d4544e0ff9bfc050c788d848e3",
+  "credit": 0,
+  "files": {
+    "O0/effects.after.json": {
+      "bytes": 121,
+      "sha256": "0b9913a146fd7207264628265d92b2ae52bfafc3a2135796b61bcceb2d364b7e"
+    },
+    "O0/effects.before.json": {
+      "bytes": 121,
+      "sha256": "0b9913a146fd7207264628265d92b2ae52bfafc3a2135796b61bcceb2d364b7e"
+    },
+    "O0/result.json": {
+      "bytes": 4353,
+      "sha256": "c1f2261f8b6acae60dbeb2d73d9f174be089c2c4ef912cf332e6d61b91c2aabe"
+    },
+    "O0/run.trace": {
+      "bytes": 296867,
+      "sha256": "b84425070a11832be2f57bf79206d4c90487fe5664b5552d4a5e2248d28d3339"
+    },
+    "O0/stderr": {
+      "bytes": 96858,
+      "sha256": "00cfd96ef0f42dee4a8be25d281693e9f91967d6d974617f417edc512912c564"
+    },
+    "O0/stdout": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "O3/effects.after.json": {
+      "bytes": 121,
+      "sha256": "0b9913a146fd7207264628265d92b2ae52bfafc3a2135796b61bcceb2d364b7e"
+    },
+    "O3/effects.before.json": {
+      "bytes": 121,
+      "sha256": "0b9913a146fd7207264628265d92b2ae52bfafc3a2135796b61bcceb2d364b7e"
+    },
+    "O3/result.json": {
+      "bytes": 4352,
+      "sha256": "f812def57fee733ba8cbe7c0cd3b47811a2551705605c0635f62773dd2abe4a6"
+    },
+    "O3/run.trace": {
+      "bytes": 296867,
+      "sha256": "f57c1bc2fd231000596750be324ab2ef714efab8622eda7e2232b71185e2d2f5"
+    },
+    "O3/stderr": {
+      "bytes": 96858,
+      "sha256": "00cfd96ef0f42dee4a8be25d281693e9f91967d6d974617f417edc512912c564"
+    },
+    "O3/stdout": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "after.json": {
+      "bytes": 811,
+      "sha256": "aa924455a000955f61dae8f7e9929343c304d425911847e58639b95488772146"
+    },
+    "before.json": {
+      "bytes": 811,
+      "sha256": "aa924455a000955f61dae8f7e9929343c304d425911847e58639b95488772146"
+    },
+    "capture.py": {
+      "bytes": 6570,
+      "sha256": "1cd57080ff1b163292a1a853a63648550c529a5c8b6a9f5655c1aed51f8a4269"
+    },
+    "gate_capture.py": {
+      "bytes": 4414,
+      "sha256": "fd83f2414e3192b32af109c24dd85a36cd75d07caee37ed279e75f2910a6bbff"
+    },
+    "gates/bracket.json": {
+      "bytes": 6183,
+      "sha256": "da35c9090dbf09610c57374d88b141b90b26f9ef7b86665a710acb8ac9663ad7"
+    },
+    "gates/gate.O0.direct.json": {
+      "bytes": 10538,
+      "sha256": "5a4465dcae3e2d34ab6bbd2967cb56923b490894208f6805c89e19707ca15e31"
+    },
+    "gates/gate.O0.direct.stderr": {
+      "bytes": 135,
+      "sha256": "8b3ba0707b3b95205e921bb7c2af39a1d9c531780da21250c6016c42fd10c8a8"
+    },
+    "gates/gate.O0.direct.stdout": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "gates/gate.O0.direct.trace": {
+      "bytes": 1899120,
+      "sha256": "e1a929e97a981d2d5a5fb159589df9b6d0ad6e677449024c5784897e45051adf"
+    },
+    "gates/gate.O0.imported.json": {
+      "bytes": 10610,
+      "sha256": "34d6ef32d4070f2dc4811205e9209f37f5879c9f3020d0160c077674d3406fe3"
+    },
+    "gates/gate.O0.imported.stderr": {
+      "bytes": 150,
+      "sha256": "ed515e70dcf3373535b6356682352426354b19eb21d49d526d64005a2e281013"
+    },
+    "gates/gate.O0.imported.stdout": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "gates/gate.O0.imported.trace": {
+      "bytes": 1902832,
+      "sha256": "ea68653fda63f56f11f88540399c6a6237c94f62ef67ffcd5c84544daec99e28"
+    },
+    "gates/gate.O3.direct.json": {
+      "bytes": 10537,
+      "sha256": "33a96f2855d91a98d7addce2bba047a40c020f5adba8596c9475f6a01aa8f473"
+    },
+    "gates/gate.O3.direct.stderr": {
+      "bytes": 135,
+      "sha256": "8b3ba0707b3b95205e921bb7c2af39a1d9c531780da21250c6016c42fd10c8a8"
+    },
+    "gates/gate.O3.direct.stdout": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "gates/gate.O3.direct.trace": {
+      "bytes": 1899120,
+      "sha256": "8748d0f62f946bcda7704b71f4dd6c6a6df32917208e483c8c8c9c5f2125f725"
+    },
+    "gates/gate.O3.imported.json": {
+      "bytes": 10609,
+      "sha256": "c4bd292f44e3afe169bdcd5a0f53467e77603cdca4b0c3d9e6b515ea2d083d2e"
+    },
+    "gates/gate.O3.imported.stderr": {
+      "bytes": 150,
+      "sha256": "ed515e70dcf3373535b6356682352426354b19eb21d49d526d64005a2e281013"
+    },
+    "gates/gate.O3.imported.stdout": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "gates/gate.O3.imported.trace": {
+      "bytes": 1902819,
+      "sha256": "2bf4d4d2913feead38a8cae0414ae17769bc911ed598e60b3657d3561529ac32"
+    },
+    "post-gates.json": {
+      "bytes": 811,
+      "sha256": "aa924455a000955f61dae8f7e9929343c304d425911847e58639b95488772146"
+    },
+    "stock/effects.after.json": {
+      "bytes": 121,
+      "sha256": "0b9913a146fd7207264628265d92b2ae52bfafc3a2135796b61bcceb2d364b7e"
+    },
+    "stock/effects.before.json": {
+      "bytes": 121,
+      "sha256": "0b9913a146fd7207264628265d92b2ae52bfafc3a2135796b61bcceb2d364b7e"
+    },
+    "stock/result.json": {
+      "bytes": 3704,
+      "sha256": "7d48bd426d2c7a1740c31bfdfb67975a167fc3203e4badffc3acea2742496fce"
+    },
+    "stock/run.trace": {
+      "bytes": 242804,
+      "sha256": "1268e1a7b684b46b3686df1684d6e03cd220787b732087ba9e51261e0d11b134"
+    },
+    "stock/stderr": {
+      "bytes": 96748,
+      "sha256": "64aefbdd4c557b604c87014309807d8139e582234b85ccbad63c9f35cc67ef87"
+    },
+    "stock/stdout": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "predecessor_archive_sha256": "02e8924aa17e58de615b5f3e70e1e8ed6b19828b8cbc2c2b567f0a7a97bbc7d8",
+  "review_head": "29cf571ddd049707c92dd20ba86630710ce824a5",
+  "schema": "imre.compatibility.evidence-seal.v1"
+}

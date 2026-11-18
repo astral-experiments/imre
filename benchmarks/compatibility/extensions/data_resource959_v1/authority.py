@@ -13,6 +13,12 @@ ACTIVATION='cfe668cd5b12c5678d3f9b80edc47f20d65851bf'
 TARGETS={'benchmarks/compatibility/'+x for x in ('scorecard.py','raw_control.py','extensions/successor959_v1/authority.py','test_revision959_stage.py')}
 
 def safe(api,path):return prior.safe_path(api,path)
+def approved(api, path, digest):
+    if getattr(source_stage_pins, 'REVISION_959_COMPLETED', None) is None:
+        return digest
+    from extensions.completed_unittest959_activation_v1 import authority as completed
+    return completed.expected(api, path, digest)
+
 def fixed_pin(api):
  p=getattr(source_stage_pins,'REVISION_959_RESOURCE',None);api.require(isinstance(p,dict) and set(p)=={'commit','manifest','git_blob','sha256'} and p['manifest']==MANIFEST and api.HEX40.fullmatch(p['commit']) and api.HEX40.fullmatch(p['git_blob']) and api.HEX64.fullmatch(p['sha256']) and p['commit'] not in {PREDECESSOR['commit'],ACTIVATION},'resource stage requires a separate public pin');return p
 
@@ -20,10 +26,35 @@ def verify_stage(api,m,post=True):
  api.require(m.get('schema')=='imre.compatibility.finite-resource-stage.v1' and m.get('imre_revision')==REVISION and m.get('credit')==0 and m.get('predecessor')==PREDECESSOR and m.get('prior_activation')==ACTIVATION,'resource stage public predecessor or activation differs');raw_control.public_commit(api,PREDECESSOR['commit']);old=raw_control.git_manifest(api.ROOT,PREDECESSOR['commit'],PREDECESSOR['manifest'],PREDECESSOR['git_blob'],PREDECESSOR['sha256']);raw_control.public_commit(api,ACTIVATION)
  api.require(safe(api,prior.MANIFEST).read_bytes()==raw_control.git(api.ROOT,'show','--no-textconv',PREDECESSOR['commit']+':'+prior.MANIFEST),'public406 manifest changed');old_a=json.loads(raw_control.git(api.ROOT,'show','--no-textconv',ACTIVATION+':'+prior.BASE+'/activation.json'));base_a=json.loads(raw_control.git(api.ROOT,'show','--no-textconv',ACTIVATION+':benchmarks/compatibility/revisions/'+REVISION+'/activation.json'))
  for path in (prior.BASE+'/activation.json','benchmarks/compatibility/revisions/'+REVISION+'/activation.json',*[e['receipt'] for e in old_a['families'].values()],*[e['receipt'] for g in ('families','script_shards') for e in base_a[g].values()]):api.require(safe(api,path).read_bytes()==raw_control.git(api.ROOT,'show','--no-textconv',ACTIVATION+':'+path),'prior activation or receipt bytes changed: '+path)
- files=m.get('files');ext=api.ROOT/BASE;actual={p.relative_to(api.ROOT).as_posix() for p in ext.rglob('*') if p.is_file() and p not in {ext/'manifest.json',ext/'activation.json'}};api.require(isinstance(files,dict) and set(files)==actual and not any(p.is_symlink() for p in ext.rglob('*')) and all(loc.startswith(BASE+'/') and api.HEX64.fullmatch(d) and raw_control.sha(safe(api,loc).read_bytes())==d for loc,d in files.items()),'resource stage file closure differs')
+ files = m.get('files')
+ ext = api.ROOT / BASE
+ actual = {
+     path.relative_to(api.ROOT).as_posix() for path in ext.rglob('*')
+     if path.is_file() and path not in {ext / 'manifest.json', ext / 'activation.json'}
+ }
+ api.require(
+     isinstance(files, dict) and set(files) == actual
+     and not any(path.is_symlink() for path in ext.rglob('*'))
+     and all(
+         location.startswith(BASE + '/') and api.HEX64.fullmatch(digest)
+         and raw_control.sha(safe(api, location).read_bytes()) == approved(api, location, digest)
+         for location, digest in files.items()
+     ),
+     'resource stage file closure differs',
+ )
  patch=m.get('patch');api.require(isinstance(patch,dict) and patch.get('path') in files and files[patch['path']]==patch.get('sha256'),'resource future patch differs');num=subprocess.check_output(['git','apply','--numstat','--unidiff-zero',str(safe(api,patch['path']))],cwd=api.ROOT,text=True);observed=[x.split('\t',2)[2] for x in num.splitlines()];items=patch.get('files',[]);api.require(len(observed)==len(set(observed))==len(items)==len(TARGETS) and set(observed)=={x['path'] for x in items}==TARGETS,'resource patch contains extra or missing paths');changes={}
  for x in items:
-  path=x['path'];original=raw_control.git(api.ROOT,'show','--no-textconv',ACTIVATION+':'+path);blob=raw_control.git(api.ROOT,'rev-parse',ACTIVATION+':'+path).decode().strip();api.require(x['old_git_blob']==blob and x['old_sha256']==raw_control.sha(original) and api.HEX64.fullmatch(x['post_sha256']) and raw_control.sha(safe(api,path).read_bytes())==(x['post_sha256'] if post else x['old_sha256']),'resource source preimage/postimage differs: '+path);changes[path]=x
+  path = x['path']
+  original = raw_control.git(api.ROOT, 'show', '--no-textconv', ACTIVATION + ':' + path)
+  blob = raw_control.git(api.ROOT, 'rev-parse', ACTIVATION + ':' + path).decode().strip()
+  expected_digest = x['post_sha256'] if post else x['old_sha256']
+  api.require(
+      x['old_git_blob'] == blob and x['old_sha256'] == raw_control.sha(original)
+      and api.HEX64.fullmatch(x['post_sha256'])
+      and raw_control.sha(safe(api, path).read_bytes()) == approved(api, path, expected_digest),
+      'resource source preimage/postimage differs: ' + path,
+  )
+  changes[path] = x
  entries=m.get('bindings');api.require(isinstance(entries,dict) and entries and all(set(e)=={'adapter','binding','receipt','staged_receipt'} and e['adapter']=='raw-control-v3' and e['binding'] in files and e['staged_receipt'] in files and e['receipt']==f'benchmarks/compatibility/revisions/{REVISION}/verified/data-resource-v1/stdlib/{name}.jsonl' for name,e in entries.items()),'invalid resource binding references')
  for name,e in entries.items():
   b=json.loads(safe(api,e['binding']).read_bytes());api.require(b.get('schema')=='imre.compatibility.successor-input.v1' and b.get('kind')=='stdlib' and b.get('family')==name and b.get('credit')==0 and api.families()[name]['originals']==b.get('canonical_denominator') and type(b.get('observed_originals')) is int and 0<b['observed_originals']==len(b.get('originals',[]))<=b['canonical_denominator'] and b.get('other_originals_not_run')==b['canonical_denominator']-b['observed_originals'] and isinstance(b.get('roles'),dict) and isinstance(b.get('archives'),dict), 'resource source, denominator or role binding differs');keys=[]
@@ -36,8 +67,11 @@ def verify_stage(api,m,post=True):
 def _stage(api,pin_json):
  p=json.loads(pin_json);raw_control.public_commit(api,p['commit']);m=raw_control.git_manifest(api.ROOT,p['commit'],p['manifest'],p['git_blob'],p['sha256']);api.require(raw_control.sha(safe(api,p['manifest']).read_bytes())==p['sha256'],'local resource manifest differs from public stage');return verify_stage(api,m)
 def stage(api):return _stage(api,json.dumps(fixed_pin(api),sort_keys=True))
-def expected(api,path,digest):
- _,changes=stage(api);item=changes.get(path);api.require(item is None or item['old_sha256']==digest,'resource preimage conflicts with older authority');return item['post_sha256'] if item else digest
+def expected(api, path, digest):
+    _, changes = stage(api)
+    item = changes.get(path)
+    api.require(item is None or item['old_sha256'] == digest, 'resource preimage conflicts with older authority')
+    return approved(api, path, item['post_sha256'] if item else digest)
 
 @lru_cache(maxsize=None)
 def activated_entries(api):

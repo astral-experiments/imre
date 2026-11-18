@@ -3,6 +3,10 @@ from unittest import TestCase
 
 def current():
     case = TestCase()
+    saved = case.assertEqual
+    assert saved.__self__ is case
+    assert saved.__func__ is TestCase.assertEqual
+    assert saved({"x": 1}, {"x": 1}) is None
     compare = case.assertDictEqual
     with case.assertRaises(AssertionError) as first:
         compare(None, {})
