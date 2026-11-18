@@ -398,35 +398,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         )),
         // CPython 3.14.5 Lib/configparser.py.
         "configparser" => bundled_source!("configparser.py"),
-        "contextlib" => Some((
-            "contextlib.py",
-            concat!(
-                include_str!("../stdlib/contextlib.py"),
-                "\n",
-                include_str!("../stdlib/contextlib_abstract_async.py"),
-                "\n",
-                include_str!("../stdlib/contextlib_nullcontext.py"),
-                "\n",
-                "class _BaseExitStack:\n",
-                include_str!("../stdlib/contextlib_exitstack_base.inc"),
-                "\n",
-                include_str!("../stdlib/contextlib_exitstack.py"),
-                "\n",
-                include_str!("../stdlib/contextlib_async_exitstack.py"),
-                "\n",
-                include_str!("../stdlib/contextlib_redirect.py"),
-                "\n",
-                include_str!("../stdlib/contextlib_chdir.py"),
-                "\n",
-                include_str!("../stdlib/contextlib_closing.py"),
-                "\n",
-                include_str!("../stdlib/contextlib_contextmanager.py"),
-                "\n",
-                include_str!("../stdlib/contextlib_suppress.py"),
-                "\n",
-                include_str!("../stdlib/contextlib_exports.py")
-            ),
-        )),
+        "contextlib" => bundled_source!("contextlib.py"),
         "_imre_socketserver_poll" => Some((
             "_imre_socketserver_poll.py",
             if cfg!(any(target_os = "linux", target_os = "macos")) {
