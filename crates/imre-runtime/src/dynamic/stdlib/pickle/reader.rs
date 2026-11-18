@@ -242,7 +242,8 @@ fn io_method(ctx: &Context, class: Id, name: &str) -> bool {
 }
 
 fn environment(ctx: &Context, root: Id, used: u16) -> bool {
-    if !builtins(ctx, root) {
+    // _append_items evaluates this default even though exact lists always have extend.
+    if !builtins(ctx, root) || !matches!(ctx.scalar_scope_name(root, "_NoValue"), Some(Some(_))) {
         return false;
     }
     let Some(Some(loads)) = ctx.scalar_scope_name(root, "loads") else {
