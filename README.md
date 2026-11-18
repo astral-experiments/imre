@@ -204,6 +204,20 @@ Revision `8571ca2dbecabf8d7863c369dc776611fd57d8ad` · **3,163 validated receipt
 These historical totals were validated at public commit [`d0b396559a8ffda965cb495063b2967847d116aa`](https://github.com/astral-experiments/imre/commit/d0b396559a8ffda965cb495063b2967847d116aa). The evolving scorecard sources in this checkout do not validate that frozen snapshot; see the [exact checkout instructions](benchmarks/compatibility/README.md#frozen-857-verification).
 <!-- current-compatibility-snapshot:end -->
 
+<!-- compatibility-snapshot-95908fb0acadc2a67304a8080e584deaef395746:start -->
+### Compatibility snapshot
+
+Revision `95908fb0acadc2a67304a8080e584deaef395746`.
+
+| Stdlib module | Verified pairs / raw originals | Status |
+| --- | ---: | --- |
+| `fnmatch` | 24 / 24 | validated |
+
+Scripts: **4 verified / 72 historically reported stock-success commands** among **84 original script IDs** ([public historical authority](https://github.com/astral-experiments/imre/commit/880648b620f57905a495eb51fbb4600755ee0c54)).
+
+[Full revision table](benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/docs/stdlib.md)
+<!-- compatibility-snapshot-95908fb0acadc2a67304a8080e584deaef395746:end -->
+
 ### Prospective practical scripts
 
 Revision `d26f19448c70c00039c305f105a85c215f820577`: [4 of 4 verified stock/O0/O3 pairs](benchmarks/supplemental/practical_workloads/scores/d26f19448c70c00039c305f105a85c215f820577.strict.json). This separate cohort is not included in the 84-script score or the revision `8571ca2` stdlib snapshot.
