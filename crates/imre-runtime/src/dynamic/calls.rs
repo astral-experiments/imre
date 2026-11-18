@@ -273,6 +273,12 @@ pub(super) enum RegisteredCall {
         args: Vec<Id>,
         kwargs: Box<[(String, Id)]>,
     },
+    /// An explicit callable descriptor forwards after its preparation borrow has ended.
+    ExplicitCall {
+        callable: Id,
+        args: Vec<Id>,
+        kwargs: Box<[(String, Id)]>,
+    },
     /// The caller's marked operands stay rooted while native dispatch can reenter Python.
     Other {
         callable: Id,
@@ -436,6 +442,45 @@ impl RegisteredCall {
                     // SAFETY: callback preparation/execution returned before error qualification.
                     stdlib::io::qualify_error(unsafe { &mut *context }, error, None)
                 })
+            }
+            Self::ExplicitCall {
+                callable,
+                args,
+                kwargs,
+            } => {
+                let kwargs = kwargs.into_vec();
+                let name = {
+                    let ctx = unsafe { &*context };
+                    let Value::Native(name) = ctx.heap.get(callable) else {
+                        unreachable!("registered callable descriptor")
+                    };
+                    copy_label(name)?
+                };
+                let owner = name.strip_suffix(".__call__").expect("callable descriptor");
+                let mut arguments = args.into_iter();
+                let function = arguments.next().ok_or_else(|| {
+                    Error::new(
+                        "TypeError",
+                        format!("descriptor '__call__' of '{owner}' object needs an argument"),
+                    )
+                })?;
+                let prepared = {
+                    let ctx = unsafe { &mut *context };
+                    if ctx.builtin_type_name(function) != Some(owner) {
+                        let actual = ctx
+                            .builtin_type_name(function)
+                            .unwrap_or_else(|| ctx.type_name(function));
+                        return Err(Error::new(
+                            "TypeError",
+                            format!(
+                                "descriptor '__call__' requires a '{owner}' object but received a '{actual}'"
+                            ),
+                        ));
+                    }
+                    ctx.prepare_call(function, arguments.collect::<Vec<_>>().into(), kwargs)
+                }?;
+                // SAFETY: receiver preparation ended; this caller still roots the descriptors and operands.
+                unsafe { prepared.run(context) }
             }
             Self::Other {
                 callable,
@@ -8902,6 +8947,18 @@ impl Context {
                     break;
                 }
                 Value::Native(ref name) => {
+                    if matches!(
+                        name.as_str(),
+                        "function.__call__"
+                            | "builtin_function_or_method.__call__"
+                            | "staticmethod.__call__"
+                    ) {
+                        return Ok(RegisteredCall::ExplicitCall {
+                            callable,
+                            args: owned_ids(args)?,
+                            kwargs: kwargs.into_boxed_slice(),
+                        });
+                    }
                     if name == "operator.call" {
                         return Ok(RegisteredCall::OperatorCall {
                             callable,
@@ -9204,31 +9261,6 @@ impl Context {
                     }
                 }
                 Ok(result)
-            }
-            Value::Native(ref name)
-                if let Some(
-                    owner @ ("function" | "builtin_function_or_method" | "staticmethod"),
-                ) = name.strip_suffix(".__call__") =>
-            {
-                let mut arguments = args.into_iter();
-                let function = arguments.next().ok_or_else(|| {
-                    Error::new(
-                        "TypeError",
-                        format!("descriptor '__call__' of '{owner}' object needs an argument"),
-                    )
-                })?;
-                if self.builtin_type_name(function) != Some(owner) {
-                    let actual = self
-                        .builtin_type_name(function)
-                        .unwrap_or_else(|| self.type_name(function));
-                    return Err(Error::new(
-                        "TypeError",
-                        format!(
-                            "descriptor '__call__' requires a '{owner}' object but received a '{actual}'"
-                        ),
-                    ));
-                }
-                self.call(function, arguments.collect(), kwargs)
             }
             Value::Native(name) if name == "super.__get__" => {
                 wrapper_descriptor::descriptor_get(self, "super", &args, &kwargs)
@@ -11152,6 +11184,38 @@ mod tests {
         // SAFETY: the preparing execution still owns the context and all its operands.
         assert_eq!(unsafe { call.run(&raw mut ctx) }.unwrap(), NONE);
         assert!(matches!(ctx.heap.get(list), Value::List(items) if items == &[list]));
+    }
+
+    #[test]
+    fn explicit_callable_descriptor_is_registered_before_forwarding() {
+        use crate::objects::locks::PrimitiveLock;
+        use std::sync::Arc;
+
+        let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let lexical = ctx.scope("descriptor_control", None);
+        ctx.heap.enter(lexical, NONE, FrameOwner::Module(NONE));
+        let backing = Arc::<PrimitiveLock>::default();
+        let lock = ctx.alloc(Value::PrimitiveLock(Arc::clone(&backing)));
+        let acquire = ctx.lookup_attr(lock, "acquire").unwrap();
+        let descriptor = ctx.builtin("builtin_function_or_method.__call__");
+        let timeout = ctx.alloc(Value::Float(0.01));
+        let mark = ctx.heap.temporary_mark();
+        for id in [descriptor, acquire, TRUE, timeout] {
+            ctx.heap.keep(id);
+        }
+        assert!(backing.acquire(false, None));
+        let call = ctx
+            .prepare_call(descriptor, vec![acquire, TRUE, timeout].into(), Vec::new())
+            .unwrap();
+        let borrowed_forward = matches!(&call, RegisteredCall::Other { .. });
+        // SAFETY: the active frame and marked descriptor operands remain rooted here.
+        assert_eq!(unsafe { call.run(&raw mut ctx) }.unwrap(), FALSE);
+        assert!(backing.release().is_ok());
+        ctx.heap.release_temporaries_since(mark);
+        assert!(
+            !borrowed_forward,
+            "descriptor forwarded through borrowed Other"
+        );
     }
 
     #[test]
