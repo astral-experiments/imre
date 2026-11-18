@@ -1,0 +1,9 @@
+{
+  "assets": 31,
+  "credit": 0,
+  "manifest_sha256": "113ddb7d936dd769ce68ad38a1d87f26e69e93530b8e187abb52b9f6091070ff",
+  "original_assessment_sha256": "fa010dd280e6bc0e1ccab91432b44d5c201607d176e9fab8d9a7b7a5cefcdd13",
+  "role": "json-decode-959-same-positive-graph-gates",
+  "schema": "imre.compatibility.sealed-supplement.v1",
+  "source_launcher_sha256": "55367f06f64b7441708387dba7625753f4312e0a70fdf5b37208e40dd35fee0b"
+}

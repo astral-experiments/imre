@@ -1,0 +1,62 @@
+{
+  "after": {
+    "/workspace/scratch/json-decode-959-replay-v1/fixtures/Lib/test/test_json/test_decode.py": "7905c620f00c028e1b28ea27656b66d14584fa809206d3eb996fac5dbee2546c",
+    "/workspace/scratch/json-decode-959-replay-v1/images/O0.exe": "fb0535ca32be0015c7de4b66211290193fdec85658ea836a79482601eae5b8bf",
+    "/workspace/scratch/json-decode-959-replay-v1/launch/launcher.py": "55367f06f64b7441708387dba7625753f4312e0a70fdf5b37208e40dd35fee0b",
+    "/workspace/scratch/json-decode-959-replay-v1/launch/stock.source.py": "7905c620f00c028e1b28ea27656b66d14584fa809206d3eb996fac5dbee2546c"
+  },
+  "argv": [
+    "/workspace/scratch/json-decode-959-replay-v1/images/O0.exe"
+  ],
+  "before": {
+    "/workspace/scratch/json-decode-959-replay-v1/fixtures/Lib/test/test_json/test_decode.py": "7905c620f00c028e1b28ea27656b66d14584fa809206d3eb996fac5dbee2546c",
+    "/workspace/scratch/json-decode-959-replay-v1/images/O0.exe": "fb0535ca32be0015c7de4b66211290193fdec85658ea836a79482601eae5b8bf",
+    "/workspace/scratch/json-decode-959-replay-v1/launch/launcher.py": "55367f06f64b7441708387dba7625753f4312e0a70fdf5b37208e40dd35fee0b",
+    "/workspace/scratch/json-decode-959-replay-v1/launch/stock.source.py": "7905c620f00c028e1b28ea27656b66d14584fa809206d3eb996fac5dbee2546c"
+  },
+  "capture_argv": [
+    "/usr/bin/strace",
+    "-f",
+    "-y",
+    "-v",
+    "-qq",
+    "-s",
+    "512",
+    "-e",
+    "trace=execve,execveat,open,openat,openat2,creat,io_uring_setup,newfstatat,rename,wait4,waitid,exit,exit_group,chdir,fchdir,close,close_range,dup,dup2,dup3,fcntl,clone,clone3,fork,vfork",
+    "-o",
+    "/workspace/scratch/json-decode-959-replay-v1/raw/O0.trace",
+    "/workspace/scratch/fnmatch-95908-replay-v1/correction-v2/raw-control-probe-child-env",
+    "withdraw",
+    "/workspace/scratch/json-decode-959-replay-v1/fixtures/Lib/test",
+    "/workspace/scratch/json-decode-959-replay-v1/fixtures/Lib/test.raw-control-stash",
+    "/workspace/scratch/json-decode-959-replay-v1/fixtures/Lib/test/test_json/test_decode.py",
+    "/workspace/scratch/json-decode-959-replay-v1/images/O0.exe"
+  ],
+  "controller_sha256": "7bf597a897abc8170733bed00536adb6b97cb2477549ae30b7a1bc3c2c13cde5",
+  "cwd": "/workspace/scratch/json-decode-959-replay-v1/empty",
+  "effects_after_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+  "effects_before_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+  "effects_equal": true,
+  "environment": {
+    "IMREFLAGS": "--opt-level 0",
+    "IMRE_PYTHON": "/workspace/scratch/imre-95908-transferred-stdlib-v1/product/imre",
+    "NO_COLOR": "1",
+    "PATH": "/workspace/scratch/imre-95908-transferred-stdlib-v1/product/imre-toolchain/bin",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONPATH": "/workspace/scratch/json-decode-959-replay-v1/fixtures/Lib",
+    "PYTHON_COLORS": "0",
+    "TMPDIR": "/workspace/scratch/json-decode-959-replay-v1/tmp"
+  },
+  "exit_code": 0,
+  "image_sha256": "fb0535ca32be0015c7de4b66211290193fdec85658ea836a79482601eae5b8bf",
+  "restored": true,
+  "seconds": 0.667,
+  "stderr_sha256": "06402e2bb7a8437039446c32db1408641a779e6ca18d054b6bc1670d7e157d92",
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "supervisor_sha256": "1e8c802ae42dd768fef9a88cb316321276c9bbd6ed534cd00ebf3e44d943cf7a",
+  "timed_out": false,
+  "timeout_seconds": 90,
+  "trace_bytes": 101556,
+  "trace_sha256": "e5ca775fa75359c3a158cfdd9fe81ef46671b8cf3276491327bca90c98aed5a5"
+}

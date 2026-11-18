@@ -1,0 +1,152 @@
+[
+  {
+    "id": "test.test_json.test_decode.TestCDecode.test_bytes",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestCDecode.test_constant_invalid_case",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestCDecode.test_decimal",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestCDecode.test_decoder_optimizations",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestCDecode.test_empty_objects",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestCDecode.test_extra_data",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestCDecode.test_float",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestCDecode.test_invalid_escape",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestCDecode.test_invalid_input_type",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestCDecode.test_keys_reuse",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestCDecode.test_limit_int",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestCDecode.test_negative_index",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestCDecode.test_nonascii_digits_rejected",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestCDecode.test_parse_constant",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestCDecode.test_string_with_utf8_bom",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestPyDecode.test_bytes",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestPyDecode.test_constant_invalid_case",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestPyDecode.test_decimal",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestPyDecode.test_decoder_optimizations",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestPyDecode.test_empty_objects",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestPyDecode.test_extra_data",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestPyDecode.test_float",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestPyDecode.test_invalid_escape",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestPyDecode.test_invalid_input_type",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestPyDecode.test_keys_reuse",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestPyDecode.test_limit_int",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestPyDecode.test_negative_index",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestPyDecode.test_nonascii_digits_rejected",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestPyDecode.test_parse_constant",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  },
+  {
+    "id": "test.test_json.test_decode.TestPyDecode.test_string_with_utf8_bom",
+    "occurrence": 1,
+    "launcher_cohort": "finite-decode"
+  }
+]
