@@ -755,6 +755,18 @@ pub(crate) fn try_readinto(fd: i32, dst: &mut [u8]) -> Result<Option<usize>> {
     transferred(unsafe { libc::read(fd, dst.as_mut_ptr().cast(), length) })
 }
 
+/// Read directly into a byte vector's uninitialized spare capacity.
+pub(crate) fn try_read_spare(
+    fd: i32,
+    dst: &mut [std::mem::MaybeUninit<u8>],
+) -> Result<Option<usize>> {
+    let length = dst.len();
+    #[cfg(target_os = "macos")]
+    let length = length.min(i32::MAX as usize);
+    // SAFETY: read initializes at most length bytes and does not retain the spare-capacity pointer.
+    transferred(unsafe { libc::read(fd, dst.as_mut_ptr().cast(), length) })
+}
+
 /// Attempt one write, returning None if a pending signal must be dispatched.
 ///
 /// # Safety

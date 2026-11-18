@@ -936,34 +936,49 @@ pub(super) fn read_path_bytes(path: &str) -> Result<Bytes> {
 /// An empty nonblocking read returns None, while a partial read returns its bytes.
 pub(crate) fn read_path_bytes_interruptible(path: &str) -> Result<Option<Bytes>> {
     let path = super::text::try_owned_string(path)?;
-    let (file, _) = open_file(&path, 0)?;
+    let (file, metadata) = open_file(&path, 0)?;
     let mut bytes = Vec::new();
-    let mut chunk = [0; 8192];
-    let result = loop {
-        match super::os::try_readinto(file.as_raw_fd(), &mut chunk) {
-            Ok(None) => {
-                if let Err(error) = super::stdlib::check_interrupt() {
-                    break Err(error);
+    let regular = metadata.is_file();
+    let maximum = if regular { 8 * 1024 * 1024 } else { 8192 };
+    let initial = usize::try_from(metadata.len())
+        .unwrap_or(usize::MAX)
+        .clamp(8192, maximum);
+    let result = (|| {
+        bytes
+            .try_reserve_exact(initial)
+            .map_err(|_| Error::memory_error())?;
+        loop {
+            if bytes.len() == bytes.capacity() {
+                let extra = bytes.len().clamp(8192, maximum);
+                bytes
+                    .try_reserve(extra)
+                    .map_err(|_| Error::memory_error())?;
+            }
+            let spare = bytes.spare_capacity_mut();
+            let length = spare.len().min(maximum);
+            match super::os::try_read_spare(file.as_raw_fd(), &mut spare[..length]) {
+                Ok(None) => {
+                    if let Err(error) = super::stdlib::check_interrupt() {
+                        return Err(error);
+                    }
                 }
-            }
-            Ok(Some(0)) => break Ok(Some(bytes)),
-            Ok(Some(count)) => {
-                if bytes.try_reserve(count).is_err() {
-                    break Err(Error::memory_error());
+                Ok(Some(0)) => return Ok(Some(bytes)),
+                Ok(Some(count)) => {
+                    // SAFETY: the successful read initialized exactly count spare bytes.
+                    unsafe { bytes.set_len(bytes.len() + count) };
                 }
-                bytes.extend_from_slice(&chunk[..count]);
+                Err(error)
+                    if error.os_args().is_some_and(|args| {
+                        args.errno == i64::from(libc::EAGAIN)
+                            || args.errno == i64::from(libc::EWOULDBLOCK)
+                    }) =>
+                {
+                    return Ok((!bytes.is_empty()).then_some(bytes));
+                }
+                Err(error) => return Err(error),
             }
-            Err(error)
-                if error.os_args().is_some_and(|args| {
-                    args.errno == i64::from(libc::EAGAIN)
-                        || args.errno == i64::from(libc::EWOULDBLOCK)
-                }) =>
-            {
-                break Ok((!bytes.is_empty()).then_some(bytes));
-            }
-            Err(error) => break Err(error),
         }
-    };
+    })();
     close_file(file).map_err(errno_error).and(result)
 }
 
