@@ -106,6 +106,8 @@ pub struct CompileOptions {
     pub command: Option<PythonCommand>,
     /// Canonical import name requested by the interpreter's `-m` entry.
     pub module_entry: Option<String>,
+    /// Require the selected named entry to have an actual checked source registration.
+    pub require_checked_module_entry: bool,
     /// Run __main__ from the command-line import path, retaining the operand as argv[0].
     pub path_entry: bool,
     /// Flags and executable for a file launched through the Python command line.
@@ -503,6 +505,9 @@ fn object_fallback(
     ) -> Result<CheckedProgram, String>,
 ) -> Result<SourceInputs, String> {
     let incremental = cache.is_some();
+    if options.require_checked_module_entry && options.module_entry.is_none() {
+        return Err("checked module admission requires a named entry".into());
+    }
     for name in &options.include_modules {
         if !modules::valid_module_operand(name) {
             return Err(format!(
@@ -548,6 +553,9 @@ fn object_fallback(
             let refusal = match lower(&mut graph, cache.as_deref_mut(), call_error)? {
                 CheckedProgram::Registered(reason) => reason,
                 CheckedProgram::Native(mut fixed) => {
+                    if options.require_checked_module_entry {
+                        return Err("named entry did not reach checked source registration".into());
+                    }
                     let module = &mut fixed.ir.0;
                     verify_after(module, "lowering")?;
                     match callables::layouts(module, std::mem::take(&mut fixed.callables)) {

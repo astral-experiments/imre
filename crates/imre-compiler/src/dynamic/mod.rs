@@ -3275,14 +3275,14 @@ pub(crate) fn compile(
         }
     }
     // runpy selects __main__ for a package, including a namespace package.
-    let module_body = module_entry.and_then(|name| {
-        let main;
-        let name = if entry_sources.get(name).is_none_or(|(_, package)| *package) {
-            main = format!("{name}.__main__");
-            main.as_str()
+    let module_main = module_entry.map(|name| {
+        if entry_sources.get(name).is_none_or(|(_, package)| *package) {
+            Cow::Owned(format!("{name}.__main__"))
         } else {
-            name
-        };
+            Cow::Borrowed(name)
+        }
+    });
+    let module_body = module_main.as_deref().and_then(|name| {
         let (root, package) = entry_sources.get(name)?;
         let &(id, _, _) = selected_sources
             .iter()
@@ -3407,12 +3407,17 @@ pub(crate) fn compile(
         .enumerate()
         .map(|(index, (id, program, module))| {
             let application = !registrations.python_providers.contains(&id);
+            let saved_application = options.require_checked_module_entry
+                && application
+                && index < ordinary_registrations.unwrap_or(usize::MAX)
+                && registrations.physical_files.contains_key(&sources[id].1);
             let checked_provider = checked_providers.contains(&id);
             // Emit the selected application's signature. Preserve the existing checker
             // scope: owning a declaration does not prove that a call will reach it.
             let mut registration = RegisteredSource::new(
                 &sources[id],
-                (program || owned_sources.contains(&id)) && application || checked_provider,
+                (program || owned_sources.contains(&id) || saved_application) && application
+                    || checked_provider,
                 module,
             );
             let checked = registrations.checked_units.get(&id);
@@ -3593,6 +3598,32 @@ pub(crate) fn compile(
             has_file_body: sdk_runpy.then_some(&has_file_body),
         }),
     )?;
+    if options.require_checked_module_entry {
+        let Some(name) = module_entry else {
+            return Err("checked module admission requires a named entry".into());
+        };
+        let checked_entry = main_unit.is_some_and(|unit| {
+            winners.iter().any(|source| {
+                source.unit == Some(unit)
+                    && source.main_body
+                    && source.is_program
+                    && source.check_execution
+                    && source.declares_signatures
+            })
+        });
+        if !checked_entry {
+            if let Some(error) = unavailable_sources.get(name).or_else(|| {
+                module_main
+                    .as_deref()
+                    .and_then(|main| unavailable_sources.get(main))
+            }) {
+                return Err(error.to_string());
+            }
+            return Err(format!(
+                "cannot save module {name:?}: its selected entry has no checked source registration; make its source available on PYTHONPATH or build the entry file directly"
+            ));
+        }
+    }
     // A namespace portion has no initializer. Its registered origin is a directory
     // that must remain available for the scratch session to add its child modules.
     let namespace_portions: HashSet<_> = inputs.directories.iter().map(|(path, _)| path).collect();
