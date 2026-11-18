@@ -3,7 +3,7 @@
 use std::cell::{Cell, RefCell};
 use std::ops::ControlFlow;
 
-use ruff_python_ast::visitor::{Visitor, walk_stmt};
+use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
 
 use super::*;
 
@@ -11,6 +11,7 @@ use super::*;
 struct Insertion<'a> {
     value: &'a ast::Expr,
     for_loop: Option<&'a ast::StmtFor>,
+    class: Option<usize>,
 }
 
 fn insertion_operand<'a>(stmt: &'a ast::Stmt, name: &str, method: &str) -> Option<&'a ast::Expr> {
@@ -25,28 +26,37 @@ fn insertion_operand<'a>(stmt: &'a ast::Stmt, name: &str, method: &str) -> Optio
     .then_some(value)
 }
 
-/// A direct element insertion in this lexical scope can supply a container layout hint.
-/// The ordinary checker still checks its operand and every other use of the list.
+/// Direct class appends may share a declared base across ordinary if/for
+/// statements; any other statement or list reference ends widening.
 fn first_insertion<'ast>(
+    checker: &Checker<'_>,
     name: &str,
     method: &str,
     statements: &'ast [ast::Stmt],
 ) -> Option<Insertion<'ast>> {
-    struct Appends<'name, 'ast> {
+    struct Appends<'checker, 'graph, 'name, 'ast> {
+        checker: &'checker Checker<'graph>,
         name: &'name str,
         method: &'name str,
         insertion: Option<Insertion<'ast>>,
+        original_class: Option<usize>,
         for_loop: Option<&'ast ast::StmtFor>,
+        widen: bool,
     }
 
-    impl<'ast> Visitor<'ast> for Appends<'_, 'ast> {
+    impl<'ast> Visitor<'ast> for Appends<'_, '_, '_, 'ast> {
         fn visit_stmt(&mut self, stmt: &'ast ast::Stmt) {
-            if self.insertion.is_some()
-                || matches!(stmt, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_))
-            {
+            if self.insertion.is_some() && !self.widen {
+                return;
+            }
+            if matches!(stmt, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)) {
+                self.widen = false;
                 return;
             }
             if let ast::Stmt::For(loop_) = stmt {
+                self.widen &= !loop_.is_async;
+                self.visit_expr(&loop_.iter);
+                self.visit_expr(&loop_.target);
                 let enclosing = self.for_loop.replace(loop_);
                 self.visit_body(&loop_.body);
                 self.for_loop = enclosing;
@@ -54,23 +64,65 @@ fn first_insertion<'ast>(
                 return;
             }
             if let Some(value) = insertion_operand(stmt, self.name, self.method) {
-                self.insertion = Some(Insertion {
-                    value,
-                    for_loop: self.for_loop,
-                });
+                self.visit_expr(value);
+                if self.insertion.is_some() && !self.widen {
+                    return;
+                }
+                let class = value
+                    .as_call_expr()
+                    .and_then(|call| self.checker.class_reference(&call.func));
+                if let Some(first) = &mut self.insertion {
+                    let declarations = self.checker.classes.declarations;
+                    let common = first.class.zip(class).and_then(|(current, next)| {
+                        std::iter::once(current)
+                            .chain(declarations.definitions[current].bases.iter().copied())
+                            .find(|&base| declarations.subclass(next, base))
+                    });
+                    first.class = common.or(self.original_class);
+                    self.widen = common.is_some();
+                } else {
+                    self.original_class = class;
+                    self.insertion = Some(Insertion {
+                        value,
+                        for_loop: self.for_loop,
+                        class,
+                    });
+                    self.widen &= class.is_some();
+                }
             } else {
-                walk_stmt(self, stmt);
+                if !matches!(stmt, ast::Stmt::If(_)) {
+                    self.widen = false;
+                }
+                if self.insertion.is_none() || self.widen {
+                    // With widening disabled, this is the old first-insertion scan.
+                    walk_stmt(self, stmt);
+                }
             }
         }
 
-        fn visit_expr(&mut self, _: &'ast ast::Expr) {}
+        fn visit_expr(&mut self, expr: &'ast ast::Expr) {
+            if !self.widen {
+                return;
+            }
+            if expr
+                .as_name_expr()
+                .is_some_and(|n| n.id.as_str() == self.name)
+            {
+                self.widen = false;
+            } else {
+                walk_expr(self, expr);
+            }
+        }
     }
 
     let mut appends = Appends {
+        checker,
         name,
         method,
         insertion: None,
+        original_class: None,
         for_loop: None,
+        widen: method == "append",
     };
     appends.visit_body(statements);
     appends.insertion
@@ -85,10 +137,8 @@ impl Checker<'_> {
         set: bool,
         later: &[ast::Stmt],
     ) -> Option<Type> {
-        let insertion = first_insertion(name, if set { "add" } else { "append" }, later)?;
-        if let ast::Expr::Call(call) = insertion.value
-            && let Some(class) = self.class_reference(&call.func)
-        {
+        let insertion = first_insertion(self, name, if set { "add" } else { "append" }, later)?;
+        if let Some(class) = insertion.class {
             return Some(Type::Class(class));
         }
         if let Some(ty) = self.graph.session.scalar_type(self.module, insertion.value) {
@@ -2959,6 +3009,79 @@ impl Checker<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fresh_list_joins_direct_conditional_and_loop_constructors() {
+        let source = r#"class Base: pass
+class Left(Base): pass
+class Right(Base): pass
+def run(flag: bool, items: list[int]) -> None:
+    values = []
+    if flag: values.append(Left())
+    if flag: values.append(Right())
+    if flag: values.append(Left())
+    if flag: values.append(Right())
+    if flag: values.append(Left())
+    if flag: values.append(Right())
+    for item in items: values.append(Left())
+    for item in items: values.append(Right())
+    for item in items: values.append(Left())
+    for item in items: values.append(Right())
+    for item in items: values.append(Left())
+    for item in items: values.append(Right())
+    if not values: values = [Left()]
+run(True, [1])
+"#;
+        crate::check(source).unwrap();
+    }
+
+    #[test]
+    fn fresh_list_cannot_join_past_another_reference() {
+        let classes = "class Base: pass\nclass Left(Base): pass\nclass Right(Base): pass\n";
+        for boundary in [
+            "    consume([values])\n",
+            "    alias = values\n",
+            "    alias = values\n    alias.append(Right())\n",
+            "    values = []\n",
+            "    if flag: values = []\n",
+            "    if not values: pass\n",
+            "    print(0)\n",
+        ] {
+            let source = format!(
+                "{classes}def consume(groups: list[list[Left]]) -> None: pass\ndef run(flag: bool) -> None:\n    values = []\n    values.append(Left())\n{boundary}    values.append(Right())\nrun(True)\n"
+            );
+            let error = crate::check(&source).unwrap_err();
+            assert!(error.contains("expected main.Left, got main.Right"), "{error}");
+        }
+        let monomorphic = format!(
+            "{classes}def run() -> None:\n    values = []\n    print(0)\n    values.append(Left())\n    values.append(Left())\nrun()\n"
+        );
+        crate::check(&monomorphic).unwrap();
+    }
+
+    #[test]
+    fn list_contracts_and_nonconstructor_insertions_are_not_widened() {
+        let classes = "class Base: pass\nclass Left(Base): pass\nclass Right(Base): pass\nclass Other: pass\ndef make() -> Right: return Right()\n";
+        for (declaration, value) in [
+            ("values: list[Left] = []", "Right()"),
+            ("values = []", "make()"),
+            ("values = []", "Other()"),
+        ] {
+            let source = format!(
+                "{classes}def run() -> None:\n    {declaration}\n    values.append(Left())\n    values.append({value})\nrun()\n"
+            );
+            assert!(crate::check(&source).is_err());
+        }
+        let incompatible = format!(
+            "{classes}def run() -> None:\n    values = []\n    values.append(Left())\n    values.append(Right())\n    values.append(make())\nrun()\n"
+        );
+        let error = crate::check(&incompatible).unwrap_err();
+        assert!(error.contains("expected main.Left, got main.Right"), "{error}");
+        crate::check(
+            "def run() -> None:\n    values = []\n    alias = values\n    values.append(1)\n    seen = set()\n    seen.add(1)\nrun()\n",
+        )
+        .unwrap();
+    }
 
     #[test]
     fn a_provisional_method_result_preserves_the_first_argument_supplier() {
