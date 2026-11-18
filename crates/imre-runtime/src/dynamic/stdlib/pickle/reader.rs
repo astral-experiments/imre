@@ -354,7 +354,7 @@ fn attempt_data(ctx: &mut Context, data: Id, direct: bool) -> Result<Option<Id>>
         return Ok(None);
     }
     let layout = preflight(bytes);
-    let vm = if layout.is_none() && !direct {
+    let vm = if layout.is_none() {
         super::vm::preflight(bytes)
     } else {
         None
@@ -363,7 +363,7 @@ fn attempt_data(ctx: &mut Context, data: Id, direct: bool) -> Result<Option<Id>>
     if crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Acquire) {
         return Ok(None);
     }
-    if direct && layout.is_some() {
+    if direct && (layout.is_some() || vm.is_some()) {
         ctx.check_call_depth(0)?;
     }
     match (layout, vm) {

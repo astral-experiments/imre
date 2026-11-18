@@ -306,7 +306,7 @@ pub(super) fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> 
         unreachable!()
     };
     let (pointer, length) = (bytes.as_ptr(), bytes.len());
-    // SAFETY: data is an exact immutable bytes object rooted by the entered source frame.
+    // SAFETY: the source frame or call operands root this exact immutable bytes object.
     // Preflight proved no operation can invoke Python or mutate this backing allocation.
     let input = unsafe { std::slice::from_raw_parts(pointer, length) };
     for instruction in layout.instructions {
