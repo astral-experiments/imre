@@ -165,6 +165,27 @@ jobs:
       - name: Check sys at O0 and O3
         id: sys_evidence
         run: bash "$RUNNER_TEMP/sys-gate.sh"
+      - name: Collect original sys suite evidence after a preflight failure
+        if: ${{ !cancelled() && steps.sys_evidence.outcome == 'failure' }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/sys-evidence.json" ]]; then exit 0; fi
+          export LANG=C.UTF-8 LC_ALL=C.UTF-8 LC_CTYPE=C.UTF-8
+          unset PYTHONUTF8 PYTHONIOENCODING
+          sys_runner=(benchmarks/cpython_stdlib/full/sys/run.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --cpython-source .cpython-stdlib-reference)
+          for opt in 0 3; do
+            python3 -B "${sys_runner[@]}" --opt-level "$opt" --result "$RUNNER_TEMP/test-sys-O$opt.json" --evidence "$RUNNER_TEMP/sys-evidence-O$opt.json"
+            python3 -B -X utf8 "${sys_runner[@]}" --opt-level "$opt" --locale-audit "$RUNNER_TEMP/sys-locale-utf8-O$opt.json"
+            python3 benchmarks/cpython_stdlib/full/sys/argv_boundary.py --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 --opt-level "$opt"
+          done
+          jq -s . "$RUNNER_TEMP/sys-evidence-O0.json" "$RUNNER_TEMP/sys-evidence-O3.json" > "$RUNNER_TEMP/sys-evidence.json"
+          check_outcomes() {
+            python3 benchmarks/cpython_stdlib/suite_evidence.py benchmarks/cpython_stdlib/full/sys/reference-linux.json "$1"
+            jq -cS '[.[].records[] | {id, occurrence, opt_level, fixture_variant, reference, outcome, classification, roles}]
+                    | sort_by(.id, .occurrence, .opt_level)[]' "$1" > "$2"
+          }
+          check_outcomes benchmarks/cpython_stdlib/full/sys/evidence-linux.json "$RUNNER_TEMP/sys-expected.jsonl"
+          check_outcomes "$RUNNER_TEMP/sys-evidence.json" "$RUNNER_TEMP/sys-measured.jsonl"
+          diff -u --label checked-in --label measured "$RUNNER_TEMP/sys-expected.jsonl" "$RUNNER_TEMP/sys-measured.jsonl"
       - name: Retain the Linux sys reports and tested source
         if: ${{ !cancelled() && (steps.sys_evidence.outcome == 'success' || steps.sys_evidence.outcome == 'failure') }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
