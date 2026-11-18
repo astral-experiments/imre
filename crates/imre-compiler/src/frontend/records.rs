@@ -1179,6 +1179,7 @@ impl Checker<'_> {
         if matches!(
             name,
             "addTypeEqualityFunc"
+                | "assertEqual"
                 | "assertIsInstance"
                 | "assertNotIsInstance"
                 | "assertIsSubclass"
