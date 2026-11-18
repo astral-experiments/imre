@@ -35,6 +35,12 @@ def safe_path(api, value):
     return api.repository_file(value, api.ROOT)
 
 
+def approved_digest(api,path,digest):
+    if getattr(source_stage_pins,'REVISION_959_RESOURCE',None) is None:return digest
+    from extensions.data_resource959_v1 import authority as resource
+    return resource.expected(api,path,digest)
+
+
 def verify_stage(api, manifest):
     api.require(manifest.get('schema') == 'imre.compatibility.successor-stage.v1'
                 and manifest.get('imre_revision') == REVISION and manifest.get('predecessor') == PREDECESSOR and source_stage_pins.REVISION_959 == PREDECESSOR,
@@ -53,7 +59,7 @@ def verify_stage(api, manifest):
     ext=(api.ROOT/BASE).resolve();api.require(ext.is_dir() and ext.is_relative_to(api.ROOT.resolve()), "successor extension directory escapes repository")
     api.require(not any(p.is_symlink() for p in ext.rglob('*')), 'unbound successor symlink')
     actual = {p.relative_to(api.ROOT).as_posix() for p in ext.rglob("*") if p.is_file() and p not in {ext/"manifest.json",ext/"activation.json"}}
-    api.require(set(files) == actual and all(loc.startswith(BASE+'/') and api.HEX64.fullmatch(digest) and raw_control.sha(safe_path(api,loc).read_bytes()) == digest for loc,digest in files.items()), 'successor shared map is incomplete, unbound or altered')
+    api.require(set(files) == actual and all(loc.startswith(BASE+'/') and api.HEX64.fullmatch(digest) and raw_control.sha(safe_path(api,loc).read_bytes()) == approved_digest(api,loc,digest) for loc,digest in files.items()), 'successor shared map is incomplete, unbound or altered')
     amended={BASE+'/'+x for x in ('authority.py','check_stage.py','generate.py','patches/validators.patch')}
     api.require(set(prior_stage['files'])<=set(files) and all((loc in amended and raw_control.sha(raw_control.git(api.ROOT,'show','--no-textconv',STAGE_PREDECESSOR['commit']+':'+loc))==digest) or files[loc]==digest for loc,digest in prior_stage['files'].items()), 'f178 source/evidence bytes removed or changed outside the amendment')
     changed = {};target_set={f'benchmarks/compatibility/{name}' for name in ('scorecard.py','raw_control.py','script_control.py','test_revision959_stage.py')}
@@ -74,7 +80,7 @@ def verify_stage(api, manifest):
             for path,digest in entry['files'].items():
                 api.require(path not in shared or shared[path]==digest, 'predecessor digest conflict');shared[path]=digest
     for path,digest in shared.items():
-        expected=changed.get(path,digest)
+        expected=approved_digest(api,path,changed.get(path,digest))
         api.require(raw_control.sha(safe_path(api,path).read_bytes())==expected, 'predecessor artifact or patched source digest differs: '+path)
     inputs=manifest.get('inputs');shared_roles=manifest.get('shared_roles');used=set();references=set()
     api.require(isinstance(inputs,dict) and inputs and len(set(inputs.values()))==len(inputs) and isinstance(shared_roles,dict), 'invalid successor input index')
@@ -142,14 +148,24 @@ def effective_binding(api,entry):
 
 @lru_cache(maxsize=None)
 def archive_members(api,archive,config_json):
-    cfg=json.loads(config_json);raw=safe_path(api,archive).read_bytes();outer=safe_path(api,cfg['outer_seal']).read_bytes();api.require(raw_control.sha(outer)==cfg['outer_sha256'],'identity outer seal differs');obj=json.loads(outer);api.require(obj.get('credit')==0 and obj.get('files')==[{'name':Path(archive).name,'bytes':len(raw),'sha256':raw_control.sha(raw)}],'identity archive differs from outer seal')
+    """Resolve immutable safe archive members under a declared versioned seal/manifest format."""
+    cfg=json.loads(config_json);raw=safe_path(api,archive).read_bytes();outer=safe_path(api,cfg['outer_seal']).read_bytes();api.require(raw_control.sha(outer)==cfg['outer_sha256'],'identity outer seal differs');obj=json.loads(outer);outer_format=cfg.get('outer_format','single-archive-v1');manifest_format=cfg.get('manifest_format','files-map-v1')
+    if outer_format=='single-archive-v1':api.require(obj.get('credit')==0 and obj.get('files')==[{'name':Path(archive).name,'bytes':len(raw),'sha256':raw_control.sha(raw)}], 'identity archive differs from outer seal')
+    elif outer_format=='archive-fields-v1':api.require(obj.get('credit')==0 and Path(obj.get('archive_path','')).name==Path(archive).name and obj.get('archive_bytes')==len(raw) and obj.get('archive_sha256')==raw_control.sha(raw) and obj.get('member_list_sha256')==cfg['manifest_sha256'], 'identity archive fields differ from outer seal')
+    else:api.require(outer_format=='member-manifest-v1' and obj.get('credit')==0 and cfg.get('archive_sha256')==raw_control.sha(raw), 'identity archive or manifest-only seal differs')
     with tarfile.open(safe_path(api,archive)) as t:
         result={}
         for x in t.getmembers():
             if x.name=='.' and x.isdir():continue
             name=x.name.removeprefix('./');api.require(x.isreg() and name and name not in result and not Path(name).is_absolute() and '..' not in Path(name).parts and Path(name).as_posix()==name and x.name in {name,'./'+name},'unsafe, duplicate or nonregular identity archive member');result[name]=t.extractfile(x).read()
-    member=cfg['manifest_member'];api.require(member in result and raw_control.sha(result[member])==cfg['manifest_sha256'],'identity member manifest differs');m=json.loads(result[member]);extra={member}|({cfg['additional_seal']} if cfg['additional_seal'] else set());api.require(m.get('schema')==cfg['manifest_schema'] and m.get('credit')==0 and len(m['files'])==cfg['members'] and set(result)==set(m['files'])|extra and all(result.get(k) is not None and v=={'bytes':len(result[k]),'sha256':raw_control.sha(result[k])} for k,v in m['files'].items()),'identity archive contains unbound or altered members')
-    if cfg['additional_seal']:api.require(json.loads(result[cfg['additional_seal']]).get('manifest_sha256')==cfg['manifest_sha256'],'identity inner seal differs')
+    member=cfg['manifest_member'];api.require(member in result and raw_control.sha(result[member])==cfg['manifest_sha256'],'identity member manifest differs');m=json.loads(result[member]);extra={member}|({cfg['additional_seal']} if cfg.get('additional_seal') else set())
+    if manifest_format=='files-map-v1':files=m.get('files');api.require(isinstance(files,dict) and m.get('schema')==cfg['manifest_schema'],'identity files-map manifest schema differs')
+    else:
+        api.require(manifest_format=='members-list-v1' and isinstance(m.get('members'),list),'unknown identity member manifest format');items=m['members'];api.require(all(isinstance(v,dict) and set(v)=={'path','bytes','sha256'} and isinstance(v['path'],str) for v in items) and len({v['path'] for v in items})==len(items),'duplicate or malformed identity list member');files={v['path']:{'bytes':v['bytes'],'sha256':v['sha256']} for v in items}
+    api.require(m.get('credit')==0 and len(files)==cfg['members'] and set(result)==set(files)|extra and all(result.get(k) is not None and v=={'bytes':len(result[k]),'sha256':raw_control.sha(result[k])} for k,v in files.items()), 'identity archive contains unbound or altered members')
+    if outer_format=='member-manifest-v1':api.require(outer==result[member], 'outer and archived member manifests differ')
+    if outer_format=='archive-fields-v1':api.require(obj.get('member_count')==len(result),'identity archive member count differs')
+    if cfg.get('additional_seal'):api.require(json.loads(result[cfg['additional_seal']]).get('manifest_sha256')==cfg['manifest_sha256'],'identity inner seal differs')
     return result
 
 
