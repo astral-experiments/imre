@@ -450,7 +450,7 @@
     "benchmarks/compatibility/raw_control.py": "9edb18699cd0a2a30dc51db20ab668a3e81e1cd36209e0ec82af767678cbfcbb",
     "benchmarks/compatibility/scorecard.py": "24fc1f25516cc6da3d6648505af55fae2b22ddf22188bc5877b8950a7c46130e",
     "benchmarks/compatibility/script_control.py": "041ea8b428a6564b6fc38f4d3c52b12583a2b3ad7475aaf5cd3e827c92943c0a",
-    "benchmarks/compatibility/test_revision959_stage.py": "68c07f6e43b43e7b95f81728231bbecfb5596859f991b745972732cd49cc66cd"
+    "benchmarks/compatibility/test_revision959_stage.py": "29c0f6440767bf697165d6123028768cd65cf2b50c3f3f7983bd1b9ed8db8c93"
   },
   "staged": {
     "script": {

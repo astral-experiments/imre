@@ -59,7 +59,7 @@ class FiniteStageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'unauthorized'):self.adapt()
     def test_zero_credit_guard_before_mutable_adapter(self):
         row=json.loads((self.data/'stdlib/fnmatch.jsonl').read_text().splitlines()[0]);row['paired']=True
-        with self.assertRaisesRegex(ValueError,'separately pinned public source stage'):scorecard.validate_snapshot_record(row,'stdlib',True,scorecard.require)
+        with patch.object(script_control.source_stage_pins,'REVISION_959',None),self.assertRaisesRegex(ValueError,'separately pinned public source stage'):scorecard.validate_snapshot_record(row,'stdlib',True,scorecard.require)
     def test_canonical_84_not_run_and_seven_anchor_hashes(self):
         rows=[json.loads(l) for f in (self.data/'scripts').glob('*.jsonl') for l in f.read_text().splitlines()];self.assertEqual({x['id'] for x in rows},set(scorecard.canonical_script_shards()));self.assertEqual(sum(all(v['outcome']=='pass' for v in x['runs'].values()) for x in rows),4);self.assertEqual(sum(all(v['outcome']=='not_run' for v in x['runs'].values()) for x in rows),80);self.assertTrue(all(not x['paired'] for x in rows));auth=json.loads((self.data/'controls/original-authority.json').read_text());self.assertEqual(len(auth['reviewed_frozen_anchors']),7);self.assertEqual(auth['commit'],script_control.ORIGINAL_AUTHORITY)
 
@@ -82,7 +82,17 @@ class ScriptStageTests(unittest.TestCase):
     def test_source_manifest_exact_stage_and_zero_credit(self):
         import gzip
         manifest=SNAPSHOT/'controls/unified-source-stage.json';m=json.loads(manifest.read_text());staged={x['path']:x['sha256'] for group in m['staged'].values() for x in group.values()};files={**m['artifacts'],**staged}
-        self.assertEqual(set(files),{p.relative_to(scorecard.ROOT).as_posix() for p in SNAPSHOT.rglob('*') if p.is_file() and p!=manifest})
+        actual={p.relative_to(scorecard.ROOT).as_posix() for p in SNAPSHOT.rglob('*') if p.is_file() and p!=manifest};pin=script_control.source_stage_pins.REVISION_959
+        if pin is None:
+            self.assertEqual(set(files),actual);self.assertFalse((SNAPSHOT/'activation.json').exists());self.assertFalse((SNAPSHOT/'verified').exists())
+            self.assertTrue(all(not json.loads(line)['paired'] for folder in ('scripts','stdlib') for p in (SNAPSHOT/folder).glob('*.jsonl') for line in p.read_text().splitlines()))
+        else:
+            with patch.object(scorecard,'DATA_ROOT',SNAPSHOT),patch.object(scorecard,'COHORT',{**scorecard.CANONICAL_COHORT,'imre_revision':PIN}):
+                activation=scorecard.snapshot_activation();entries=[*activation['families'].values(),*activation['script_shards'].values()];self.assertTrue(entries)
+                public=script_control.authority(scorecard,entries[0]);self.assertEqual(public,m);self.assertEqual(manifest.read_bytes(),raw_control.git(scorecard.ROOT,'show','--no-textconv',f"{pin['commit']}:{pin['manifest']}"))
+                verified={entry['receipt'] for entry in entries};self.assertEqual(verified,{p.relative_to(scorecard.ROOT).as_posix() for p in (SNAPSHOT/'verified').rglob('*.jsonl')});self.assertTrue(all(entry['source_stage']==pin for entry in entries))
+                extras={str((SNAPSHOT/name).relative_to(scorecard.ROOT)) for name in ('activation.json','README.md','docs/stdlib.md')}|verified;self.assertEqual(actual,set(files)|extras)
+                fs,scripts=scorecard.summary();self.assertEqual((fs['fnmatch']['paired'],fs['fnmatch']['receipts']),(24,24));self.assertEqual({r['id'] for r in scripts if r['paired']},{'uv-10','uv-26','uv-29','ty-05'})
         for loc,digest in {**m['sources'],**files}.items():self.assertEqual(sha(scorecard.ROOT/loc),digest,loc)
         for id,ref in m['bindings']['script'].items():
             binding=json.loads((scorecard.ROOT/ref['path']).read_text());self.assertEqual(ref['sha256'],sha(scorecard.ROOT/ref['path']));self.assertEqual(ref['strict_source_control'],binding['strict_source_control']);self.assertEqual(binding['id'],id)
@@ -91,7 +101,6 @@ class ScriptStageTests(unittest.TestCase):
         for case,ref in m['compressed_stock_traces'].items():
             path=scorecard.ROOT/ref['path'];raw=gzip.decompress(path.read_bytes());self.assertEqual((sha(path),path.stat().st_size),(ref['compressed_sha256'],ref['compressed_bytes']));self.assertEqual((hashlib.sha256(raw).hexdigest(),len(raw)),(ref['raw_sha256'],ref['raw_bytes']));self.assertEqual(fresh[case+'/stock.trace'],{'sha256':ref['raw_sha256'],'bytes':len(raw)})
             prior=m['nonselected_prior_stock'][case];self.assertEqual(old[prior['exported_path']]['sha256'],prior['sha256']);self.assertFalse((SNAPSHOT/'evidence/scripts/uvb'/prior['exported_path']).exists())
-        self.assertFalse((SNAPSHOT/'activation.json').exists());self.assertFalse((SNAPSHOT/'verified').exists())
     def test_rehashed_ruff_a_retrospective_transcript_is_not_authority(self):
         binding=json.loads((SNAPSHOT/'evidence/scripts/uv-10.binding.json').read_text());entry={'files':{loc:sha(scorecard.ROOT/loc) for loc in binding['artifacts'].values()}};original=raw_control.bound_artifacts(scorecard,entry,binding['artifacts']);evidence=json.loads(original('native_toolchain').read_text())
         script_control.ruff_a_transcript(scorecard,original,evidence)
@@ -114,7 +123,7 @@ class ScriptStageTests(unittest.TestCase):
                     with self.subTest(id=id),self.assertRaisesRegex(ValueError,reason):script_control.strict_case(scorecard,row,binding,entry)
                 else:script_control.strict_case(scorecard,row,binding,entry)
                 row['paired']=True
-                with self.assertRaisesRegex(ValueError,'separately pinned public source stage'):scorecard.validate_snapshot_record(row,'script',True,scorecard.require)
+                with patch.object(script_control.source_stage_pins,'REVISION_959',None),self.assertRaisesRegex(ValueError,'separately pinned public source stage'):scorecard.validate_snapshot_record(row,'script',True,scorecard.require)
     def test_existing_scorecard_derives_frozen_eligibility(self):
         anchors=scorecard.load_frozen_scripts();observed={}
         with patch.object(scorecard,'DATA_ROOT',SNAPSHOT),patch.object(scorecard,'COHORT',{**scorecard.CANONICAL_COHORT,'imre_revision':PIN}),patch.object(scorecard,'validate_snapshot_record',side_effect=lambda r,k,eligible,c:observed.__setitem__(r['id'],eligible)):
