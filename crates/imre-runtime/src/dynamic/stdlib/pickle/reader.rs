@@ -130,6 +130,21 @@ impl<'a> Cursor<'a> {
     }
 }
 
+/// Classify a bounded short payload directly; retain the general slice routine for every other size.
+#[inline]
+fn dense_text_is_ascii(bytes: &[u8]) -> bool {
+    let bits = match bytes {
+        [a, b, c] => *a | *b | *c,
+        [a, b, c, d] => *a | *b | *c | *d,
+        [a, b, c, d, e] => *a | *b | *c | *d | *e,
+        [a, b, c, d, e, f] => *a | *b | *c | *d | *e | *f,
+        [a, b, c, d, e, f, g] => *a | *b | *c | *d | *e | *f | *g,
+        [a, b, c, d, e, f, g, h] => *a | *b | *c | *d | *e | *f | *g | *h,
+        _ => return bytes.is_ascii(),
+    };
+    bits & 0x80 == 0
+}
+
 /// Validate the accepted grammar and UTF-8 before publishing Python objects;
 /// retain only packed positions into the immutable input, not copies of text.
 fn preflight(data: &[u8]) -> Option<Layout> {
@@ -155,7 +170,10 @@ fn preflight(data: &[u8]) -> Option<Layout> {
         };
         let start = cursor.at.checked_add(2)?;
         let text_end = start.checked_add(usize::from(length))?;
-        if text_end >= end || data[text_end] != MEMOIZE || !data[start..text_end].is_ascii() {
+        if text_end >= end
+            || data[text_end] != MEMOIZE
+            || !dense_text_is_ascii(&data[start..text_end])
+        {
             break;
         }
         cursor.at = text_end + 1;
@@ -502,6 +520,43 @@ fn attempt_data(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bounded_dense_ascii_checks_every_payload_byte_and_falls_back_at_boundaries() {
+        for length in 0..=10 {
+            let mut bytes = vec![b'a'; length];
+            assert!(dense_text_is_ascii(&bytes));
+            for position in 0..length {
+                bytes[position] = 0x80;
+                assert!(
+                    !dense_text_is_ascii(&bytes),
+                    "length {length}, byte {position}"
+                );
+                bytes[position] = b'a';
+            }
+        }
+    }
+
+    #[test]
+    fn bounded_dense_ascii_hands_non_ascii_and_truncation_to_general_preflight() {
+        fn frame(payload: &[u8]) -> Vec<u8> {
+            let mut data = vec![PROTO, 5, FRAME];
+            data.extend_from_slice(&(payload.len() as u64).to_le_bytes());
+            data.extend_from_slice(payload);
+            data
+        }
+        let unicode_tail =
+            frame(b"]\x94(\x8c\x03abc\x94\x8c\x03\xe2\x82\xac\x94\x8c\x08abcdefgh\x94e.");
+        let layout = preflight(&unicode_tail).unwrap();
+        assert_eq!(layout.dense_prefix, 1);
+        assert_eq!(layout.items.len(), 2);
+        assert!(!layout.items[0].is_ascii());
+        assert!(layout.items[1].is_ascii());
+        let invalid = frame(b"]\x94(\x8c\x03\x80aa\x94e.");
+        assert!(preflight(&invalid).is_none());
+        let truncated = frame(b"]\x94(\x8c\x08abcdefg");
+        assert!(preflight(&truncated).is_none());
+    }
 
     #[test]
     fn direct_receipt_is_minted_only_for_the_immediate_text_reader_without_gets() {
