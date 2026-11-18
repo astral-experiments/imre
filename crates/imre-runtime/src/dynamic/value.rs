@@ -8250,13 +8250,13 @@ impl Heap {
         self.free_count += 1;
     }
 
-    /// Recycle a fully verified, unmarked exact text leaf and link it to the batch's free head.
+    /// Recycle an unobserved, unmarked exact text leaf and link it to the batch's free head.
     ///
     /// Unlike an arbitrary swept value, this slot has no GC-order link, header,
     /// finalization state, generator identity, or compound hash to remove. The caller
     /// updates the batch's free count after retiring every leaf in source sweep order.
     #[inline]
-    fn retire_verified_text_leaf(&mut self, id: usize, free_head: usize) {
+    fn retire_unobserved_text_leaf(&mut self, id: usize, free_head: usize) {
         debug_assert!(self.slot_shapes[id].is_scalar_leaf());
         debug_assert_eq!(self.traces[id].get(), UNMARKED);
         debug_assert_eq!(self.slots[id].gc_prev.get(), UNMARKED);
@@ -8264,15 +8264,20 @@ impl Heap {
         debug_assert!(self.slots[id].finalization == Finalization::None);
         debug_assert!(matches!(self.slots[id].value, Some(Value::Str(_))));
         self.slot_shapes[id] = SlotShape::Vacant;
-        self.traces[id].set(UNMARKED);
+        let slot = &mut self.slots[id];
+        slot.value = None;
+        slot.gc_next.set(free_head);
+    }
+
+    /// Forget observations of a text leaf before recycling it on the general checked path.
+    #[inline]
+    fn retire_verified_text_leaf(&mut self, id: usize, free_head: usize) {
         if self.text_position.get().slot == id as Id {
             self.text_position.set(TextPosition::default());
         }
         self.root_trace.recycled(id);
         self.invalidate_stream_bindings(id);
-        let slot = &mut self.slots[id];
-        slot.value = None;
-        slot.gc_next.set(free_head);
+        self.retire_unobserved_text_leaf(id, free_head);
     }
 
     /// Recycle unmarked slots in a span which can contain unreachable values.
@@ -8334,7 +8339,11 @@ impl Heap {
             // retirement cannot allocate, collect, call Python or mutate the
             // owner, which is retired only after the final pointer read.
             let child = unsafe { *items.add(position) } as usize;
-            self.retire_verified_text_leaf(child, free_head);
+            // The prior occupant was forgotten before this slot entered the free list;
+            // a newly appended slot has never been observed. The immediate closed-region
+            // witness excludes observers and collection since this fresh leaf was decoded,
+            // so there is no leaf observation to forget a second time.
+            self.retire_unobserved_text_leaf(child, free_head);
             free_head = child;
         }
         self.free_head = free_head;
@@ -8570,6 +8579,64 @@ mod tests {
             children[1] as usize
         );
         assert_eq!(heap.slots[children[1] as usize].gc_next.get(), head);
+    }
+
+    #[test]
+    fn certified_nonshort_retirement_reuses_a_forgotten_slot_without_disturbing_other_observations()
+    {
+        let mut heap = Heap::new();
+        let unrelated = heap.alloc(Value::Str("unrelated string".into()));
+        let previous = heap.alloc(Value::Str("previous occupant".into()));
+        heap.root_trace.flags.resize(heap.slots.len(), 0);
+        heap.root_trace.flags[previous as usize] = RootTrace::COVERED | RootTrace::FRONTIER;
+        heap.root_trace.valid = true;
+        let mut position = TextPosition::default();
+        position.slot = previous;
+        heap.text_position.set(position);
+        heap.cache_standard_stream_bindings(previous, [NONE; 3]);
+
+        heap.retire_slot(previous as usize);
+        assert!(!heap.root_trace.valid);
+        assert_eq!(heap.root_trace.flags[previous as usize], 0);
+        assert_eq!(heap.text_position.get().slot, NONE);
+        assert!(heap.standard_stream_bindings(previous).is_none());
+
+        heap.root_trace.flags[unrelated as usize] = RootTrace::COVERED;
+        heap.root_trace.valid = true;
+        position.slot = unrelated;
+        heap.text_position.set(position);
+        heap.cache_standard_stream_bindings(unrelated, [NONE; 3]);
+        let mark = heap.temporary_mark();
+        let long = "x".repeat(200);
+        let (owner, children) = nonshort_text_list(&mut heap, &[("fresh", true), (&long, true)]);
+        assert_eq!(children[0], previous);
+        heap.release_temporaries_since(mark);
+
+        // SAFETY: the immediate producer reused the forgotten slot, and no observer,
+        // collector, alias or root can have reached the fresh leaf since allocation.
+        assert!(unsafe { heap.retire_certified_nonshort_text_list(owner) });
+        assert!(
+            children
+                .iter()
+                .all(|&child| heap.slots[child as usize].value.is_none())
+        );
+        assert!(heap.root_trace.valid);
+        assert_eq!(
+            heap.root_trace.flags[unrelated as usize],
+            RootTrace::COVERED
+        );
+        assert_eq!(heap.text_position.get().slot, unrelated);
+        assert!(heap.standard_stream_bindings(unrelated).is_some());
+
+        let (next_owner, next_children) = nonshort_text_list(&mut heap, &[("again", true)]);
+        assert_eq!(next_children, [owner]);
+        assert_eq!(next_owner, previous);
+        heap.release_temporaries_since(mark);
+        // SAFETY: the next producer reused slots from the same scrubbed free list.
+        assert!(unsafe { heap.retire_certified_nonshort_text_list(next_owner) });
+        assert!(heap.root_trace.valid);
+        assert_eq!(heap.text_position.get().slot, unrelated);
+        assert!(heap.standard_stream_bindings(unrelated).is_some());
     }
 
     #[test]
