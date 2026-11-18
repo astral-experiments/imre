@@ -1,10 +1,4 @@
 # CPython 3.14.5 Lib/contextlib.py
-from types import GenericAlias as _GenericAlias
-
-# The typed compiler also loads the abstract base on its own.
-AbstractContextManager.__class_getitem__ = classmethod(_GenericAlias)
-
-
 class closing(AbstractContextManager):
     """Context to automatically close something at the end of a block.
 

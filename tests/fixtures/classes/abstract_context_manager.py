@@ -2,7 +2,7 @@ import contextlib
 from contextlib import AbstractContextManager
 
 
-class Resource(AbstractContextManager[int]):
+class Resource(AbstractContextManager[int, None]):
     def __enter__(self) -> int:
         return 42
 

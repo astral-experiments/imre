@@ -568,27 +568,18 @@ impl Reachable {
         self.instance_attributes.contains(name)
             || self.class_attributes.contains(&(owner, name.to_owned()))
     }
-    pub(super) fn collect(graph: &SourceGraph, strict_callers: bool) -> Self {
-        Self::collect_with_reprs(graph, strict_callers, &HashSet::new())
+    pub(super) fn collect(graph: &SourceGraph) -> Self {
+        Self::collect_with_reprs(graph, &HashSet::new())
     }
 
     pub(super) fn collect_with_reprs(
         graph: &SourceGraph,
-        strict_callers: bool,
         key_reprs: &HashSet<DefinitionId>,
     ) -> Self {
         let mut found = Self::default();
         for (module, source) in graph.modules.iter().enumerate() {
             for (statement, node) in source.parsed.syntax().body.iter().enumerate() {
                 let id = DefinitionId { module, statement };
-                if strict_callers && !source.bundled {
-                    References {
-                        graph,
-                        module,
-                        found: &mut found,
-                    }
-                    .visit_stmt(node);
-                }
                 match node {
                     ast::Stmt::FunctionDef(f) => {
                         if source.function_binding(module, f).is_some()

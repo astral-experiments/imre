@@ -2027,7 +2027,7 @@ impl Context {
 
     /// Test native or C3 inheritance without traversing the ABC registry.
     pub(super) fn direct_subclass(&self, class: Id, target: Id) -> bool {
-        if self.equal_class(class, target) || self.structural_context_manager(class, target) {
+        if self.equal_class(class, target) {
             return true;
         }
         if let Value::Class { ancestors, .. } = self.heap.get(class) {
