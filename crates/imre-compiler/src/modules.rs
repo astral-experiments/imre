@@ -264,20 +264,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             ),
         )),
         "queue" => bundled_source!("queue.py"),
-        "csv" => Some((
-            "csv.py",
-            concat!(
-                include_str!("../stdlib/csv/dialect.py"),
-                "\n",
-                include_str!("../stdlib/csv/writer.py"),
-                "\n",
-                include_str!("../stdlib/csv/reader.py"),
-                "\n",
-                include_str!("../stdlib/csv/dict.py"),
-                "\n",
-                include_str!("../stdlib/csv/sniffer.py"),
-            ),
-        )),
+        "csv" => bundled_source!("csv.py"),
         "contextvars" => bundled_source!("contextvars.py", from "contextvars"),
         "copy" => Some((
             "copy.py",
