@@ -1314,7 +1314,8 @@ fn checked_lower_with(
                 &graph.inputs,
             )
             .and_then(|owner| {
-                owner.closed_program_errors(&graph.modules, skipped, &overloads, native, None)
+                let roots = owner.closed_file_roots(&graph.modules, skipped, &overloads, None);
+                owner.closed_program_errors(&roots, native)
             });
         // An inapplicable object representation cannot replace a native source or ABI
         // diagnostic. A real registration checks this result before emitting its body.
