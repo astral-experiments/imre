@@ -10002,11 +10002,18 @@ impl<'a> Checker<'a> {
         expression: &ast::Expr,
         result: ResultUse<'_>,
     ) -> Result<Expr, String> {
-        self.with_expression_site(expression, |checker| {
-            match checker.lower_expression(expression, result) {
-                Err(failure) if checker.missing_operation(&failure) => Ok(Expr::unrepresented()),
-                result => result,
-            }
+        // Expression lowering recurses through debug frames substantially larger than the
+        // visitor frames. Grow before entering them so nested calls and field accesses can
+        // compile on hosts whose default thread stack is only 1 MiB.
+        stacker::maybe_grow(512 * 1024, 2 * 1024 * 1024, || {
+            self.with_expression_site(expression, |checker| {
+                match checker.lower_expression(expression, result) {
+                    Err(failure) if checker.missing_operation(&failure) => {
+                        Ok(Expr::unrepresented())
+                    }
+                    result => result,
+                }
+            })
         })
     }
 
@@ -12948,6 +12955,16 @@ impl<'a> Checker<'a> {
             // entry has already declined an operand and is checking the remaining stores.
             self.namespace_calls.insert(call.range());
             return Ok(registered::values::name_call(call, "globals", vec![]));
+        }
+        if self
+            .graph
+            .session
+            .fixed_source_compile_call(self.module, call)
+        {
+            return Err(self.scoped_builtin_error("compile", call));
+        }
+        if self.graph.session.fixed_eval_call(self.module, call) {
+            return Err(self.scoped_builtin_error("eval", call));
         }
         if self.graph.session.fixed_exec_call(self.module, call) {
             let refusal = self.scoped_builtin_error("exec", call);

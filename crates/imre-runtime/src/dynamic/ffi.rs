@@ -1348,9 +1348,61 @@ pub(super) unsafe extern "C" fn imre_dyn_exec_operand(
     ctx.native_module_code(entry, filename, Some(flags))
 }
 
+/// Link a bounded runtime statement plan only for the live builtin `exec` and an
+/// immutable `exec`-mode parsed code object with the caller's exact future flags.
+///
+/// # Safety
+/// The emitted caller supplies its active context and live callable/code handles.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_bounded_file_exec_operand(
+    ctx: *mut Context,
+    callable: Id,
+    code: Id,
+    flags: u32,
+) -> Id {
+    // SAFETY: generated callers own the active context and keep both operands rooted.
+    let ctx = unsafe { &mut *ctx };
+    let result = ctx.link_bounded_file_exec(callable, code, flags);
+    finish(ctx, result)
+}
+
+/// Link a checked non-expression interactive statement only when builtin `exec`
+/// consumes the exact parsed `single`-mode code object and matching future flags.
+/// Code compiled in another mode and shadowed callables keep their original operand.
+///
+/// # Safety
+/// The caller supplies a live context, native entry, and NUL-terminated expected source.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_single_operand(
+    ctx: *mut Context,
+    callable: Id,
+    text: Id,
+    entry: Code,
+    flags: u32,
+    expected: *const c_char,
+) -> Id {
+    // SAFETY: compiled callers supply an active context and static UTF-8 source.
+    let (ctx, expected) = unsafe { (&mut *ctx, cstr(expected)) };
+    if !matches!(ctx.heap.get(callable), Value::Native(name) if name == "exec") {
+        return text;
+    }
+    if let Value::Code(code) = ctx.heap.get(text)
+        && let value::Body::ParsedSingle { constants, source } = &code.body
+        && code.definition.flags == flags
+        && matches!(ctx.heap.get(*source), Value::Str(value) if value.as_str() == expected)
+    {
+        let constants = *constants;
+        let Value::Code(code) = ctx.heap.get_mut(text) else {
+            unreachable!("validated code object")
+        };
+        code.body = value::Body::Native(entry, constants);
+    }
+    text
+}
+
 /// Link a fixed expression only when the evaluated callable is builtin `eval`
-/// and its actual string and inherited flags match the compiled alternative.
-/// This leaves a shadowed callable's original string argument untouched.
+/// and its actual string or parsed code source and flags match the compiled alternative.
+/// A shadowed callable receives its original argument unchanged.
 ///
 /// # Safety
 /// The caller supplies a live context, native entry, and NUL-terminated expected source.
@@ -1365,8 +1417,22 @@ pub(super) unsafe extern "C" fn imre_dyn_eval_operand(
 ) -> Id {
     // SAFETY: compiled callers supply an active context and static UTF-8 source.
     let (ctx, expected) = unsafe { (&mut *ctx, cstr(expected)) };
-    if !matches!(ctx.heap.get(callable), Value::Native(name) if name == "eval")
-        || !matches!(ctx.heap.get(text), Value::Str(value) if value.as_str() == expected)
+    if !matches!(ctx.heap.get(callable), Value::Native(name) if name == "eval") {
+        return text;
+    }
+    if let Value::Code(code) = ctx.heap.get(text)
+        && let value::Body::ParsedEval { constants, source } = &code.body
+        && code.definition.flags == flags
+        && matches!(ctx.heap.get(*source), Value::Str(value) if value.as_str() == expected)
+    {
+        let constants = *constants;
+        let Value::Code(code) = ctx.heap.get_mut(text) else {
+            unreachable!("validated code object")
+        };
+        code.body = value::Body::Native(entry, constants);
+        return text;
+    }
+    if !matches!(ctx.heap.get(text), Value::Str(value) if value.as_str() == expected)
         || ctx.inherited_compile_flags() != flags
     {
         return text;
@@ -3554,6 +3620,50 @@ impl Context {
 pub(super) unsafe extern "C" fn imre_dyn_failed(ctx: *const Context) -> bool {
     // SAFETY: the generated caller holds the context throughout this query.
     unsafe { (*ctx).heap.execution.pending.is_some() }
+}
+
+/// Preserve only an entry gateway or a prepared exact string method's positional ABI.
+/// Other calls respect explicit interposition of the canonical scoped call, including source
+/// functions invoked from within another source function. Inspect the evaluated callable after
+/// argument effects so rebinding and `__code__` replacement cannot inherit an old source proof.
+/// String methods use the same allocation-free symbol map as `builtin_method_target`; other
+/// prepared methods conservatively use the canonical ABI.
+///
+/// # Safety
+/// `ctx` must point to the active interpreter. `callable` and any nonzero `receiver`
+/// must be live handles from one prepared positional call. `method` is null for a standalone
+/// callable or points to its linked NUL-terminated method name.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_positional_call_abi(
+    ctx: *const Context,
+    callable: Id,
+    receiver: Id,
+    method: *const c_char,
+) -> bool {
+    // SAFETY: generated callers keep the interpreter and evaluated callable alive.
+    let ctx = unsafe { &*ctx };
+    if receiver != NONE {
+        let (Value::Str(_) | Value::SurrogateStr(_), Value::Native(symbol)) =
+            (ctx.heap.get(receiver), ctx.heap.get(callable))
+        else {
+            return false;
+        };
+        if method.is_null() {
+            return false;
+        }
+        // SAFETY: generated method calls pass the linked NUL-terminated name.
+        return imre_ast::strings::str_method_symbol(unsafe { cstr(method) })
+            == Some(symbol.as_str());
+    }
+    // A method lookup with no unbound receiver may have returned an already bound method
+    // or a custom descriptor result. Only a standalone source callee is an entry gateway.
+    if !method.is_null() || !ctx.heap.current_frame_is_module() {
+        return false;
+    }
+    let Value::Function { code, .. } = ctx.heap.get(callable) else {
+        return false;
+    };
+    matches!(ctx.heap.get(*code), Value::Code(code) if code.native_entry().is_some())
 }
 
 /// Record the caller's temporary root boundary before an expression runs.

@@ -41,6 +41,7 @@ pub fn module_suffixes() -> [String; 7] {
 /// Unicode Character Database version shipped with the target CPython 3.14 release.
 pub const UNICODE_DATA_VERSION: &str = "16.0.0";
 
+pub mod annotation_scopes;
 pub mod comprehension;
 #[cfg(target_os = "linux")]
 pub mod epoll;
@@ -55,6 +56,7 @@ pub mod posixpath;
 pub mod providers;
 pub mod python_nodes;
 pub mod source_arguments;
+pub mod source_complexity;
 pub mod source_encoding;
 pub mod startup;
 pub mod strings;

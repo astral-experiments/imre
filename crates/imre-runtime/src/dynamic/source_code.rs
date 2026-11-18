@@ -1,6 +1,9 @@
 //! Runtime code metadata, compilation of source objects and Python namespace operations.
 
 mod annotations;
+mod bounded_exec;
+
+pub(super) use bounded_exec::Plan as BoundedExecPlan;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -2276,13 +2279,32 @@ impl Context {
         mode: &str,
         inherited: u32,
     ) -> Result<Id> {
-        let program = self.prepare_source_program(source, filename, mode, false, inherited)?;
-        let source = if mode == "exec" && matches!(self.heap.get(source), Value::Str(_)) {
+        // A compiled buffer must retain the text decoded at compile time: the
+        // original bytearray may change before its code object is executed.
+        // Parse that same snapshot so source decoding allocates only once.
+        let retain = matches!(mode, "exec" | "eval" | "single");
+        let source = if retain && self.string_storage(source).is_none() {
+            let decoded = self.decode_compile_buffer(source, Some(filename))?;
+            self.text(decoded)
+        } else if retain {
+            self.string_storage(source).unwrap_or(source)
+        } else {
+            source
+        };
+        let program =
+            self.prepare_source_program(source, filename, mode, false, inherited, true)?;
+        let retained = if retain && matches!(self.heap.get(source), Value::Str(_)) {
             source
         } else {
             NONE
         };
-        Ok(self.box_source_code(program, filename, source))
+        let mode = match mode {
+            "exec" => value::ParsedMode::Exec,
+            "eval" => value::ParsedMode::Eval,
+            "single" => value::ParsedMode::Single,
+            _ => unreachable!("validated compile mode"),
+        };
+        Ok(self.box_source_code(program, filename, retained, mode))
     }
 
     fn prepare_source_program(
@@ -2292,6 +2314,7 @@ impl Context {
         mode: &str,
         strip_indent: bool,
         inherited: u32,
+        limit_complexity: bool,
     ) -> Result<ParsedModule> {
         use ruff_python_parser::Mode;
         let interactive = mode == "single";
@@ -2324,6 +2347,14 @@ impl Context {
         } else {
             imre_ast::indentation::Source::original(source)
         };
+        if limit_complexity
+            && imre_ast::source_complexity::check_runtime_compile(&input.text).is_err()
+        {
+            return Err(Error::new(
+                "RecursionError",
+                "maximum recursion depth exceeded during compilation",
+            ));
+        }
         let parsed = ruff_python_parser::parse_unchecked(&input.text, parser_mode.into());
         // In single mode, a second statement is an error before its suite is read.
         let first_statement_end = match (interactive, parsed.syntax()) {
@@ -2455,8 +2486,7 @@ impl Context {
                 let mut strings =
                     CompiledStrings::new(&mut self.heap, &mut shared, &spellings, &code.directives);
                 strings.visit_expr(&expression.body);
-                let constants = strings.finish_scope(code.has_named_bindings, true)?;
-                constants
+                strings.finish_scope(code.has_named_bindings, true)?
             }
             ast::Mod::Module(module) => {
                 let mut body = module.body;
@@ -2563,13 +2593,22 @@ impl Context {
         }
     }
 
-    fn box_source_code(&mut self, module: ParsedModule, filename: Id, source: Id) -> Id {
+    fn box_source_code(
+        &mut self,
+        module: ParsedModule,
+        filename: Id,
+        source: Id,
+        mode: value::ParsedMode,
+    ) -> Id {
         let name = self.heap.code_name("<module>");
+        let constants = module.constants;
+        let body = match mode {
+            value::ParsedMode::Exec => Body::Parsed { constants, source },
+            value::ParsedMode::Eval => Body::ParsedEval { constants, source },
+            value::ParsedMode::Single => Body::ParsedSingle { constants, source },
+        };
         self.realize_code(
-            Body::Parsed {
-                constants: module.constants,
-                source,
-            },
+            body,
             value::CodeDefinition {
                 module_definition: true,
                 // The supported module compile modes admit only future flags.
@@ -2868,7 +2907,14 @@ impl Context {
         }
         self.checked_source_namespaces(globals, locals, None, "eval")?;
         let filename = self.text("<string>");
-        self.prepare_source_program(text, filename, "eval", true, self.inherited_compile_flags())?;
+        self.prepare_source_program(
+            text,
+            filename,
+            "eval",
+            true,
+            self.inherited_compile_flags(),
+            false,
+        )?;
         Err(Error::new(
             "NotImplementedError",
             "annotation source expression has no checked AOT body; declare the annotation in source or avoid eval_str",
@@ -3169,7 +3215,12 @@ impl Context {
                     "cannot use a closure with this code object",
                 ));
             }
-            Value::Code(code) if matches!(code.body, Body::Parsed { .. }) => {
+            Value::Code(code)
+                if matches!(
+                    code.body,
+                    Body::Parsed { .. } | Body::ParsedEval { .. } | Body::ParsedSingle { .. }
+                ) =>
+            {
                 return self.missing_compiled_body(source);
             }
             Value::Code(_) => source,
@@ -3193,7 +3244,14 @@ impl Context {
                     && !imre_ast::forward_refs::is_starred(self.str_value(source)?);
                 let filename = self.text("<string>");
                 if !exact {
-                    self.prepare_source_program(source, filename, mode, mode == "eval", inherited)?;
+                    self.prepare_source_program(
+                        source,
+                        filename,
+                        mode,
+                        mode == "eval",
+                        inherited,
+                        false,
+                    )?;
                 }
                 let entry =
                     entry.ok_or_else(|| Self::missing_body_error("<module>", "<string>", 1))?;

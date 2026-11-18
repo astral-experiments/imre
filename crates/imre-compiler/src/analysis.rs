@@ -6,6 +6,10 @@ mod closed_program_tests;
 mod correlated_calls;
 mod exact_calls;
 mod execution;
+pub(crate) use execution::{
+    bounded_source_string, finite_eval_count_operand, finite_eval_sources,
+    finite_first_integer_choices, valid_eval_arguments,
+};
 #[cfg(test)]
 mod incremental_tests;
 mod inferred_shapes;
@@ -30,7 +34,6 @@ use ruff_db::vendored::VendoredFileSystem;
 use ruff_python_ast::token::{TokenKind, Tokens};
 use ruff_python_ast::visitor::{Visitor, walk_stmt};
 use ruff_python_ast::{Expr, ExprCall, ExprRef, Stmt};
-use ruff_python_parser::{Mode, lexer::lex};
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use salsa::Setter;
 use ty_python_core::program::ProgramSettings;
@@ -197,12 +200,13 @@ impl SourceContract {
             Self::Checked(result) => result,
             Self::Pending { native, result } => result.get_or_init(|| {
                 let (skipped, overloads) = graph.diagnostic_scopes();
-                graph.session.closed_program_errors(
+                graph.session.closed_program_errors_with_entry(
                     &graph.modules,
                     skipped.as_deref(),
                     &overloads,
                     Some(native),
                     Some(&graph.registered_source_errors.borrow()),
+                    Some((graph.entry, graph.module_filename(graph.entry))),
                 )
             }),
         }
@@ -1575,7 +1579,9 @@ impl Session {
         let mut selected_providers = HashMap::new();
         for (id, source) in sources.clone() {
             if source.has_open_execution && source.is_original_sdk_source() {
-                selected_providers.entry(source.name).or_insert(self.files[id]);
+                selected_providers
+                    .entry(source.name)
+                    .or_insert(self.files[id]);
             }
         }
         let selected_provider = |owner: &str| selected_providers.get(owner).copied();
@@ -2111,7 +2117,13 @@ impl Session {
         ty_python_core::semantic_index(&self.db, self.db.program_file(file))
             .semantic_syntax_errors()
             .iter()
-            .find(|error| !class_cell::binds_nonlocal(&self.db, file, error))
+            .find(|error| {
+                !class_cell::binds_nonlocal(&self.db, file, error)
+                    && !imre_ast::annotation_scopes::named_expression_in_lambda_body(
+                        self.parsed(file).syntax(),
+                        error,
+                    )
+            })
             .cloned()
     }
 
@@ -3963,6 +3975,27 @@ impl Session {
         native: Option<&crate::frontend::phase::Diagnostic>,
         checked_bodies: Option<&crate::modules::RegisteredSourceErrors>,
     ) -> Result<(), String> {
+        self.closed_program_errors_with_entry(
+            modules,
+            skipped,
+            overloads,
+            native,
+            checked_bodies,
+            None,
+        )
+    }
+
+    /// Render source-contract errors with the invoked entry filename while retaining
+    /// each module's canonical path as its checked source identity.
+    pub(crate) fn closed_program_errors_with_entry(
+        &self,
+        modules: &[impl ClosedSource],
+        skipped: Option<&[Vec<TextRange>]>,
+        overloads: &[Vec<CheckedDiagnostic>],
+        native: Option<&crate::frontend::phase::Diagnostic>,
+        checked_bodies: Option<&crate::modules::RegisteredSourceErrors>,
+        entry_filename: Option<(usize, &Path)>,
+    ) -> Result<(), String> {
         use ty_python_core::definition::DefinitionKind;
 
         assert_eq!(modules.len(), self.files.len());
@@ -4084,6 +4117,11 @@ impl Session {
                     continue;
                 }
             }
+            // The graph keeps its canonical path for source identity and imports, but
+            // diagnostics for the entry belong to the spelling used to invoke it.
+            let path = entry_filename
+                .filter(|(entry, _)| *entry == index)
+                .map_or(path, |(_, filename)| filename);
             let mut dormant = Vec::new();
             self.exact_scalar_stores(
                 index,
@@ -6088,143 +6126,7 @@ impl<'a> Visitor<'a> for SuiteLimits<'_> {
 /// Ruff indexes the AST recursively as soon as the database parses a module.
 /// Bound the depth before that happens, including chains with no parentheses.
 pub(crate) fn check_source_complexity(source: &str) -> Result<(), &'static str> {
-    const LIMIT: usize = 96;
-    if source.len() < LIMIT {
-        return Ok(());
-    }
-
-    #[derive(Default)]
-    struct Group {
-        operators: usize,
-        primary_depth: usize,
-        longest_primary: usize,
-        longest_item: usize,
-        enclosing_operators: usize,
-        longest_boolean_operand: usize,
-        boolean_operators: usize,
-        open_lambda_parameters: usize,
-        // Replacement fields are siblings in an f-string or template string.
-        interpolated_string: bool,
-        // Commas in a comprehension target belong to one assignment target.
-        keep_commas: bool,
-    }
-
-    impl Group {
-        fn operand_depth(&self) -> usize {
-            self.operators + self.longest_primary.max(self.primary_depth)
-        }
-
-        fn depth(&self) -> usize {
-            let operand = self.operand_depth();
-            // A Boolean expression has at most an outer "or" and an inner "and".
-            // Ruff stores the operands of each operator as siblings.
-            let boolean = if self.boolean_operators == 0 {
-                operand
-            } else {
-                2 + self.longest_boolean_operand.max(operand)
-            };
-            // ty tracks a flow branch at each short circuit, even for a flat AST.
-            self.longest_item
-                .max(self.enclosing_operators + boolean)
-                .max(self.boolean_operators)
-        }
-
-        fn next_item(&mut self) {
-            self.longest_item = self.depth();
-            self.enclosing_operators = 0;
-            self.longest_boolean_operand = 0;
-            self.boolean_operators = 0;
-            self.operators = 0;
-            self.primary_depth = 0;
-            self.longest_primary = 0;
-        }
-    }
-
-    use TokenKind::*;
-    let mut lexer = lex(source, Mode::Module);
-    let mut parents = Vec::new();
-    let mut group = Group::default();
-    let mut indents = Vec::new();
-    let mut elif_depth = 0;
-    let mut statement_start = true;
-    loop {
-        let token = lexer.next_token();
-        if statement_start
-            && !matches!(
-                token,
-                Indent | Dedent | Newline | Comment | NonLogicalNewline
-            )
-        {
-            // Each elif adds a nested false branch. Its suite inherits that
-            // depth, while a new statement starts a fresh chain at this indent.
-            match token {
-                Elif => elif_depth += 1,
-                Else => {}
-                _ => elif_depth = indents.last().copied().unwrap_or(0),
-            }
-            statement_start = false;
-        }
-        match token {
-            EndOfFile => return Ok(()),
-            Indent => indents.push(elif_depth),
-            Dedent => elif_depth = indents.pop().unwrap_or(0),
-            Newline | Semi if parents.is_empty() => {
-                group = Group::default();
-                statement_start = token == Newline;
-            }
-            Lpar | Lsqb | Lbrace | FStringStart | TStringStart => {
-                if token == Lbrace && group.interpolated_string {
-                    group.next_item();
-                }
-                group.primary_depth += 1;
-                parents.push(std::mem::take(&mut group));
-                group.interpolated_string = matches!(token, FStringStart | TStringStart);
-            }
-            Rpar | Rsqb | Rbrace | FStringEnd | TStringEnd => {
-                if let Some(mut parent) = parents.pop() {
-                    parent.primary_depth = parent.primary_depth.max(1 + group.depth());
-                    group = parent;
-                }
-            }
-            Comma if !group.keep_commas && group.open_lambda_parameters == 0 => group.next_item(),
-            And | Or => {
-                let depth = group.operand_depth();
-                group.longest_boolean_operand = group.longest_boolean_operand.max(depth);
-                group.boolean_operators += 1;
-                group.operators = 0;
-                group.primary_depth = 0;
-                group.longest_primary = 0;
-            }
-            Dot => group.primary_depth += 1,
-            kind if kind.as_binary_operator().is_some() => {
-                // In f() + g(), the calls are siblings. Count every operator on
-                // the expression spine and the deepest of its primary operands.
-                group.longest_primary = group.longest_primary.max(group.primary_depth);
-                group.primary_depth = 0;
-                group.operators += 1;
-            }
-            // These expressions can enclose Boolean operands across the entire item.
-            Lambda => {
-                group.open_lambda_parameters += 1;
-                group.enclosing_operators += 1;
-            }
-            Colon if group.open_lambda_parameters > 0 => {
-                group.open_lambda_parameters -= 1;
-                group.operators += 1;
-            }
-            For => {
-                group.keep_commas = true;
-                group.enclosing_operators += 1;
-            }
-            If | Else | Yield | ColonEqual => group.enclosing_operators += 1,
-            Identifier | Int | Float | Complex | String | True | False | None | Ellipsis
-            | FStringMiddle | TStringMiddle | Comment | NonLogicalNewline => continue,
-            _ => group.operators += 1,
-        }
-        if indents.len() + elif_depth + parents.len() + group.depth() > LIMIT {
-            return Err("Imre: source exceeds the syntax complexity limit");
-        }
-    }
+    imre_ast::source_complexity::check(source)
 }
 
 /// ty retains a snapshot of the scope's flow state for every handler in a try.

@@ -447,6 +447,41 @@ impl BuildOptions {
 }
 
 impl LinkOptions {
+    /// Resolve GNU linker wrap requests from direct, `-Xlinker`, and `-Wl,` driver forms.
+    pub(super) fn interposition(&self) -> imre_compiler::LinkInterposition {
+        let mut policy = imre_compiler::LinkInterposition::default();
+        let mut next_is_symbol = false;
+        for argument in &self.args {
+            let Some(argument) = argument.to_str() else {
+                continue;
+            };
+            let words: Vec<_> = match argument.strip_prefix("-Wl,") {
+                Some(driver_options) => driver_options.split(',').collect(),
+                None => vec![argument],
+            };
+            for word in words {
+                if word == "-Xlinker" {
+                    continue;
+                }
+                let symbol = if next_is_symbol {
+                    next_is_symbol = false;
+                    Some(word)
+                } else if word == "--wrap" {
+                    next_is_symbol = true;
+                    None
+                } else {
+                    word.strip_prefix("--wrap=")
+                };
+                match symbol {
+                    Some("imre_dyn_lit") => policy.literal = true,
+                    Some("imre_dyn_scoped_call_at") => policy.scoped_call = true,
+                    _ => {}
+                }
+            }
+        }
+        policy
+    }
+
     fn codegen(&mut self, option: &str) -> Result<(), String> {
         match option.split_once('=') {
             Some(("link-arg", arg)) => self.args.push(arg.into()),

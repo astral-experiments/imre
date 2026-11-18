@@ -50,6 +50,29 @@ pub(super) enum ValueUse<'a> {
     FinalIntegerOperand,
 }
 
+/// Source callees own their traceback positions independently of the enclosing fixed sites.
+#[derive(Clone, Copy)]
+enum CalleeLoader {
+    Ordinary,
+    Source,
+}
+
+impl CalleeLoader {
+    fn fixed(self, frame: &mut CheckedFrame<'_, '_, '_>, expr: &Expr, next: &mut String) -> String {
+        match self {
+            Self::Ordinary => frame.kept_call_value(expr, next),
+            Self::Source => frame.source_callee(expr, next),
+        }
+    }
+
+    fn packed(self, frame: &mut CheckedFrame<'_, '_, '_>, expr: &Expr) -> String {
+        match self {
+            Self::Ordinary => frame.evaluate_handle(expr),
+            Self::Source => frame.source_callee_handle(expr),
+        }
+    }
+}
+
 impl<'a> ValueUse<'a> {
     /// An enclosing operation can supply the boundary above its preceding operands.
     pub(super) fn operand_mark(self, frame: &mut CheckedFrame<'_, '_, '_>) -> Cow<'a, str> {
@@ -304,7 +327,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 callable,
                 &args.values,
                 usage,
-                CheckedFrame::kept_call_value,
+                CalleeLoader::Ordinary,
             )
         };
         let frame = self.python();
@@ -322,7 +345,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         target: &Expr,
         args: &[Expr],
         usage: ValueUse<'_>,
-        load_callable: fn(&mut CheckedFrame<'f, 'a, 'p>, &Expr, &mut String) -> String,
+        load_callable: CalleeLoader,
     ) -> CheckedValue {
         use super::registered::CallArguments;
         use ir::{RegisteredArguments, RegisteredCallTarget};
@@ -350,18 +373,25 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             frame.call_position(name);
         }
         let mut next = mark.to_string();
-        let packed = matches!(call.arguments, RegisteredArguments::Packed(_));
+        let forced_pack = frame.output.link_interposition.scoped_call
+            && !matches!(call.arguments, RegisteredArguments::Packed(_));
+        let guarded_positional = forced_pack
+            && matches!(call.arguments, RegisteredArguments::Positional)
+            && call.partition_field.is_none();
+        let packed = forced_pack || matches!(call.arguments, RegisteredArguments::Packed(_));
         let scope = scope.map(|scope| {
-            if packed {
+            if packed && !guarded_positional {
                 frame.evaluate_handle(scope)
             } else {
                 frame.kept_call_value(scope, &mut next)
             }
         });
-        let target = if !matches!(call.target, RegisteredCallTarget::Method { .. }) && !packed {
-            load_callable(frame, target, &mut next)
+        let target = if !matches!(call.target, RegisteredCallTarget::Method { .. })
+            && (!packed || guarded_positional)
+        {
+            load_callable.fixed(frame, target, &mut next)
         } else {
-            frame.evaluate_handle(target)
+            load_callable.packed(frame, target)
         };
         let (callable, receiver, range, end) = match &call.target {
             RegisteredCallTarget::Callable { .. } | RegisteredCallTarget::FixedExec { .. } => {
@@ -372,7 +402,8 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 attribute,
                 name_start,
             } => {
-                let direct = matches!(call.arguments, RegisteredArguments::Positional);
+                let direct = (!packed || guarded_positional)
+                    && matches!(call.arguments, RegisteredArguments::Positional);
                 let (lookup, range) = frame
                     .positions
                     .method_ranges(*attribute, *name_start, name, call.range)
@@ -388,7 +419,80 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 (callable, bound, range, attribute.end())
             }
         };
+        if guarded_positional {
+            let receiver_slot = receiver.is_some();
+            let prepared_receiver = receiver.as_deref().unwrap_or("0").to_owned();
+            let (array, count) = frame.kept_call_arguments(&callable, receiver, args, next, exec);
+            let method_name = match &call.target {
+                RegisteredCallTarget::Method { name, .. } => frame.output.data(name.as_bytes()),
+                _ => "null".into(),
+            };
+            // Arguments may replace the function's code, so inspect the live callable only
+            // after its operands have run and before constructing any canonical argument list.
+            let positional = frame.value(&format!(
+                "call i1 @imre_dyn_positional_call_abi(ptr %ctx, i64 {callable}, i64 {prepared_receiver}, ptr {method_name})"
+            ));
+            let source = frame.name("b");
+            let dynamic = frame.name("b");
+            let done = frame.name("b");
+            frame.branch(&positional, &source, &dynamic);
+            frame.label(&source);
+            let span = frame.position_for_call(range, end, call.range.end());
+            let source_result = frame.call_at(
+                &callable,
+                CallArguments::Positional {
+                    array,
+                    count,
+                    receiver_slot,
+                },
+                &mark,
+                span,
+                scope.as_deref(),
+            );
+            let source_block = frame.current_block().to_owned();
+            frame.jump(&done);
+            frame.label(&dynamic);
+            let args = frame.pack_evaluated_positional(array, count, receiver_slot);
+            frame.finish_unwind(edge, |frame| frame.release_owned_operands(&mark));
+            let span = frame.position_for_call(range, end, call.range.end());
+            let dynamic_result = frame.call_at(
+                &callable,
+                CallArguments::Packed {
+                    args,
+                    kwargs: "0".into(),
+                },
+                &mark,
+                span,
+                scope.as_deref(),
+            );
+            let dynamic_block = frame.current_block().to_owned();
+            frame.jump(&done);
+            frame.label(&done);
+            return CheckedValue::handle(frame.value(&format!(
+                "phi i64 [ {source_result}, %{source_block} ], [ {dynamic_result}, %{dynamic_block} ]"
+            )));
+        }
         let operands = match &call.arguments {
+            layout if forced_pack => {
+                let (positional, keywords) = match layout {
+                    RegisteredArguments::Positional => (args.len(), Vec::new()),
+                    RegisteredArguments::Keywords { positional, names } => (
+                        *positional,
+                        names
+                            .iter()
+                            .map(|name| Some(name.as_str().to_owned()))
+                            .collect(),
+                    ),
+                    RegisteredArguments::Packed(_) => unreachable!("already packed"),
+                };
+                let pack = ir::PackedArguments {
+                    starred: vec![false; positional],
+                    keywords,
+                };
+                let (args, kwargs) =
+                    frame.pack_arguments_with_exec(&pack, args, Some(&callable), exec);
+                CallArguments::Packed { args, kwargs }
+            }
             RegisteredArguments::Packed(pack) => {
                 let (args, kwargs) = frame.pack_arguments(pack, args, Some(&callable));
                 CallArguments::Packed { args, kwargs }
@@ -432,6 +536,13 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         } else {
             let result = invoke(frame);
             frame.finish_unwind(edge, |frame| frame.release_owned_operands(&mark));
+            result
+        };
+        let result = if forced_pack && let Some((index, outer)) = call.partition_field {
+            let span = frame.expression_range_span(outer, call.range.end(), b'[');
+            let key = frame.integer(index);
+            frame.op_at("get", &[&result, &key], span)
+        } else {
             result
         };
         CheckedValue::handle(result)
@@ -994,9 +1105,9 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                         .call_operands(range, frame.operand_range(expr), expr)
                         .expect("placed call operands");
                     let load = if target.is_some() {
-                        CheckedFrame::source_callee
+                        CalleeLoader::Source
                     } else {
-                        CheckedFrame::kept_call_value
+                        CalleeLoader::Ordinary
                     };
                     return CheckedBody::registered(frame.reborrow())
                         .python_call(site, None, callee, args, usage, load);

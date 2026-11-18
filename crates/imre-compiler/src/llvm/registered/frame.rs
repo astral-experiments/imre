@@ -1530,13 +1530,71 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         operands: &[Expr],
         callable: Option<&str>,
     ) -> (String, String) {
+        self.pack_arguments_with_exec(layout, operands, callable, None)
+    }
+
+    /// Preserve compiled-source identity checks when a wrapped canonical call requires packing.
+    pub(in crate::llvm) fn pack_arguments_with_exec(
+        &mut self,
+        layout: &ir::PackedArguments,
+        operands: &[Expr],
+        callable: Option<&str>,
+        mut exec: Option<super::sites::CompiledExec>,
+    ) -> (String, String) {
         let mut pack = ArgumentPack::new(self, layout, callable);
         for (index, operand) in operands.iter().enumerate() {
             let slot = pack.prepare(self, index);
-            let value = self.evaluate_handle(operand);
+            let mut value = self.evaluate_handle(operand);
+            if index == 0
+                && let Some(child) = exec.take()
+            {
+                value = self.guard_compiled_source(
+                    callable.expect("compiled-source callable"),
+                    value,
+                    child,
+                );
+            }
             pack.insert(self, slot, &value);
         }
         pack.finish(self)
+    }
+
+    /// Build the canonical call list from already evaluated positional operands. An immediate
+    /// method lookup reserves slot zero even when it returned an already bound callable; omit
+    /// that zero sentinel. Load every handle before allocating, because operations reuse `%live`.
+    pub(in crate::llvm) fn pack_evaluated_positional(
+        &mut self,
+        array: &str,
+        count: usize,
+        receiver_slot: bool,
+    ) -> String {
+        let values: Vec<_> = (0..count)
+            .map(|index| {
+                let address = if index == 0 {
+                    array.to_owned()
+                } else {
+                    self.value(&format!("getelementptr i64, ptr {array}, i64 {index}"))
+                };
+                self.value(&format!("load i64, ptr {address}"))
+            })
+            .collect();
+        let list = self.op("list", &[]);
+        let mut values = values.into_iter();
+        if receiver_slot {
+            let receiver = values.next().expect("prepared method receiver slot");
+            let bound = self.value(&format!("icmp ne i64 {receiver}, 0"));
+            let append = self.name("b");
+            let done = self.name("b");
+            self.branch(&bound, &append, &done);
+            self.label(&append);
+            self.op("append", &[&list, &receiver]);
+            self.jump(&done);
+            self.label(&done);
+        }
+        for value in values {
+            self.op("append", &[&list, &value]);
+        }
+        list
     }
 
     pub(super) fn discard_operand(&mut self, evaluate: impl FnOnce(&mut Self) -> String) {
@@ -1965,39 +2023,69 @@ impl RegisteredFrame<'_, '_> {
         exec: Option<super::sites::CompiledExec>,
     ) -> (&'static str, usize) {
         if let Some(child) = exec {
-            for child in child.alternatives {
-                if let Some(file) = child.file {
-                    self.output.declare(
-                        |d| &mut d.linked_file_source,
-                        "declare i64 @imre_dyn_link_file_source(ptr, ptr, ptr, ptr, i32)\n",
-                    );
-                    self.checked(&format!(
+            let source = std::mem::take(&mut values[0]);
+            values[0] = self.guard_compiled_source(callable, source, child);
+        }
+        self.handle_array(&values)
+    }
+
+    /// Authenticate the original source or compiled code before publishing a linked body.
+    fn guard_compiled_source(
+        &mut self,
+        callable: &str,
+        mut source: String,
+        child: super::sites::CompiledExec,
+    ) -> String {
+        if let Some(flags) = child.bounded_file_flags {
+            self.output.declare(
+                |d| &mut d.bounded_file_exec_operand,
+                "declare i64 @imre_dyn_bounded_file_exec_operand(ptr, i64, i64, i32)\n",
+            );
+            source = self.checked(&format!(
+                    "call i64 @imre_dyn_bounded_file_exec_operand(ptr %ctx, i64 {callable}, i64 {source}, i32 {flags})"
+                ));
+        }
+        for child in child.alternatives {
+            if let Some(file) = child.file {
+                self.output.declare(
+                    |d| &mut d.linked_file_source,
+                    "declare i64 @imre_dyn_link_file_source(ptr, ptr, ptr, ptr, i32)\n",
+                );
+                self.checked(&format!(
                         "call i64 @imre_dyn_link_file_source(ptr %ctx, ptr {file}, ptr {}, ptr {}, i32 {})",
                         child.source, child.entry, child.flags,
                     ));
-                    continue;
-                }
-                let source = &mut values[0];
-                let name = if child.expression {
+                continue;
+            }
+            let name = match child.mode {
+                super::sites::CompiledSourceMode::Eval => {
                     self.output.declare(
                         |d| &mut d.eval_operand,
                         "declare i64 @imre_dyn_eval_operand(ptr, i64, i64, ptr, i32, ptr)\n",
                     );
                     "imre_dyn_eval_operand"
-                } else {
+                }
+                super::sites::CompiledSourceMode::Exec => {
                     self.output.declare(
                         |d| &mut d.exec_operand,
                         "declare i64 @imre_dyn_exec_operand(ptr, i64, i64, ptr, i32, ptr)\n",
                     );
                     "imre_dyn_exec_operand"
-                };
-                *source = self.checked(&format!(
-                    "call i64 @{name}(ptr %ctx, i64 {callable}, i64 {source}, ptr {}, i32 {}, ptr {})",
-                    child.entry, child.flags, child.source
-                ));
-            }
+                }
+                super::sites::CompiledSourceMode::Single => {
+                    self.output.declare(
+                        |d| &mut d.single_operand,
+                        "declare i64 @imre_dyn_single_operand(ptr, i64, i64, ptr, i32, ptr)\n",
+                    );
+                    "imre_dyn_single_operand"
+                }
+            };
+            source = self.checked(&format!(
+                "call i64 @{name}(ptr %ctx, i64 {callable}, i64 {source}, ptr {}, i32 {}, ptr {})",
+                child.entry, child.flags, child.source
+            ));
         }
-        self.handle_array(&values)
+        source
     }
 
     pub(crate) fn invoke(&mut self, callable: &str, values: &[&str]) -> String {
@@ -2021,18 +2109,24 @@ impl RegisteredFrame<'_, '_> {
         mark: &str,
         span: Option<[usize; 4]>,
     ) -> String {
-        let (ptr, count) = self.handle_array(values);
-        self.call_at(
-            callable,
+        let operands = if self.output.link_interposition.scoped_call {
+            let args = self.op("list", &[]);
+            for value in values {
+                self.op("append", &[&args, value]);
+            }
+            CallArguments::Packed {
+                args,
+                kwargs: "0".into(),
+            }
+        } else {
+            let (ptr, count) = self.handle_array(values);
             CallArguments::Positional {
                 array: ptr,
                 count,
                 receiver_slot: false,
-            },
-            mark,
-            span,
-            None,
-        )
+            }
+        };
+        self.call_at(callable, operands, mark, span, None)
     }
 
     /// The optional message has already been evaluated on the failure edge.
@@ -2236,11 +2330,18 @@ impl RegisteredFrame<'_, '_> {
         len: usize,
         key: Constant,
     ) -> String {
-        let slot = self.constant_slot(key);
-        self.take_matching_check();
-        self.checked(&format!(
-            "call i64 @imre_dyn_linked_string(ptr %ctx, ptr {slot}, i32 {kind}, ptr {data}, i64 {len})"
-        ))
+        if self.output.link_interposition.literal {
+            self.take_matching_check();
+            self.checked(&format!(
+                "call i64 @imre_dyn_lit(ptr %ctx, i32 {kind}, ptr {data}, i64 {len})"
+            ))
+        } else {
+            let slot = self.constant_slot(key);
+            self.take_matching_check();
+            self.checked(&format!(
+                "call i64 @imre_dyn_linked_string(ptr %ctx, ptr {slot}, i32 {kind}, ptr {data}, i64 {len})"
+            ))
+        }
     }
 }
 

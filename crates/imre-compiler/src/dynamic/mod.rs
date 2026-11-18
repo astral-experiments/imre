@@ -1806,9 +1806,10 @@ pub(crate) fn compile(
                         &candidates,
                         (&options.launcher_arguments, &[]),
                     );
-                    if !options.launcher_arguments.is_empty() && !sites.is_empty() {
+                    if !options.launcher_arguments.is_empty() && !sites.literals.is_empty() {
                         literals.linked_exec.entry(unit).or_default().extend(
                             sites
+                                .literals
                                 .iter()
                                 .filter(|(site, _)| site.file.is_none())
                                 .map(|(site, _)| site.call),
@@ -3354,6 +3355,7 @@ pub(crate) fn compile(
         "command_source":command,"path0_bytes":path0_bytes,"packaged_file_module":packaged_file_module,
         "command":in_memory,"module_entry":module_entry,"path_entry":options.path_entry,"paths":paths,
     });
+    output.link_interposition = options.link_interposition;
     let used_archive = output.emit_registered(
         prepared,
         module_body

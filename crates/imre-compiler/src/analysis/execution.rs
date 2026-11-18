@@ -1,7 +1,7 @@
 //! Resolve first-class execution operations using the declarations of their operands.
 
 use super::{Session, is_stdlib_function_type};
-use crate::dynamic::literal::{LiteralCandidate, LiteralSite, ParsedLiteral};
+use crate::dynamic::literal::{LiteralCandidate, LiteralSite, ParsedLiteral, SelectedLiteralLevel};
 use crate::frontend::phase::Diagnostic;
 use ruff_db::files::File;
 use ruff_db::parsed::ParsedModuleRef;
@@ -9,7 +9,8 @@ use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
 use ruff_python_ast::{Expr, ExprCall, Stmt, StmtFunctionDef};
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use std::{collections::HashMap, path::Path};
-use ty_python_core::definition::{DefinitionKind, FunctionDefinitionKind};
+use ty_python_core::definition::{DefinitionKind, FunctionDefinitionKind, TargetKind};
+use ty_python_core::unpack::UnpackPosition;
 use ty_python_semantic::types::{Type, TypeDefinition};
 use ty_python_semantic::{Db, HasType, SemanticModel};
 
@@ -32,6 +33,122 @@ pub(super) fn assigned_value<'a>(
         value = assignment.value(parsed);
     }
     Some(value)
+}
+
+/// Follow only assignments whose values occur before the code operand they supply.
+fn prior_code_value<'a>(
+    db: &dyn Db,
+    file: File,
+    parsed: &'a ParsedModuleRef,
+    mut value: &'a Expr,
+) -> Option<&'a Expr> {
+    let mut seen = std::collections::HashSet::new();
+    while value.is_name_expr() {
+        let definition = super::shipped_exports::binding_at_use(db, file, value)?;
+        let DefinitionKind::Assignment(assignment) = definition.kind(db) else {
+            return None;
+        };
+        let assigned = assignment.value(parsed);
+        if assignment.unpack().is_some()
+            || assigned.start() >= value.start()
+            || !seen.insert(definition)
+        {
+            return None;
+        }
+        value = assigned;
+    }
+    Some(value)
+}
+
+/// Admit only the positional source and valid, non-duplicated eval namespaces.
+pub(crate) fn valid_eval_arguments(call: &ExprCall) -> bool {
+    let args = &call.arguments.args;
+    if args.is_empty() || args.len() > 3 || args.iter().any(Expr::is_starred_expr) {
+        return false;
+    }
+    let mut globals = args.len() >= 2;
+    let mut locals = args.len() >= 3;
+    for keyword in &call.arguments.keywords {
+        let present = match keyword.arg.as_ref().map(|name| name.as_str()) {
+            Some("globals") => &mut globals,
+            Some("locals") => &mut locals,
+            _ => return false,
+        };
+        if std::mem::replace(present, true) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Extract the bounded integer choices from a tuple of `(count, expected)` rows.
+pub(crate) fn finite_first_integer_choices(iterable: &Expr) -> Option<Vec<usize>> {
+    let rows = iterable.as_tuple_expr()?;
+    if rows.elts.is_empty() || rows.elts.len() > 32 {
+        return None;
+    }
+    rows.elts
+        .iter()
+        .map(|row| {
+            let literal = row
+                .as_tuple_expr()?
+                .elts
+                .first()?
+                .as_number_literal_expr()?;
+            let ruff_python_ast::Number::Int(value) = &literal.value else {
+                return None;
+            };
+            usize::try_from(value.as_i64()?).ok()
+        })
+        .collect()
+}
+
+/// Recognize `prefix + repeated * count + suffix` without evaluating Python code.
+pub(crate) fn finite_eval_count_operand(expression: &Expr) -> Option<&Expr> {
+    let outer = expression.as_bin_op_expr()?;
+    let left = outer.left.as_bin_op_expr()?;
+    let repeated = left.right.as_bin_op_expr()?;
+    (outer.op == ruff_python_ast::Operator::Add
+        && left.op == ruff_python_ast::Operator::Add
+        && repeated.op == ruff_python_ast::Operator::Mult
+        && left.left.is_string_literal_expr()
+        && repeated.left.is_string_literal_expr()
+        && repeated.right.is_name_expr()
+        && outer.right.is_string_literal_expr())
+    .then_some(&repeated.right)
+}
+
+/// Build each finite expression source while enforcing the ordinary source-size bound.
+pub(crate) fn finite_eval_sources(expression: &Expr, counts: &[usize]) -> Option<Vec<String>> {
+    finite_eval_count_operand(expression)?;
+    let outer = expression.as_bin_op_expr()?;
+    let left = outer.left.as_bin_op_expr()?;
+    let repeated = left.right.as_bin_op_expr()?;
+    let prefix = left.left.as_string_literal_expr()?.value.to_str();
+    let item = repeated.left.as_string_literal_expr()?.value.to_str();
+    let suffix = outer.right.as_string_literal_expr()?.value.to_str();
+    counts
+        .iter()
+        .map(|&count| {
+            let size = prefix
+                .len()
+                .checked_add(item.len().checked_mul(count)?)?
+                .checked_add(suffix.len())?;
+            if size > 1 << 20 {
+                return None;
+            }
+            let mut source = String::new();
+            source.try_reserve_exact(size).ok()?;
+            source.push_str(prefix);
+            if !item.is_empty() {
+                for _ in 0..count {
+                    source.push_str(item);
+                }
+            }
+            source.push_str(suffix);
+            Some(source)
+        })
+        .collect()
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -846,6 +963,72 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
 }
 
 impl<'a> Escape<'a, '_> {
+    /// A malformed `eval` operand needs no AOT body when the runtime parser must
+    /// reject it and the enclosing Python suite can catch that `SyntaxError`.
+    /// Uncaught malformed operands still retain the checked-source diagnostic.
+    fn caught_eval_syntax_refusal(&self, call: &ExprCall, text: &str) -> bool {
+        let text = text.trim_start_matches([' ', '\t']);
+        if (text.contains('\r') || text.contains('\0'))
+            || super::check_source_complexity(text).is_err()
+            || ruff_python_parser::parse_unchecked(
+                text,
+                ruff_python_parser::Mode::Expression.into(),
+            )
+            .errors()
+            .is_empty()
+        {
+            return false;
+        }
+        use ruff_python_ast::{AnyNodeRef, ExceptHandler, find_node::covering_node};
+        let covering = covering_node(self.parsed.syntax().into(), call.range());
+        for ancestor in covering.ancestors() {
+            match ancestor {
+                AnyNodeRef::StmtFunctionDef(_)
+                | AnyNodeRef::StmtClassDef(_)
+                | AnyNodeRef::ExprLambda(_) => return false,
+                AnyNodeRef::StmtTry(guard)
+                    if !guard.is_star
+                        && guard
+                            .body
+                            .iter()
+                            .any(|statement| statement.range().contains_range(call.range()))
+                        && guard.handlers.iter().any(|handler| {
+                            let ExceptHandler::ExceptHandler(handler) = handler;
+                            let Some(expression) = handler.type_.as_deref() else {
+                                return false;
+                            };
+                            if self.session.reads_custom_builtins(
+                                self.model.file(),
+                                self.parsed,
+                                expression,
+                            ) {
+                                return false;
+                            }
+                            let Some(ty @ Type::ClassLiteral(_)) =
+                                expression.inferred_type(self.model)
+                            else {
+                                return false;
+                            };
+                            matches!(
+                                ty.definition(self.model.db(), &self.model.program_environment()),
+                                Some(TypeDefinition::StaticClass(class))
+                                    if class.name(self.model.db()).as_deref() == Some("SyntaxError")
+                                        && self.session.is_vendored_module_file(
+                                            self.model,
+                                            class.file(self.model.db()),
+                                            "builtins",
+                                        )
+                            )
+                        }) =>
+                {
+                    return true;
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
     fn visit_operand(&mut self, expression: &'a Expr, check_escape: bool) {
         if self.first.is_some() {
             return;
@@ -959,7 +1142,13 @@ impl<'a> Escape<'a, '_> {
             let outer = ruff_db::source::source_text(self.model.db(), self.model.file());
             let result = crate::frontend::exec_literal_text(literal, outer.as_str())
                 .map_err(str::to_owned)
-                .and_then(|text| unit.prepare_eval(call.range(), text));
+                .and_then(|text| {
+                    if self.caught_eval_syntax_refusal(call, text) {
+                        Ok(())
+                    } else {
+                        unit.prepare_eval(call.range(), text)
+                    }
+                });
             if let Err(reason) = result {
                 self.first = Some(self.required(
                     SourceCallable::Builtin(ExecutionIntrinsic::Eval),
@@ -976,7 +1165,27 @@ impl<'a> Escape<'a, '_> {
                     .func
                     .as_name_expr()
                     .is_some_and(|name| name.id == "eval")
-                && operand.is_string_literal_expr())
+                && (operand.is_string_literal_expr()
+                    || self
+                        .session
+                        .selected_finite_eval_sources(
+                            self.model.file(),
+                            self.parsed,
+                            self.model,
+                            call,
+                        )
+                        .is_some()
+                    || self
+                        .session
+                        .selected_compiled_eval_source(
+                            self.model.file(),
+                            self.parsed,
+                            self.model,
+                            call,
+                            ruff_db::source::source_text(self.model.db(), self.model.file())
+                                .as_str(),
+                        )
+                        .is_some()))
             && !(source_callable == SourceCallable::Builtin(ExecutionIntrinsic::Exec)
                 && (crate::frontend::exec_source_operand(call)
                     .is_some_and(Expr::is_string_literal_expr)
@@ -994,6 +1203,54 @@ impl<'a> Escape<'a, '_> {
                             ruff_db::source::source_text(self.model.db(), self.model.file())
                                 .as_str(),
                         )
+                        .is_some()
+                    || self.session.selected_bounded_file_exec(
+                        self.model.file(),
+                        self.parsed,
+                        self.model,
+                        call,
+                    )
+                    || self
+                        .session
+                        .selected_finite_compiled_exec_sources(
+                            self.model.file(),
+                            self.parsed,
+                            self.model,
+                            call,
+                        )
+                        .is_some()
+                    || self
+                        .session
+                        .selected_compiled_single_source(
+                            self.model.file(),
+                            self.parsed,
+                            self.model,
+                            call,
+                            ruff_db::source::source_text(self.model.db(), self.model.file())
+                                .as_str(),
+                        )
+                        .is_some()
+                    || self.session.finite_repeated_keyword_exec(
+                        self.model.file(),
+                        self.parsed,
+                        self.model,
+                        call,
+                        ruff_db::source::source_text(self.model.db(), self.model.file()).as_str(),
+                    )
+                    || self
+                        .session
+                        .finite_concat_exec_sources(
+                            self.model.file(),
+                            self.parsed,
+                            self.model,
+                            call,
+                            ruff_db::source::source_text(self.model.db(), self.model.file())
+                                .as_str(),
+                        )
+                        .is_some()
+                    || self
+                        .session
+                        .finite_exec_literals(self.model.file(), self.parsed, self.model, call)
                         .is_some()
                     || self
                         .linked_exec
@@ -1085,7 +1342,7 @@ pub(super) fn selected_module_exec_literal<'a>(
 ///
 /// This recognizes shapes such as `'x = ' + '1' * 3`, while deliberately
 /// refusing arbitrary values, deep trees, and results larger than one MiB.
-fn bounded_source_string(expression: &Expr, outer: &str) -> Option<String> {
+pub(crate) fn bounded_source_string(expression: &Expr, outer: &str) -> Option<String> {
     const MAX_SOURCE: usize = 1 << 20;
     fn fold(expression: &Expr, outer: &str, depth: usize) -> Option<String> {
         if depth == 0 {
@@ -1162,6 +1419,15 @@ pub(super) fn checked_literal_source<'a>(
         crate::SourceKind::Command,
     )?;
     Ok((file, text, parsed))
+}
+
+/// Match the normalized exec input checked by runtime builtin `compile` before parsing.
+fn compiled_exec_exceeds_complexity(source: &str) -> bool {
+    let Ok(text) = crate::normalize_source(source, crate::SourceKind::Command) else {
+        return false;
+    };
+    let input = imre_ast::indentation::prepare(&text);
+    imre_ast::source_complexity::check_runtime_compile(&input.text).is_err()
 }
 
 impl Session {
@@ -1245,6 +1511,157 @@ impl Session {
         selected_module_exec_literal(model, file, parsed, call)
     }
 
+    /// Fold fixed bytes or bytearray input to `compile` without executing Python.
+    ///
+    /// ```python
+    /// padding = 113 * 8 - len(b"#\nVALUE = 7\n")
+    /// source = bytearray(b"#" + b"x" * padding + b"\nVALUE = 7\n")
+    /// exec(compile(source, "settings.py", "exec"), {})
+    /// ```
+    ///
+    /// Only sole reaching assignments, literal arithmetic, and the builtin
+    /// `len` and `bytearray` are recognized. The result remains bounded by
+    /// the same one-MiB limit as string source.
+    fn bounded_compiled_bytes<'a>(
+        &self,
+        file: File,
+        parsed: &'a ParsedModuleRef,
+        model: &SemanticModel<'_>,
+        expression: &'a Expr,
+    ) -> Option<String> {
+        const MAX_SOURCE: usize = 1 << 20;
+
+        fn bytes<'a>(
+            session: &Session,
+            file: File,
+            parsed: &'a ParsedModuleRef,
+            model: &SemanticModel<'_>,
+            expression: &'a Expr,
+            depth: usize,
+        ) -> Option<Vec<u8>> {
+            if depth == 0 {
+                return None;
+            }
+            let expression =
+                assigned_value(&session.db, file, parsed, expression, Expr::is_name_expr)?;
+            match expression {
+                Expr::BytesLiteral(literal) => {
+                    if literal.value.len() > MAX_SOURCE {
+                        return None;
+                    }
+                    let mut result = Vec::new();
+                    result.try_reserve_exact(literal.value.len()).ok()?;
+                    result.extend(literal.value.bytes());
+                    Some(result)
+                }
+                Expr::BinOp(binary) if binary.op == ruff_python_ast::Operator::Add => {
+                    let mut left = bytes(session, file, parsed, model, &binary.left, depth - 1)?;
+                    let right = bytes(session, file, parsed, model, &binary.right, depth - 1)?;
+                    if left.len().checked_add(right.len())? > MAX_SOURCE {
+                        return None;
+                    }
+                    left.try_reserve_exact(right.len()).ok()?;
+                    left.extend_from_slice(&right);
+                    Some(left)
+                }
+                Expr::BinOp(binary) if binary.op == ruff_python_ast::Operator::Mult => {
+                    let value = bytes(session, file, parsed, model, &binary.left, depth - 1)?;
+                    let count = usize::try_from(integer(
+                        session,
+                        file,
+                        parsed,
+                        model,
+                        &binary.right,
+                        depth - 1,
+                    )?)
+                    .ok()?;
+                    if value.is_empty() || count == 0 {
+                        return Some(Vec::new());
+                    }
+                    let size = value.len().checked_mul(count)?;
+                    if size > MAX_SOURCE {
+                        return None;
+                    }
+                    let mut result = Vec::new();
+                    result.try_reserve_exact(size).ok()?;
+                    for _ in 0..count {
+                        result.extend_from_slice(&value);
+                    }
+                    Some(result)
+                }
+                _ => None,
+            }
+        }
+
+        fn integer<'a>(
+            session: &Session,
+            file: File,
+            parsed: &'a ParsedModuleRef,
+            model: &SemanticModel<'_>,
+            expression: &'a Expr,
+            depth: usize,
+        ) -> Option<i64> {
+            if depth == 0 {
+                return None;
+            }
+            let expression =
+                assigned_value(&session.db, file, parsed, expression, Expr::is_name_expr)?;
+            match expression {
+                Expr::NumberLiteral(literal) => match &literal.value {
+                    ruff_python_ast::Number::Int(value) => value.as_i64(),
+                    _ => None,
+                },
+                Expr::BinOp(binary) => {
+                    let left = integer(session, file, parsed, model, &binary.left, depth - 1)?;
+                    let right = integer(session, file, parsed, model, &binary.right, depth - 1)?;
+                    match binary.op {
+                        ruff_python_ast::Operator::Add => left.checked_add(right),
+                        ruff_python_ast::Operator::Sub => left.checked_sub(right),
+                        ruff_python_ast::Operator::Mult => left.checked_mul(right),
+                        _ => None,
+                    }
+                }
+                Expr::Call(call)
+                    if !session.reads_custom_builtins(file, parsed, &call.func)
+                        && super::resolves_to_stdlib_function(
+                            model, &call.func, "builtins", "len",
+                        )
+                        && call.arguments.keywords.is_empty() =>
+                {
+                    let [value] = call.arguments.args.as_ref() else {
+                        return None;
+                    };
+                    i64::try_from(bytes(session, file, parsed, model, value, depth - 1)?.len()).ok()
+                }
+                _ => None,
+            }
+        }
+
+        let selected = assigned_value(&self.db, file, parsed, expression, Expr::is_name_expr)?;
+        let source = if let Expr::Call(call) = selected {
+            let env = model.program_environment();
+            let ty @ Type::ClassLiteral(_) = call.func.inferred_type(model)? else {
+                return None;
+            };
+            let canonical =
+                ty_python_semantic::types::KnownClass::Bytearray.to_instance(&self.db, &env);
+            if self.reads_custom_builtins(file, parsed, &call.func)
+                || Some(ty.definition(&self.db, &env)?) != canonical.definition(&self.db, &env)
+                || !call.arguments.keywords.is_empty()
+            {
+                return None;
+            }
+            let [source] = call.arguments.args.as_ref() else {
+                return None;
+            };
+            source
+        } else {
+            selected
+        };
+        let source = bytes(self, file, parsed, model, source, 32)?;
+        imre_ast::source_encoding::decode_compile_source(source, |_, error| error.to_string()).ok()
+    }
+
     /// Recognize a fixed builtin `compile` result consumed by builtin `exec`.
     ///
     /// ```python
@@ -1288,7 +1705,685 @@ impl Session {
         {
             return None;
         }
+        let selected = assigned_value(&self.db, file, parsed, source, Expr::is_name_expr)?;
+        bounded_source_string(selected, outer)
+            .or_else(|| self.bounded_compiled_bytes(file, parsed, model, selected))
+    }
+
+    /// Permit only a compiled file read whose source arrives through a fixed launcher argument.
+    /// The emitted operand guard still refuses every source outside the bounded runtime plan.
+    fn selected_bounded_file_exec(
+        &self,
+        file: File,
+        parsed: &ParsedModuleRef,
+        model: &SemanticModel<'_>,
+        call: &ExprCall,
+    ) -> bool {
+        if self.reads_custom_builtins(file, parsed, &call.func)
+            || ExecutionIntrinsic::resolve(model, &call.func) != Some(ExecutionIntrinsic::Exec)
+        {
+            return false;
+        }
+        let Some(operand) = crate::frontend::exec_source_operand(call) else {
+            return false;
+        };
+        let compiled = if let Some(compiled) = operand.as_call_expr() {
+            Some(compiled)
+        } else if operand.is_name_expr() {
+            // A with statement leaves an unbound path in ty's flow graph. Require every
+            // bound path to use the same assignment; the runtime guard separately checks
+            // the actual operand if ordinary Python name lookup takes another path.
+            let index = ty_python_core::semantic_index(&self.db, self.db.program_file(file));
+            let Some((scope, use_id)) = index
+                .try_expression_scope_id(operand)
+                .zip(index.try_expression_use_id(operand.into()))
+            else {
+                return false;
+            };
+            let map = index.use_def_map(scope);
+            let mut definitions = map
+                .bindings_at_use(use_id)
+                .filter_map(|binding| binding.binding.definition());
+            let Some(first) = definitions.next() else {
+                return false;
+            };
+            if definitions.any(|definition| definition != first) {
+                return false;
+            }
+            let DefinitionKind::Assignment(assignment) = first.kind(&self.db) else {
+                return false;
+            };
+            if assignment.unpack().is_some() {
+                return false;
+            }
+            assignment.value(parsed).as_call_expr()
+        } else {
+            None
+        };
+        let Some(compiled) = compiled else {
+            return false;
+        };
+        self.selected_bounded_file_compile(file, parsed, model, compiled)
+    }
+
+    /// Prove the passive compile producer independently so the frontend can route it through
+    /// registered lowering before its later guarded exec consumer is prepared.
+    fn selected_bounded_file_compile(
+        &self,
+        file: File,
+        parsed: &ParsedModuleRef,
+        model: &SemanticModel<'_>,
+        compiled: &ExprCall,
+    ) -> bool {
+        let selected = || -> Option<()> {
+            if self.reads_custom_builtins(file, parsed, &compiled.func)
+                || !super::resolves_to_stdlib_function(model, &compiled.func, "builtins", "compile")
+                || !compiled.arguments.keywords.is_empty()
+            {
+                return None;
+            }
+            let [source, filename, mode] = compiled.arguments.args.as_ref() else {
+                return None;
+            };
+            if filename
+                .as_string_literal_expr()?
+                .value
+                .to_str()
+                .contains('\0')
+                || mode.as_string_literal_expr()?.value.to_str() != "exec"
+            {
+                return None;
+            }
+            let read = source.as_call_expr()?;
+            let method = read.func.as_attribute_expr()?;
+            if method.attr.as_str() != "read" || !read.arguments.is_empty() {
+                return None;
+            }
+            let receiver = &method.value;
+            receiver.as_name_expr()?;
+            let definition = super::shipped_exports::binding_at_use(&self.db, file, receiver)?;
+            let DefinitionKind::WithItem(item) = definition.kind(&self.db) else {
+                return None;
+            };
+            if item.is_async() || item.target(parsed).as_name_expr().is_none() {
+                return None;
+            }
+            let open = item.context_expr(parsed).as_call_expr()?;
+            if self.reads_custom_builtins(file, parsed, &open.func)
+                || !super::resolves_to_stdlib_function(model, &open.func, "builtins", "open")
+                || !open.arguments.keywords.is_empty()
+            {
+                return None;
+            }
+            let [path] = open.arguments.args.as_ref() else {
+                return None;
+            };
+            let path = path.as_subscript_expr()?;
+            let argv = path.value.as_attribute_expr()?;
+            if argv.attr.as_str() != "argv"
+                || !matches!(argv.value.inferred_type(model), Some(Type::ModuleLiteral(module))
+                    if module.module(&self.db).name(&self.db).as_str() == "sys")
+            {
+                return None;
+            }
+            let ruff_python_ast::Number::Int(index) = &path.slice.as_number_literal_expr()?.value
+            else {
+                return None;
+            };
+            (index.as_i64()? > 0).then_some(())
+        };
+        selected().is_some()
+    }
+
+    /// Link `exec(compile(source, fixed_filename, "exec"))` when one finite
+    /// loop binding supplies only bounded bytes or bytearray sources. Every
+    /// choice is decoded using Python's BOM/cookie rules before it is linked;
+    /// the runtime guards the immutable decoded compile-time snapshot again.
+    fn selected_finite_compiled_exec_sources(
+        &self,
+        file: File,
+        parsed: &ParsedModuleRef,
+        model: &SemanticModel<'_>,
+        call: &ExprCall,
+    ) -> Option<Vec<String>> {
+        if self.reads_custom_builtins(file, parsed, &call.func)
+            || ExecutionIntrinsic::resolve(model, &call.func) != Some(ExecutionIntrinsic::Exec)
+        {
+            return None;
+        }
+        let compiled = crate::frontend::exec_source_operand(call)?.as_call_expr()?;
+        if !compiled
+            .func
+            .as_name_expr()
+            .is_some_and(|name| name.id == "compile")
+            || self.reads_custom_builtins(file, parsed, &compiled.func)
+            || !super::resolves_to_stdlib_function(model, &compiled.func, "builtins", "compile")
+            || !compiled.arguments.keywords.is_empty()
+        {
+            return None;
+        }
+        let [source, filename, mode] = compiled.arguments.args.as_ref() else {
+            return None;
+        };
+        if filename
+            .as_string_literal_expr()?
+            .value
+            .to_str()
+            .contains('\0')
+            || mode.as_string_literal_expr()?.value.to_str() != "exec"
+        {
+            return None;
+        }
+        let name = source.as_name_expr()?;
+        let definition = super::shipped_exports::binding_at_use(&self.db, file, source)?;
+        let DefinitionKind::For(binding) = definition.kind(&self.db) else {
+            return None;
+        };
+        if binding.is_async()
+            || !matches!(binding.target_kind(), TargetKind::Single)
+            || binding.target(parsed).as_name_expr()?.id != name.id
+        {
+            return None;
+        }
+        let choices = match binding.iterable(parsed) {
+            Expr::Tuple(values) => &values.elts,
+            Expr::List(values) => &values.elts,
+            _ => return None,
+        };
+        if choices.is_empty() || choices.len() > 32 {
+            return None;
+        }
+        choices
+            .iter()
+            .map(|choice| self.bounded_compiled_bytes(file, parsed, model, choice))
+            .collect()
+    }
+
+    /// Link a fixed `single`-mode annotated assignment consumed by builtin `exec`.
+    /// Expression statements remain excluded because interactive mode must display them.
+    fn selected_compiled_single_source(
+        &self,
+        file: File,
+        parsed: &ParsedModuleRef,
+        model: &SemanticModel<'_>,
+        call: &ExprCall,
+        outer: &str,
+    ) -> Option<String> {
+        if self.reads_custom_builtins(file, parsed, &call.func)
+            || ExecutionIntrinsic::resolve(model, &call.func) != Some(ExecutionIntrinsic::Exec)
+        {
+            return None;
+        }
+        let compiled = crate::frontend::exec_source_operand(call)?.as_call_expr()?;
+        if !compiled
+            .func
+            .as_name_expr()
+            .is_some_and(|name| name.id == "compile")
+            || self.reads_custom_builtins(file, parsed, &compiled.func)
+            || !super::resolves_to_stdlib_function(model, &compiled.func, "builtins", "compile")
+            || !compiled.arguments.keywords.is_empty()
+        {
+            return None;
+        }
+        let [source, filename, mode] = compiled.arguments.args.as_ref() else {
+            return None;
+        };
+        if filename
+            .as_string_literal_expr()?
+            .value
+            .to_str()
+            .contains('\0')
+            || mode.as_string_literal_expr()?.value.to_str() != "single"
+        {
+            return None;
+        }
+        let source = bounded_source_string(source, outer)?;
+        let checked = ruff_python_parser::parse_module(&source).ok()?;
+        if !matches!(checked.syntax().body.as_slice(), [Stmt::AnnAssign(_)])
+            || imre_ast::check_single_input(&checked.syntax().body, checked.tokens()).is_err()
+        {
+            return None;
+        }
+        Some(source)
+    }
+
+    /// Recognize a fixed builtin `compile(..., "eval")` result consumed by builtin `eval`.
+    /// A sole reaching code assignment and bounded source are required; runtime
+    /// dispatch verifies the live eval callable, parsed code source, and flags.
+    fn selected_compiled_eval_source(
+        &self,
+        file: File,
+        parsed: &ParsedModuleRef,
+        model: &SemanticModel<'_>,
+        call: &ExprCall,
+        outer: &str,
+    ) -> Option<String> {
+        if !call
+            .func
+            .as_name_expr()
+            .is_some_and(|name| name.id == "eval")
+            || !valid_eval_arguments(call)
+            || self.reads_custom_builtins(file, parsed, &call.func)
+            || ExecutionIntrinsic::resolve(model, &call.func) != Some(ExecutionIntrinsic::Eval)
+        {
+            return None;
+        }
+        let operand = call.arguments.args.first()?;
+        let compiled = prior_code_value(&self.db, file, parsed, operand)?.as_call_expr()?;
+        self.selected_eval_compile_source(file, parsed, model, compiled, outer)
+    }
+
+    /// Resolve only builtin `compile` calls with a bounded expression source.
+    fn selected_eval_compile_source(
+        &self,
+        file: File,
+        parsed: &ParsedModuleRef,
+        model: &SemanticModel<'_>,
+        compiled: &ExprCall,
+        outer: &str,
+    ) -> Option<String> {
+        if !compiled
+            .func
+            .as_name_expr()
+            .is_some_and(|name| name.id == "compile")
+            || self.reads_custom_builtins(file, parsed, &compiled.func)
+            || !super::resolves_to_stdlib_function(model, &compiled.func, "builtins", "compile")
+            || !compiled.arguments.keywords.is_empty()
+        {
+            return None;
+        }
+        let [source, filename, mode] = compiled.arguments.args.as_ref() else {
+            return None;
+        };
+        if filename
+            .as_string_literal_expr()?
+            .value
+            .to_str()
+            .contains('\0')
+            || mode.as_string_literal_expr()?.value.to_str() != "eval"
+        {
+            return None;
+        }
         bounded_source_string(source, outer)
+    }
+
+    /// Route a bounded eval source or guarded file-source compile through registered lowering.
+    pub(crate) fn fixed_source_compile_call(&self, module: usize, call: &ExprCall) -> bool {
+        if !call
+            .func
+            .as_name_expr()
+            .is_some_and(|name| name.id == "compile")
+        {
+            return false;
+        }
+        let file = self.files[module];
+        let model = SemanticModel::new(&self.db, self.db.program_file(file));
+        self.selected_eval_compile_source(
+            file,
+            &self.parsed(file),
+            &model,
+            call,
+            ruff_db::source::source_text(&self.db, file).as_str(),
+        )
+        .is_some()
+            || self.selected_bounded_file_compile(file, &self.parsed(file), &model, call)
+    }
+
+    /// Permit a finite exec whose every source fails before Python can execute a body.
+    ///
+    /// ```python
+    /// for source in ("f(a=1, a=2)", "f(**{}, a=1, a=2)"):
+    ///     exec("mark()\n" + source, namespace)
+    /// ```
+    ///
+    /// The same shared syntax check runs at runtime; a valid alternative keeps
+    /// the ordinary missing-body refusal.
+    fn finite_repeated_keyword_exec(
+        &self,
+        file: File,
+        parsed: &ParsedModuleRef,
+        model: &SemanticModel<'_>,
+        call: &ExprCall,
+        outer: &str,
+    ) -> bool {
+        if self.reads_custom_builtins(file, parsed, &call.func)
+            || ExecutionIntrinsic::resolve(model, &call.func) != Some(ExecutionIntrinsic::Exec)
+        {
+            return false;
+        }
+        let Some(binary) =
+            crate::frontend::exec_source_operand(call).and_then(Expr::as_bin_op_expr)
+        else {
+            return false;
+        };
+        if binary.op != ruff_python_ast::Operator::Add {
+            return false;
+        }
+        let (Some(prefix), Some(name)) = (
+            binary.left.as_string_literal_expr(),
+            binary.right.as_name_expr(),
+        ) else {
+            return false;
+        };
+        let Some(definition) =
+            super::shipped_exports::binding_at_use(&self.db, file, &binary.right)
+        else {
+            return false;
+        };
+        let DefinitionKind::For(binding) = definition.kind(&self.db) else {
+            return false;
+        };
+        if binding.is_async()
+            || binding
+                .target(parsed)
+                .as_name_expr()
+                .is_none_or(|target| target.id != name.id)
+        {
+            return false;
+        }
+        let Some(values) = binding.iterable(parsed).as_tuple_expr() else {
+            return false;
+        };
+        if values.elts.is_empty() || values.elts.len() > 32 {
+            return false;
+        }
+        let Ok(prefix) = crate::frontend::exec_literal_text(prefix, outer) else {
+            return false;
+        };
+        values.elts.iter().all(|value| {
+            let Some(literal) = value.as_string_literal_expr() else {
+                return false;
+            };
+            let Ok(value) = crate::frontend::exec_literal_text(literal, outer) else {
+                return false;
+            };
+            let Some(size) = prefix
+                .len()
+                .checked_add(value.len())
+                .filter(|size| *size <= 1 << 20)
+            else {
+                return false;
+            };
+            let mut source = String::new();
+            if source.try_reserve_exact(size).is_err() {
+                return false;
+            }
+            source.push_str(prefix);
+            source.push_str(value);
+            ruff_python_parser::parse_module(&source)
+                .ok()
+                .is_some_and(|parsed| imre_ast::repeated_keyword(parsed.syntax().into()).is_some())
+        })
+    }
+
+    /// Link a fixed string pattern containing one finite loop-bound string. Both
+    /// concatenation and a plain f-string field are checked against the live source.
+    fn finite_concat_exec_sources(
+        &self,
+        file: File,
+        parsed: &ParsedModuleRef,
+        model: &SemanticModel<'_>,
+        call: &ExprCall,
+        outer: &str,
+    ) -> Option<Vec<String>> {
+        use ruff_python_ast as ast;
+        if self.reads_custom_builtins(file, parsed, &call.func)
+            || ExecutionIntrinsic::resolve(model, &call.func) != Some(ExecutionIntrinsic::Exec)
+            || self.finite_repeated_keyword_exec(file, parsed, model, call, outer)
+        {
+            return None;
+        }
+        struct Pattern<'a> {
+            name: Option<&'a Expr>,
+            prefix: String,
+            suffix: String,
+        }
+        impl<'a> Pattern<'a> {
+            fn fixed(&mut self, text: &str) -> Option<()> {
+                let accumulated = self
+                    .prefix
+                    .len()
+                    .checked_add(self.suffix.len())?
+                    .checked_add(text.len())?;
+                if accumulated > 1 << 20 {
+                    return None;
+                }
+                let target = if self.name.is_some() {
+                    &mut self.suffix
+                } else {
+                    &mut self.prefix
+                };
+                target.try_reserve(text.len()).ok()?;
+                target.push_str(text);
+                Some(())
+            }
+            fn field(&mut self, expression: &'a Expr) -> Option<()> {
+                if !expression.is_name_expr() || self.name.replace(expression).is_some() {
+                    return None;
+                }
+                Some(())
+            }
+            fn concat(&mut self, expression: &'a Expr, outer: &str, depth: usize) -> Option<()> {
+                if depth == 0 {
+                    return None;
+                }
+                match expression {
+                    Expr::BinOp(binary) if binary.op == ast::Operator::Add => {
+                        self.concat(&binary.left, outer, depth - 1)?;
+                        self.concat(&binary.right, outer, depth - 1)
+                    }
+                    Expr::StringLiteral(literal) => {
+                        self.fixed(crate::frontend::exec_literal_text(literal, outer).ok()?)
+                    }
+                    Expr::Name(_) => self.field(expression),
+                    _ => None,
+                }
+            }
+            fn fstring(&mut self, expression: &'a ast::ExprFString, outer: &str) -> Option<()> {
+                let mut parts = expression.value.iter();
+                let ast::FStringPartRef::FString(part) = parts.next()? else {
+                    return None;
+                };
+                if parts.next().is_some() {
+                    return None;
+                }
+                for element in &part.elements {
+                    match element {
+                        ast::InterpolatedStringElement::Literal(literal) => {
+                            let spelling = outer
+                                .get(usize::from(literal.start())..usize::from(literal.end()))?;
+                            // Accept only literal spelling with no escape or brace transformation.
+                            if spelling != literal.value.as_ref() || !spelling.is_ascii() {
+                                return None;
+                            }
+                            self.fixed(spelling)?;
+                        }
+                        ast::InterpolatedStringElement::Interpolation(field) => {
+                            if field.conversion != ast::ConversionFlag::None
+                                || field.format_spec.is_some()
+                                || field.debug_text.is_some()
+                            {
+                                return None;
+                            }
+                            self.field(&field.expression)?;
+                        }
+                    }
+                }
+                Some(())
+            }
+        }
+        let operand = crate::frontend::exec_source_operand(call)?;
+        let mut pattern = Pattern {
+            name: None,
+            prefix: String::new(),
+            suffix: String::new(),
+        };
+        match operand {
+            Expr::BinOp(_) => pattern.concat(operand, outer, 8)?,
+            Expr::FString(value) => pattern.fstring(value, outer)?,
+            _ => return None,
+        }
+        let name_operand = pattern.name?;
+        let name = name_operand.as_name_expr()?;
+        let definition = super::shipped_exports::binding_at_use(&self.db, file, name_operand)?;
+        let DefinitionKind::For(binding) = definition.kind(&self.db) else {
+            return None;
+        };
+        if binding.is_async() || binding.target(parsed).as_name_expr()?.id != name.id {
+            return None;
+        }
+        let first = match binding.target_kind() {
+            TargetKind::Single => false,
+            TargetKind::Sequence(UnpackPosition::First, _) => true,
+            _ => return None,
+        };
+        let values = match binding.iterable(parsed) {
+            Expr::Tuple(values) => &values.elts,
+            Expr::List(values) => &values.elts,
+            _ => return None,
+        };
+        if values.is_empty() || values.len() > 32 {
+            return None;
+        }
+        values
+            .iter()
+            .map(|value| {
+                let value = if first {
+                    value.as_tuple_expr()?.elts.first()?
+                } else {
+                    value
+                };
+                let choice =
+                    crate::frontend::exec_literal_text(value.as_string_literal_expr()?, outer)
+                        .ok()?;
+                let size = pattern
+                    .prefix
+                    .len()
+                    .checked_add(choice.len())?
+                    .checked_add(pattern.suffix.len())?;
+                if size > 1 << 20 {
+                    return None;
+                }
+                let mut source = String::new();
+                source.try_reserve_exact(size).ok()?;
+                source.push_str(&pattern.prefix);
+                source.push_str(choice);
+                source.push_str(&pattern.suffix);
+                let checked = ruff_python_parser::parse_module(&source).ok()?;
+                if imre_ast::repeated_keyword(checked.syntax().into()).is_some() {
+                    return None;
+                }
+                Some(source)
+            })
+            .collect()
+    }
+
+    /// Select a small literal source set from the sole loop binding reaching `exec`.
+    ///
+    /// ```python
+    /// for source, expected in (("f(*42)", "not iterable"), ("f(*missing)", "missing")):
+    ///     exec(source, namespace)
+    /// ```
+    ///
+    /// The site table links each alternative independently; the runtime still
+    /// checks the live callable and exact source before choosing a body.
+    fn finite_exec_literals<'a>(
+        &self,
+        file: File,
+        parsed: &'a ParsedModuleRef,
+        model: &SemanticModel<'_>,
+        call: &ExprCall,
+    ) -> Option<Vec<&'a ruff_python_ast::ExprStringLiteral>> {
+        if self.reads_custom_builtins(file, parsed, &call.func)
+            || ExecutionIntrinsic::resolve(model, &call.func) != Some(ExecutionIntrinsic::Exec)
+        {
+            return None;
+        }
+        let operand = crate::frontend::exec_source_operand(call)?;
+        let name = operand.as_name_expr()?;
+        let definition = super::shipped_exports::binding_at_use(&self.db, file, operand)?;
+        let DefinitionKind::For(binding) = definition.kind(&self.db) else {
+            return None;
+        };
+        if binding.is_async() || binding.target(parsed).as_name_expr()?.id != name.id {
+            return None;
+        }
+        let values = binding.iterable(parsed).as_tuple_expr()?;
+        if values.elts.is_empty() || values.elts.len() > 32 {
+            return None;
+        }
+        let first = match binding.target_kind() {
+            TargetKind::Single => false,
+            TargetKind::Sequence(UnpackPosition::First, _) => true,
+            _ => return None,
+        };
+        values
+            .elts
+            .iter()
+            .map(|value| {
+                let value = if first {
+                    value.as_tuple_expr()?.elts.first()?
+                } else {
+                    value
+                };
+                let literal = value.as_string_literal_expr()?;
+                (literal.value.to_str().len() <= 1 << 20).then_some(literal)
+            })
+            .collect()
+    }
+
+    /// Select expression alternatives when one finite loop binding supplies the repeat count.
+    /// The emitter links the same bounded strings, and the runtime verifies the live source.
+    fn selected_finite_eval_sources(
+        &self,
+        file: File,
+        parsed: &ParsedModuleRef,
+        model: &SemanticModel<'_>,
+        call: &ExprCall,
+    ) -> Option<Vec<String>> {
+        let operand = call.arguments.args.first()?;
+        let count = finite_eval_count_operand(operand)?;
+        if !valid_eval_arguments(call)
+            || self.reads_custom_builtins(file, parsed, &call.func)
+            || ExecutionIntrinsic::resolve(model, &call.func) != Some(ExecutionIntrinsic::Eval)
+        {
+            return None;
+        }
+        let name = count.as_name_expr()?;
+        let definition = super::shipped_exports::binding_at_use(&self.db, file, count)?;
+        let DefinitionKind::For(binding) = definition.kind(&self.db) else {
+            return None;
+        };
+        if binding.is_async()
+            || binding.target(parsed).as_name_expr()?.id != name.id
+            || !matches!(
+                binding.target_kind(),
+                TargetKind::Sequence(UnpackPosition::First, _)
+            )
+        {
+            return None;
+        }
+        finite_eval_sources(
+            operand,
+            &finite_first_integer_choices(binding.iterable(parsed))?,
+        )
+    }
+
+    /// Route a finite computed eval through registered lowering, which owns its alternatives.
+    pub(crate) fn fixed_eval_call(&self, module: usize, call: &ExprCall) -> bool {
+        let file = self.files[module];
+        let model = SemanticModel::new(&self.db, self.db.program_file(file));
+        self.selected_finite_eval_sources(file, &self.parsed(file), &model, call)
+            .is_some()
+            || self
+                .selected_compiled_eval_source(
+                    file,
+                    &self.parsed(file),
+                    &model,
+                    call,
+                    ruff_db::source::source_text(&self.db, file).as_str(),
+                )
+                .is_some()
     }
 
     /// The launcher can link the initial text of a fixed sys.argv operand. The
@@ -1342,6 +2437,38 @@ impl Session {
                     ruff_db::source::source_text(&self.db, file).as_str(),
                 )
                 .is_some()
+            || self.selected_bounded_file_exec(file, &self.parsed(file), &model, call)
+            || self
+                .selected_finite_compiled_exec_sources(file, &self.parsed(file), &model, call)
+                .is_some()
+            || self
+                .selected_compiled_single_source(
+                    file,
+                    &self.parsed(file),
+                    &model,
+                    call,
+                    ruff_db::source::source_text(&self.db, file).as_str(),
+                )
+                .is_some()
+            || self.finite_repeated_keyword_exec(
+                file,
+                &self.parsed(file),
+                &model,
+                call,
+                ruff_db::source::source_text(&self.db, file).as_str(),
+            )
+            || self
+                .finite_concat_exec_sources(
+                    file,
+                    &self.parsed(file),
+                    &model,
+                    call,
+                    ruff_db::source::source_text(&self.db, file).as_str(),
+                )
+                .is_some()
+            || self
+                .finite_exec_literals(file, &self.parsed(file), &model, call)
+                .is_some()
     }
 
     /// Resolve fixed exec operands and file-write sources after the parent's imports are registered.
@@ -1354,13 +2481,13 @@ impl Session {
         inherited_flags: u32,
         candidates: &[LiteralCandidate],
         (launcher_arguments, site_lines): (&[Option<String>], &[String]),
-    ) -> Vec<(LiteralSite, Result<ParsedLiteral, String>)> {
+    ) -> SelectedLiteralLevel {
         use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
         if candidates.is_empty() {
-            return Vec::new();
+            return SelectedLiteralLevel::default();
         }
         let model = SemanticModel::new(&self.db, self.db.program_file(parent));
-        let mut sites = Vec::new();
+        let mut sites = SelectedLiteralLevel::default();
         for candidate in candidates {
             let range = candidate.call;
             let AnyNodeRef::ExprCall(call) = covering_node(parsed.syntax().into(), range).node()
@@ -1378,7 +2505,13 @@ impl Session {
                 continue;
             };
             let operand = argument.start();
-            let mut add = |original: Result<&str, String>, optional| {
+            if candidate.file.is_none()
+                && self.selected_bounded_file_exec(parent, parsed, &model, call)
+            {
+                sites.bounded_file_exec.push(range);
+                continue;
+            }
+            let mut add = |original: Result<&str, String>, optional, mode| {
                 let module = original.and_then(|original| {
                     // A text write emits UTF-8 bytes, but a loader decodes those bytes
                     // according to any PEP 263 cookie before compiling the module.
@@ -1405,9 +2538,10 @@ impl Session {
                         } else {
                             inherited_flags
                         },
+                        mode,
                     ))
                 });
-                sites.push((
+                sites.literals.push((
                     LiteralSite {
                         call: range,
                         operand,
@@ -1422,21 +2556,71 @@ impl Session {
                     add(
                         crate::frontend::exec_literal_text(literal, source).map_err(str::to_owned),
                         true,
+                        crate::llvm::registered::sites::CompiledSourceMode::Exec,
                     );
                 }
             } else if let Some(literal) = self.selected_exec_literal(parent, parsed, &model, call) {
                 add(
                     crate::frontend::exec_literal_text(literal, source).map_err(str::to_owned),
                     false,
+                    crate::llvm::registered::sites::CompiledSourceMode::Exec,
                 );
             } else if let Some(original) =
                 self.selected_compiled_exec_source(parent, parsed, &model, call, source)
             {
-                add(Ok(&original), false);
+                // The runtime compile call is guaranteed to raise RecursionError on this
+                // exact normalized source, so its consumer cannot execute a body.
+                if !compiled_exec_exceeds_complexity(&original) {
+                    add(
+                        Ok(&original),
+                        false,
+                        crate::llvm::registered::sites::CompiledSourceMode::Exec,
+                    );
+                }
+            } else if let Some(originals) =
+                self.selected_finite_compiled_exec_sources(parent, parsed, &model, call)
+            {
+                for original in originals {
+                    add(
+                        Ok(&original),
+                        false,
+                        crate::llvm::registered::sites::CompiledSourceMode::Exec,
+                    );
+                }
+            } else if let Some(original) =
+                self.selected_compiled_single_source(parent, parsed, &model, call, source)
+            {
+                add(
+                    Ok(&original),
+                    false,
+                    crate::llvm::registered::sites::CompiledSourceMode::Single,
+                );
+            } else if let Some(literals) = self.finite_exec_literals(parent, parsed, &model, call) {
+                for literal in literals {
+                    add(
+                        crate::frontend::exec_literal_text(literal, source).map_err(str::to_owned),
+                        false,
+                        crate::llvm::registered::sites::CompiledSourceMode::Exec,
+                    );
+                }
+            } else if let Some(originals) =
+                self.finite_concat_exec_sources(parent, parsed, &model, call, source)
+            {
+                for original in originals {
+                    add(
+                        Ok(&original),
+                        false,
+                        crate::llvm::registered::sites::CompiledSourceMode::Exec,
+                    );
+                }
             } else if let Some(original) =
                 self.selected_launcher_exec_source(parent, parsed, &model, call, launcher_arguments)
             {
-                add(Ok(original), false);
+                add(
+                    Ok(original),
+                    false,
+                    crate::llvm::registered::sites::CompiledSourceMode::Exec,
+                );
             } else if !site_lines.is_empty()
                 && argument
                     .as_name_expr()
@@ -1445,7 +2629,11 @@ impl Session {
                 && ExecutionIntrinsic::resolve(&model, &call.func) == Some(ExecutionIntrinsic::Exec)
             {
                 for line in site_lines {
-                    add(Ok(line), true);
+                    add(
+                        Ok(line),
+                        true,
+                        crate::llvm::registered::sites::CompiledSourceMode::Exec,
+                    );
                 }
             }
         }

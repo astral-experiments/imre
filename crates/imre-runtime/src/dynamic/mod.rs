@@ -101,6 +101,7 @@ enum LinkedSource {
     Loader(SourceModule),
     Doctest(Rc<DoctestSource>),
     Expression(Code),
+    BoundedExec(Rc<source_code::BoundedExecPlan>),
 }
 
 /// How a registered module supplies its code object to importlib.
@@ -3775,7 +3776,9 @@ impl Context {
                     result
                 }))
             }
-            value::Body::Parsed { .. } => self.missing_compiled_body(code),
+            value::Body::Parsed { .. }
+            | value::Body::ParsedEval { .. }
+            | value::Body::ParsedSingle { .. } => self.missing_compiled_body(code),
         }
     }
 

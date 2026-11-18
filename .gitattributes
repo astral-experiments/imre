@@ -7,3 +7,5 @@ benchmarks/cpython_stdlib/upstream/Lib/test/decimaltestdata/** linguist-vendored
 crates/imre-compiler/stdlib/venv/scripts/** text eol=lf
 crates/imre-compiler/stdlib/venv/scripts/common/Activate.ps1 text eol=crlf
 crates/imre-compiler/stdlib/venv/scripts/nt/*.bat text eol=crlf
+# Preserve canonical Python test and fixture source bytes on every checkout platform.
+tests/**/*.py text eol=lf
