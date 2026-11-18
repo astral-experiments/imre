@@ -8033,13 +8033,6 @@ mod tests {
 
     #[test]
     fn parked_sendfile_guards_root_only_their_own_execution() {
-        println!(
-            "Context={} Heap={} ExecutionState={} OptionExecutionState={}",
-            std::mem::size_of::<Context>(),
-            std::mem::size_of::<Heap>(),
-            std::mem::size_of::<ExecutionState>(),
-            std::mem::size_of::<Option<ExecutionState>>()
-        );
         let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
         let mark = ctx.heap.temporary_mark();
         let receiver = ctx.alloc(Value::List(Vec::new()));
