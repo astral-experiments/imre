@@ -4240,11 +4240,13 @@ impl Session {
                 file_errors(&self.db, checked).as_slice()
             };
             let mut exact_calls = Vec::new();
-            if !declarations.parameters(&self.db).is_empty() {
+            let returns = result_scopes.get(&file).map_or(&[][..], Vec::as_slice);
+            if !declarations.parameters(&self.db).is_empty() || !returns.is_empty() {
                 self.exact_scalar_calls(
                     index,
                     path,
                     declarations,
+                    returns,
                     skipped.map_or(&[], |ranges| ranges[index].as_slice()),
                     ty_errors,
                     &mut exact_calls,

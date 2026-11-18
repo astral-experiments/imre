@@ -2012,23 +2012,47 @@ ACCEPTED = {
     },
     "source_loader_namespace_directory": {
         "main.py": (
-            "import os\n"
+            "import os\nimport sys\n"
             "from types import ModuleType\n"
             "from importlib.machinery import SourceFileLoader\n"
             "import ns.child\n"
+            "directory = ns.__path__[0]\n"
             "try:\n"
-            "    SourceFileLoader('ns', ns.__path__[0]).get_code('ns')\n"
+            "    SourceFileLoader('ns', directory).get_code('ns')\n"
+            "except ImportError as exc:\n"
+            "    assert sys.implementation.name == 'imre' and type(exc) is ImportError\n"
+            "    assert exc.name == 'ns' and exc.path == directory\n"
+            "    assert 'no matching linked code' in str(exc)\n"
+            "    assert 'Declare and import the qualified module' in str(exc)\n"
             "except OSError:\n"
-            "    pass\n"
+            "    assert sys.implementation.name != 'imre'\n"
             "else:\n"
             "    raise AssertionError('file loader returned code for a namespace directory')\n"
-            "path = ns.__path__[0] + '/late.py'\n"
+            "path = directory + '/late.py'\n"
             "with open(path, 'wb'):\n"
             "    pass\n"
             "try:\n"
             "    loader = SourceFileLoader('late', path)\n"
-            "    assert loader.get_code('late').co_filename == path\n"
-            "    loader.exec_module(ModuleType('late'))\n"
+            "    if sys.implementation.name == 'imre':\n"
+            "        try:\n"
+            "            loader.get_code('late')\n"
+            "        except ImportError as exc:\n"
+            "            assert type(exc) is ImportError and exc.name == 'late' and exc.path == path\n"
+            "            assert 'no matching linked code' in str(exc)\n"
+            "            assert 'Declare and import the qualified module' in str(exc)\n"
+            "        else:\n"
+            "            raise AssertionError('fresh unlinked source unexpectedly compiled')\n"
+            "        try:\n"
+            "            loader.exec_module(ModuleType('late'))\n"
+            "        except ImportError as exc:\n"
+            "            assert type(exc) is ImportError and exc.name == 'late' and exc.path == path\n"
+            "            assert 'no matching linked code' in str(exc)\n"
+            "            assert 'Declare and import the qualified module' in str(exc)\n"
+            "        else:\n"
+            "            raise AssertionError('fresh unlinked source unexpectedly executed')\n"
+            "    else:\n"
+            "        assert loader.get_code('late').co_filename == path\n"
+            "        loader.exec_module(ModuleType('late'))\n"
             "finally:\n"
             "    os.unlink(path)\n"
         ),
@@ -2811,9 +2835,18 @@ def main() -> None:
                     command.append("--sanitize")
                 require_success(run(command, temporary, timeout=build_timeout))
                 result = run([str(executable)], temporary)
-                expected = f"NotImplementedError: no compiled Python body for <module> ({case / 'main.py.plugin.py'}:1)"
                 assert result.returncode == 1 and not result.stdout, result
-                assert result.stderr.splitlines()[-1] == expected, result
+                error = result.stderr.splitlines()[-1]
+                path = case / "main.py.plugin.py"
+                if name == "unregistered_source_loader":
+                    assert error.startswith(
+                        f"ImportError: no matching linked code for 'plugin' at {str(path)!r};"
+                    ), result
+                    assert "Declare and import the qualified module" in error, result
+                else:
+                    assert error == (
+                        f"NotImplementedError: no compiled Python body for <module> ({path}:1)"
+                    ), result
                 checks += 1
 
         # A provider can return to the application's check without acquiring its signature policy.
