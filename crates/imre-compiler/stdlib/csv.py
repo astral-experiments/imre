@@ -16,7 +16,7 @@ QUOTE_NOTNULL = 5
 
 
 class Error(Exception):
-    pass
+    __module__ = "_csv"
 
 
 class _Format:
