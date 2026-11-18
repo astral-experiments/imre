@@ -128,6 +128,15 @@ def rebound_checks(m,old,entry,binding,rows,names,frozen):
         if label.endswith('exec'):trace=trace.replace(x['actual_compiler_path'],'/tmp/substituted-imre',1)
         else:trace=trace.replace('PYTHON_COLORS=0','PYTHON_COLORS=1',1);x['actual_compiler_environment']['PYTHON_COLORS']='1'
         x['trace_sha256']=raw_control.sha(trace.encode());bad(lambda:adapt({'O0_build_json':enc(x),'O0_positive_trace':trace.encode()}),label)
+    for tier,label in (('O0','substituted successful clang path'),('O3','changed linker runtime argv')):
+        x=json.loads(read(tier+'_build_json'));lines=read(tier+'_positive_trace').decode().splitlines(keepends=True);output=scorecard.option(x['build_argv'],'-o');clang=x['fd_before']['clang']['path'];runtime=x['fd_before']['runtime']['path']
+        matches=[(i,m,json.loads(m[3])) for i,line in enumerate(lines) if (m:=raw_control.EXEC.fullmatch(line.rstrip('\n'))) and json.loads(m[2])==clang and output in json.loads(m[3])];scorecard.require(len(matches)==1,'negative control linker selection differs');i,m,args=matches[0];path=clang
+        if tier=='O0':path=args[0]='/tmp/substituted-clang'
+        else:args[args.index(runtime)]='/tmp/substituted-runtime.a'
+        line=lines[i].rstrip('\n');lines[i]=line[:m.start(2)]+json.dumps(path)+line[m.end(2):m.start(3)]+json.dumps(args)+line[m.end(3):]+'\n';trace=''.join(lines).encode();x['trace_sha256']=raw_control.sha(trace)
+        try:adapt({tier+'_build_json':enc(x),tier+'_positive_trace':trace})
+        except ValueError as e:scorecard.require(str(e)=='positive linker executable, runtime archive or environment differs',label+' failed for an unrelated reason');count+=1
+        else:raise AssertionError('accepted rebound: '+label)
     x=json.loads(read('O0_meta'));x['image_sha256']=pos['old_image_sha256'];bad(lambda:adapt({'O0_meta':enc(x)}),'stale O0 ELF')
     x=json.loads(read('O3_build_json'));x['old_image_sha256']='0'*64;bad(lambda:adapt({'O3_build_json':enc(x)}),'O3 content join')
     gm=json.loads(read('gate_O0_direct_meta'));br=json.loads(read('gate_bracket'))

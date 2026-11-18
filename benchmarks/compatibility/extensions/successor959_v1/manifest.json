@@ -18,7 +18,7 @@
     "benchmarks/compatibility/extensions/successor959_v1/authority.py": "10d53687bb0e43bec4c77ea895be90e2fae13b1db9038faa532efa1483704e18",
     "benchmarks/compatibility/extensions/successor959_v1/bindings/json.identity.json": "6c7c667189ab45b02bf264ab3f0a95e2c2a3c4dfc6171951c5a9a96a48d12987",
     "benchmarks/compatibility/extensions/successor959_v1/bindings/json.input.json": "62bbfdc6858ea51f49235bb667486794555c91d2f75f3356e76b79fc5033c21d",
-    "benchmarks/compatibility/extensions/successor959_v1/check_stage.py": "ddbb7ca60d5fe80c8700fd5ad352cff5d55947eaf87aec0ae139a1f56d725b0f",
+    "benchmarks/compatibility/extensions/successor959_v1/check_stage.py": "f3eeda9d3adb51408b8cbda51a4872497a52eff73c46be423141dd1d0620dd7c",
     "benchmarks/compatibility/extensions/successor959_v1/evidence/held-stock/COMPLETE.json": "47eee407121c63e35af4a5b6736167a37542c79f7609970165be84b518b81912",
     "benchmarks/compatibility/extensions/successor959_v1/evidence/held-stock/json959-held-stock-v1.tar.gz": "88728eff6ed6a02c52de34aa32b6999c679f5262846a0fd751a4553348a524d0",
     "benchmarks/compatibility/extensions/successor959_v1/evidence/identity/COMPLETE.json": "f261eed5bbf4e86f911b2a1fcf84bdb81519a779f6c1a06449fbc4fcef66c1e6",
@@ -95,7 +95,7 @@
     "benchmarks/compatibility/extensions/successor959_v1/evidence/json/selected-evidence-v1.json": "8b792a4a655706afdc346b10b74227800a08751d6edf3ee1716552c29334f893",
     "benchmarks/compatibility/extensions/successor959_v1/evidence/sealed/json-decode-959-selected-v1.tar.gz": "fae5b50a20c65bb58f960fc230491469b8e7266e6ff53f25e39305b4b72fe91b",
     "benchmarks/compatibility/extensions/successor959_v1/generate.py": "aab068f21341c506003d6d589f4e76d709a4ddee13fd7a5173f60093a334e043",
-    "benchmarks/compatibility/extensions/successor959_v1/patches/validators.patch": "c5b055f38461e4d35156e2a2e368a2ba544ddf8e074b751bc8fd2eb8812decff",
+    "benchmarks/compatibility/extensions/successor959_v1/patches/validators.patch": "ca4d2e5baef2b9fffac9969c27f25d4852ed640ad9be9a3b35f56cabafa20dcd",
     "benchmarks/compatibility/extensions/successor959_v1/templates/stdlib/json.identity.jsonl": "4305b1adf68a9f136a00711e7f00f723ad52464a06a9efe758002b2a5c09ff34",
     "benchmarks/compatibility/extensions/successor959_v1/templates/stdlib/json.jsonl": "26431dc508c2bf06dee85016726526066d178065e23263460fff9126d9db2c1f"
   },
@@ -116,7 +116,7 @@
           "old_git_blob": "dc53f7068385ec0a7840310f087570fa9a7c6a73",
           "old_sha256": "9edb18699cd0a2a30dc51db20ab668a3e81e1cd36209e0ec82af767678cbfcbb",
           "path": "benchmarks/compatibility/raw_control.py",
-          "post_sha256": "78354de5034807f8cc374672c5f823eb341b822f6f0240e19459045964721d65"
+          "post_sha256": "097f33254ac3c0230a1bbff1f90157598d35cbd44f0f03d490dbf9ffc2cfcf34"
         },
         {
           "old_git_blob": "f26b024fe2dd80e61e6f2aa7a7fc0eae2e0aa4c5",
@@ -132,7 +132,7 @@
         }
       ],
       "path": "benchmarks/compatibility/extensions/successor959_v1/patches/validators.patch",
-      "sha256": "c5b055f38461e4d35156e2a2e368a2ba544ddf8e074b751bc8fd2eb8812decff"
+      "sha256": "ca4d2e5baef2b9fffac9969c27f25d4852ed640ad9be9a3b35f56cabafa20dcd"
     }
   ],
   "predecessor": {
