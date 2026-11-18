@@ -3275,6 +3275,8 @@ enum SlotShape {
     FreshNonshortTextList,
     /// A certified fresh text leaf was retired with all scalar slot metadata already clear.
     VacantText,
+    /// The authenticated dense producer constructed every distinct child inline.
+    FreshInlineTextList,
 }
 
 impl SlotShape {
@@ -3292,7 +3294,10 @@ impl SlotShape {
     }
 
     fn is_fresh_text_list(self) -> bool {
-        matches!(self, Self::FreshTextList | Self::FreshNonshortTextList)
+        matches!(
+            self,
+            Self::FreshTextList | Self::FreshNonshortTextList | Self::FreshInlineTextList
+        )
     }
 
     fn text(value: &str) -> Self {
@@ -4930,6 +4935,24 @@ impl Heap {
         self.slot_shapes[id as usize] = SlotShape::FreshNonshortTextList;
     }
 
+    /// Record a nonempty no-GET graph produced entirely by the reserved dense ASCII batch.
+    ///
+    /// # Safety
+    /// Each distinct private child must have been constructed as an exact `Value::Str`
+    /// from a 3..=8-byte ASCII `&str` by the closed dense batch on a target whose
+    /// `compact_str` inline capacity (`size_of::<String>()`) is at least eight. No later action may alter
+    /// this provenance without invalidating the owner shape.
+    pub(super) unsafe fn mark_fresh_inline_text_list(&mut self, id: Id) {
+        debug_assert!(std::mem::size_of::<String>() >= 8);
+        debug_assert!(
+            matches!(self.get(id), Value::List(items) if !items.is_empty()
+            && items.iter().all(|&child| matches!(self.get(child), Value::Str(text)
+                if (3..=8).contains(&text.len()) && text.is_ascii() && !text.is_heap_allocated())))
+        );
+        debug_assert!(self.slot_shapes[id as usize] == SlotShape::Other);
+        self.slot_shapes[id as usize] = SlotShape::FreshInlineTextList;
+    }
+
     /// Producer provenance checked when a direct decode returns its per-call witness.
     pub(super) fn is_fresh_text_list(&self, id: Id) -> bool {
         usize::try_from(id)
@@ -4943,7 +4966,19 @@ impl Heap {
         usize::try_from(id)
             .ok()
             .and_then(|index| self.slot_shapes.get(index))
-            == Some(&SlotShape::FreshNonshortTextList)
+            .is_some_and(|shape| {
+                matches!(
+                    shape,
+                    SlotShape::FreshNonshortTextList | SlotShape::FreshInlineTextList
+                )
+            })
+    }
+
+    pub(super) fn is_fresh_inline_text_list(&self, id: Id) -> bool {
+        usize::try_from(id)
+            .ok()
+            .and_then(|index| self.slot_shapes.get(index))
+            == Some(&SlotShape::FreshInlineTextList)
     }
 
     /// A compiler-certified source local has no live frame, namespace, cell, or
@@ -8338,9 +8373,35 @@ impl Heap {
         debug_assert_eq!(self.slots[id].generation, 0);
         debug_assert!(!self.slots[id].untracked_tuple.get());
         self.slot_shapes[id] = SlotShape::VacantText;
-        self.traces[id].set(UNMARKED);
         let slot = &mut self.slots[id];
         slot.value = None;
+        slot.gc_next.set(free_head);
+    }
+
+    /// Recycle a private string constructed inline by the closed dense producer.
+    /// Its `CompactString` representation owns no allocation or other Drop resource.
+    #[inline]
+    fn retire_private_inline_text_leaf(&mut self, id: usize, free_head: usize) {
+        debug_assert!(self.slot_shapes[id] == SlotShape::AsciiStr);
+        debug_assert_eq!(self.traces[id].get(), UNMARKED);
+        debug_assert_eq!(self.slots[id].gc_prev.get(), UNMARKED);
+        debug_assert!(!self.slots[id].has_gc_header);
+        debug_assert!(self.slots[id].finalization == Finalization::None);
+        debug_assert!(
+            self.root_trace
+                .flags
+                .get(id)
+                .is_none_or(|&flags| flags == 0)
+        );
+        debug_assert!(matches!(self.slots[id].value, Some(Value::Str(ref text))
+            if (3..=8).contains(&text.len()) && text.is_ascii() && !text.is_heap_allocated()));
+        debug_assert!(!self.slots[id].may_have_buffer_views);
+        debug_assert_eq!(self.slots[id].generation, 0);
+        debug_assert!(!self.slots[id].untracked_tuple.get());
+        self.slot_shapes[id] = SlotShape::VacantText;
+        let slot = &mut self.slots[id];
+        // `take` clears the slot; this producer proves the inline value has no resource to drop.
+        std::mem::forget(slot.value.take());
         slot.gc_next.set(free_head);
     }
 
@@ -8380,7 +8441,7 @@ impl Heap {
         if index < FIRST_DYNAMIC_SLOT
             || self.full_collection_active()
             || self.allocation_traces.is_tracing()
-            || self.slot_shapes.get(index) != Some(&SlotShape::FreshNonshortTextList)
+            || !self.is_fresh_nonshort_text_list(id)
             || self.traces[index].get() != UNMARKED
         {
             return false;
@@ -8398,7 +8459,16 @@ impl Heap {
         let count = items.len();
         let items = items.as_ptr();
         let mut free_head = self.free_head;
-        if self.certified_text_side_state_clear() {
+        let side_state_clear = self.certified_text_side_state_clear();
+        if side_state_clear && self.is_fresh_inline_text_list(id) {
+            for position in (0..count).rev() {
+                // SAFETY: the immediate closed dense producer and uninterrupted ownership
+                // witness additionally prove each private ASCII string was constructed inline.
+                let child = unsafe { *items.add(position) } as usize;
+                self.retire_private_inline_text_leaf(child, free_head);
+                free_head = child;
+            }
+        } else if side_state_clear {
             for position in (0..count).rev() {
                 // SAFETY: the immediate producer and uninterrupted compiler witness
                 // prove each item is a distinct private 3..=255-byte exact string.
@@ -8618,6 +8688,116 @@ mod tests {
         let list = heap.alloc(Value::List(children.clone()));
         heap.mark_fresh_nonshort_text_list(list);
         (list, children)
+    }
+
+    fn inline_text_list(heap: &mut Heap) -> (Id, Vec<Id>) {
+        let mut input = Vec::new();
+        for width in 3..=8 {
+            input.extend([0x8c, width]);
+            input.extend(std::iter::repeat_n(b'x', usize::from(width)));
+            input.push(0x94);
+        }
+        heap.reserve_unobserved_texts(6).unwrap();
+        let mut children = Vec::with_capacity(6);
+        // SAFETY: these six complete dense ASCII entries and all reserved capacities are exact.
+        let (at, count) =
+            unsafe { heap.append_reserved_dense_ascii_texts(&input, 0, 6, &mut children) };
+        assert_eq!((at, count), (input.len(), 6));
+        let owner = heap.alloc(Value::List(children.clone()));
+        // SAFETY: all six distinct children came directly from the closed dense batch.
+        unsafe { heap.mark_fresh_inline_text_list(owner) };
+        (owner, children)
+    }
+
+    #[test]
+    fn inline_producer_retirement_preserves_free_order_and_clean_slot_reuse() {
+        if std::mem::size_of::<String>() < 8 {
+            return;
+        }
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let retired = heap.alloc(Value::List(Vec::new()));
+        heap.release_temporaries_since(mark);
+        heap.collect(std::iter::empty());
+        let initial_head = heap.free_head;
+        let mark = heap.temporary_mark();
+        let (owner, children) = inline_text_list(&mut heap);
+        assert_eq!(children[0] as usize, initial_head);
+        assert_eq!(children[0], retired);
+        assert!(heap.is_fresh_nonshort_text_list(owner));
+        assert!(heap.is_fresh_inline_text_list(owner));
+        heap.release_temporaries_since(mark);
+        let old_head = heap.free_head;
+        // SAFETY: this test holds the unchanged, unmarked, private producer graph.
+        assert!(unsafe { heap.retire_certified_nonshort_text_list(owner) });
+        assert_eq!(heap.free_head, owner as usize);
+        assert_eq!(
+            heap.slots[owner as usize].gc_next.get(),
+            children[0] as usize
+        );
+        for (i, &child) in children.iter().enumerate() {
+            let index = child as usize;
+            assert!(heap.slot_shapes[index] == SlotShape::VacantText);
+            assert!(heap.slots[index].value.is_none());
+            assert_eq!(heap.traces[index].get(), UNMARKED);
+            assert_eq!(
+                heap.slots[index].gc_next.get(),
+                children.get(i + 1).map_or(old_head, |&id| id as usize)
+            );
+        }
+        let replacement = heap.alloc(Value::List(Vec::new()));
+        assert_eq!(replacement, owner);
+        let replacement_text = heap.unobserved_text("another", true);
+        assert_eq!(replacement_text, children[0]);
+        assert!(matches!(heap.get(replacement_text), Value::Str(text) if text == "another"));
+    }
+
+    #[test]
+    fn inline_producer_mutation_and_side_state_miss_preserve_full_behavior() {
+        if std::mem::size_of::<String>() < 8 {
+            return;
+        }
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let (owner, children) = inline_text_list(&mut heap);
+        heap.release_temporaries_since(mark);
+        let mut position = TextPosition::default();
+        position.slot = children[0];
+        heap.text_position.set(position);
+        assert!(!heap.certified_text_side_state_clear());
+        // SAFETY: the graph itself remains private and unchanged; the deliberate metadata
+        // miss requires the ordinary per-child invalidation path.
+        assert!(unsafe { heap.retire_certified_nonshort_text_list(owner) });
+        assert_eq!(heap.text_position.get().slot, NONE);
+        assert!(heap.slot_shapes[children[0] as usize] == SlotShape::Vacant);
+        let mark = heap.temporary_mark();
+        let (other, _) = inline_text_list(&mut heap);
+        assert!(heap.is_fresh_inline_text_list(other));
+        let _ = heap.get_mut(other);
+        assert!(!heap.is_fresh_inline_text_list(other));
+        heap.release_temporaries_since(mark);
+        // SAFETY: an invalidated owner must reject without inspecting its children.
+        assert!(!unsafe { heap.retire_certified_nonshort_text_list(other) });
+        heap.collect(std::iter::once(other));
+        assert!(matches!(heap.get(other), Value::List(_)));
+    }
+
+    #[test]
+    fn heap_backed_short_text_is_never_inline_provenance() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let mut text = crate::Str::with_capacity(64);
+        text.push_str("abc");
+        assert!(text.is_heap_allocated());
+        let child = heap.alloc(Value::Str(text));
+        let owner = heap.alloc(Value::List(vec![child]));
+        heap.mark_fresh_nonshort_text_list(owner);
+        assert!(!heap.is_fresh_inline_text_list(owner));
+        heap.release_temporaries_since(mark);
+        // SAFETY: the nonshort graph is isolated and private, but only the normal
+        // destructor path is allowed for a heap-backed string regardless of its length.
+        assert!(unsafe { heap.retire_certified_nonshort_text_list(owner) });
+        assert!(heap.slots[child as usize].value.is_none());
     }
 
     #[test]

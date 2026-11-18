@@ -344,6 +344,8 @@ fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
     // any later operation can observe or collect them.
     let input = unsafe { std::slice::from_raw_parts(pointer, length) };
     let mut saw_short = false;
+    let solely_dense = layout.items.is_empty();
+    let mut batch_count = 0;
     if layout.dense_prefix != 0 {
         let mut at = 14usize;
         let mut first = 0usize;
@@ -359,6 +361,7 @@ fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
                     &mut values,
                 )
             };
+            batch_count = first;
         }
         for position in first..layout.dense_prefix {
             // SAFETY: dense preflight validated the complete frame, its short
@@ -410,7 +413,15 @@ fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
     }
     let result = ctx.alloc(Value::List(values));
     if !layout.has_get {
-        if layout.texts != 0 && !saw_short {
+        if solely_dense
+            && batch_count != 0
+            && batch_count == layout.dense_prefix
+            && layout.texts == batch_count
+        {
+            // SAFETY: the complete nonempty no-GET list was produced by the closed
+            // reserved batch, which accepts only exact 3..=8-byte inline ASCII strings.
+            unsafe { ctx.heap.mark_fresh_inline_text_list(result) };
+        } else if layout.texts != 0 && !saw_short {
             ctx.heap.mark_fresh_nonshort_text_list(result);
         } else {
             ctx.heap.mark_fresh_text_list(result);
@@ -676,6 +687,38 @@ mod tests {
                 };
                 assert_ne!(items[0], items[1]);
             }
+        }
+    }
+
+    #[test]
+    fn inline_text_provenance_requires_the_entire_closed_dense_batch() {
+        fn frame(payload: &[u8]) -> Vec<u8> {
+            let mut bytes = vec![PROTO, 5, FRAME];
+            bytes.extend_from_slice(&(payload.len() as u64).to_le_bytes());
+            bytes.extend_from_slice(payload);
+            bytes
+        }
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        for (payload, inline) in [
+            (&b"]\x94(\x8c\x03abc\x94\x8c\x08abcdefgh\x94e."[..], true),
+            (&b"]\x94(\x8c\x03abc\x94\x8c\x09abcdefghi\x94e."[..], false),
+            (&b"]\x94(\x8c\x03abc\x94\x8c\x01x\x94e."[..], false),
+            (
+                &b"]\x94(\x8c\x03abc\x94\x8c\x03\xe2\x82\xac\x94e."[..],
+                false,
+            ),
+            (&b"]\x94(\x8c\x03abc\x94h\x01e."[..], false),
+            (&b"]\x94(e."[..], false),
+        ] {
+            let data = ctx.alloc(Value::Bytes(frame(payload)));
+            let result = attempt_data(&mut ctx, data, false, || {})
+                .unwrap()
+                .unwrap()
+                .value();
+            assert_eq!(
+                ctx.heap.is_fresh_inline_text_list(result),
+                inline && std::mem::size_of::<String>() >= 8
+            );
         }
     }
 
