@@ -7,6 +7,13 @@ pub(crate) fn keyword_suggestion<'a>(wrong: &str, names: &[&'a str]) -> Option<&
     suggestions::declaration_order(wrong, names)
 }
 
+/// Match an uncaught ImportError's named fields against the native errno registry.
+pub(crate) fn import_suggestion(name: &str, wrong: &str) -> Option<&'static str> {
+    (name == "errno")
+        .then(|| suggestions::closest(wrong, crate::objects::errno::exported_names()))
+        .flatten()
+}
+
 use super::*;
 use crate::objects::boxed_values::{
     checked_text, concrete, length, sequence_item, tuple_item, word_text,
@@ -53,11 +60,7 @@ impl Import {
                 unsafe { &*(field.word as *const Str) }.as_str()
             })
         };
-        if text(&self.fields[0])? != "errno" {
-            return None;
-        }
-        let wrong = text(&self.fields[2])?;
-        suggestions::closest(wrong, crate::objects::errno::exported_names())
+        import_suggestion(text(&self.fields[0])?, text(&self.fields[2])?)
     }
 }
 

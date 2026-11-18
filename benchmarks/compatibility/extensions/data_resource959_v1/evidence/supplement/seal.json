@@ -1,0 +1,10 @@
+{
+  "archive_path": "/workspace/scratch/configparser-959-identity-supplement-v1/private-supplement.tar.gz",
+  "archive_sha256": "bf77d75329502e6a4892a1b9f8dc78a0774304ab64bb5979302f97e56994bb42",
+  "archive_bytes": 229508,
+  "member_count": 24,
+  "member_list_path": "/workspace/scratch/configparser-959-identity-supplement-v1/members.json",
+  "member_list_sha256": "e9897dc01b07865b37edc47b6325df2194a40f0dcc94da40ca8274b56996f115",
+  "first_archive_sha256": "0aaf6be3143875bfcf63262c8c0ecdee05911f21919d8100c63fbcefcf0fdfbd",
+  "credit": 0
+}

@@ -3378,9 +3378,7 @@ pub(crate) enum PathOperation {
     TemporaryDirectory,
     TemporaryFile,
     CleanupTemporaryDirectory,
-    ContextNew {
-        temporary: bool,
-    },
+    ContextNew,
     ContextEnter,
     ContextExit,
     UnionText,

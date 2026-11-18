@@ -90,10 +90,15 @@ class ScriptStageTests(unittest.TestCase):
             with patch.object(scorecard,'DATA_ROOT',SNAPSHOT),patch.object(scorecard,'COHORT',{**scorecard.CANONICAL_COHORT,'imre_revision':PIN}):
                 activation=scorecard.snapshot_activation();entries=[*activation['families'].values(),*activation['script_shards'].values()];self.assertTrue(entries)
                 public=script_control.authority(scorecard,entries[0]);self.assertEqual(public,m);self.assertEqual(manifest.read_bytes(),raw_control.git(scorecard.ROOT,'show','--no-textconv',f"{pin['commit']}:{pin['manifest']}"))
-                verified={entry['receipt'] for entry in entries};self.assertEqual(verified,{p.relative_to(scorecard.ROOT).as_posix() for p in (SNAPSHOT/'verified').rglob('*.jsonl')});self.assertTrue(all(entry['source_stage']==pin for entry in entries))
+                verified={entry['receipt'] for entry in entries}|{entry['receipt'] for entry in scorecard.activated_extension_entries().values()};self.assertEqual(verified,{p.relative_to(scorecard.ROOT).as_posix() for p in (SNAPSHOT/'verified').rglob('*.jsonl')});self.assertTrue(all(entry['source_stage']==pin for entry in entries))
                 extras={str((SNAPSHOT/name).relative_to(scorecard.ROOT)) for name in ('activation.json','README.md','docs/stdlib.md')}|verified;self.assertEqual(actual,set(files)|extras)
                 fs,scripts=scorecard.summary();self.assertEqual((fs['fnmatch']['paired'],fs['fnmatch']['receipts']),(24,24));self.assertEqual({r['id'] for r in scripts if r['paired']},{'uv-10','uv-26','uv-29','ty-05'})
-        for loc,digest in {**m['sources'],**files}.items():self.assertEqual(sha(scorecard.ROOT/loc),digest,loc)
+        for loc,digest in m['sources'].items():
+            if pin is not None and getattr(script_control.source_stage_pins,'REVISION_959_SUCCESSOR',None) is not None:
+                from extensions.successor959_v1 import authority as successor
+                successor.legacy_file(scorecard,loc,digest)
+            else:self.assertEqual(sha(scorecard.ROOT/loc),digest,loc)
+        for loc,digest in files.items():self.assertEqual(sha(scorecard.ROOT/loc),digest,loc)
         for id,ref in m['bindings']['script'].items():
             binding=json.loads((scorecard.ROOT/ref['path']).read_text());self.assertEqual(ref['sha256'],sha(scorecard.ROOT/ref['path']));self.assertEqual(ref['strict_source_control'],binding['strict_source_control']);self.assertEqual(binding['id'],id)
         tuple=m['build_tuples']['ruff_a'];tool=json.loads((SNAPSHOT/'custody/ruff-a-native-toolchain.json').read_text());ref=tuple['retrospective_transcript'];self.assertEqual(tuple['cargo_build_argv'],tool['cargo_build_argv']);self.assertEqual(tuple['cargo_build_environment'],tool['cargo_build_environment']);self.assertEqual(ref['sha256'],sha(scorecard.ROOT/ref['path']));self.assertEqual(tuple['custody_files'][ref['path']],ref['sha256'])
@@ -311,3 +316,12 @@ class ScriptReboundTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'effect mapping'):self.stock_semantics()
 
 if __name__=='__main__':unittest.main()
+
+
+class SuccessorAuthorityTests(unittest.TestCase):
+    def test_successor_needs_independent_public_pin(self):
+        from extensions.successor959_v1 import authority as successor
+        import source_stage_pins
+        if getattr(source_stage_pins,'REVISION_959_SUCCESSOR',None) is None:
+            with self.assertRaisesRegex(ValueError,'separately reviewed public'):successor.fixed_pin(scorecard)
+        else:self.assertEqual(successor.fixed_pin(scorecard)['manifest'],successor.MANIFEST)
