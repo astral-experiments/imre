@@ -27,7 +27,7 @@ impl Argument {
         match self {
             Self::Lock(lock) => ctx.alloc(lock.into_value()),
             Self::Builtin(name) => ctx.builtin(name),
-            Self::Alias(first) => ctx.scope_data(local).names[shape.parameter(first)],
+            Self::Alias(first) => ctx.scope_data(local).names()[shape.parameter(first)],
         }
     }
 }
@@ -297,7 +297,7 @@ impl Callback {
         if receiver.is_some() && !code.definition.freevars().is_empty() {
             return Ok(None);
         }
-        let bindings = &ctx.scope_data(scope).closure;
+        let bindings = &ctx.scope_data(scope).closure();
         if let [name] = code.definition.freevars()
             && pos.is_empty()
             && kwargs.is_none_or(

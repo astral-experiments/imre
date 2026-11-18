@@ -45,28 +45,9 @@ impl Kind {
     }
 }
 
-/// The high byte is the opcode; the low 32 bits index its immutable input bytes.
-#[derive(Clone, Copy)]
-struct Instruction(u64);
-
-impl Instruction {
-    fn new(op: u8, offset: usize) -> Option<Self> {
-        Some(Self(
-            (u64::from(op) << 56) | u64::from(u32::try_from(offset).ok()?),
-        ))
-    }
-
-    fn op(self) -> u8 {
-        (self.0 >> 56) as u8
-    }
-
-    fn offset(self) -> usize {
-        self.0 as u32 as usize
-    }
-}
-
 pub(super) struct Layout {
-    instructions: Vec<Instruction>,
+    start: usize,
+    end: usize,
     stack: usize,
     marks: usize,
     memo: usize,
@@ -163,7 +144,7 @@ pub(super) fn preflight(input: &[u8]) -> Option<Layout> {
         (2, input.len(), false)
     };
     let mut cursor = Cursor { input, at, end };
-    let mut instructions = Vec::new();
+    let mut instructions = 0usize;
     let mut stack = Vec::new();
     let mut marks = Vec::new();
     let mut memo = Vec::new();
@@ -171,17 +152,17 @@ pub(super) fn preflight(input: &[u8]) -> Option<Layout> {
     let mut max_marks = 0;
     let mut allocations = 0usize;
     loop {
-        if instructions.len() & 1023 == 0 && pending() {
+        if instructions & 1023 == 0 && pending() {
             return None;
         }
-        let offset = cursor.at;
         let op = cursor.byte()?;
         if op == STOP {
             if !marks.is_empty() || stack.len() != 1 || (framed && cursor.at != end) {
                 return None;
             }
             return Some(Layout {
-                instructions,
+                start: at,
+                end: cursor.at,
                 stack: max_stack,
                 marks: max_marks,
                 memo: memo.len(),
@@ -282,11 +263,11 @@ pub(super) fn preflight(input: &[u8]) -> Option<Layout> {
                 allocations = allocations.checked_add(1)?;
             }
         }
-        push(&mut instructions, Instruction::new(op, offset)?)?;
+        instructions += 1;
     }
 }
 
-/// Execute only validated instructions; every container and scalar is exact and callback-free.
+/// Stream the already validated immutable input; every operation is exact and callback-free.
 pub(super) fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
     let mut stack = Vec::new();
     let mut marks = Vec::new();
@@ -309,13 +290,16 @@ pub(super) fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> 
     // SAFETY: the source frame or call operands root this exact immutable bytes object.
     // Preflight proved no operation can invoke Python or mutate this backing allocation.
     let input = unsafe { std::slice::from_raw_parts(pointer, length) };
-    for instruction in layout.instructions {
-        let op = instruction.op();
-        let mut cursor = Cursor {
-            input,
-            at: instruction.offset() + 1,
-            end: input.len(),
-        };
+    let mut cursor = Cursor {
+        input,
+        at: layout.start,
+        end: layout.end,
+    };
+    loop {
+        let op = cursor.byte().unwrap();
+        if op == STOP {
+            break;
+        }
         let new = match op {
             EMPTY_LIST => Some(ctx.alloc(Value::List(Vec::new()))),
             EMPTY_DICT => Some(ctx.dict(Vec::new())),
@@ -347,6 +331,9 @@ pub(super) fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> 
                 None
             }
             MEMOIZE | BINPUT => {
+                if op == BINPUT {
+                    cursor.index(op).unwrap();
+                }
                 memo.push(*stack.last().unwrap());
                 None
             }
@@ -466,6 +453,115 @@ mod tests {
         assert_eq!(entries[0].0, TRUE);
         assert!(
             matches!(ctx.heap.get(entries[0].1), Value::Int(value) if value.as_small() == Some(22))
+        );
+    }
+
+    #[test]
+    fn streamed_protocol2_consumes_memo_indices_and_stops_before_trailing_bytes() {
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let pickle = [
+            PROTO, 2, EMPTY_LIST, BINPUT, 0, MARK, BININT1, 7, BINGET, 0, APPENDS, STOP, 0xff,
+        ];
+        let input = ctx.alloc(Value::Bytes(pickle.to_vec()));
+        let output = decode(&mut ctx, input, preflight(&pickle).unwrap()).unwrap();
+        let Value::List(items) = ctx.heap.get(output) else {
+            panic!("list")
+        };
+        assert!(matches!(ctx.heap.get(items[0]), Value::Int(value) if value.as_small() == Some(7)));
+        assert_eq!(items[1], output);
+    }
+
+    #[test]
+    fn streamed_frame_treats_stop_inside_payload_as_data() {
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let mut pickle = vec![PROTO, 5, FRAME];
+        pickle.extend_from_slice(&5u64.to_le_bytes());
+        pickle.extend_from_slice(&[SHORT_BYTES, 2, STOP, b'x', STOP]);
+        let input = ctx.alloc(Value::Bytes(pickle.clone()));
+        let output = decode(&mut ctx, input, preflight(&pickle).unwrap()).unwrap();
+        assert!(matches!(ctx.heap.get(output), Value::Bytes(bytes) if bytes == &[STOP, b'x']));
+
+        pickle[3] = 6;
+        pickle.push(0xff);
+        assert!(preflight(&pickle).is_none());
+    }
+
+    #[test]
+    fn streamed_protocol2_keeps_opcode_valued_indices_and_payloads_in_their_fields() {
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let mut pickle = vec![PROTO, 2, EMPTY_LIST, BINPUT, 0, MARK];
+        let mut last_index_at = 0;
+        for index in 1u8..=MARK {
+            let value = if index == MARK {
+                i32::from_le_bytes([FRAME, MARK, STOP, 0])
+            } else {
+                1000 + i32::from(index)
+            };
+            pickle.push(BININT);
+            pickle.extend_from_slice(&value.to_le_bytes());
+            pickle.push(BINPUT);
+            last_index_at = pickle.len();
+            pickle.push(index);
+        }
+        pickle.extend_from_slice(&[BINGET, MARK, LONG_BINGET]);
+        pickle.extend_from_slice(&u32::from(MARK).to_le_bytes());
+        pickle.extend_from_slice(&[BINGET, 0, APPENDS, STOP, 0xff]);
+
+        let input = ctx.alloc(Value::Bytes(pickle.clone()));
+        let output = decode(&mut ctx, input, preflight(&pickle).unwrap()).unwrap();
+        let Value::List(items) = ctx.heap.get(output) else {
+            panic!("list")
+        };
+        assert_eq!(items.len(), usize::from(MARK) + 3);
+        assert_eq!(items[usize::from(MARK) - 1], items[usize::from(MARK)]);
+        assert_eq!(items[usize::from(MARK)], items[usize::from(MARK) + 1]);
+        assert_eq!(items[usize::from(MARK) + 2], output);
+        assert!(
+            matches!(ctx.heap.get(items[usize::from(MARK) - 1]), Value::Int(value)
+            if value.as_small() == Some(i64::from(i32::from_le_bytes([FRAME, MARK, STOP, 0]))))
+        );
+
+        pickle[last_index_at] = MARK - 1;
+        assert!(
+            preflight(&pickle).is_none(),
+            "a repeated BINPUT index must fall back"
+        );
+    }
+
+    #[test]
+    fn streamed_frame_bounds_payloads_aliases_and_trailing_bytes() {
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let mut payload = vec![EMPTY_LIST, MEMOIZE, MARK, BINUNICODE];
+        let text = ".(é".as_bytes();
+        payload.extend_from_slice(&(text.len() as u32).to_le_bytes());
+        payload.extend_from_slice(text);
+        payload.extend_from_slice(&[MEMOIZE, BINBYTES]);
+        let bytes = [STOP, FRAME, BINPUT, MARK];
+        payload.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        payload.extend_from_slice(&bytes);
+        payload.extend_from_slice(&[BINGET, 1, APPENDS, STOP]);
+        let mut pickle = vec![PROTO, 5, FRAME];
+        pickle.extend_from_slice(&(payload.len() as u64).to_le_bytes());
+        pickle.extend_from_slice(&payload);
+        pickle.push(0xff); // outside the completed frame and ignored after STOP
+
+        let input = ctx.alloc(Value::Bytes(pickle.clone()));
+        let output = decode(&mut ctx, input, preflight(&pickle).unwrap()).unwrap();
+        let Value::List(items) = ctx.heap.get(output) else {
+            panic!("list")
+        };
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0], items[2]);
+        assert!(matches!(ctx.heap.get(items[0]), Value::Str(value) if value == ".(é"));
+        assert!(matches!(ctx.heap.get(items[1]), Value::Bytes(value) if value == &bytes));
+
+        let mut truncated = pickle.clone();
+        truncated.truncate(11 + payload.len() - 1);
+        assert!(preflight(&truncated).is_none());
+        pickle[3..11].copy_from_slice(&((payload.len() + 1) as u64).to_le_bytes());
+        assert!(
+            preflight(&pickle).is_none(),
+            "STOP must end the declared frame"
         );
     }
 }

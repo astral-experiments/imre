@@ -2604,8 +2604,8 @@ impl Context {
             unreachable!()
         };
         frame.comprehension = Some(kind);
-        frame.closure.declared = locals;
-        frame.closure.declared_complete = true;
+        frame.closure_mut().declared = locals;
+        frame.closure_mut().declared_complete = true;
         scope
     }
 
@@ -2618,7 +2618,7 @@ impl Context {
                 .expect("enclosing comprehension scope");
         }
         let frame = self.scope_data(scope);
-        if frame.closure.environment && !frame.closure.cells.contains_key(name) {
+        if frame.closure().environment && !frame.closure().cells.contains_key(name) {
             return frame
                 .parent
                 .expect("closure environment has module globals");
@@ -2639,11 +2639,13 @@ impl Context {
         scope
     }
     fn binding_scope(&self, scope: Id, name: &str) -> Id {
-        if self.scope_data(scope).closure.nonlocals.contains(name) {
+        if self.scope_data(scope).closure().nonlocals.contains(name) {
             let mut cursor = self.scope_data(scope).parent;
             while let Some(parent) = cursor {
                 let frame = self.scope_data(parent);
-                if frame.closure.cells.contains_key(name) || frame.closure.declared.contains(name) {
+                if frame.closure().cells.contains_key(name)
+                    || frame.closure().declared.contains(name)
+                {
                     return parent;
                 }
                 cursor = frame.parent;
@@ -2657,12 +2659,51 @@ impl Context {
 
     fn scope_name(&self, scope: Id, name: &str) -> Option<Id> {
         let scope = self.scope_data(scope);
-        if let Some(&cell) = scope.closure.cells.get(name)
+        if let Some(&cell) = scope.closure().cells.get(name)
             && let Value::Cell(contents) = self.heap.get(cell)
         {
             return *contents;
         }
         self.namespace_binding(scope, name)
+    }
+
+    /// Resolve a live binding without consulting the general scope-slot hint.
+    fn uncached_scope_name(&self, scope: Id, name: &str) -> Option<Id> {
+        let scope = self.scope_data(scope);
+        if let Some(&cell) = scope.closure().cells.get(name)
+            && let Value::Cell(contents) = self.heap.get(cell)
+        {
+            return *contents;
+        }
+        if let Some(namespace) = scope.binding_namespace(name) {
+            return self.dict_named_item(namespace, name);
+        }
+        scope.names().get(name).copied()
+    }
+
+    /// Seal only the original system module after successful FILE startup preparation.
+    fn seal_launcher_sys_streams(&mut self) {
+        let Some(module) = self.threads.system_module else {
+            return;
+        };
+        let Value::Module {
+            name,
+            scope,
+            initializing: false,
+            constructor: None,
+            ..
+        } = self.heap.get(module)
+        else {
+            return;
+        };
+        if name != "sys" {
+            return;
+        }
+        let scope = *scope;
+        let Value::Scope(scope) = self.heap.get_mut(scope) else {
+            return;
+        };
+        scope.seal_sys_streams();
     }
 
     /// Read the scope's own dictionary, excluding cells captured from another scope.
@@ -2677,12 +2718,12 @@ impl Context {
         let middle = name.as_bytes().get(name.len() / 2).copied().unwrap_or(0);
         let bucket = name.len() ^ usize::from(middle);
         let slot = &self.scope_name_slots[bucket % self.scope_name_slots.len()];
-        if let Some((key, value)) = scope.names.get_index(slot.get())
+        if let Some((key, value)) = scope.names().get_index(slot.get())
             && key == name
         {
             return Some(*value);
         }
-        let (index, _, &value) = scope.names.get_full(name)?;
+        let (index, _, &value) = scope.names().get_full(name)?;
         slot.set(index);
         Some(value)
     }
@@ -2691,10 +2732,10 @@ impl Context {
     fn scope_bindings(&self, scope: Id) -> impl Iterator<Item = (&str, Id)> {
         let frame = self.scope_data(scope);
         let names = frame
-            .names
+            .names()
             .iter()
             .map(|(name, &value)| (name.as_str(), value));
-        let dictionary = frame.namespace.and_then(|dict| self.dict_entries(dict));
+        let dictionary = frame.namespace().and_then(|dict| self.dict_entries(dict));
         names.chain(
             dictionary
                 .into_iter()
@@ -2718,9 +2759,9 @@ impl Context {
         let Value::Scope(frame) = self.heap.get_mut(environment) else {
             unreachable!()
         };
-        frame.closure.environment = true;
-        frame.closure.declared_complete = true;
-        frame.closure.cells = cells;
+        frame.closure_mut().environment = true;
+        frame.closure_mut().declared_complete = true;
+        frame.closure_mut().cells = cells;
         environment
     }
 
@@ -2842,15 +2883,15 @@ impl Context {
 
     /// Expose the current class-body mapping and use it for subsequent name bindings.
     fn active_class_namespace(&mut self, scope: Id) -> Id {
-        if let Some(dict) = self.scope_data(scope).namespace {
+        if let Some(dict) = self.scope_data(scope).namespace() {
             return dict;
         }
         let dict = self.class_namespace_dict(scope, true);
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!()
         };
-        frame.namespace = Some(dict);
-        frame.names.clear();
+        frame.set_namespace(Some(dict));
+        frame.names_mut().clear();
         dict
     }
 
@@ -2858,7 +2899,7 @@ impl Context {
     pub(super) fn class_annotation_dict_cell(&mut self, scope: Id) -> Id {
         let owner = self.scope_data(scope);
         if !owner.in_class_body
-            && let Some(&cell) = owner.closure.cells.get("__classdict__")
+            && let Some(&cell) = owner.closure().cells.get("__classdict__")
         {
             return cell;
         }
@@ -2882,7 +2923,7 @@ impl Context {
     /// Copy the bindings from an exposed class-body namespace before creating the type.
     fn finish_class_namespace(&mut self, scope: Id) -> Result<Option<ExposedClassBody>> {
         let frame = self.scope_data(scope);
-        let Some(body) = frame.namespace else {
+        let Some(body) = frame.namespace() else {
             return Ok(None);
         };
         let annotation_cell = frame
@@ -2903,8 +2944,8 @@ impl Context {
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!()
         };
-        frame.names = names;
-        frame.namespace = None;
+        frame.replace_names(names);
+        frame.set_namespace(None);
         frame.class_namespace.as_mut().unwrap().dictionary = None;
         self.heap.keep(body);
         if let Some(cell) = annotation_cell {
@@ -2932,10 +2973,10 @@ impl Context {
         if let Some(globals) = frame.exec_globals {
             return Ok(globals.dict);
         }
-        if let Some(dict) = frame.namespace {
+        if let Some(dict) = frame.namespace() {
             return Ok(dict);
         }
-        let names = std::mem::take(&mut frame.names);
+        let names = frame.take_names();
         let entries = names
             .into_iter()
             .map(|(name, v)| (self.heap.code_name(&name), v))
@@ -2944,12 +2985,12 @@ impl Context {
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!()
         };
-        frame.namespace = Some(dict);
+        frame.set_namespace(Some(dict));
         Ok(dict)
     }
 
     fn remove_binding(&mut self, scope: Id, name: &str, key: Id) -> Result<bool> {
-        if let Some(&cell) = self.scope_data(scope).closure.cells.get(name) {
+        if let Some(&cell) = self.scope_data(scope).closure().cells.get(name) {
             if let Some(previous) = self.heap.replace_cell(cell, None) {
                 self.release_list_owner(previous);
                 return Ok(true);
@@ -2972,7 +3013,7 @@ impl Context {
         let Value::Scope(data) = self.heap.get_mut(scope) else {
             unreachable!()
         };
-        let Some(previous) = data.names.shift_remove(name) else {
+        let Some(previous) = data.names_mut().shift_remove(name) else {
             return Ok(false);
         };
         let dictionary = data
@@ -3000,14 +3041,8 @@ impl Context {
         };
         debug_assert!(!frame.in_class_body);
         debug_assert!(frame.class_namespace.is_none());
-        debug_assert!(frame.namespace.is_none());
-        if !frame.names.contains_key(name.as_str()) {
-            frame
-                .names
-                .try_reserve(1)
-                .map_err(|_| Error::new("MemoryError", ""))?;
-        }
-        if let Some(previous) = frame.names.insert(name, value)
+        debug_assert!(frame.namespace().is_none());
+        if let Some(previous) = frame.insert_argument_name(name, value)?
             && previous != value
         {
             self.heap.weak_edge_removed(previous);
@@ -3021,7 +3056,7 @@ impl Context {
     }
 
     fn bind_local(&mut self, scope: Id, name: &str, value: Id) {
-        if let Some(&cell) = self.scope_data(scope).closure.cells.get(name) {
+        if let Some(&cell) = self.scope_data(scope).closure().cells.get(name) {
             if let Some(previous) = self.heap.replace_cell(cell, Some(value))
                 && previous != value
             {
@@ -3039,12 +3074,7 @@ impl Context {
         let Value::Scope(s) = self.heap.get_mut(scope) else {
             unreachable!("compiled scope handle")
         };
-        let previous = if let Some(binding) = s.names.get_mut(name) {
-            Some(std::mem::replace(binding, value))
-        } else {
-            s.names.insert(crate::Str::new(name), value);
-            None
-        };
+        let previous = s.insert_name(name, value);
         let dictionary = s
             .class_namespace
             .as_ref()
@@ -3073,10 +3103,10 @@ impl Context {
             local = self.scope_data(local).parent.expect("comprehension parent");
         }
         let frame = self.scope_data(scope);
-        let declared = !frame.in_class_body && frame.closure.declared.contains(name);
+        let declared = !frame.in_class_body && frame.closure().declared.contains(name);
         let mut error = if declared && local == scope {
             Error::unbound_local(name)
-        } else if declared || frame.closure.cells.contains_key(name) {
+        } else if declared || frame.closure().cells.contains_key(name) {
             Error::new(
                 "NameError",
                 format!(
@@ -3141,7 +3171,7 @@ impl Context {
             let frame = self.scope_data(scope);
             if target != scope
                 && frame.class_body_mapping().is_some()
-                && frame.closure.nonlocals.contains(name)
+                && frame.closure().nonlocals.contains(name)
                 && let Some(value) = self.lookup_scope_name(scope, name)?
             {
                 // LOAD_FROM_DICT_OR_DEREF checks class locals before its enclosing cell.
@@ -3155,7 +3185,7 @@ impl Context {
                 }
             }
             let s = self.scope_data(scope);
-            if let Some(&cell) = s.closure.cells.get(name) {
+            if let Some(&cell) = s.closure().cells.get(name) {
                 let value = match self.heap.get(cell) {
                     Value::Cell(value) => *value,
                     _ => self.namespace_binding(s, name),
@@ -3169,7 +3199,7 @@ impl Context {
                 return Ok(id);
             }
             let s = self.scope_data(scope);
-            if !s.in_class_body && s.closure.declared.contains(name) {
+            if !s.in_class_body && s.closure().declared.contains(name) {
                 return Err(self.missing_binding(origin, scope, name));
             }
             // An eager comprehension in a class cannot capture an outer function's __class__.

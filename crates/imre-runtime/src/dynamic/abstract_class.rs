@@ -319,7 +319,7 @@ impl Context {
         // acquire abstract markers or run finalizers when a callback removes a binding.
         let declarations: Vec<_> = self
             .scope_data(scope)
-            .names
+            .names()
             .iter()
             .filter(|(name, value)| {
                 name.as_str() != "__qualname__"

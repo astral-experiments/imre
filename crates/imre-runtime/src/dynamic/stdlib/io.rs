@@ -211,18 +211,13 @@ pub(in crate::dynamic) fn rooted_standard_streams(ctx: &Context) -> Option<Stand
     let Value::Module { scope, .. } = *ctx.heap.get(ctx.threads.system_module?) else {
         return None;
     };
-    let [stdin, stdout, stderr] = if let Some(streams) = ctx.heap.standard_stream_bindings(scope) {
-        streams
-    } else {
-        let streams = ["__stdin__", "__stdout__", "__stderr__"]
-            .map(|name| ctx.scope_name(scope, name).unwrap_or(NONE));
-        let bindings = ctx.scope_data(scope);
-        // Exposed namespace dictionaries and cells can change independently of the scope.
-        if bindings.namespace.is_none() && bindings.closure.cells.is_empty() {
-            ctx.heap.cache_standard_stream_bindings(scope, streams);
-        }
-        streams
-    };
+    let [stdin, stdout, stderr] = ctx
+        .scope_data(scope)
+        .sealed_sys_streams()
+        .unwrap_or_else(|| {
+            ["__stdin__", "__stdout__", "__stderr__"]
+                .map(|name| ctx.uncached_scope_name(scope, name).unwrap_or(NONE))
+        });
     let [input, buffer, raw] = text_descriptor_chain(&ctx.heap, stdin).unwrap_or([NONE; 3]);
     Some([input, buffer, raw, stdout, stderr])
 }
