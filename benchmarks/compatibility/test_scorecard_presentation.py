@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import scorecard
 
-PIN = "8571ca2dbecabf8d7863c369dc776611fd57d8ad"
+PIN = scorecard.REVISION_959
 
 
 def row(originals, receipts=0, paired=0, pending=0):
@@ -30,11 +30,11 @@ class PresentationTests(unittest.TestCase):
     def test_root_summary_shows_only_staged_modules_and_keeps_pending_uncredited(self):
         fs = {"active": row(10, receipts=10, paired=8), "pending": row(20, pending=3), "untouched": row(30)}
         with patch.object(scorecard, "is_snapshot", return_value=True), patch.dict(scorecard.COHORT, {"imre_revision": PIN}):
-            rendered = scorecard.render_root_summary(fs)
-        self.assertIn("10 validated receipts", rendered)
-        self.assertIn("8 verified pairs", rendered)
-        self.assertIn("| `active` | 10 | 8 verified |", rendered)
-        self.assertIn("| `pending` | 20 | pending (3 staged) |", rendered)
+            rendered = scorecard.render_root_summary(fs, [])
+        self.assertIn("| `active` | 8 / 10 | validated |", rendered)
+        self.assertIn("| `pending` | 0 / 20 | 3 staged, unverified |", rendered)
+        self.assertIn("0 verified / 72 historically reported stock-success commands", rendered)
+        self.assertIn("84 original script IDs", rendered)
         self.assertNotIn("untouched", rendered)
         self.assertIn(f"revisions/{PIN}/docs/stdlib.md", rendered)
 
@@ -46,7 +46,7 @@ class PresentationTests(unittest.TestCase):
             stale = scorecard.ROOT_SUMMARY_START + "\nstale\n" + scorecard.ROOT_SUMMARY_END
             original = block + "\n\n" + stale + "\n"
             (root / "README.md").write_text(original); (root / "docs/stdlib.md").write_text(block + "\n")
-            with patch.object(scorecard, "ROOT", root), patch.object(scorecard, "DATA_ROOT", data), patch.dict(scorecard.COHORT, {"imre_revision": PIN}), patch.object(scorecard, "summary", return_value=(fs, [])), patch.object(scorecard, "render", return_value=block), patch.object(scorecard, "select_snapshot"), patch("check_omissions.validate"):
+            with patch.object(scorecard, "ROOT", root), patch.object(scorecard, "DATA_ROOT", data), patch.dict(scorecard.COHORT, {"imre_revision": PIN}), patch.object(scorecard, "summary", return_value=(fs, [])), patch.object(scorecard, "render", return_value=block), patch.object(scorecard, "script_cohort_text", return_value="fixture script cohort"), patch.object(scorecard, "select_snapshot"), patch("check_omissions.validate"):
                 with patch.object(scorecard, "is_snapshot", return_value=False), patch.object(sys, "argv", ["scorecard.py", "--check"]):
                     scorecard.main()  # The canonical check ignores the separate stale marker.
                 with patch.object(scorecard, "is_snapshot", return_value=True):

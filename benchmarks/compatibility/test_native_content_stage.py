@@ -12,6 +12,7 @@ import scorecard
 from test_raw_control_staged import PIN, SNAPSHOT
 
 RUN_ONLY = SNAPSHOT / "evidence/run-only"
+FROZEN = "d0b396559a8ffda965cb495063b2967847d116aa"
 
 def digest(path): return hashlib.sha256(path.read_bytes()).hexdigest()
 def loc(path): return path.relative_to(scorecard.ROOT).as_posix()
@@ -90,9 +91,12 @@ class NativeContentStageTests(unittest.TestCase):
                 raw_control.validate_capture_archive(scorecard,archive,family,entry)
 
     def test_uncredited_manifest_matches_selected_bytes(self):
-        manifest=json.loads((scorecard.ROOT/raw_control.SOURCE_MANIFEST).read_text())
+        frozen=raw_control.git(scorecard.ROOT,"show","--no-textconv",f"{FROZEN}:{raw_control.SOURCE_MANIFEST}")
+        self.assertEqual((scorecard.ROOT/raw_control.SOURCE_MANIFEST).read_bytes(),frozen)
+        manifest=json.loads(frozen)
         for path,value in manifest["sources"].items():
-            self.assertEqual(digest(scorecard.ROOT/path),value,path)
+            source=raw_control.git(scorecard.ROOT,"show","--no-textconv",f"{FROZEN}:{path}")
+            self.assertEqual(hashlib.sha256(source).hexdigest(),value,path)
         for family in ("glob","logging"):
             frozen=manifest["families"][family];self.assertEqual(frozen["strict_source_control"],"native-content-v1")
             binding=json.loads((scorecard.ROOT/frozen["binding"]["path"]).read_text())
