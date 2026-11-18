@@ -1,5 +1,6 @@
 """Run unchanged basicConfig methods against the actual root handler registry."""
 import argparse
+import ast
 import hashlib
 import json
 from pathlib import Path
@@ -13,7 +14,7 @@ SOURCE = STDLIB / "upstream/Lib/test/test_logging.py"
 sys.path[:0] = [str(HERE), str(STDLIB)]
 from native_basic_config_options import option_cases
 from suite_inventory import cases, load_suite, verify_files
-from suite_native import NativeCompileError, Toolchain, native_method, run_in_fixtures, testcase_fixture
+from suite_native import NativeCompileError, Toolchain, method_bytes, native_method, run_in_fixtures, testcase_fixture
 
 PREFIX = "test.test_logging.BasicConfigTest."
 METHODS = {
@@ -48,6 +49,51 @@ class NativeCase:
         if first != second:
             raise AssertionError("different date formats")
 """
+
+
+def critical_case(toolchain, directory, original):
+    """Run the complete upstream critical method and its helper in the native child."""
+    case_id = PREFIX + "test_critical"
+    support_source = Path(original.support.__file__).resolve()
+    if support_source != Path(original.__file__).resolve().parent / "support" / "__init__.py":
+        raise ValueError("logging test imported a different support module")
+    data = support_source.read_bytes()
+    git_blob = hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
+    if git_blob != "6635ec3474e12ec6a2f684a1a93b6ec08df49a37":
+        raise ValueError("support source differs from pinned CPython 3.14.5")
+    node, = [n for n in ast.parse(data).body if isinstance(n, ast.FunctionDef) and n.name == "patch"]
+    support_patch = b"".join(data.splitlines(keepends=True)[node.lineno - 1:node.end_lineno])
+    if hashlib.sha256(support_patch).hexdigest() != "5fe18673e1a7a421fd686bddb38c5283e6974d7e36b378ee2cca618498caad9a":
+        raise ValueError("support.patch differs from the audited function")
+    helper = method_bytes(SOURCE, "BasicConfigTest", "_test_log")
+    if hashlib.sha256(helper).hexdigest() != "573f527b82b697fc517a04b9389d2d6d0e348574450a6a0244f889c93719623c":
+        raise ValueError("BasicConfigTest._test_log differs from the audited helper")
+
+    def execute(case, method):
+        if original.logging.root.handlers or original.logging.root.level != case.original_logging_level:
+            raise AssertionError("original BasicConfigTest did not prepare the expected root state")
+        (directory / "imre_logging_critical_support.py").write_bytes(support_patch)
+        setup = SETUP.replace("LEVEL", repr(case.original_logging_level))
+        fixture = (PREPARE + "\nimport imre_logging_critical_support as support\n"
+                   "ORIGINAL_BASIC_CONFIG = logging.basicConfig\n" + testcase_fixture() + setup + helper.decode() +
+                   "\n    def doCleanups(self) -> bool:\n"
+                   "        cleaned = super().doCleanups()\n"
+                   "        if logging.basicConfig is not ORIGINAL_BASIC_CONFIG:\n"
+                   "            raise AssertionError('native basicConfig cleanup did not restore its identity')\n"
+                   "        if logging.root.level != self.original_logging_level:\n"
+                   "            raise AssertionError('native root level cleanup did not restore its value')\n"
+                   "        return cleaned\n")
+        call = native_method(toolchain, directory, SOURCE, "BasicConfigTest", case_id, fixture,
+            operation=("imre", "Native logging.critical auto-configures the root via basicConfig()"),
+            cleanups=True)
+        result = call(case, method)
+        result["observation"]["evidence"].update(
+            helper_sha256=hashlib.sha256(helper).hexdigest(),
+            support_patch_sha256=hashlib.sha256(support_patch).hexdigest(),
+            assertion="Unchanged native _test_log asserts the intercepted basicConfig call has no arguments",
+            fixture="CPython BasicConfigTest hooks; native empty root with the observed saved level; native registered cleanups")
+        return result
+    return execute
 
 
 def config_cases(toolchain, directory):
@@ -89,6 +135,9 @@ def config_cases(toolchain, directory):
         return execute
 
     callbacks = {PREFIX + method: configure(method, description) for method, description in METHODS.items()}
+    critical = directory / "critical"
+    critical.mkdir()
+    callbacks[PREFIX + "test_critical"] = critical_case(toolchain, critical, test_logging)
     options = directory / "file-options"
     options.mkdir()
     callbacks.update(option_cases(toolchain, options, SOURCE, PREPARE, SETUP))
