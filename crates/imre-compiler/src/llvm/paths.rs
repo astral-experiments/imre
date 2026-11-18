@@ -155,11 +155,10 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            PathOperation::ContextNew { temporary } => {
+            PathOperation::ContextNew => {
                 let operand = self.instruction(format!(
-                    "call ptr @imre_directory_context_new(i64 {}, i32 {})",
+                    "call ptr @imre_directory_context_new(i64 {})",
                     args[0].value.operand,
-                    u32::from(temporary)
                 ));
                 self.owned(Value {
                     ty: returns,

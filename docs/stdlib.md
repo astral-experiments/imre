@@ -3,71 +3,72 @@
 <!-- compatibility-scorecard:start -->
 ### Pinned compatibility scorecard
 
-Revision `49f0dc2ef78b82692e333252faf71b4fc7730949` · CPython **3.14.5** · Linux x86-64. These are original-test receipts at this revision, not cumulative credits.
+Revision `95908fb0acadc2a67304a8080e584deaef395746` · CPython **3.14.5** · Linux x86-64. These are original-test receipts at this revision, not cumulative credits.
 
-Frozen 45-family cohort: **16,203 pinned receipts** of **16,225 raw upstream originals**, **2,232 observed stock/O0/O3 pass intersections**, **24 verified credited pairs**; **22 originals have no receipt**.
+Frozen 45-family cohort: **398 pinned receipts** of **16,225 raw upstream originals**, **393 observed stock/O0/O3 pass intersections**, **393 verified credited pairs**; **15,827 originals have no validated receipt**.
 
-Supplemental pilots, outside the frozen cohort: **3 receipts** of **3 originals**, **3 observed intersections**, **3 verified credited pairs**.
+Supplemental pilots, outside the frozen cohort: **0 receipts** of **3 originals**, **0 observed intersections**, **0 verified credited pairs**.
 
-Scripts: **84 of 84 original commands have receipts**, **3 verified paired passes**; **0 not run**.
+Scripts: **4 of 84 original command IDs have receipts**; **4 verified / 72 historically reported stock-success commands** among **84 original script IDs** ([public historical authority](https://github.com/astral-experiments/imre/commit/880648b620f57905a495eb51fbb4600755ee0c54)). **80 IDs unobserved at this revision**.
 
 #### Frozen cohort
 
 | Family | Raw originals | Stock | O0 | O3 | Observed stock/O0/O3 passes | Verified credited pairs | Historical mixed-revision credits |
 | --- | ---: | --- | --- | --- | ---: | --- | ---: |
-| `argparse` | 1,893 | 1,893 pass | not run | not run | 0 | 0 verified | 1,887 |
-| `base64` | 41 | 41 pass | 40 pass, 1 skip | 40 pass, 1 skip | 40 | 0 verified | 40 |
-| `collections` | 659 | 655 pass, 3 skip, 1 not run | 160 pass, 4 error, 3 skip, 492 not run | not run | 0 | 0 verified; 1 unknown | 639 |
-| `configparser` | 344 | 339 pass, 5 skip | 339 pass, 5 skip | 339 pass, 5 skip | 339 | 0 verified | 339 |
-| `contextlib` | 149 | 149 pass | 91 pass, 58 not run | not run | 0 | 0 verified | 149 |
-| `copy` | 81 | 81 pass | not run | not run | 0 | 0 verified | 81 |
-| `csv` | 128 | 124 pass, 4 skip | 122 pass, 6 skip | 122 pass, 6 skip | 122 | 0 verified | 122 |
-| `dataclasses` | 276 | 275 pass, 1 skip | not run | not run | 0 | 0 verified | 273 |
-| `datetime` | 1,098 | 1,045 pass, 53 skip | 19 pass, 24 skip, 1,055 not run | 21 pass, 24 skip, 1,053 not run | 19 | 0 verified | 1,029 |
+| `argparse` | 1,893 | not run | not run | not run | unknown (not run) | unknown (not run) | 1,887 |
+| `base64` | 41 | not run | not run | not run | unknown (not run) | unknown (not run) | 40 |
+| `collections` | 659 | not run | not run | not run | unknown (not run) | unknown (not run) | 639 |
+| `configparser` | 344 | 339 pass, 5 skip | 339 pass, 5 skip | 339 pass, 5 skip | 339 | 339 verified | 339 |
+| `contextlib` | 149 | not run | not run | not run | unknown (not run) | unknown (not run) | 149 |
+| `copy` | 81 | not run | not run | not run | unknown (not run) | unknown (not run) | 81 |
+| `csv` | 128 | not run | not run | not run | unknown (not run) | unknown (not run) | 122 |
+| `dataclasses` | 276 | not run | not run | not run | unknown (not run) | unknown (not run) | 273 |
+| `datetime` | 1,098 | not run | not run | not run | unknown (not run) | unknown (not run) | 1,029 |
 | `fnmatch` | 24 | 24 pass | 24 pass | 24 pass | 24 | 24 verified | 24 |
-| `fractions` | 50 | 50 pass | not run | not run | 0 | 0 verified | 50 |
-| `functools` | 329 | 325 pass, 4 not run | not run | not run | 0 | 0 verified; 4 unknown | 316 |
-| `glob` | 24 | 22 pass, 2 skip | 21 pass, 2 skip, 1 not run | 21 pass, 2 skip, 1 not run | 21 | 0 verified | 22 |
-| `gzip` | 75 | 75 pass | 66 pass, 1 error, 8 not run | 66 pass, 1 error, 8 not run | 66 | 0 verified | 74 |
-| `hashlib` | 82 | 69 pass, 13 skip | 67 pass, 1 error, 14 skip | 67 pass, 1 error, 14 skip | 67 | 0 verified | 78 |
-| `importlib` | 1,345 | 1,328 pass, 17 skip | not run | not run | 0 | 0 verified | 432 |
-| `inspect` | 362 | 355 pass, 7 skip | not run | not run | 0 | 0 verified | 264 |
-| `io` | 1,038 | 1,029 pass, 9 skip | 675 pass, 2 fail, 13 error, 24 skip, 324 not run | 374 pass, 2 fail, 4 error, 19 skip, 639 not run | 372 | 0 verified | 959 |
-| `itertools` | 138 | 134 pass, 4 skip | 93 pass, 4 error, 17 skip, 24 not run | 95 pass, 4 error, 17 skip, 22 not run | 93 | 0 verified | 111 |
-| `json` | 216 | 215 pass, 1 skip | 158 pass, 4 fail, 5 error, 1 skip, 48 not run | 149 pass, 4 fail, 5 error, 1 skip, 57 not run | 145 | 0 verified | 207 |
-| `logging` | 272 | 269 pass, 3 skip | not run | not run | 0 | 0 verified | 220 |
-| `math` | 89 | 89 pass | not run | not run | 0 | 0 verified | 85 |
-| `netrc` | 23 | 22 pass, 1 skip | 22 pass, 1 skip | not run | 0 | 0 verified | 22 |
-| `os` | 579 | 474 pass, 2 error, 103 skip | 25 pass, 554 not run | 25 pass, 554 not run | 25 | 0 verified | 471 |
-| `pathlib` | 1,369 | 966 pass, 403 skip | 211 pass, 3 error, 16 skip, 1,139 not run | 207 pass, 3 error, 16 skip, 1,143 not run | 207 | 0 verified | 968 |
-| `re` | 165 | 164 pass, 1 skip | not run | not run | 0 | 0 verified | 146 |
-| `shutil` | 223 | 160 pass, 63 skip | not run | not run | 0 | 0 verified | 172 |
-| `socket` | 746 | 614 pass, 132 skip | not run | not run | 0 | 0 verified | 110 |
-| `ssl` | 195 | 180 pass, 15 skip | not run | not run | 0 | 0 verified | 66 |
-| `struct` | 43 | 43 pass | 34 pass, 1 fail, 2 error, 6 skip | 34 pass, 1 fail, 2 error, 6 skip | 34 | 0 verified | 34 |
-| `subprocess` | 353 | 308 pass, 2 error, 43 skip | not run | not run | 0 | 0 verified | 303 |
-| `tempfile` | 118 | 112 pass, 6 skip | not run | not run | 0 | 0 verified | 110 |
-| `textwrap` | 68 | 68 pass | 68 pass | 68 pass | 68 | 0 verified | 68 |
-| `threading` | 228 | 220 pass, 1 fail, 7 skip | 90 pass, 86 error, 15 skip, 37 not run | 90 pass, 86 error, 15 skip, 37 not run | 90 | 0 verified | 97 |
-| `tokenize` | 130 | 130 pass | 127 pass, 2 error, 1 not run | 127 pass, 2 error, 1 not run | 127 | 0 verified | 127 |
-| `tomllib` | 17 | 17 pass | 17 pass | 17 pass | 17 | 0 verified | 17 |
-| `types` | 141 | 128 pass, 1 skip, 12 not run | not run | not run | 0 | 0 verified; 12 unknown | 134 |
-| `typing` | 712 | 712 pass | not run | not run | 0 | 0 verified | 710 |
-| `unittest` | 1,090 | 1,088 pass, 2 skip | 491 pass, 1 error, 3 skip, 595 not run | 35 pass, 1,055 not run | 35 | 0 verified | 1,054 |
-| `urllib` | 178 | 174 pass, 2 error, 2 skip | 174 pass, 2 error, 2 skip | 174 pass, 2 error, 2 skip | 174 | 0 verified | 173 |
-| `uuid` | 120 | 103 pass, 17 skip | not run | not run | 0 | 0 verified | 48 |
-| `warnings` | 187 | 181 pass, 6 skip | not run | not run | 0 | 0 verified | 181 |
-| `weakref` | 183 | 179 pass, 4 skip | 147 pass, 1 fail, 3 error, 11 skip, 21 not run | 147 pass, 1 fail, 3 error, 11 skip, 21 not run | 147 | 0 verified | 168 |
-| `zipfile` | 383 | 376 pass, 2 skip, 5 not run | not run | not run | 0 | 0 verified; 5 unknown | 370 |
-| `zoneinfo` | 261 | 233 pass, 28 skip | not run | not run | 0 | 0 verified | 229 |
+| `fractions` | 50 | not run | not run | not run | unknown (not run) | unknown (not run) | 50 |
+| `functools` | 329 | not run | not run | not run | unknown (not run) | unknown (not run) | 316 |
+| `glob` | 24 | not run | not run | not run | unknown (not run) | unknown (not run) | 22 |
+| `gzip` | 75 | not run | not run | not run | unknown (not run) | unknown (not run) | 74 |
+| `hashlib` | 82 | not run | not run | not run | unknown (not run) | unknown (not run) | 78 |
+| `importlib` | 1,345 | not run | not run | not run | unknown (not run) | unknown (not run) | 432 |
+| `inspect` | 362 | not run | not run | not run | unknown (not run) | unknown (not run) | 264 |
+| `io` | 1,038 | not run | not run | not run | unknown (not run) | unknown (not run) | 959 |
+| `itertools` | 138 | not run | not run | not run | unknown (not run) | unknown (not run) | 111 |
+| `json` | 216 | 30 pass, 186 not run | 30 pass, 186 not run | 30 pass, 186 not run | 30 | 30 verified; 186 unknown | 207 |
+| `logging` | 272 | not run | not run | not run | unknown (not run) | unknown (not run) | 220 |
+| `math` | 89 | not run | not run | not run | unknown (not run) | unknown (not run) | 85 |
+| `netrc` | 23 | not run | not run | not run | unknown (not run) | unknown (not run) | 22 |
+| `os` | 579 | not run | not run | not run | unknown (not run) | unknown (not run) | 471 |
+| `pathlib` | 1,369 | not run | not run | not run | unknown (not run) | unknown (not run) | 968 |
+| `re` | 165 | not run | not run | not run | unknown (not run) | unknown (not run) | 146 |
+| `shutil` | 223 | not run | not run | not run | unknown (not run) | unknown (not run) | 172 |
+| `socket` | 746 | not run | not run | not run | unknown (not run) | unknown (not run) | 110 |
+| `ssl` | 195 | not run | not run | not run | unknown (not run) | unknown (not run) | 66 |
+| `struct` | 43 | not run | not run | not run | unknown (not run) | unknown (not run) | 34 |
+| `subprocess` | 353 | not run | not run | not run | unknown (not run) | unknown (not run) | 303 |
+| `tempfile` | 118 | not run | not run | not run | unknown (not run) | unknown (not run) | 110 |
+| `textwrap` | 68 | not run | not run | not run | unknown (not run) | unknown (not run) | 68 |
+| `threading` | 228 | not run | not run | not run | unknown (not run) | unknown (not run) | 97 |
+| `tokenize` | 130 | not run | not run | not run | unknown (not run) | unknown (not run) | 127 |
+| `tomllib` | 17 | not run | not run | not run | unknown (not run) | unknown (not run) | 17 |
+| `types` | 141 | not run | not run | not run | unknown (not run) | unknown (not run) | 134 |
+| `typing` | 712 | not run | not run | not run | unknown (not run) | unknown (not run) | 710 |
+| `unittest` | 1,090 | not run | not run | not run | unknown (not run) | unknown (not run) | 1,054 |
+| `urllib` | 178 | not run | not run | not run | unknown (not run) | unknown (not run) | 173 |
+| `uuid` | 120 | not run | not run | not run | unknown (not run) | unknown (not run) | 48 |
+| `warnings` | 187 | not run | not run | not run | unknown (not run) | unknown (not run) | 181 |
+| `weakref` | 183 | not run | not run | not run | unknown (not run) | unknown (not run) | 168 |
+| `zipfile` | 383 | not run | not run | not run | unknown (not run) | unknown (not run) | 370 |
+| `zoneinfo` | 261 | not run | not run | not run | unknown (not run) | unknown (not run) | 229 |
 
 #### Supplemental pilots
 
 | Family | Raw originals | Stock | O0 | O3 | Observed stock/O0/O3 passes | Verified credited pairs | Historical mixed-revision credits |
 | --- | ---: | --- | --- | --- | ---: | --- | ---: |
-| `errno` | 3 | 3 pass | 3 pass | 3 pass | 3 | 3 verified | — |
+| `errno` | 3 | not run | not run | not run | unknown (not run) | unknown (not run) | — |
 
 An observed intersection means the same original passed stock, O0 and O3; frozen credited pairs also require the launcher to pass its imported bad-type control and any required source-withdrawal check. Script passes also require independently anchored frozen preimages and reference observations, plus exact exit, stdout, stderr and effect comparisons. Skips, omissions, unsupported diagnostics, exclusions, timeouts and non-stock successes never earn credited pairs. Historical credits come from the [frozen mixed-revision ledger](../benchmarks/cpython_stdlib/full/frozen-stock-intersection-8818.tsv) and are separate from the pinned result. [Receipts and replay instructions](../benchmarks/compatibility/README.md).
+Historical views: [49f pinned scorecard](https://github.com/astral-experiments/imre/blob/f1788f4337076e2a9cb8a004d601303ec1088d55/docs/stdlib.md#pinned-compatibility-scorecard); [separate 857 snapshot](https://github.com/astral-experiments/imre/blob/d0b396559a8ffda965cb495063b2967847d116aa/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/docs/stdlib.md).
 <!-- compatibility-scorecard:end -->
 
 The six accepted [argparse bytecode omissions](stdlib-omissions.md#argparse) remain in the 1,893-original denominator. Their revision-independent [policy ledger](../benchmarks/cpython_stdlib/full/argparse/accepted-omissions-linux.tsv) does not alter the pinned receipts or earn passes.

@@ -80,7 +80,11 @@ def validate_file_set(api,row,entry,manifest):
                 and entry.get('receipt')==receipt and entry.get('staged_receipt')==stage['path'] and entry.get('sources')==sources
                 and set(entry.get('files',{}))==set(fixed)|{receipt} and all(entry['files'].get(k)==v for k,v in fixed.items()), 'activation file set or binding differs from immutable 959 stage')
     for loc,digest in entry['files'].items():
-        api.require(isinstance(digest,str) and api.HEX64.fullmatch(digest) and raw_control.sha(api.repository_file(loc,api.ROOT).read_bytes())==digest, '959 source-stage bound file digest differs')
+        if getattr(source_stage_pins,'REVISION_959_SUCCESSOR',None) is not None:
+            from extensions.successor959_v1 import authority as successor
+            successor.legacy_file(api,loc,digest)
+        else:
+            api.require(isinstance(digest,str) and api.HEX64.fullmatch(digest) and raw_control.sha(api.repository_file(loc,api.ROOT).read_bytes())==digest, '959 source-stage bound file digest differs')
     return binding
 
 
