@@ -189,6 +189,7 @@ def assertNotRegex(self, text, unexpected_regex, msg=None):
 
 TestCase.assertRegex = assertRegex
 TestCase.assertNotRegex = assertNotRegex
+assertRaisesRegex.__qualname__ = "TestCase.assertRaisesRegex"
 TestCase.assertRaisesRegex = assertRaisesRegex
 assertRaises.__qualname__ = "TestCase.assertRaises"
 TestCase.assertRaises = assertRaises
