@@ -3,18 +3,61 @@
 
 Revision `95908fb0acadc2a67304a8080e584deaef395746` · CPython **3.14.5** · Linux x86-64. These are original-test receipts at this revision, not cumulative credits.
 
-Frozen 45-family cohort: **24 pinned receipts** of **16,225 raw upstream originals**, **24 observed stock/O0/O3 pass intersections**, **24 verified credited pairs**; **16,201 originals have no validated receipt**.
+Frozen 45-family cohort: **54 pinned receipts** of **16,225 raw upstream originals**, **54 observed stock/O0/O3 pass intersections**, **54 verified credited pairs**; **16,171 originals have no validated receipt**.
 
 Supplemental pilots, outside the frozen cohort: **0 receipts** of **3 originals**, **0 observed intersections**, **0 verified credited pairs**.
 
-Scripts: **4 of 84 original commands have receipts**, **4 observed intersections**, **4 verified credited pairs**; **80 not run**. **4 verified / 72 historically reported stock-success commands** among **84 original script IDs** ([public historical authority](https://github.com/astral-experiments/imre/commit/880648b620f57905a495eb51fbb4600755ee0c54)).
+Scripts: **4 of 84 original command IDs have receipts**; **4 verified / 72 historically reported stock-success commands** among **84 original script IDs** ([public historical authority](https://github.com/astral-experiments/imre/commit/880648b620f57905a495eb51fbb4600755ee0c54)). **80 IDs unobserved at this revision**.
 
 #### Frozen cohort
 
 | Family | Raw originals | Stock | O0 | O3 | Observed stock/O0/O3 passes | Verified credited pairs | Historical mixed-revision credits |
 | --- | ---: | --- | --- | --- | ---: | --- | ---: |
 | `argparse` | 1,893 | not run | not run | not run | unknown (not run) | unknown (not run) | 1,887 |
+| `base64` | 41 | not run | not run | not run | unknown (not run) | unknown (not run) | 40 |
+| `collections` | 659 | not run | not run | not run | unknown (not run) | unknown (not run) | 639 |
+| `configparser` | 344 | not run | not run | not run | unknown (not run) | unknown (not run) | 339 |
+| `contextlib` | 149 | not run | not run | not run | unknown (not run) | unknown (not run) | 149 |
+| `copy` | 81 | not run | not run | not run | unknown (not run) | unknown (not run) | 81 |
+| `csv` | 128 | not run | not run | not run | unknown (not run) | unknown (not run) | 122 |
+| `dataclasses` | 276 | not run | not run | not run | unknown (not run) | unknown (not run) | 273 |
+| `datetime` | 1,098 | not run | not run | not run | unknown (not run) | unknown (not run) | 1,029 |
 | `fnmatch` | 24 | 24 pass | 24 pass | 24 pass | 24 | 24 verified | 24 |
+| `fractions` | 50 | not run | not run | not run | unknown (not run) | unknown (not run) | 50 |
+| `functools` | 329 | not run | not run | not run | unknown (not run) | unknown (not run) | 316 |
+| `glob` | 24 | not run | not run | not run | unknown (not run) | unknown (not run) | 22 |
+| `gzip` | 75 | not run | not run | not run | unknown (not run) | unknown (not run) | 74 |
+| `hashlib` | 82 | not run | not run | not run | unknown (not run) | unknown (not run) | 78 |
+| `importlib` | 1,345 | not run | not run | not run | unknown (not run) | unknown (not run) | 432 |
+| `inspect` | 362 | not run | not run | not run | unknown (not run) | unknown (not run) | 264 |
+| `io` | 1,038 | not run | not run | not run | unknown (not run) | unknown (not run) | 959 |
+| `itertools` | 138 | not run | not run | not run | unknown (not run) | unknown (not run) | 111 |
+| `json` | 216 | 30 pass, 186 not run | 30 pass, 186 not run | 30 pass, 186 not run | 30 | 30 verified; 186 unknown | 207 |
+| `logging` | 272 | not run | not run | not run | unknown (not run) | unknown (not run) | 220 |
+| `math` | 89 | not run | not run | not run | unknown (not run) | unknown (not run) | 85 |
+| `netrc` | 23 | not run | not run | not run | unknown (not run) | unknown (not run) | 22 |
+| `os` | 579 | not run | not run | not run | unknown (not run) | unknown (not run) | 471 |
+| `pathlib` | 1,369 | not run | not run | not run | unknown (not run) | unknown (not run) | 968 |
+| `re` | 165 | not run | not run | not run | unknown (not run) | unknown (not run) | 146 |
+| `shutil` | 223 | not run | not run | not run | unknown (not run) | unknown (not run) | 172 |
+| `socket` | 746 | not run | not run | not run | unknown (not run) | unknown (not run) | 110 |
+| `ssl` | 195 | not run | not run | not run | unknown (not run) | unknown (not run) | 66 |
+| `struct` | 43 | not run | not run | not run | unknown (not run) | unknown (not run) | 34 |
+| `subprocess` | 353 | not run | not run | not run | unknown (not run) | unknown (not run) | 303 |
+| `tempfile` | 118 | not run | not run | not run | unknown (not run) | unknown (not run) | 110 |
+| `textwrap` | 68 | not run | not run | not run | unknown (not run) | unknown (not run) | 68 |
+| `threading` | 228 | not run | not run | not run | unknown (not run) | unknown (not run) | 97 |
+| `tokenize` | 130 | not run | not run | not run | unknown (not run) | unknown (not run) | 127 |
+| `tomllib` | 17 | not run | not run | not run | unknown (not run) | unknown (not run) | 17 |
+| `types` | 141 | not run | not run | not run | unknown (not run) | unknown (not run) | 134 |
+| `typing` | 712 | not run | not run | not run | unknown (not run) | unknown (not run) | 710 |
+| `unittest` | 1,090 | not run | not run | not run | unknown (not run) | unknown (not run) | 1,054 |
+| `urllib` | 178 | not run | not run | not run | unknown (not run) | unknown (not run) | 173 |
+| `uuid` | 120 | not run | not run | not run | unknown (not run) | unknown (not run) | 48 |
+| `warnings` | 187 | not run | not run | not run | unknown (not run) | unknown (not run) | 181 |
+| `weakref` | 183 | not run | not run | not run | unknown (not run) | unknown (not run) | 168 |
+| `zipfile` | 383 | not run | not run | not run | unknown (not run) | unknown (not run) | 370 |
+| `zoneinfo` | 261 | not run | not run | not run | unknown (not run) | unknown (not run) | 229 |
 
 #### Supplemental pilots
 
@@ -25,4 +68,5 @@ Scripts: **4 of 84 original commands have receipts**, **4 observed intersections
 The [stdlib report](docs/stdlib.md) lists every frozen family, including those not run.
 
 An observed intersection means the same original passed stock, O0 and O3; frozen credited pairs also require the launcher to pass its imported bad-type control and any required source-withdrawal check. Script passes also require independently anchored frozen preimages and reference observations, plus exact exit, stdout, stderr and effect comparisons. Skips, omissions, unsupported diagnostics, exclusions, timeouts and non-stock successes never earn credited pairs. Historical credits come from the [frozen mixed-revision ledger](../../../../benchmarks/cpython_stdlib/full/frozen-stock-intersection-8818.tsv) and are separate from the pinned result. [Receipts and replay instructions](../../../../benchmarks/compatibility/README.md).
+Historical views: [49f pinned scorecard](https://github.com/astral-experiments/imre/blob/f1788f4337076e2a9cb8a004d601303ec1088d55/docs/stdlib.md#pinned-compatibility-scorecard); [separate 857 snapshot](https://github.com/astral-experiments/imre/blob/d0b396559a8ffda965cb495063b2967847d116aa/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/docs/stdlib.md).
 <!-- compatibility-scorecard:end -->

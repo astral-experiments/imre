@@ -3,11 +3,11 @@
 
 Revision `95908fb0acadc2a67304a8080e584deaef395746` · CPython **3.14.5** · Linux x86-64. These are original-test receipts at this revision, not cumulative credits.
 
-Frozen 45-family cohort: **24 pinned receipts** of **16,225 raw upstream originals**, **24 observed stock/O0/O3 pass intersections**, **24 verified credited pairs**; **16,201 originals have no validated receipt**.
+Frozen 45-family cohort: **54 pinned receipts** of **16,225 raw upstream originals**, **54 observed stock/O0/O3 pass intersections**, **54 verified credited pairs**; **16,171 originals have no validated receipt**.
 
 Supplemental pilots, outside the frozen cohort: **0 receipts** of **3 originals**, **0 observed intersections**, **0 verified credited pairs**.
 
-Scripts: **4 of 84 original commands have receipts**, **4 observed intersections**, **4 verified credited pairs**; **80 not run**. **4 verified / 72 historically reported stock-success commands** among **84 original script IDs** ([public historical authority](https://github.com/astral-experiments/imre/commit/880648b620f57905a495eb51fbb4600755ee0c54)).
+Scripts: **4 of 84 original command IDs have receipts**; **4 verified / 72 historically reported stock-success commands** among **84 original script IDs** ([public historical authority](https://github.com/astral-experiments/imre/commit/880648b620f57905a495eb51fbb4600755ee0c54)). **80 IDs unobserved at this revision**.
 
 #### Frozen cohort
 
@@ -32,7 +32,7 @@ Scripts: **4 of 84 original commands have receipts**, **4 observed intersections
 | `inspect` | 362 | not run | not run | not run | unknown (not run) | unknown (not run) | 264 |
 | `io` | 1,038 | not run | not run | not run | unknown (not run) | unknown (not run) | 959 |
 | `itertools` | 138 | not run | not run | not run | unknown (not run) | unknown (not run) | 111 |
-| `json` | 216 | not run | not run | not run | unknown (not run) | unknown (not run) | 207 |
+| `json` | 216 | 30 pass, 186 not run | 30 pass, 186 not run | 30 pass, 186 not run | 30 | 30 verified; 186 unknown | 207 |
 | `logging` | 272 | not run | not run | not run | unknown (not run) | unknown (not run) | 220 |
 | `math` | 89 | not run | not run | not run | unknown (not run) | unknown (not run) | 85 |
 | `netrc` | 23 | not run | not run | not run | unknown (not run) | unknown (not run) | 22 |
@@ -66,4 +66,5 @@ Scripts: **4 of 84 original commands have receipts**, **4 observed intersections
 | `errno` | 3 | not run | not run | not run | unknown (not run) | unknown (not run) | — |
 
 An observed intersection means the same original passed stock, O0 and O3; frozen credited pairs also require the launcher to pass its imported bad-type control and any required source-withdrawal check. Script passes also require independently anchored frozen preimages and reference observations, plus exact exit, stdout, stderr and effect comparisons. Skips, omissions, unsupported diagnostics, exclusions, timeouts and non-stock successes never earn credited pairs. Historical credits come from the [frozen mixed-revision ledger](../../../../../benchmarks/cpython_stdlib/full/frozen-stock-intersection-8818.tsv) and are separate from the pinned result. [Receipts and replay instructions](../../../../../benchmarks/compatibility/README.md).
+Historical views: [49f pinned scorecard](https://github.com/astral-experiments/imre/blob/f1788f4337076e2a9cb8a004d601303ec1088d55/docs/stdlib.md#pinned-compatibility-scorecard); [separate 857 snapshot](https://github.com/astral-experiments/imre/blob/d0b396559a8ffda965cb495063b2967847d116aa/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/docs/stdlib.md).
 <!-- compatibility-scorecard:end -->
