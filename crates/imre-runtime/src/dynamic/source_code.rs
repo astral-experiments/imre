@@ -2455,8 +2455,7 @@ impl Context {
                 let mut strings =
                     CompiledStrings::new(&mut self.heap, &mut shared, &spellings, &code.directives);
                 strings.visit_expr(&expression.body);
-                let constants = strings.finish_scope(code.has_named_bindings, true)?;
-                constants
+                strings.finish_scope(code.has_named_bindings, true)?
             }
             ast::Mod::Module(module) => {
                 let mut body = module.body;
