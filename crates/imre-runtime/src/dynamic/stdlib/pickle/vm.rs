@@ -252,7 +252,12 @@ pub(super) fn preflight(input: &[u8]) -> Option<Layout> {
                     if stack[mark - 1] != Kind::Dict || (stack.len() - mark) % 2 != 0 {
                         return None;
                     }
-                    if !stack[mark..].chunks_exact(2).all(|pair| pair[0].key()) {
+                    if !stack[mark..]
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .all(|pair| pair[0].key())
+                    {
                         return None;
                     }
                 }
@@ -380,7 +385,7 @@ pub(super) fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> 
             SETITEMS => {
                 let mark = marks.pop().unwrap();
                 let dict = stack[mark - 1];
-                for pair in stack[mark..].chunks_exact(2) {
+                for pair in stack[mark..].as_chunks::<2>().0 {
                     ctx.put_item(dict, pair[0], pair[1])?;
                 }
                 stack.truncate(mark);
