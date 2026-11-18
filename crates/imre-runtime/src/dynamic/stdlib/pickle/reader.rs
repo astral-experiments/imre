@@ -353,7 +353,9 @@ fn environment(ctx: &Context, root: Id, used: u16) -> bool {
         return false;
     };
     let Value::Module {
-        scope: io_scope, ..
+        scope: io_scope,
+        constructor: None,
+        ..
     } = ctx.heap.get(io)
     else {
         return false;
@@ -388,6 +390,7 @@ fn environment(ctx: &Context, root: Id, used: u16) -> bool {
     }
     let Value::Module {
         scope: system_scope,
+        constructor: None,
         ..
     } = ctx.heap.get(system)
     else {
