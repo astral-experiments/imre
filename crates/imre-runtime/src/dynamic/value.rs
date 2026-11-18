@@ -4685,29 +4685,22 @@ impl Heap {
         self.reserve_temporaries(count.saturating_add(1))
     }
 
-    /// Fill one reserved untracked text slot without the generic object/finalizer path.
-    /// The caller must exclude allocation traces and retain the source bytes until copying finishes.
-    pub(super) fn unobserved_text(&mut self, text: &str, ascii: bool) -> Id {
-        debug_assert!(!self.allocation_traces.is_tracing());
-        debug_assert_eq!(ascii, text.is_ascii());
-        if text.len() <= 2
-            && let Some(id) = self.short_string(text)
-        {
-            return id;
-        }
+    /// Install one exact text leaf into a slot reserved by `reserve_unobserved_texts`.
+    /// The caller must exclude collection, callbacks, and allocation tracing.
+    #[inline(always)]
+    fn fill_reserved_text_slot(&mut self, text: crate::Str, ascii: bool) -> Id {
         let shape = if ascii {
             SlotShape::AsciiStr
         } else {
             SlotShape::ScalarLeaf
         };
-        let value = Value::Str(text.into());
         let index = if self.free_head != END {
             let index = self.free_head;
             self.free_head = self.slots[index].gc_next.replace(UNMARKED);
             self.free_count -= 1;
             self.slot_shapes[index] = shape;
             let slot = &mut self.slots[index];
-            slot.value = Some(value);
+            slot.value = Some(Value::Str(text));
             slot.may_have_buffer_views = false;
             slot.generation = 0;
             slot.untracked_tuple.set(false);
@@ -4720,10 +4713,39 @@ impl Heap {
             debug_assert!(self.slots.len() < self.slots.capacity());
             self.slot_shapes.push(shape);
             self.traces.push(Cell::new(UNMARKED));
-            self.slots.push(Slot::new(value));
-            self.slots.len() - 1
+            let index = self.slots.len();
+            // SAFETY: reserve_unobserved_texts reserved this slot and no
+            // callback or collection can consume that capacity. Initialize all
+            // Slot::new fields in spare storage before publishing its length.
+            // Write the owned text last, with no fallible work before set_len.
+            unsafe {
+                let slot = self.slots.as_mut_ptr().add(index);
+                std::ptr::addr_of_mut!((*slot).gc_next).write(Cell::new(UNMARKED));
+                std::ptr::addr_of_mut!((*slot).gc_prev).write(Cell::new(UNMARKED));
+                std::ptr::addr_of_mut!((*slot).untracked_tuple).write(Cell::new(false));
+                std::ptr::addr_of_mut!((*slot).has_gc_header).write(false);
+                std::ptr::addr_of_mut!((*slot).may_have_buffer_views).write(false);
+                std::ptr::addr_of_mut!((*slot).finalization).write(Finalization::None);
+                std::ptr::addr_of_mut!((*slot).generation).write(0);
+                std::ptr::addr_of_mut!((*slot).value).write(Some(Value::Str(text)));
+                self.slots.set_len(index + 1);
+            }
+            index
         };
-        let id = index as Id;
+        index as Id
+    }
+
+    /// Fill one reserved untracked text slot without the generic object/finalizer path.
+    /// The caller must exclude allocation traces and retain the source bytes until copying finishes.
+    pub(super) fn unobserved_text(&mut self, text: &str, ascii: bool) -> Id {
+        debug_assert!(!self.allocation_traces.is_tracing());
+        debug_assert_eq!(ascii, text.is_ascii());
+        if text.len() <= 2
+            && let Some(id) = self.short_string(text)
+        {
+            return id;
+        }
+        let id = self.fill_reserved_text_slot(text.into(), ascii);
         self.keep(id);
         id
     }
