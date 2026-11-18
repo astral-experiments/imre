@@ -33,6 +33,8 @@ declare i64 @imre_dyn_difflib_init(ptr, i64, ptr)
 declare i64 @imre_dyn_difflib_find_longest(ptr, i64, ptr)
 declare i64 @imre_dyn_difflib_get_blocks(ptr, i64, ptr)
 declare i64 @imre_dyn_difflib_ratio(ptr, i64, ptr)
+declare i64 @imre_dyn_pickle_loads(ptr, i64, ptr)
+declare i64 @imre_dyn_path_read_bytes(ptr, i64, ptr)
 declare i1 @imre_dyn_failed(ptr)
 declare i64 @imre_dyn_truth_mark(ptr) memory(read)
 declare void @imre_dyn_comprehension_step(ptr, i64)
@@ -89,6 +91,7 @@ pub(crate) struct Declarations {
     pub(crate) exec_operand: bool,
     pub(crate) eval_operand: bool,
     pub(crate) linked_file_source: bool,
+    pub(super) replacement_region: bool,
     pub(super) integers: crate::llvm::body::IntegerFunctions,
     pub(crate) reads_exact_int_word: bool,
     pub(super) releases_integer_owner: bool,

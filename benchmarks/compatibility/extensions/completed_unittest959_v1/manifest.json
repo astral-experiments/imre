@@ -1,0 +1,147 @@
+{
+  "annotation_controls": {
+    "O0": {
+      "direct": "expected int, got bool; compiler exit 1; no image",
+      "imported": "expected int, got bool; compiler exit 1; no image"
+    },
+    "O3": {
+      "direct": "expected int, got bool; compiler exit 1; no image",
+      "imported": "expected int, got bool; compiler exit 1; no image"
+    }
+  },
+  "canonical_originals": 276,
+  "credit": 0,
+  "custody": {
+    "products": {
+      "cc": "a23ecab8ff08f09ad8c80602c2c5df7f49e09c25905cb8975902e101bf72635f",
+      "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+      "cli": "e2d0886948f766332df6370a2e3140a5be5c8b0fc108224ef7242fc38fc58bd4",
+      "cli_depfile": "988b937a995cdba3b39954620115ce717463469b060f9fd6c79a4632905eaef8",
+      "probe": "a4686257bc9fda18820da4a774e2b4d3340eb216082615e2bc9be5012a00f9b9",
+      "probe_source": "5e850ab6d1c977d4dae2a4949e7221b518fade280af57b25ff0f3dcc21ceaf3d",
+      "runtime": "33ae5dfef5eff3c1fac5e0a5e19263daa980d7d80a5917979b426e85fa128c5c",
+      "runtime_depfile": "b3eebec3bdad48392e272b9665b4ea50ac005fe4e452eea77a41c62af0d5dcad",
+      "stock": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+    },
+    "public_donor": "benchmarks/compatibility/extensions/data_resource959_v1/bindings/configparser.json",
+    "transfer_archive_sha256": "c9cfcd02e0cc62dc7928119d68a4c4da5125f8030657c1c52b2cd3d49cb554b0"
+  },
+  "evidence": {
+    "archive": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/dataclasses-959.tar.gz",
+    "receipt": "benchmarks/compatibility/extensions/completed_unittest959_v1/templates/dataclasses.jsonl",
+    "receipt_sha256": "518d5bd9ea86538d69a7931604d438dda2cdb732a6a364f71a310a828a70f71b",
+    "seal": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/COMPLETE.json",
+    "sha256": "02e8924aa17e58de615b5f3e70e1e8ed6b19828b8cbc2c2b567f0a7a97bbc7d8",
+    "supplement": {
+      "archive": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz",
+      "bytes": 221338,
+      "seal": "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.COMPLETE.json",
+      "sha256": "c6297af57dfe72050df1e6bfbb71506c10ec95d4544e0ff9bfc050c788d848e3"
+    }
+  },
+  "files": {
+    "benchmarks/compatibility/extensions/completed_unittest959_v1/METHOD.md": "34381a95ea6fdee576a9346b9b1ce07f849ef987e82c1bb446e3d17e123f2c8d",
+    "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/COMPLETE.json": "d52af675171cdc42c1b3a7767d9a76494ec2d1a214e2805ce254e5bbf461afd0",
+    "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/dataclasses-959.tar.gz": "02e8924aa17e58de615b5f3e70e1e8ed6b19828b8cbc2c2b567f0a7a97bbc7d8",
+    "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.COMPLETE.json": "c956e64b7009019beddf0fa6c06111e6bfe4c0e278dc73a7a3b37e1a26bdecd7",
+    "benchmarks/compatibility/extensions/completed_unittest959_v1/evidence/identity-effects-v1.tar.gz": "c6297af57dfe72050df1e6bfbb71506c10ec95d4544e0ff9bfc050c788d848e3",
+    "benchmarks/compatibility/extensions/completed_unittest959_v1/patches/completed-unittest.patch": "5ba2a8956041c4d3583a8640c186973bc6356989cdd4cca1ee4c75f8a8d5ec70",
+    "benchmarks/compatibility/extensions/completed_unittest959_v1/policy.json": "6e6ab813f10c26f7cc6f53d88ea4c6fe518546443476f082ac55bfe4f18289da",
+    "benchmarks/compatibility/extensions/completed_unittest959_v1/templates/dataclasses.jsonl": "518d5bd9ea86538d69a7931604d438dda2cdb732a6a364f71a310a828a70f71b",
+    "benchmarks/compatibility/extensions/completed_unittest959_v1/test_completed.py": "52e6cdef6f1d0ce28a3c465f368c60c5d2b3a3d3660af31ac756461dda1d2d1b"
+  },
+  "first_blocker": "reviewed source-stage authority and a shared initial-build/saved-image identity role are not wired into the active finite importer",
+  "fixture_files": 1639,
+  "frozen_original_receipt": "benchmarks/compatibility/stdlib/dataclasses.jsonl",
+  "identity_limits": [
+    "all live /proc samples occur after exec and are not atomic FD exec",
+    "the shared identity adapter currently requires a second positive build join; no initial-build/saved-image role is implemented"
+  ],
+  "inventory_sha256": "b6d4db80e0deccf73b60b689809a48be218b63e51708d7d255d1b9373e72639f",
+  "observed_originals": 276,
+  "observed_pass_intersection": 273,
+  "other_originals_not_run": 0,
+  "policy": {
+    "path": "benchmarks/compatibility/extensions/completed_unittest959_v1/policy.json",
+    "sha256": "6e6ab813f10c26f7cc6f53d88ea4c6fe518546443476f082ac55bfe4f18289da",
+    "status": "unapplied hardened future source patch; independent review required"
+  },
+  "predecessor_public_main": "91fee1a5123ed0dad2a20df091c0262356e33e9b",
+  "recapture": {
+    "O0": {
+      "effects_sha256": "0b9913a146fd7207264628265d92b2ae52bfafc3a2135796b61bcceb2d364b7e",
+      "elapsed_seconds": 12.816471186999934,
+      "held_executable_sha256": "3dc0a328f2b13d0213b351c9be52af8451092ef4da12ceb9a039e9ce5d0292a9",
+      "live_pid": "3386",
+      "outcomes": {
+        "error": 1,
+        "pass": 273,
+        "skip": 2
+      },
+      "suite_exit_code": 1
+    },
+    "O3": {
+      "effects_sha256": "0b9913a146fd7207264628265d92b2ae52bfafc3a2135796b61bcceb2d364b7e",
+      "elapsed_seconds": 12.59576520099995,
+      "held_executable_sha256": "b41597b5aee5dac9eb6ce2da97f3a27bf0dff48ed0758b75007b59346004a5bd",
+      "live_pid": "3394",
+      "outcomes": {
+        "error": 1,
+        "pass": 273,
+        "skip": 2
+      },
+      "suite_exit_code": 1
+    },
+    "stock": {
+      "effects_sha256": "0b9913a146fd7207264628265d92b2ae52bfafc3a2135796b61bcceb2d364b7e",
+      "elapsed_seconds": 1.0666840620001494,
+      "held_executable_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+      "live_pid": "3378",
+      "outcomes": {
+        "pass": 275,
+        "skip": 1
+      },
+      "suite_exit_code": 0
+    }
+  },
+  "results": {
+    "O0": {
+      "outcomes": {
+        "error": 1,
+        "pass": 273,
+        "skip": 2
+      },
+      "seconds": 12.384903048000012,
+      "suite_exit_code": 1,
+      "timed_out": false
+    },
+    "O3": {
+      "outcomes": {
+        "error": 1,
+        "pass": 273,
+        "skip": 2
+      },
+      "seconds": 12.508494086000042,
+      "suite_exit_code": 1,
+      "timed_out": false
+    },
+    "stock": {
+      "outcomes": {
+        "pass": 275,
+        "skip": 1
+      },
+      "seconds": 2.2741941550000035,
+      "suite_exit_code": 0,
+      "timed_out": false
+    }
+  },
+  "revision": "95908fb0acadc2a67304a8080e584deaef395746",
+  "schema": "imre.compatibility.completed-unittest-stage.v1",
+  "source": {
+    "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "git_blob": "fed32260c792707dbe9f43b7da4b99dd8ebcea2d",
+    "path": "Lib/test/test_dataclasses/__init__.py",
+    "repo": "https://github.com/python/cpython",
+    "sha256": "725ec19fa8c47f91b7aed7a8f2b1f3e74e6454647efd11e9a3e0e29245605af0"
+  }
+}

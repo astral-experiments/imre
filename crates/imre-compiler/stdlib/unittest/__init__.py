@@ -240,9 +240,6 @@ class TestCase(_SuiteMember):
     def _raise_missing_callable(self, kind: str, name: str) -> None:
         raise self.failureException(self._formatMessage(None, kind + " not raised by " + name))
 
-    def _bound_assertEqual(self) -> _BoundEqual:
-        return _BoundEqual(self)
-
     def _bound_assertListEqual(self) -> _BoundListEqual:
         return _BoundListEqual(self)
 
@@ -504,10 +501,6 @@ class _BoundAssertion:
 
     def __init__(self, case: TestCase) -> None:
         self._receiver = case
-
-
-class _BoundEqual(_BoundAssertion):
-    pass
 
 
 class _BoundListEqual(_BoundAssertion):

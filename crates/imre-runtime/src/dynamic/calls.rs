@@ -273,6 +273,12 @@ pub(super) enum RegisteredCall {
         args: Vec<Id>,
         kwargs: Box<[(String, Id)]>,
     },
+    /// An explicit callable descriptor forwards after its preparation borrow has ended.
+    ExplicitCall {
+        callable: Id,
+        args: Vec<Id>,
+        kwargs: Box<[(String, Id)]>,
+    },
     /// The caller's marked operands stay rooted while native dispatch can reenter Python.
     Other {
         callable: Id,
@@ -415,6 +421,7 @@ impl RegisteredCall {
                 let kwargs = kwargs.into_vec();
                 // Preserve Other's native-label copy before Operation::Call copies its operands.
                 let _native_name = {
+                    // SAFETY: this thread owns the executing context and the call roots callable.
                     let ctx = unsafe { &*context };
                     let Value::Native(name) = ctx.heap.get(callable) else {
                         unreachable!("registered operator.call")
@@ -424,6 +431,7 @@ impl RegisteredCall {
                 let result = (|| {
                     let args = copy_ids(&args)?;
                     let prepared = {
+                        // SAFETY: the shared borrow ended; this thread still exclusively owns the context.
                         let ctx = unsafe { &mut *context };
                         let (target, args) = ctx.operator_call_target(args)?;
                         let scope = ctx.heap.current_scope();
@@ -436,6 +444,47 @@ impl RegisteredCall {
                     // SAFETY: callback preparation/execution returned before error qualification.
                     stdlib::io::qualify_error(unsafe { &mut *context }, error, None)
                 })
+            }
+            Self::ExplicitCall {
+                callable,
+                args,
+                kwargs,
+            } => {
+                let kwargs = kwargs.into_vec();
+                let name = {
+                    // SAFETY: this thread owns the active context and the caller roots the descriptor.
+                    let ctx = unsafe { &*context };
+                    let Value::Native(name) = ctx.heap.get(callable) else {
+                        unreachable!("registered callable descriptor")
+                    };
+                    copy_label(name)?
+                };
+                let owner = name.strip_suffix(".__call__").expect("callable descriptor");
+                let mut arguments = args.into_iter();
+                let function = arguments.next().ok_or_else(|| {
+                    Error::new(
+                        "TypeError",
+                        format!("descriptor '__call__' of '{owner}' object needs an argument"),
+                    )
+                })?;
+                let prepared = {
+                    // SAFETY: the shared borrow ended; this thread owns the context and rooted operands.
+                    let ctx = unsafe { &mut *context };
+                    if ctx.builtin_type_name(function) != Some(owner) {
+                        let actual = ctx
+                            .builtin_type_name(function)
+                            .unwrap_or_else(|| ctx.type_name(function));
+                        return Err(Error::new(
+                            "TypeError",
+                            format!(
+                                "descriptor '__call__' requires a '{owner}' object but received a '{actual}'"
+                            ),
+                        ));
+                    }
+                    ctx.prepare_call(function, arguments.collect::<Vec<_>>().into(), kwargs)
+                }?;
+                // SAFETY: receiver preparation ended; this caller still roots the descriptors and operands.
+                unsafe { prepared.run(context) }
             }
             Self::Other {
                 callable,
@@ -8902,6 +8951,18 @@ impl Context {
                     break;
                 }
                 Value::Native(ref name) => {
+                    if matches!(
+                        name.as_str(),
+                        "function.__call__"
+                            | "builtin_function_or_method.__call__"
+                            | "staticmethod.__call__"
+                    ) {
+                        return Ok(RegisteredCall::ExplicitCall {
+                            callable,
+                            args: owned_ids(args)?,
+                            kwargs: kwargs.into_boxed_slice(),
+                        });
+                    }
                     if name == "operator.call" {
                         return Ok(RegisteredCall::OperatorCall {
                             callable,
@@ -9204,31 +9265,6 @@ impl Context {
                     }
                 }
                 Ok(result)
-            }
-            Value::Native(ref name)
-                if let Some(
-                    owner @ ("function" | "builtin_function_or_method" | "staticmethod"),
-                ) = name.strip_suffix(".__call__") =>
-            {
-                let mut arguments = args.into_iter();
-                let function = arguments.next().ok_or_else(|| {
-                    Error::new(
-                        "TypeError",
-                        format!("descriptor '__call__' of '{owner}' object needs an argument"),
-                    )
-                })?;
-                if self.builtin_type_name(function) != Some(owner) {
-                    let actual = self
-                        .builtin_type_name(function)
-                        .unwrap_or_else(|| self.type_name(function));
-                    return Err(Error::new(
-                        "TypeError",
-                        format!(
-                            "descriptor '__call__' requires a '{owner}' object but received a '{actual}'"
-                        ),
-                    ));
-                }
-                self.call(function, arguments.collect(), kwargs)
             }
             Value::Native(name) if name == "super.__get__" => {
                 wrapper_descriptor::descriptor_get(self, "super", &args, &kwargs)
@@ -9963,6 +9999,24 @@ impl Context {
         }
     }
 
+    /// Identify the authenticated bundled pickle body without binding or running Python.
+    pub(super) fn direct_pickle_call_target(&self, callable: Id) -> Option<(Id, Id)> {
+        let Value::Function {
+            scope,
+            code,
+            kwdefaults,
+            ..
+        } = *self.heap.get(callable)
+        else {
+            return None;
+        };
+        if u32::from(self.code_object(code).definition.provider_body()) != value::PICKLE_LOADS_BODY
+        {
+            return None;
+        }
+        Some((scope, kwdefaults))
+    }
+
     pub(super) fn prepare_function_call(
         &mut self,
         callable: Id,
@@ -9980,14 +10034,24 @@ impl Context {
         else {
             unreachable!("registered Python function");
         };
+        let qualname = fields.qualname;
         let (argc, kwargs) = match &arguments {
             FunctionArguments::Written(positional, keywords, _) => {
                 (positional.len(), keywords.as_slice())
             }
             FunctionArguments::Bound(slots) => (slots.len(), &[][..]),
         };
-        let parameters = self.code_object(code).parameters;
-        let name = self.copy_name(fields.qualname)?;
+        let definition = self.code_object(code);
+        let parameters = definition.parameters;
+        if u32::from(definition.definition.provider_body()) == value::PICKLE_LOADS_BODY
+            && let FunctionArguments::Written(ref args, ref kwargs, _) = arguments
+            && let [data] = args.as_ref()
+            && kwargs.is_empty()
+            && let Some(value) = stdlib::pickle::try_direct_loads(self, scope, kwdefaults, *data)?
+        {
+            return Ok(RegisteredCall::Returned(value));
+        }
+        let name = self.copy_name(qualname)?;
         if parameters == NONE {
             if let Some((key, _)) = kwargs.first() {
                 return Err(Error::new(
@@ -10008,8 +10072,9 @@ impl Context {
         // Root the scope, packed arguments, keyword names, and returning value.
         self.heap
             .reserve_temporaries(kwargs.len().saturating_add(4))?;
-        let module = copy_label(&self.scope_data(scope).module)?;
-        let local = allocator_api2::boxed::Box::try_new(Scope::new(module, Some(scope)))
+        let module = crate::Str::try_new(self.scope_data(scope).module.as_str())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        let local = allocator_api2::boxed::Box::try_new(Scope::with_module(module, Some(scope)))
             .map_err(|_| Error::new("MemoryError", ""))?;
         let local = self.alloc(Value::Scope(local));
         let sig = self.parsed_parameters(code)?;
@@ -10022,6 +10087,19 @@ impl Context {
 
         let shape = sig.shape();
         let omitted = match arguments {
+            FunctionArguments::Written(args, kwargs, None)
+                if args.len() == 1
+                    && kwargs.is_empty()
+                    && sig.positional.len() == 1
+                    && sig.keyword_only.is_empty()
+                    && sig.varargs.is_none()
+                    && sig.kwargs.is_none() =>
+            {
+                // The sole written argument fills the sole formal. Defaults and
+                // positional-only status cannot affect this successful binding.
+                self.bind_argument(local, &sig.positional[0], args[0])?;
+                smallvec::SmallVec::new()
+            }
             FunctionArguments::Written(args, kwargs, variadic) => {
                 let pos = &sig.positional;
                 let num_defaults = self.tuple_elements(defaults).map_or(0, <[_]>::len);
@@ -10086,10 +10164,10 @@ impl Context {
             self.bind_argument(local, shape.parameter(slot), value)?;
         }
         supplied_types?;
-        let Value::Scope(frame) = self.heap.get_mut(local) else {
-            unreachable!()
-        };
         if sig.class_cell {
+            let Value::Scope(frame) = self.heap.get_mut(local) else {
+                unreachable!()
+            };
             frame.class_cell = class_cell;
         }
         self.check_call_depth(0)?;
@@ -11140,6 +11218,192 @@ impl Context {
 mod tests {
     use super::*;
 
+    unsafe extern "C" fn return_value(raw: *mut Context, scope: Id) -> Id {
+        // SAFETY: the native function ABI supplies the exclusively executing context.
+        let ctx = unsafe { &mut *raw };
+        let value = ctx.lookup(scope, "value");
+        super::super::ffi::finish(ctx, value)
+    }
+
+    fn identity_function(ctx: &mut Context, signature: &str) -> Id {
+        let scope = ctx.scope("binding_test", None);
+        let name = ctx.text("identity");
+        let parameters = ctx.text(signature);
+        let filename = ctx.text("binding_test.py");
+        let code = ctx.prelinked_code(
+            value::Body::Native(return_value, NONE),
+            scope,
+            name,
+            parameters,
+            (name, NONE),
+            (filename, 1),
+        );
+        let globals = ctx.dict(Vec::new());
+        ctx.construct_function(&[code, globals], &[]).unwrap()
+    }
+
+    #[test]
+    fn single_positional_binding_keeps_defaults_annotations_and_class_cells() {
+        let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let function = identity_function(
+            &mut ctx,
+            r#"{"posonly":["value"],"types":{"value":{"builtin":"int"}},"return_type":"int","class_cell":true}"#,
+        );
+        let default = ctx.int(7);
+        let defaults = ctx.alloc(Value::Tuple(vec![default]));
+        let cell = ctx.alloc(Value::Cell(Some(default)));
+        let Value::Function {
+            defaults: function_defaults,
+            class_cell,
+            ..
+        } = ctx.heap.get_mut(function)
+        else {
+            unreachable!()
+        };
+        *function_defaults = defaults;
+        *class_cell = Some(cell);
+
+        let argument = ctx.int(42);
+        let call = ctx
+            .prepare_function_call(
+                function,
+                FunctionArguments::Written([argument].as_slice().into(), Vec::new(), None),
+            )
+            .unwrap();
+        let scope = ctx.heap.current_scope();
+        assert_eq!(ctx.scope_data(scope).names.get("value"), Some(&argument));
+        assert_eq!(ctx.scope_data(scope).class_cell, Some(cell));
+        // SAFETY: this test owns the context and the prepared native activation.
+        assert_eq!(unsafe { call.run(&raw mut ctx) }.unwrap(), argument);
+        assert_eq!(ctx.call(function, Vec::new(), Vec::new()).unwrap(), default);
+        let invalid = ctx.text("not an int");
+        assert_eq!(
+            ctx.call(function, vec![invalid], Vec::new())
+                .unwrap_err()
+                .kind,
+            "TypeError"
+        );
+        let invalid_return =
+            identity_function(&mut ctx, r#"{"positional":["value"],"return_type":"int"}"#);
+        let return_name = ctx.text("return");
+        let int_type = ctx.builtin("int");
+        let annotations = ctx.dict(vec![(return_name, int_type)]);
+        let Value::Function { fields, .. } = ctx.heap.get_mut(invalid_return) else {
+            unreachable!()
+        };
+        fields.annotations = Some(annotations);
+        assert_eq!(
+            ctx.call(invalid_return, vec![invalid], Vec::new())
+                .unwrap_err()
+                .kind,
+            "TypeError"
+        );
+    }
+
+    #[test]
+    fn single_positional_binding_falls_back_for_keywords_and_variadics() {
+        let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let simple = identity_function(&mut ctx, r#"{"positional":["value"]}"#);
+        let value = ctx.int(12);
+        assert_eq!(
+            ctx.call(simple, Vec::new(), vec![("value".into(), value)])
+                .unwrap(),
+            value
+        );
+        let duplicate = ctx
+            .call(simple, vec![value], vec![("value".into(), value)])
+            .unwrap_err();
+        assert_eq!(duplicate.kind, "TypeError");
+        assert!(duplicate.message.contains("multiple values"));
+        let missing = ctx.call(simple, Vec::new(), Vec::new()).unwrap_err();
+        assert_eq!(missing.kind, "TypeError");
+        assert!(missing.message.contains("missing"));
+
+        let keyword_only = identity_function(
+            &mut ctx,
+            r#"{"positional":["value"],"kwonly":["required"]}"#,
+        );
+        let missing = ctx.call(keyword_only, vec![value], Vec::new()).unwrap_err();
+        assert_eq!(missing.kind, "TypeError");
+        assert!(missing.message.contains("keyword-only"));
+
+        let variadic = identity_function(
+            &mut ctx,
+            r#"{"positional":["value"],"varargs":"rest","kwargs":"options"}"#,
+        );
+        let extra = ctx.int(13);
+        let call = ctx
+            .prepare_function_call(
+                variadic,
+                FunctionArguments::Written(
+                    vec![value, extra].into(),
+                    vec![("flag".into(), extra)],
+                    None,
+                ),
+            )
+            .unwrap();
+        let scope = ctx.heap.current_scope();
+        let frame = ctx.scope_data(scope);
+        assert_eq!(
+            ctx.tuple_elements(*frame.names.get("rest").unwrap())
+                .unwrap(),
+            &[extra]
+        );
+        assert_eq!(
+            ctx.dict_named_item(*frame.names.get("options").unwrap(), "flag"),
+            Some(extra)
+        );
+        // SAFETY: this test owns the context and the prepared native activation.
+        assert_eq!(unsafe { call.run(&raw mut ctx) }.unwrap(), value);
+    }
+
+    unsafe extern "C" fn return_none(_: *mut Context, _: Id) -> Id {
+        NONE
+    }
+
+    #[test]
+    fn function_activations_preserve_inline_and_long_module_labels() {
+        let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        for module in ["__main__", "package.with_a_very_long_unicode_module_name_λ"] {
+            let parent = ctx.scope(module, None);
+            let name = ctx.text("noop");
+            let parameters = ctx.text(r#"{"positional":[]}"#);
+            let filename = ctx.text("scope_test.py");
+            let code = ctx.prelinked_code(
+                value::Body::Native(return_none, NONE),
+                parent,
+                name,
+                parameters,
+                (name, NONE),
+                (filename, 1),
+            );
+            let module_name = ctx.root_module_name(parent);
+            let function = ctx.function_with_closure(
+                code,
+                (parent, module_name),
+                super::super::source_code::FunctionClosure::Cells(&[]),
+                (name, name),
+                NONE,
+                NONE,
+            );
+            let call = ctx
+                .prepare_function_call(
+                    function,
+                    FunctionArguments::Written([].as_slice().into(), Vec::new(), None),
+                )
+                .unwrap();
+            let frame = ctx.scope_data(ctx.heap.current_scope());
+            assert_eq!(frame.parent, Some(parent));
+            assert_eq!(frame.module.as_str(), module);
+            assert_eq!(
+                frame.module.is_heap_allocated(),
+                module.len() > size_of::<String>()
+            );
+            // SAFETY: this test owns the context and its prepared native activation.
+            assert_eq!(unsafe { call.run(&raw mut ctx) }.unwrap(), NONE);
+        }
+    }
+
     #[test]
     fn native_method_runs_after_registered_call_preparation() {
         let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
@@ -11152,6 +11416,38 @@ mod tests {
         // SAFETY: the preparing execution still owns the context and all its operands.
         assert_eq!(unsafe { call.run(&raw mut ctx) }.unwrap(), NONE);
         assert!(matches!(ctx.heap.get(list), Value::List(items) if items == &[list]));
+    }
+
+    #[test]
+    fn explicit_callable_descriptor_is_registered_before_forwarding() {
+        use crate::objects::locks::PrimitiveLock;
+        use std::sync::Arc;
+
+        let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let lexical = ctx.scope("descriptor_control", None);
+        ctx.heap.enter(lexical, NONE, FrameOwner::Module(NONE));
+        let backing = Arc::<PrimitiveLock>::default();
+        let lock = ctx.alloc(Value::PrimitiveLock(Arc::clone(&backing)));
+        let acquire = ctx.lookup_attr(lock, "acquire").unwrap();
+        let descriptor = ctx.builtin("builtin_function_or_method.__call__");
+        let timeout = ctx.alloc(Value::Float(0.01));
+        let mark = ctx.heap.temporary_mark();
+        for id in [descriptor, acquire, TRUE, timeout] {
+            ctx.heap.keep(id);
+        }
+        assert!(backing.acquire(false, None));
+        let call = ctx
+            .prepare_call(descriptor, vec![acquire, TRUE, timeout].into(), Vec::new())
+            .unwrap();
+        let borrowed_forward = matches!(&call, RegisteredCall::Other { .. });
+        // SAFETY: the active frame and marked descriptor operands remain rooted here.
+        assert_eq!(unsafe { call.run(&raw mut ctx) }.unwrap(), FALSE);
+        assert!(backing.release().is_ok());
+        ctx.heap.release_temporaries_since(mark);
+        assert!(
+            !borrowed_forward,
+            "descriptor forwarded through borrowed Other"
+        );
     }
 
     #[test]

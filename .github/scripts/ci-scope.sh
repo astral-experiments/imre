@@ -32,6 +32,7 @@ if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
       crates/imre-compiler/src/frontend.rs|crates/imre-compiler/src/frontend/*) ;;
       crates/imre-compiler/src/*|crates/imre-runtime*/*|crates/imre-regex/*|\
       tests/run_suites.py|tests/assignments.py|tests/containers.py|tests/differential.py|\
+      tests/imports.py|tests/module_values.py|\
       tests/extension_wheel.py|tests/wheel_record.py)
         FULL_ASAN=true ;;
     esac

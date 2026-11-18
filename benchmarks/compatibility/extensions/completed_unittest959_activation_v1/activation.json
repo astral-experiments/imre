@@ -1,0 +1,20 @@
+{
+  "families": {
+    "dataclasses": {
+      "adapter": "raw-control-v4",
+      "binding": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/binding.json",
+      "receipt": "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/verified/completed-finite-v1/stdlib/dataclasses.jsonl",
+      "staged_receipt": "benchmarks/compatibility/extensions/completed_unittest959_v1/templates/dataclasses.jsonl"
+    }
+  },
+  "receipt_hashes": {
+    "benchmarks/compatibility/revisions/95908fb0acadc2a67304a8080e584deaef395746/verified/completed-finite-v1/stdlib/dataclasses.jsonl": "948f0f090b4d853165bb2fb2774c3ab6c3758b9aae29fd7da0644a5680c5db89"
+  },
+  "schema": "imre.compatibility.completed-finite-activation.v1",
+  "source_stage": {
+    "commit": "d9d4e41acd858321f034fac16177ebe860064c87",
+    "git_blob": "728994a20fc65848388e0988a864599be37644e0",
+    "manifest": "benchmarks/compatibility/extensions/completed_unittest959_activation_v1/manifest.json",
+    "sha256": "1e9169a7c868e8a30b9f6c62d0c65d9b7e23e6072462becf59a90e042b698922"
+  }
+}

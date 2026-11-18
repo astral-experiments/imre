@@ -77,31 +77,50 @@ def activation_entry(name, kind="stdlib"):
 
 
 
-def successor_entry(name):
+def activated_extension_entries():
     import source_stage_pins
-    if not is_snapshot() or COHORT['imre_revision']!='95908fb0acadc2a67304a8080e584deaef395746' or getattr(source_stage_pins,'REVISION_959_SUCCESSOR',None) is None:return None
+    if not is_snapshot() or COHORT['imre_revision']!='95908fb0acadc2a67304a8080e584deaef395746' or getattr(source_stage_pins,'REVISION_959_SUCCESSOR',None) is None:return {}
     from extensions.successor959_v1 import authority as successor
-    return successor.entry_for(sys.modules[__name__],name)
+    entries=dict(successor.activated_entries(sys.modules[__name__])['families'])
+    if getattr(source_stage_pins,'REVISION_959_RESOURCE',None) is not None:
+        from extensions.data_resource959_v1 import authority as resource
+        extra=resource.activated_entries(sys.modules[__name__])['families'];require(not set(entries)&set(extra),'append-only extension family collision');entries.update(extra)
+    if getattr(source_stage_pins,'REVISION_959_COMPLETED',None) is not None:
+        from extensions.completed_unittest959_activation_v1 import authority as completed
+        extra = completed.activated_entries(sys.modules[__name__])['families']
+        require(not set(entries) & set(extra), 'append-only extension family collision')
+        entries.update(extra)
+    return entries
+
+
+def successor_entry(name):return activated_extension_entries().get(name)
+
+
+def extension_authority(entry):
+    if entry.get('adapter') == 'raw-control-v4':
+        from extensions.completed_unittest959_activation_v1 import authority
+    elif entry.get('adapter') == 'raw-control-v3':
+        from extensions.data_resource959_v1 import authority
+    else:
+        from extensions.successor959_v1 import authority
+    return authority
 
 
 def bound_artifact(entry, locator):
-    if entry.get('adapter')=='raw-control-v2':
-        from extensions.successor959_v1 import authority as successor
-        return successor.artifact(sys.modules[__name__],entry,locator)
+    if entry.get('adapter') in {'raw-control-v2', 'raw-control-v3', 'raw-control-v4'}:
+        return extension_authority(entry).artifact(sys.modules[__name__],entry,locator)
     return checked_file(repository_file(locator,DATA_ROOT),binding_digest(entry,locator))
 
 
 def bound_bytes(entry,locator):
-    if entry.get('adapter')=='raw-control-v2':
-        from extensions.successor959_v1 import authority as successor
-        return successor.read(sys.modules[__name__],entry,locator)
+    if entry.get('adapter') in {'raw-control-v2', 'raw-control-v3', 'raw-control-v4'}:
+        return extension_authority(entry).read(sys.modules[__name__],entry,locator)
     return bound_artifact(entry,locator).read_bytes()
 
 
 def binding_digest(entry, locator):
     if 'files' not in entry:
-        from extensions.successor959_v1 import authority as successor
-        return successor.digest(sys.modules[__name__],entry,locator)
+        return extension_authority(entry).digest(sys.modules[__name__],entry,locator)
     files = entry.get("files", {})
     require(isinstance(files, dict) and isinstance(files.get(locator), str) and bool(HEX64.fullmatch(files[locator])), f"snapshot file is not digest-bound: {locator}")
     return files[locator]
@@ -630,7 +649,7 @@ def adapt_urllib(root, revision, source_path, source_sha, source_blob):
 
 def validate_activated_family_record(r, eligible, check, entry):
     adapter = entry.get("adapter"); source = r["source"]; family = r["family"]; d = DATA_ROOT / "evidence" / family
-    if adapter in {'raw-control-v1','raw-control-v2'}:
+    if adapter in {'raw-control-v1', 'raw-control-v2', 'raw-control-v3', 'raw-control-v4'}:
         import raw_control
         return raw_control.validate_record(sys.modules[__name__], r, eligible, check, entry)
     if adapter == "shared-family-v1": return validate_family_artifact_record(r, eligible, check)
@@ -861,8 +880,10 @@ def verify_stdlib_evidence(r):
     if vendored.is_file():
         stat = vendored.stat()
         require(source_digests(vendored, stat.st_mtime_ns, stat.st_size) == (source["sha256"], source["git_blob"]), f"{r['id']}: source hash differs from vendored upstream")
-    if is_snapshot() and ((successor_entry(r['family']) or activation_entry(r['family']) or {}).get('adapter') in {'raw-control-v1','raw-control-v2'}):
-        return  # validate_snapshot_record already verified raw finite-runner events and locators.
+    if is_snapshot():
+        entry = successor_entry(r['family']) or activation_entry(r['family']) or {}
+        if entry.get('adapter') in {'raw-control-v1', 'raw-control-v2', 'raw-control-v3', 'raw-control-v4'}:
+            return  # The snapshot validator already checked the finite events and locators.
     module = source_module(source["path"])
     for tier, run in r["runs"].items():
         if run["outcome"] not in {"pass", "fail", "error", "skip"} and not (is_snapshot() and run["outcome"] == "timeout"): continue
@@ -948,8 +969,7 @@ def load_records(kind, names, frozen_scripts=None):
     if is_snapshot() and kind=='stdlib':
         import source_stage_pins
         if COHORT['imre_revision']=='95908fb0acadc2a67304a8080e584deaef395746' and getattr(source_stage_pins,'REVISION_959_SUCCESSOR',None) is not None:
-            from extensions.successor959_v1 import authority as successor
-            for name,entry in successor.activated_entries(sys.modules[__name__])['families'].items():
+            for name,entry in activated_extension_entries().items():
                 path=bound_artifact(entry,entry['receipt'])
                 for line in path.read_text().splitlines():
                     r=validate_record(json.loads(line),kind,names,frozen_scripts);key=(r['family'],r['id'],r['occurrence']);require(key not in seen and r['family']==name,'successor receipt collides or differs from its entry');seen.add(key);verify_stdlib_evidence(r);records.append(r)
