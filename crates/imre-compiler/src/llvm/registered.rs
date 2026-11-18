@@ -593,14 +593,47 @@ impl<'p> RegisteredBody<'p> {
             code.replacement = Some(plan);
         }
         let next = Cell::new(0);
-        let frame = Frame {
+        let mut frame = Frame {
             code,
             names: Some(&checked.local_names),
             inputs,
             suite,
             fixed_sites: (!checked.fixed_sites.is_empty()).then_some((checked, &next)),
         };
-        CheckedBody::registered(frame).emit_function(&checked.function);
+        if frame.code.replacement.is_some() {
+            // The closed selector proves that the first two statements are the
+            // initial position and ordinary result assignment. Its call records
+            // whether the already-evaluated callable was the authenticated body;
+            // the initial result itself never receives an ownership witness.
+            let (initial, continuation) = checked.function.body.split_at(2);
+            CheckedBody::registered(frame.reborrow()).emit_block(initial);
+            if !frame.code.body.terminated {
+                let fixed_start = next.get();
+                let enabled = frame
+                    .code
+                    .body
+                    .instruction("load i1, ptr %replacement_initial");
+                let proof = frame.code.name("b");
+                let ordinary = frame.code.name("b");
+                frame.code.branch(&enabled, &proof, &ordinary);
+
+                frame.code.label(&proof);
+                CheckedBody::registered(frame.reborrow()).emit_block(continuation);
+                let fixed_end = next.get();
+
+                // The ordinary continuation is the original checked body, with
+                // replacement emission disabled. It consumes the same fixed
+                // source sites independently and owns its own loop/cleanup blocks.
+                let plan = frame.code.replacement.take();
+                next.set(fixed_start);
+                frame.code.label(&ordinary);
+                CheckedBody::registered(frame.reborrow()).emit_block(continuation);
+                debug_assert_eq!(next.get(), fixed_end);
+                frame.code.replacement = plan;
+            }
+        } else {
+            CheckedBody::registered(frame).emit_function(&checked.function);
+        }
         code.restore_checked_slots(enclosing);
     }
 }

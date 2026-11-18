@@ -131,6 +131,51 @@ fn a_replacement_region_requires_a_private_result_and_terminal_read() {
 }
 
 #[test]
+fn replacement_region_versions_the_ordinary_continuation_after_initial_call() {
+    use ruff_text_size::Ranged;
+    let source = concat!(
+        "def loads(data: bytes) -> object:\n    return data\n",
+        "def exercise(data: bytes, count: int) -> object:\n",
+        "    result = loads(data)\n",
+        "    for i in range(count):\n        result = loads(data)\n",
+        "    return result\n",
+        "print(exercise(b'', 2))\n",
+    );
+    let mut graph = SourceGraph::single(source).unwrap();
+    graph.registered_startup = true;
+    crate::checked_lower(&mut graph).unwrap();
+    let definition = &graph.modules[graph.entry].parsed.syntax().body[1];
+    let frames = graph.registered_functions();
+    let function = &frames[&graph.entry][&definition.start()];
+    let plan = super::ownership::replacement(function, |_| true).unwrap();
+    let mut output = Output::default();
+    let file = output.data(b"app.py");
+    let positions = SourcePositions::new(Path::new("app.py"), source, &file);
+    let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
+    frame.replacement = Some(plan);
+    RegisteredBody::Function(function).emit(&mut TestFrame(&mut frame, CheckedSites::default()));
+    frame.finish_callable(None);
+    let body = &output.functions;
+    assert_eq!(
+        body.matches("call i64 @imre_dyn_replacement_initial_call_at(")
+            .count(),
+        1
+    );
+    assert_eq!(
+        body.matches("call i64 @imre_dyn_replacement_positional_call_at(")
+            .count(),
+        1
+    );
+    assert_eq!(
+        body.matches("call void @imre_dyn_replacement_commit(")
+            .count(),
+        1
+    );
+    assert!(body.contains("call i64 @imre_dyn_positional_call_at("));
+    assert!(body.contains("load i1, ptr %replacement_initial"));
+}
+
+#[test]
 fn a_typed_parameter_keeps_its_python_slice_receiver() {
     let source = "def section(text: str) -> str:\n    return text[:2] + text[4:]\nprint(section('example'))\n";
     let mut graph = SourceGraph::single(source).unwrap();

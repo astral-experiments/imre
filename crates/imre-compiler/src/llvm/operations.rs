@@ -1414,6 +1414,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 }
                 if let Entry::Registered(frame) = &mut self.0 {
                     frame.replacement_rhs = false;
+                    frame.replacement_initial = false;
                 }
             }
             Statement::AugmentItem(receiver, key, op, rhs) => {

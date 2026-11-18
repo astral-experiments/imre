@@ -164,6 +164,7 @@ pub(crate) struct RegisteredFrame<'a, 'p> {
     /// Compiler-only state for a closed private-local replacement region.
     pub(super) replacement: Option<super::ownership::Replacement>,
     pub(in crate::llvm) replacement_rhs: bool,
+    pub(in crate::llvm) replacement_initial: bool,
 }
 
 impl<'a, 'p> RegisteredFrame<'a, 'p> {
@@ -212,6 +213,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             native_suspension,
             replacement: None,
             replacement_rhs: false,
+            replacement_initial: false,
         }
     }
 
@@ -332,6 +334,8 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         if self.replacement.is_some() {
             self.body.entry_slot("%replacement_proof", "i64", Some("0"));
             self.body.entry_slot("%replacement_next", "i64", Some("0"));
+            self.body
+                .entry_slot("%replacement_initial", "i1", Some("false"));
         }
         // A loaded code object owns its identifier-like strings before any statement runs.
         if module && !self.output.interned_identifiers.is_empty() {
@@ -1075,7 +1079,9 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
                 count,
                 receiver_slot,
             } => (
-                if self.replacement_rhs && !receiver_slot && count == 1 {
+                if self.replacement_initial && !receiver_slot && count == 1 {
+                    "imre_dyn_replacement_initial_call_at"
+                } else if self.replacement_rhs && !receiver_slot && count == 1 {
                     "imre_dyn_replacement_positional_call_at"
                 } else if receiver_slot {
                     "imre_dyn_positional_method_at"
@@ -1086,7 +1092,9 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             ),
         };
         let scope = scope.map_or_else(|| self.scope.to_string(), str::to_owned);
-        let proof = if function == "imre_dyn_replacement_positional_call_at" {
+        let proof = if function == "imre_dyn_replacement_initial_call_at" {
+            ", ptr %replacement_initial"
+        } else if function == "imre_dyn_replacement_positional_call_at" {
             ", ptr %replacement_proof, ptr %replacement_next"
         } else {
             if self.replacement_rhs {
@@ -1101,7 +1109,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         self.output.intern_identifier(name);
         let data = self.output.data(name.as_bytes());
         self.take_matching_check();
-        let call = if self.replacement.is_some() {
+        let call = if self.replacement.is_some() && !self.replacement_initial {
             format!(
                 "call i64 @imre_dyn_replacement_assign_target(ptr %ctx, i64 {scope}, ptr {data}, i64 {}, i64 {value}, ptr %replacement_proof, ptr %replacement_next)",
                 name.len()
@@ -1136,7 +1144,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
     fn release_store(&mut self, replaced: &str) {
         let (ptr, count) = self.live_handles(&[]);
         let mark = self.iteration.expression_mark.as_deref().unwrap_or("0");
-        if self.replacement.is_some() {
+        if self.replacement.is_some() && !self.replacement_initial {
             self.line(&format!("call void @imre_dyn_replacement_assignment_target_at(ptr %ctx, i64 {mark}, ptr {ptr}, i64 {count}, i64 {replaced}, ptr %replacement_proof, ptr %replacement_next)"));
         } else {
             self.line(&format!("call void @imre_dyn_assignment_target_at(ptr %ctx, i64 {mark}, ptr {ptr}, i64 {count}, i64 {replaced})"));
@@ -1155,6 +1163,10 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             .replacement
             .as_ref()
             .is_some_and(|plan| plan.result == slot && plan.position == self.current_range);
+        self.replacement_initial = self
+            .replacement
+            .as_ref()
+            .is_some_and(|plan| plan.result == slot && plan.initial_position == self.current_range);
     }
 }
 
