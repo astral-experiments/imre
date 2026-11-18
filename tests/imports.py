@@ -159,7 +159,7 @@ REJECTED = {
             "def unused() -> int: return take('x')\n"
             "print(take(7))\n"
         ),
-    }, "invalid-argument-type"),
+    }, "main.py:3:34: Imre: expected int, got str"),
     "source_loader_subclass_preserves_typed_call": ({
         "scores.py": "def take(value: int) -> int: return value\n",
         "rules.py": (
@@ -215,7 +215,7 @@ REJECTED = {
             "if False: FrozenImporter.find_spec('stat')\n"
             "print(take('x'))\n"
         ),
-    }, "invalid-argument-type"),
+    }, "main.py:4:12: Imre: expected int, got str"),
     "builtin_importer_preserves_typed_call": ({
         "scores.py": "def take(value: int) -> int: return value\n",
         "main.py": (
@@ -224,7 +224,7 @@ REJECTED = {
             "if False: BuiltinImporter.find_spec('errno')\n"
             "print(take('x'))\n"
         ),
-    }, "invalid-argument-type"),
+    }, "main.py:4:12: Imre: expected int, got str"),
     "methodcaller_preserves_typed_call": ({
         "main.py": (
             "from operator import methodcaller\n"
@@ -285,7 +285,7 @@ REJECTED = {
             "DocFileSuite()\n"
             "typed('wrong')\n"
         ),
-    }, "error[invalid-argument-type]"),
+    }, "main.py:4:7: Imre: expected int, got str"),
     "unittest_method_skip_preserves_typed_call": ({
         "main.py": (
             "import unittest\n"
