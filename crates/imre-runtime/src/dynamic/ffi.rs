@@ -2580,7 +2580,20 @@ unsafe extern "C" fn imre_dyn_replacement_assign_target(
         *next = NONE;
         return NONE;
     }
-    let result = ctx.store_source_name(scope, name, value).map(flag);
+    let result = if ctx.proven_private_text_binding(scope, name, value, *proof) {
+        // The closed compiler region keeps the witnessed TEXT/noGET graph private:
+        // neither this exact list nor any of its non-singleton immutable text leaves
+        // can have acquired a finalizer or weak edge since the producer returned.
+        // The binding already exists, so this is the same infallible names-table write
+        // and scope mutation bookkeeping used by bind_local, without scanning the graph.
+        let Value::Scope(frame) = ctx.heap.get_mut(scope) else {
+            unreachable!("private replacement scope")
+        };
+        *frame.names.get_mut(name).expect("witnessed binding") = value;
+        Ok(FALSE)
+    } else {
+        ctx.store_source_name(scope, name, value).map(flag)
+    };
     replacement_finish(ctx, result, None, || {
         *proof = NONE;
         *next = NONE;
@@ -2610,9 +2623,11 @@ unsafe extern "C" fn imre_dyn_replacement_guard_result_store(
             &mut *next,
         )
     };
-    if !ctx.heap.private_replacement_frame(scope)
-        || ctx.heap.has_weak_values
-        || ctx.replacing_finalizer(scope, name, value)
+    let proven = ctx.proven_private_text_binding(scope, name, value, *proof);
+    if !proven
+        && (!ctx.heap.private_replacement_frame(scope)
+            || ctx.heap.has_weak_values
+            || ctx.replacing_finalizer(scope, name, value))
     {
         *proof = NONE;
         *next = NONE;
@@ -2626,6 +2641,18 @@ unsafe extern "C" fn imre_dyn_replacement_guard_result_store(
     }
     if *next != value || !ctx.heap.is_fresh_text_list(*next) {
         *next = NONE;
+    }
+}
+
+impl Context {
+    /// Recognize the old private TEXT/noGET result while its per-call compiler witness lives.
+    fn proven_private_text_binding(&self, scope: Id, name: &str, value: Id, proof: Id) -> bool {
+        proof != NONE
+            && proof != value
+            && !self.heap.has_weak_values
+            && self.heap.private_replacement_frame(scope)
+            && self.scope_data(scope).names.get(name) == Some(&proof)
+            && self.heap.is_fresh_text_list(proof)
     }
 }
 
@@ -5019,7 +5046,16 @@ mod tests {
                 &mut proof,
                 &mut next,
             );
-            let replaced = imre_dyn_assign_target(&mut ctx, scope, name.as_ptr(), name.len(), new);
+            let replaced = imre_dyn_replacement_assign_target(
+                &mut ctx,
+                scope,
+                name.as_ptr(),
+                name.len(),
+                new,
+                &mut proof,
+                &mut next,
+            );
+            assert_eq!(replaced, FALSE);
             imre_dyn_replacement_assignment_target_at(
                 &mut ctx,
                 0,
@@ -5046,6 +5082,38 @@ mod tests {
         assert!(!ctx.heap.is_fresh_text_list(old));
         assert!(ctx.heap.is_fresh_text_list(new));
         assert!(matches!(ctx.heap.get(singleton), Value::Str(text) if text == "é"));
+    }
+
+    #[test]
+    fn unwitnessed_producer_shape_does_not_skip_finalizer_checks() {
+        let (mut ctx, scope) = replacement_context();
+        let (old, _) = fresh_text_list(&mut ctx, "original leaf");
+        let Value::List(items) = ctx.heap.get(old) else {
+            unreachable!()
+        };
+        let child = items[1];
+        *ctx.heap.get_mut(child) = Value::List(Vec::new());
+        ctx.heap.register_finalizer(child);
+        assert!(ctx.heap.is_fresh_text_list(old));
+        ctx.bind_local(scope, "result", old);
+        let (new, _) = fresh_text_list(&mut ctx, "replacement leaf");
+        let (mut proof, mut next) = (NONE, new);
+        let name = b"result";
+        assert!(ctx.replacing_finalizer(scope, "result", new));
+        // SAFETY: the test owns the private scope and independent compiler words;
+        // the absent witness must force the ordinary finalizer-sensitive path.
+        unsafe {
+            imre_dyn_replacement_guard_result_store(
+                &ctx,
+                scope,
+                name.as_ptr(),
+                name.len(),
+                new,
+                &mut proof,
+                &mut next,
+            );
+        }
+        assert_eq!((proof, next), (NONE, NONE));
     }
 
     #[test]
