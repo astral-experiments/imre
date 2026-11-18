@@ -124,7 +124,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `doctest` | Yes | `DocTestSuite` and execution of selected original docstring examples. [Evidence](../benchmarks/cpython_stdlib/full/doctest/README.md) | — | — | — |
 | `email` | Yes | Parse and format RFC mail dates with `email.utils.parsedate_to_datetime`, `format_datetime`, and `formatdate`. Selected message declarations also bind in unreachable code. [Evidence](../benchmarks/cpython_stdlib/full/email/README.md) | [0 / 1,793](../benchmarks/cpython_stdlib/full/email/) | 4 | 7 |
 | `encodings` | Yes | No API example recorded. | — | — | — |
-| `enum` | Yes | Named `Enum` and `StrEnum` members and aliases. [Evidence](../tests/fixtures/classes/ordinary_enums.py) | — | — | — |
+| `enum` | Yes | Named `Enum` and `StrEnum` members and aliases; the provider does not export `EnumMeta` or `EnumType`. [Evidence](../benchmarks/cpython_stdlib/supplemental/enum-collection.md) | — | — | — |
 | `errno` | Yes | Named errno constants, aliases and the `errorcode` registry. [Evidence](../benchmarks/cpython_stdlib/full/errno/README.md) | [3 / 3](../benchmarks/cpython_stdlib/full/errno/) | 0 | 0 |
 | `faulthandler` | Yes | No API example recorded. | — | — | — |
 | `fcntl` | Yes | No API example recorded. | — | — | — |
