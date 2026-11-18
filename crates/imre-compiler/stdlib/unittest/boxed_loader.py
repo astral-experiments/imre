@@ -1,5 +1,8 @@
 # Runtime-loaded modules expose actual bindings and classes, including aliases
 # and descriptors. The fixed-layout frontend continues to use static metadata.
+TestCase.__module__ = "unittest.case"
+
+
 class FunctionTestCase(TestCase):
     """A test case that wraps a test function.
 
