@@ -554,7 +554,7 @@ fn plain_replacement(ctx: &Context, id: Id, budget: &mut usize) -> bool {
             .iter()
             .all(|&item| plain_replacement(ctx, item, budget)),
         Value::Dict(entries) => {
-            entries.ordered_nodes().is_empty()
+            entries.order_len() == 0
                 && entries.iter().all(|&(key, value)| {
                     plain_replacement(ctx, key, budget) && plain_replacement(ctx, value, budget)
                 })
@@ -570,7 +570,7 @@ fn observe_release(ctx: &Context, result: Id) -> bool {
     }
     if let Value::Dict(entries) = ctx.heap.get(result) {
         // An ordered node can still own a key removed through a dict descriptor.
-        if !entries.ordered_nodes().is_empty() {
+        if entries.order_len() != 0 {
             return true;
         }
         if scalar_entries(ctx, entries) {
