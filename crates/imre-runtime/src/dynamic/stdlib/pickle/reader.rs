@@ -130,19 +130,18 @@ impl<'a> Cursor<'a> {
     }
 }
 
-/// Classify a bounded short payload directly; retain the general slice routine for every other size.
+/// Classify a short payload with one frame-bounded word, excluding neighboring opcodes.
 #[inline]
-fn dense_text_is_ascii(bytes: &[u8]) -> bool {
-    let bits = match bytes {
-        [a, b, c] => *a | *b | *c,
-        [a, b, c, d] => *a | *b | *c | *d,
-        [a, b, c, d, e] => *a | *b | *c | *d | *e,
-        [a, b, c, d, e, f] => *a | *b | *c | *d | *e | *f,
-        [a, b, c, d, e, f, g] => *a | *b | *c | *d | *e | *f | *g,
-        [a, b, c, d, e, f, g, h] => *a | *b | *c | *d | *e | *f | *g | *h,
-        _ => return bytes.is_ascii(),
-    };
-    bits & 0x80 == 0
+fn dense_text_is_ascii(frame: &[u8], start: usize, length: usize) -> bool {
+    if (3..=8).contains(&length)
+        && let Some(word) = frame[start..].first_chunk::<8>()
+    {
+        // The word may include the following MEMOIZE or other frame bytes. Shift their
+        // high bits out before testing only the validated payload bytes.
+        let high_bits = u64::from_le_bytes(*word) & 0x8080_8080_8080_8080;
+        return high_bits << ((8 - length) * 8) == 0;
+    }
+    frame[start..start + length].is_ascii()
 }
 
 /// Validate the accepted grammar and UTF-8 before publishing Python objects;
@@ -156,6 +155,7 @@ fn preflight(data: &[u8]) -> Option<Layout> {
     if end > data.len() || end > u32::MAX as usize {
         return None;
     }
+    let frame = &data[..end];
     let mut cursor = Cursor { data, at: 11, end };
     if cursor.byte()? != EMPTY_LIST || cursor.byte()? != MEMOIZE || cursor.byte()? != MARK {
         return None;
@@ -164,20 +164,23 @@ fn preflight(data: &[u8]) -> Option<Layout> {
     // ASCII text. Keep that prefix in place even if a later item needs the
     // general grammar; only the remaining pushes need packed descriptors.
     let mut dense_prefix = 0usize;
-    while cursor.at < end && data[cursor.at] == SHORT_BINUNICODE {
-        let Some(&length) = data.get(cursor.at.checked_add(1)?) else {
+    while cursor.at < end && frame[cursor.at] == SHORT_BINUNICODE {
+        let remaining = end - cursor.at;
+        // The opcode, length and trailing MEMOIZE must all fit in this frame.
+        if remaining < 3 {
             break;
-        };
-        let start = cursor.at.checked_add(2)?;
-        let text_end = start.checked_add(usize::from(length))?;
-        if text_end >= end
-            || data[text_end] != MEMOIZE
-            || !dense_text_is_ascii(&data[start..text_end])
-        {
+        }
+        let length = usize::from(frame[cursor.at + 1]);
+        if length > remaining - 3 {
+            break;
+        }
+        let start = cursor.at + 2;
+        let text_end = start + length;
+        if frame[text_end] != MEMOIZE || !dense_text_is_ascii(frame, start, length) {
             break;
         }
         cursor.at = text_end + 1;
-        dense_prefix = dense_prefix.checked_add(1)?;
+        dense_prefix += 1;
     }
     let mut items: Vec<Item> = Vec::new();
     items
@@ -525,16 +528,36 @@ mod tests {
     fn bounded_dense_ascii_checks_every_payload_byte_and_falls_back_at_boundaries() {
         for length in 0..=10 {
             let mut bytes = vec![b'a'; length];
-            assert!(dense_text_is_ascii(&bytes));
+            // High bits outside the payload must not affect the word classifier.
+            bytes.extend_from_slice(&[0xff; 8]);
+            assert!(dense_text_is_ascii(&bytes, 0, length));
             for position in 0..length {
                 bytes[position] = 0x80;
                 assert!(
-                    !dense_text_is_ascii(&bytes),
+                    !dense_text_is_ascii(&bytes, 0, length),
                     "length {length}, byte {position}"
                 );
                 bytes[position] = b'a';
             }
         }
+    }
+
+    #[test]
+    fn bounded_dense_ascii_never_reads_past_the_declared_frame() {
+        for length in 3..8 {
+            let mut backing = vec![b'a'; length];
+            backing.extend_from_slice(&[0xff; 8]);
+            let frame = &backing[..length];
+            assert!(dense_text_is_ascii(frame, 0, length));
+        }
+
+        let mut truncated = vec![PROTO, 5, FRAME];
+        let payload = b"]\x94(\x8c\x03abc";
+        truncated.extend_from_slice(&(payload.len() as u64).to_le_bytes());
+        truncated.extend_from_slice(payload);
+        // MEMOIZE and STOP outside the declared frame cannot complete this stream.
+        truncated.extend_from_slice(b"\x94e.");
+        assert!(preflight(&truncated).is_none());
     }
 
     #[test]
