@@ -126,17 +126,15 @@ pub extern "C" fn imre_sysconfig_scripts() -> *const Str {
     StrOwner::into_raw(StrOwner::new(Str::from(text)))
 }
 
-/// The Python interpreter for explicitly launched Python helpers. Preserve
-/// symlinks so a selected virtual environment keeps its own interpreter path.
-pub(crate) fn python_executable_text() -> String {
-    python_executable()
-        .and_then(|path| path.into_os_string().into_string().ok())
-        .unwrap_or_default()
-}
-
+/// Return the running native image, independently of Python helper discovery.
+/// An unavailable or non-UTF-8 executable path is represented by an empty string.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_sys_executable() -> *const Str {
-    StrOwner::into_raw(StrOwner::new(Str::from(python_executable_text())))
+    let executable = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.into_os_string().into_string().ok())
+        .unwrap_or_default();
+    StrOwner::into_raw(StrOwner::new(Str::from(executable)))
 }
 
 /// Returns an owned reference to the same mutable list on every successful call.
