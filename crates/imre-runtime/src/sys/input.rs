@@ -80,8 +80,8 @@ impl Input {
         Ok(())
     }
 
-    fn line(&mut self, reader: &mut impl Read) -> Result<String> {
-        let settings = encoding::settings(false, None);
+    fn line(&mut self) -> Result<String> {
+        let mut reader = None;
         let mut line = String::new();
         // A terminal can produce EOF for a single read and supply another line later.
         self.eof = false;
@@ -97,12 +97,14 @@ impl Input {
             if self.eof {
                 return Ok(line);
             }
-            self.fill(reader, settings)?;
+            // Buffered lines need no process stdin lock. Hold it across refills of a long line.
+            let reader = reader.get_or_insert_with(|| io::stdin().lock());
+            self.fill(reader, encoding::settings(false, None))?;
         }
     }
 }
 
 pub(crate) fn read_input_line() -> Result<String> {
     let mut input = INPUT.lock().unwrap_or_else(|poison| poison.into_inner());
-    input.line(&mut io::stdin().lock())
+    input.line()
 }
