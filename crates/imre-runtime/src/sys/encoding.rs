@@ -359,16 +359,17 @@ fn with_ctype_locale<T>(name: impl AsRef<OsStr>, op: impl FnOnce() -> T) -> Opti
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_locale, with_ctype_locale};
+    use super::{Codec, current_codeset, decode_locale, locked_locale, with_ctype_locale};
 
     #[test]
     fn locale_decoder_reports_the_first_invalid_character() {
+        let cases = [
+            (c"abc\xf4\x90\x80\x80abc", 3),
+            (c"a\xf4\x90\x80\x80\xff", 1),
+            (c"xx\xe2\x82", 2),
+        ];
         let check = || {
-            for (name, start) in [
-                (c"abc\xf4\x90\x80\x80abc", 3),
-                (c"a\xf4\x90\x80\x80\xff", 1),
-                (c"xx\xe2\x82", 2),
-            ] {
+            for (name, start) in cases {
                 let error = decode_locale(name).unwrap_err();
                 let args = error.decode_args().expect("UnicodeDecodeError");
                 assert_eq!(args.encoding, "locale");
@@ -376,10 +377,31 @@ mod tests {
                 assert_eq!((args.start, args.end), (start, start + 1));
             }
         };
-        // C is required by POSIX. Where installed, also exercise a multibyte locale.
-        with_ctype_locale("C", check).expect("C character locale");
-        let _ = ["C.UTF-8", "C.utf8", "UTF-8"]
+        with_ctype_locale("C", || {
+            #[cfg(target_vendor = "apple")]
+            for (name, _) in cases {
+                let expected: String = name.to_bytes().iter().copied().map(char::from).collect();
+                assert_eq!(decode_locale(name).ok().unwrap(), expected);
+            }
+            #[cfg(not(target_vendor = "apple"))]
+            check();
+        })
+        .expect("C character locale");
+        let utf8_locale = ["C.UTF-8", "C.utf8", "UTF-8", "en_US.UTF-8"]
             .into_iter()
-            .find_map(|name| with_ctype_locale(name, check));
+            .find(|name| {
+                with_ctype_locale(name, || {
+                    if !matches!(
+                        Codec::lookup(&locked_locale(current_codeset)),
+                        Ok(Codec::Utf8 { signature: false })
+                    ) {
+                        return false;
+                    }
+                    check();
+                    true
+                })
+                .unwrap_or(false)
+            });
+        assert!(utf8_locale.is_some(), "required UTF-8 character locale");
     }
 }
