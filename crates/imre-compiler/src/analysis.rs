@@ -5008,6 +5008,8 @@ fn file_errors<'db>(db: &'db dyn LiteralSourceDb, checked: CheckedFile<'db>) -> 
                     .and_then(|span| span.range())
                     .is_some_and(|range| {
                         skipped.iter().any(|scope| scope.contains_range(range))
+                            || (rule == "invalid-argument-type"
+                                && buffered_random_index_argument(db, file, diagnostic, range))
                             || (check_argument && runtime_argument(db, checked, range, rule))
                             // ty also reports implicit None returns at the annotation span.
                             || (checks != FileChecks::DeclaredSignatures
@@ -5637,6 +5639,76 @@ fn parameter_labels(diagnostic: &Diagnostic) -> impl Iterator<Item = (File, Text
             };
             (!label.is_primary()).then_some((*owner, span.range()?))
         })
+}
+
+/// Correct typeshed's narrow `int` annotation only for the real BufferedRandom size.
+/// The builtin `_io` module cannot be shadowed, so use ty's resolved parameter label
+/// and its SupportsIndex protocol check rather than relaxing ordinary int contracts.
+fn buffered_random_index_argument(
+    db: &dyn LiteralSourceDb,
+    file: File,
+    diagnostic: &Diagnostic,
+    range: TextRange,
+) -> bool {
+    use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
+    use ty_python_semantic::types::KnownClass;
+
+    let size = parameter_labels(diagnostic).any(|(owner, parameter)| {
+        if !owner.path(db).as_vendored_path().is_some_and(|path| {
+            path.components()
+                .map(|component| component.as_str())
+                .eq(["stdlib", "_io.pyi"])
+        }) {
+            return false;
+        }
+        let parsed =
+            ruff_db::parsed::parsed_module(db, db.program_file(owner).python_file(db)).load(db);
+        let nodes = covering_node(parsed.syntax().into(), parameter);
+        let mut constructor = false;
+        let mut class = false;
+        for node in nodes.ancestors() {
+            match node {
+                AnyNodeRef::StmtFunctionDef(function) => {
+                    constructor = function.name.as_str() == "__init__"
+                        && function.parameters.args.iter().any(|argument| {
+                            argument.parameter.name.as_str() == "buffer_size"
+                                && argument.range().contains_range(parameter)
+                        });
+                }
+                AnyNodeRef::StmtClassDef(owner) => class = owner.name.as_str() == "BufferedRandom",
+                _ => {}
+            }
+        }
+        constructor && class
+    });
+    if !size {
+        return false;
+    }
+    let program = db.program_file(file);
+    let parsed = ruff_db::parsed::parsed_module(db, program.python_file(db)).load(db);
+    let nodes = covering_node(parsed.syntax().into(), range);
+    let operand = nodes.ancestors().find_map(|node| {
+        let call = node.expr_call()?;
+        call.arguments
+            .args
+            .iter()
+            .find(|arg| arg.range() == range)
+            .or_else(|| {
+                call.arguments
+                    .keywords
+                    .iter()
+                    .find(|keyword| keyword.range() == range || keyword.value.range() == range)
+                    .map(|keyword| &keyword.value)
+            })
+    });
+    let Some(operand) = operand else {
+        return false;
+    };
+    let model = SemanticModel::new(db, program);
+    let env = model.program_environment();
+    operand.inferred_type(&model).is_some_and(|actual| {
+        actual.is_assignable_to(db, &env, KnownClass::SupportsIndex.to_instance(db, &env))
+    })
 }
 
 /// Leave argument conversion on vendored callables to Python.
@@ -6561,6 +6633,54 @@ impl Db for Database {
 #[cfg(test)]
 mod diagnostic_mode_tests {
     use super::*;
+
+    #[test]
+    fn buffered_random_size_uses_the_index_protocol_without_changing_int_contracts() {
+        let check = |source: &str| {
+            let root = Path::new("/project");
+            let mut session = Session::new(root, &[]).unwrap();
+            session
+                .add(&root.join("app.py"), source, crate::SourceKind::File)
+                .unwrap();
+            session.set_closed_program_rules();
+            session.errors(
+                0..session.files.len(),
+                None,
+                &[],
+                FileChecks::Full,
+                None,
+                None,
+            )
+        };
+        let prefix = concat!(
+            "import io\n",
+            "class Size:\n    def __index__(self) -> int: return 4\n",
+            "class Derived(io.BufferedRandom): pass\n",
+            "raw = io.FileIO('data', 'w+')\n",
+        );
+        check(&format!(
+            "{prefix}Derived(raw, Size())\nDerived(raw, buffer_size=Size())\nDerived(raw, 4)\n"
+        ))
+        .unwrap();
+
+        let error = check(&format!("{prefix}Derived(raw, 'bad')\n")).unwrap_err();
+        assert!(
+            error.contains("Expected `int`") && error.contains("bad"),
+            "{error}"
+        );
+
+        let error = check(&format!(
+            "{prefix}class Wrong:\n    def __index__(self) -> str: return 'bad'\nDerived(raw, Wrong())\n"
+        ))
+        .unwrap_err();
+        assert!(error.contains("Expected `int`, found `Wrong`"), "{error}");
+
+        let error = check(&format!(
+            "{prefix}def take(value: int) -> None: pass\ntake(Size())\n"
+        ))
+        .unwrap_err();
+        assert!(error.contains("Expected `int`, found `Size`"), "{error}");
+    }
 
     #[test]
     fn deferred_global_checks_physical_reads_and_refreshes_after_edits() {
