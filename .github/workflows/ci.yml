@@ -30,6 +30,10 @@ on:
         description: Run all ThinLTO suites instead of the linking smoke test
         type: boolean
         default: false
+      thinlto_classes_phase_probe:
+        description: Supplemental classes-only ThinLTO linker timing probe; no full-gate credit
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -41,7 +45,7 @@ concurrency:
 
 jobs:
   scope:
-    if: github.event_name != 'push' && !inputs.sys_source && !inputs.unittest_source
+    if: github.event_name != 'push' && !inputs.sys_source && !inputs.unittest_source && !inputs.thinlto_classes_phase_probe
     runs-on: ubuntu-24.04
     outputs:
       release_artifacts: ${{ steps.scope.outputs.release_artifacts }}
@@ -60,7 +64,7 @@ jobs:
         run: bash .github/scripts/ci-scope.sh
 
   unittest-source:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.unittest_source != '' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.unittest_source != '' && !inputs.thinlto_classes_phase_probe }}
     # Use Imre's repository ID so a rename keeps the verified Namespace profile.
     runs-on: &linux-x64 >-
       ${{ github.repository_id == '1423429334' && 'namespace-profile-ubuntu-24-04-16' ||
@@ -119,7 +123,7 @@ jobs:
           retention-days: 7
 
   sys-source:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.sys_source != '' && !inputs.unittest_source }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.sys_source != '' && !inputs.unittest_source && !inputs.thinlto_classes_phase_probe }}
     runs-on: *linux-x64
     timeout-minutes: 35
     env:
@@ -201,7 +205,7 @@ jobs:
       - run: cargo test -p imre-compiler --lib --locked
 
   check:
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.sys_source && !inputs.unittest_source)
+    if: ${{ !inputs.thinlto_classes_phase_probe && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.sys_source && !inputs.unittest_source)) }}
     runs-on: *linux-x64
     timeout-minutes: 120
     env: &wheel-env
@@ -671,7 +675,7 @@ jobs:
           python3 benchmarks/memory_validate.py --python python3 --binary /tmp/memory-report --compute-binary /tmp/memory-report-compute --rust /tmp/imre-memory-reference/memory-report-reference
 
   asan:
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.sys_source && !inputs.unittest_source)
+    if: ${{ !inputs.thinlto_classes_phase_probe && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.sys_source && !inputs.unittest_source)) }}
     runs-on: *linux-x64
     timeout-minutes: 120
     env: *wheel-env
@@ -783,3 +787,156 @@ jobs:
           python3 tests/run_suites_children.py
           python3 tests/run_suites.py --kill-failed-children --log-dir /tmp/imre-suites-thinlto --suites "${suites[@]}" \
             -- --compiler target/release/imre --runtime target/lto/release/libimre_runtime.a --clang clang-18 --target "$imre_target" --lto-linker "$ci_lld" --opt-levels 3
+
+  thinlto-classes-phase-probe:
+    if: github.event_name == 'workflow_dispatch' && inputs.thinlto_classes_phase_probe
+    runs-on: *linux-x64
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.14.5'
+      - name: Authenticate the supplemental source and selection
+        env:
+          UNITTEST_SOURCE: ${{ inputs.unittest_source }}
+          SYS_SOURCE: ${{ inputs.sys_source }}
+          LOGGING: ${{ inputs.logging_evidence }}
+          RELEASE: ${{ inputs.release_artifacts }}
+          ASAN: ${{ inputs.full_asan }}
+          THIN: ${{ inputs.full_thinlto }}
+        run: |
+          set -euo pipefail
+          [[ -z "$UNITTEST_SOURCE" && -z "$SYS_SOURCE" && "$LOGGING" != true && "$RELEASE" != true && "$ASAN" != true && "$THIN" != true ]]
+          [[ "$(git rev-parse HEAD^)" == 32f5e52212fed7adff056970d8913187b13fe113 ]]
+          [[ "$(git diff-tree --no-commit-id --name-only -r HEAD)" == .github/workflows/ci.yml ]]
+          [[ "$(git rev-parse HEAD:.github/scripts/ci-thinlto-ld.lld)" == da708fb33915005fa357eaa46347c142c254c72d ]]
+          [[ "$(git rev-parse HEAD:tests/run_suites.py)" == 4c3e012434d01b971bce578e20cc66408c45e78d ]]
+          [[ "$(git rev-parse HEAD:tests/run_suites_children.py)" == 81df562fbbd64c4fefdb77abe6c473da2c3e951e ]]
+          [[ "$(git rev-parse HEAD:tests/classes.py)" == 004c249cdc5e35b9cf66495751aed5334bba22dd ]]
+          [[ "$(git rev-parse HEAD:tests/fixtures/classes/class_data_setup.py)" == 81d4ec755a69cb9da4e0f7b63e5f783989626a25 ]]
+          [[ "$(git rev-parse HEAD:tests/class_data_sources.py)" == 367802df45d3019d3b5f9a42509626295182ebe6 ]]
+          [[ "$(git rev-parse HEAD:tests/comprehensions.py)" == c7225cf89cff363113d67938dfcb77ee8b5904f1 ]]
+          [[ "$(git rev-parse HEAD:tests/lto.py)" == 4d5815181c7e219bff71f20a8ee30e6db282428b ]]
+          [[ "$(sha256sum .github/scripts/ci-thinlto-ld.lld | cut -d' ' -f1)" == b64290363fb78545ea4e03de965765672a7cb463955a3878ff64937c9a1a51ff ]]
+          [[ "$(nproc)" == 16 ]]
+          available="$(df --output=avail -B1 "$GITHUB_WORKSPACE" | tail -1 | tr -d ' ')"
+          memory="$(awk '/^MemAvailable:/ {printf "%.0f", $2 * 1024}' /proc/meminfo)"
+          (( available > 60 * 1024 * 1024 * 1024 && memory >= 24 * 1024 * 1024 * 1024 ))
+      - name: Install LLVM 18
+        run: sudo apt-get update && sudo apt-get install -y clang-18
+      - name: Build the release compiler
+        run: |
+          set -euo pipefail
+          available="$(df --output=avail -B1 "$GITHUB_WORKSPACE" | tail -1 | tr -d ' ')"
+          memory="$(awk '/^MemAvailable:/ {printf "%.0f", $2 * 1024}' /proc/meminfo)"
+          (( available > 60 * 1024 * 1024 * 1024 && memory >= 24 * 1024 * 1024 * 1024 ))
+          cargo build -p imre-compiler --release --locked
+      - name: Build the bitcode runtime for ThinLTO
+        env:
+          RUSTFLAGS: -Clinker-plugin-lto
+        run: |
+          set -euo pipefail
+          available="$(df --output=avail -B1 "$GITHUB_WORKSPACE" | tail -1 | tr -d ' ')"
+          memory="$(awk '/^MemAvailable:/ {printf "%.0f", $2 * 1024}' /proc/meminfo)"
+          (( available > 60 * 1024 * 1024 * 1024 && memory >= 24 * 1024 * 1024 * 1024 ))
+          cargo build -p imre-runtime --release --locked --target-dir target/lto
+      - name: Run the supplemental original classes suite with a linker phase trace
+        env:
+          FULL_THINLTO: 'true'
+        run: |
+          set -euo pipefail
+          imre_target="$(rustc -vV | sed -n 's/^host: //p')"
+          imre_lld_dir="$(rustc --print sysroot)/lib/rustlib/$imre_target/bin"
+          export IMRE_CI_LLD="$imre_lld_dir/gcc-ld/ld.lld"
+          export IMRE_CI_LTO_CACHE="$RUNNER_TEMP/imre-thinlto-cache"
+          mkdir -p "$IMRE_CI_LTO_CACHE"
+          phase_dir="$(mktemp -d "$RUNNER_TEMP/imre-classes-phase.XXXXXXXX")"
+          chmod 700 "$phase_dir"
+          ci_lld="$GITHUB_WORKSPACE/.github/scripts/ci-thinlto-ld.lld"
+          if ! python3 tests/lto.py --compiler target/release/imre --runtime target/lto/release/libimre_runtime.a --clang clang-18 --target "$imre_target" --rust-lld "$ci_lld" --python python3 >"$phase_dir/cli.log" 2>&1; then echo 'SUPPLEMENTAL_CLI_CONTROL_FAILED'; exit 1; fi
+          if ! grep -q '^Passed 10 ThinLTO CLI checks$' "$phase_dir/cli.log"; then echo 'SUPPLEMENTAL_CLI_SUMMARY_UNCONFIRMED'; exit 1; fi
+          if ! python3 tests/run_suites_children.py >"$phase_dir/children.log" 2>&1; then echo 'SUPPLEMENTAL_CHILD_CONTROL_FAILED'; exit 1; fi
+          python3 - "$imre_target" "$phase_dir" <<'PY'
+          import ctypes, errno, json, os, re, signal, stat, subprocess, sys, time
+          from pathlib import Path
+          target, directory = sys.argv[1:]
+          root = Path(directory)
+          assert root.is_dir() and stat.S_IMODE(root.stat().st_mode) == 0o700
+          trace = root / 'linker.jsonl'
+          fd = os.open(trace, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+          os.close(fd)
+          shim = root / 'linker-shim'
+          shim_source = "#!/usr/bin/python3\nimport json, os, signal, stat, subprocess, sys, time\nfrom pathlib import Path\ntrace = Path(__file__).with_name('linker.jsonl')\nfd = os.open(trace, os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK)\nst = os.fstat(fd)\nassert stat.S_ISREG(st.st_mode) and st.st_uid == os.getuid() and stat.S_IMODE(st.st_mode) == 0o600 and st.st_nlink == 1 and st.st_size < 256*1024\ndef record(kind, **more):\n    data = (json.dumps({'event':kind,'monotonic_ns':time.monotonic_ns(),'pid':os.getpid(),**more},separators=(',',':'))+'\\n').encode()\n    assert len(data) < 512\n    os.write(fd,data)\n    os.fsync(fd)\nrecord('ENTRY')\nchild = None\ndef forward(sig, frame):\n    if child is not None:\n        try: os.kill(child.pid, sig)\n        except ProcessLookupError: pass\nfor sig in (signal.SIGINT,signal.SIGTERM,signal.SIGHUP): signal.signal(sig,forward)\ntry:\n    child = subprocess.Popen([str(Path(os.environ['GITHUB_WORKSPACE'])/'.github/scripts/ci-thinlto-ld.lld'),*sys.argv[1:]])\n    rc = child.wait()\n    record('EXIT',returncode=rc)\nfinally:\n    os.close(fd)\nif rc < 0:\n    signal.signal(-rc, signal.SIG_DFL)\n    os.kill(os.getpid(), -rc)\nsys.exit(rc)\n"
+          fd = os.open(shim, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o700)
+          with os.fdopen(fd, 'w') as f:
+              f.write(shim_source)
+          ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) == 0 or sys.exit('subreaper unavailable')
+          command = ['python3', 'tests/run_suites.py', '--workers', '1', '--kill-failed-children', '--log-dir', str(root / 'suite'), '--suites', 'classes', '--', '--compiler', 'target/release/imre', '--runtime', 'target/lto/release/libimre_runtime.a', '--clang', 'clang-18', '--target', target, '--lto-linker', str(shim), '--opt-levels', '3']
+          pending = []
+          def caught(s, frame):
+              pending.append(s)
+          for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+              signal.signal(sig, caught)
+          raw = root / 'runner.log'
+          child = None
+          rc = None
+          outcome = 'INCOMPLETE'
+          cleanup = False
+          started = time.monotonic()
+          try:
+              with raw.open('xb') as log:
+                  launch_disk = os.statvfs('.').f_bavail * os.statvfs('.').f_frsize
+                  launch_mem = next(int(x.split()[1]) * 1024 for x in Path('/proc/meminfo').read_text().splitlines() if x.startswith('MemAvailable:'))
+                  if launch_disk <= 60*1024**3 or launch_mem < 24*1024**3: raise RuntimeError('launch resource gate')
+                  if pending: raise RuntimeError('signal before launch')
+                  child = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+                  while True:
+                      if pending or time.monotonic() - started >= 1200:
+                          raise RuntimeError('signal or outer deadline')
+                      disk = os.statvfs('.').f_bavail * os.statvfs('.').f_frsize
+                      mem = next(int(x.split()[1]) * 1024 for x in Path('/proc/meminfo').read_text().splitlines() if x.startswith('MemAvailable:'))
+                      if disk < 44*1024**3 or mem < 12*1024**3 or raw.stat().st_size > 16*1024**2 or trace.stat().st_size > 256*1024:
+                          raise RuntimeError('resource or output floor/cap')
+                      event = os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                      if event is not None:
+                          break
+                      time.sleep(.2)
+              outcome = 'COMPLETED'
+          except BaseException:
+              outcome = 'INCOMPLETE'
+          finally:
+              try:
+                  if child is not None:
+                      for sig, duration in ((signal.SIGTERM, 2), (signal.SIGKILL, 2)):
+                          try: os.killpg(child.pid, sig)
+                          except ProcessLookupError: pass
+                          end = time.monotonic() + duration
+                          while time.monotonic() < end:
+                              try:
+                                  event = os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                              except ChildProcessError: break
+                              if event is not None: break
+                              time.sleep(.05)
+                      rc = child.wait(timeout=2)
+                      end = time.monotonic() + 3
+                      while time.monotonic() < end:
+                          try:
+                              pid, status = os.waitpid(-1, os.WNOHANG)
+                              if pid == 0: time.sleep(.05)
+                          except ChildProcessError:
+                              cleanup = True
+                              break
+              except BaseException:
+                  cleanup = False
+          lines = raw.read_text(errors='replace').splitlines() if cleanup and raw.exists() and raw.stat().st_size <= 16*1024**2 else []
+          rows = [m.groups() for x in lines if (m := re.search(r'\b(PASS|FAIL|SKIP)\s+(classes)\s+\(([0-9.]+)s\)', x))]
+          events = [json.loads(x) for x in trace.read_text().splitlines()] if cleanup and trace.stat().st_size <= 256*1024 else []
+          timed_out = any('TimeoutExpired' in x and 'timed out after 60 seconds' in x for x in lines)
+          known_fixture = any('class_data_setup.py' in x for x in lines) if timed_out else False
+          summary = {'scope':'SUPPLEMENTAL_ORIGINAL_CLASSES_PHASE_PROBE_NO_FULL35_CREDIT','cli_passed':10,'children_control':'PASS','suite_selected':1,'actual_started':child is not None,'outcome':outcome,'runner_exit':rc,'suite_result':rows[0][0] if len(rows)==1 else 'UNKNOWN','suite_duration_seconds':float(rows[0][2]) if len(rows)==1 else None,'build_timeout60_observed':timed_out,'known_fixture':known_fixture,'linker_events':events,'signal_observed':bool(pending),'all_owned_reaped':cleanup,'original_full35_credit':0}
+          print(json.dumps(summary, separators=(',',':')))
+          if outcome != 'COMPLETED' or pending or not cleanup or len(rows)!=1 or rc != 0 or rows[0][0] != 'PASS': sys.exit(1)
+          PY
