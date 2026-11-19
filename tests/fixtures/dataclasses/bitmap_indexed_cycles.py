@@ -73,6 +73,8 @@ def main() -> None:
     measure(sparse, len(sparse), 73, 9001, 0.5)
     sparse[32768] = Reading(19.0, False)
     measure(sparse, len(sparse), 19, 49002, 0.0)
+    # This prefix never visits the distinct replacement.
+    measure(sparse, len(sparse), 0, 9001, -0.0)
 
 
 main()
