@@ -94,6 +94,7 @@ struct Layout {
     has_get: bool,
     texts: usize,
     dense_prefix: usize,
+    dense_inline: bool,
     prefix_extra_memo: usize,
 }
 
@@ -130,19 +131,18 @@ impl<'a> Cursor<'a> {
     }
 }
 
-/// Classify a bounded short payload directly; retain the general slice routine for every other size.
+/// Classify short text from a frame-bounded little-endian window, ignoring the
+/// high bits of any following pickle opcodes or operands.
 #[inline]
-fn dense_text_is_ascii(bytes: &[u8]) -> bool {
-    let bits = match bytes {
-        [a, b, c] => *a | *b | *c,
-        [a, b, c, d] => *a | *b | *c | *d,
-        [a, b, c, d, e] => *a | *b | *c | *d | *e,
-        [a, b, c, d, e, f] => *a | *b | *c | *d | *e | *f,
-        [a, b, c, d, e, f, g] => *a | *b | *c | *d | *e | *f | *g,
-        [a, b, c, d, e, f, g, h] => *a | *b | *c | *d | *e | *f | *g | *h,
-        _ => return bytes.is_ascii(),
-    };
-    bits & 0x80 == 0
+fn dense_text_is_ascii(frame_tail: &[u8], length: usize) -> bool {
+    if (3..=8).contains(&length)
+        && let Some(window) = frame_tail.first_chunk::<8>()
+    {
+        let payload_high_bits = 0x8080_8080_8080_8080_u64 >> ((8 - length) * 8);
+        u64::from_le_bytes(*window) & payload_high_bits == 0
+    } else {
+        frame_tail.get(..length).is_some_and(<[u8]>::is_ascii)
+    }
 }
 
 /// Validate the accepted grammar and UTF-8 before publishing Python objects;
@@ -164,6 +164,7 @@ fn preflight(data: &[u8]) -> Option<Layout> {
     // ASCII text. Keep that prefix in place even if a later item needs the
     // general grammar; only the remaining pushes need packed descriptors.
     let mut dense_prefix = 0usize;
+    let mut dense_inline = true;
     while cursor.at < end && data[cursor.at] == SHORT_BINUNICODE {
         let Some(&length) = data.get(cursor.at.checked_add(1)?) else {
             break;
@@ -172,12 +173,13 @@ fn preflight(data: &[u8]) -> Option<Layout> {
         let text_end = start.checked_add(usize::from(length))?;
         if text_end >= end
             || data[text_end] != MEMOIZE
-            || !dense_text_is_ascii(&data[start..text_end])
+            || !dense_text_is_ascii(&data[start..end], usize::from(length))
         {
             break;
         }
         cursor.at = text_end + 1;
         dense_prefix = dense_prefix.checked_add(1)?;
+        dense_inline &= (3..=8).contains(&length);
     }
     let mut items: Vec<Item> = Vec::new();
     items
@@ -231,6 +233,7 @@ fn preflight(data: &[u8]) -> Option<Layout> {
                     has_get,
                     texts,
                     dense_prefix,
+                    dense_inline,
                     prefix_extra_memo,
                 });
             }
@@ -312,6 +315,28 @@ fn decode(ctx: &mut Context, data: Id, layout: Layout) -> Result<Id> {
     values
         .try_reserve_exact(layout.dense_prefix + layout.items.len())
         .map_err(|_| crate::Error::memory_error())?;
+    if layout.dense_prefix != 0
+        && layout.dense_inline
+        && layout.items.is_empty()
+        && !layout.has_get
+        && layout.prefix_extra_memo == 0
+        && ctx.heap.reserve_flat_dense_text_list(layout.dense_prefix)?
+    {
+        let Value::Bytes(bytes) = ctx.heap.get(data) else {
+            unreachable!()
+        };
+        let (pointer, length) = (bytes.as_ptr(), bytes.len());
+        // SAFETY: preflight validated the whole frame as distinct memoized ASCII texts of
+        // inline length, without GETs or a suffix. The call operand roots the immutable bytes;
+        // all output, slot and one root capacities were reserved before entering the region.
+        let input = unsafe { std::slice::from_raw_parts(pointer, length) };
+        // SAFETY: the same preflight and reservations satisfy the publisher's contract.
+        let result = unsafe {
+            ctx.heap
+                .publish_flat_dense_text_list(input, 14, layout.dense_prefix, values)
+        };
+        return Ok(result);
+    }
     let mut memo = Vec::new();
     if layout.has_get {
         memo.try_reserve_exact(layout.memo)
@@ -522,19 +547,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bounded_dense_ascii_checks_every_payload_byte_and_falls_back_at_boundaries() {
+    fn bounded_dense_ascii_masks_neighbors_and_checks_every_payload_byte() {
         for length in 0..=10 {
             let mut bytes = vec![b'a'; length];
-            assert!(dense_text_is_ascii(&bytes));
+            bytes.extend_from_slice(&[0xff; 8]);
+            assert!(dense_text_is_ascii(&bytes, length));
+            assert!(dense_text_is_ascii(&bytes[..length], length));
             for position in 0..length {
                 bytes[position] = 0x80;
                 assert!(
-                    !dense_text_is_ascii(&bytes),
+                    !dense_text_is_ascii(&bytes, length),
                     "length {length}, byte {position}"
                 );
+                assert!(!dense_text_is_ascii(&bytes[..length], length));
                 bytes[position] = b'a';
             }
         }
+        assert!(!dense_text_is_ascii(b"abcd", 5));
     }
 
     #[test]
@@ -556,6 +585,64 @@ mod tests {
         assert!(preflight(&invalid).is_none());
         let truncated = frame(b"]\x94(\x8c\x08abcdefg");
         assert!(preflight(&truncated).is_none());
+
+        // No eight-byte load may consume bytes beyond the declared frame,
+        // even when the input has a following frame or unrelated bytes.
+        let mut bounded = frame(b"]\x94(\x8c\x03abc\x94e.");
+        bounded.extend_from_slice(&[0xff; 8]);
+        assert_eq!(preflight(&bounded).unwrap().dense_prefix, 1);
+    }
+
+    #[test]
+    fn flat_dense_admission_excludes_suffixes_aliases_short_unicode_and_observers() {
+        fn frame(payload: &[u8]) -> Vec<u8> {
+            let mut bytes = vec![PROTO, 5, FRAME];
+            bytes.extend_from_slice(&(payload.len() as u64).to_le_bytes());
+            bytes.extend_from_slice(payload);
+            bytes
+        }
+        let dense = frame(b"]\x94(\x8c\x03abc\x94\x8c\x08abcdefgh\x94e.");
+        let layout = preflight(&dense).unwrap();
+        assert!(layout.dense_inline && !layout.has_get && layout.items.is_empty());
+        assert_eq!(layout.dense_prefix, 2);
+        let extra_memo = preflight(&frame(b"]\x94(\x8c\x03abc\x94\x94e.")).unwrap();
+        assert_eq!(extra_memo.prefix_extra_memo, 1);
+        for (payload, inline, get, suffix) in [
+            (&b"]\x94(\x8c\x01x\x94e."[..], false, false, false),
+            (&b"]\x94(\x8c\x03abc\x94h\x01e."[..], true, true, true),
+            (
+                &b"]\x94(\x8c\x03abc\x94\x8c\x02\xc3\xa9\x94e."[..],
+                true,
+                false,
+                true,
+            ),
+        ] {
+            let layout = preflight(&frame(payload)).unwrap();
+            assert_eq!(layout.dense_inline, inline);
+            assert_eq!(layout.has_get, get);
+            assert_eq!(!layout.items.is_empty(), suffix);
+        }
+        assert!(preflight(&frame(b"]\x94(\x8c\x08abcdefg")).is_none());
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let data = ctx.alloc(Value::Bytes(dense));
+        ctx.heap.has_weak_values = true;
+        assert!(
+            attempt_data(&mut ctx, data, false, || {})
+                .unwrap()
+                .is_none()
+        );
+        ctx.heap.has_weak_values = false;
+        #[cfg(unix)]
+        {
+            let handler = ctx.alloc(Value::Str("non-default handler".into()));
+            ctx.signal_handlers.resize(libc::SIGINT as usize + 1, NONE);
+            ctx.signal_handlers[libc::SIGINT as usize] = handler;
+            assert!(
+                attempt_data(&mut ctx, data, false, || {})
+                    .unwrap()
+                    .is_none()
+            );
+        }
     }
 
     #[test]

@@ -4700,6 +4700,111 @@ impl Heap {
         self.reserve_temporaries(count.saturating_add(1))
     }
 
+    /// Reserve a complete flat inline-text list before any child becomes temporarily unrooted.
+    /// A pending or crossed heap watermark keeps the ordinary decoder and collection schedule.
+    pub(super) fn reserve_flat_dense_text_list(&mut self, count: usize) -> Result<bool> {
+        if std::mem::size_of::<String>() < 8 || self.collection_requested() {
+            return Ok(false);
+        }
+        let total = count
+            .checked_add(1)
+            .ok_or_else(|| Error::new("MemoryError", ""))?;
+        let additional = total.saturating_sub(self.free_count);
+        if self
+            .slots
+            .len()
+            .checked_add(additional)
+            .is_none_or(|end| end >= self.next_collection)
+        {
+            return Ok(false);
+        }
+        self.slot_shapes
+            .try_reserve(additional)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        self.traces
+            .try_reserve(additional)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        self.slots
+            .try_reserve(additional)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        self.reserve_temporaries(1)?;
+        Ok(true)
+    }
+
+    /// Publish a prevalidated flat ASCII list while rooting only its completed owner.
+    ///
+    /// # Safety
+    /// Every one of the `count` encoded entries at `at` must be a complete, memoized ASCII
+    /// text of length 3–8 in the same rooted immutable input. The caller must first reserve
+    /// `count + 1` heap slots, one temporary root, and `count` output IDs. No callback,
+    /// allocation, checkpoint, collection, or observer may occur until the owner is rooted.
+    pub(super) unsafe fn publish_flat_dense_text_list(
+        &mut self,
+        input: &[u8],
+        mut at: usize,
+        count: usize,
+        mut values: Vec<Id>,
+    ) -> Id {
+        debug_assert!(count != 0 && values.is_empty() && values.capacity() >= count);
+        debug_assert!(!self.allocation_traces.is_tracing());
+        let additional = (count + 1).saturating_sub(self.free_count);
+        debug_assert!(self.slots.capacity() - self.slots.len() >= additional);
+        debug_assert!(self.slot_shapes.capacity() - self.slot_shapes.len() >= additional);
+        debug_assert!(self.traces.capacity() - self.traces.len() >= additional);
+        debug_assert!(
+            self.execution.current().live.capacity() - self.execution.current().live.len() >= 1
+        );
+        let mut free_head = self.free_head;
+        let mut popped = 0usize;
+        for _ in 0..count {
+            // SAFETY: the caller preflighted every range and its ASCII contents.
+            let length = usize::from(unsafe { *input.get_unchecked(at + 1) });
+            debug_assert!((3..=8).contains(&length));
+            // SAFETY: the complete payload range and its ASCII bytes were prevalidated.
+            let text = unsafe {
+                std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                    input.as_ptr().add(at + 2),
+                    length,
+                ))
+            };
+            // This range fits compact_str's inline representation; neither conversion nor
+            // the reserved slot/output writes can allocate, collect, or call Python.
+            let text: crate::Str = text.into();
+            let index = if free_head != END {
+                let index = free_head;
+                let slot = &mut self.slots[index];
+                free_head = slot.gc_next.replace(UNMARKED);
+                popped += 1;
+                self.slot_shapes[index] = SlotShape::AsciiStr;
+                slot.value = Some(Value::Str(text));
+                slot.may_have_buffer_views = false;
+                slot.generation = 0;
+                slot.untracked_tuple.set(false);
+                slot.has_gc_header = false;
+                slot.finalization = Finalization::None;
+                index
+            } else {
+                Self::append_reserved_text_slot(
+                    &mut self.slots,
+                    &mut self.slot_shapes,
+                    &mut self.traces,
+                    text,
+                    SlotShape::AsciiStr,
+                )
+            };
+            values.push(index as Id);
+            at += length + 3;
+        }
+        self.free_head = free_head;
+        self.free_count -= popped;
+
+        // The extra reserved slot and temporary make the ordinary List allocation's
+        // reserve checks no-ops while retaining its precise GC and rooting behavior.
+        let id = self.alloc(Value::List(values));
+        self.mark_fresh_nonshort_text_list(id);
+        id
+    }
+
     /// Install one exact text leaf into a slot reserved by `reserve_unobserved_texts`.
     /// The caller must exclude collection, callbacks, and allocation tracing.
     #[inline(always)]
@@ -8849,6 +8954,77 @@ mod tests {
         assert!(matches!(batch.get(values[0]), Value::Str(s) if s == "abc"));
         assert!(matches!(batch.get(values[1]), Value::Str(s) if s == "abcdefgh"));
         assert!(matches!(batch.get(values[2]), Value::Str(s) if s == "x"));
+    }
+
+    #[test]
+    fn flat_dense_publication_matches_scalar_slots_and_roots_only_the_list() {
+        fn seeded(free_count: usize) -> (Heap, usize) {
+            let mut heap = Heap::new();
+            let mark = heap.temporary_mark();
+            for _ in 0..free_count {
+                heap.alloc(Value::List(Vec::new()));
+            }
+            heap.release_temporaries_since(mark);
+            heap.collect(std::iter::empty());
+            assert_eq!(heap.free_count, free_count);
+            (heap, mark)
+        }
+        // Cover no recycled slots, mixed children, exactly enough children, and a recycled owner.
+        for free_count in [0, 2, 3, 4] {
+            let (mut flat, mark) = seeded(free_count);
+            let (mut scalar, scalar_mark) = seeded(free_count);
+            let input = b"\x8c\x03abc\x94\x8c\x03abc\x94\x8c\x08abcdefgh\x94";
+            assert!(flat.reserve_flat_dense_text_list(3).unwrap());
+            // SAFETY: this exact input contains three complete memoized ASCII texts of inline
+            // lengths, and all owner/child/output/root capacity was reserved above.
+            let owner =
+                unsafe { flat.publish_flat_dense_text_list(input, 0, 3, Vec::with_capacity(3)) };
+
+            scalar.reserve_unobserved_texts(3).unwrap();
+            let expected = vec![
+                scalar.unobserved_text("abc", true),
+                scalar.unobserved_text("abc", true),
+                scalar.unobserved_text("abcdefgh", true),
+            ];
+            let scalar_owner = scalar.alloc(Value::List(expected.clone()));
+            scalar.mark_fresh_nonshort_text_list(scalar_owner);
+            scalar.keep_call_result(scalar_mark, scalar_owner);
+            assert_eq!(owner, scalar_owner);
+            let Value::List(actual) = flat.get(owner) else {
+                unreachable!()
+            };
+            assert_eq!(actual, &expected);
+            assert_ne!(actual[0], actual[1]);
+            assert_eq!(flat.execution.current().live[mark..], [owner]);
+            assert_eq!(flat.free_count, scalar.free_count);
+            assert_eq!(flat.slots.len(), scalar.slots.len());
+            assert_eq!(flat.gc_order.head, scalar.gc_order.head);
+            assert_eq!(flat.gc_order.tail, scalar.gc_order.tail);
+            assert_eq!(flat.gc_schedule.requested(), scalar.gc_schedule.requested());
+            assert!(flat.slots[owner as usize].has_gc_header);
+            assert!(flat.is_fresh_nonshort_text_list(owner));
+            flat.release_temporaries_since(mark);
+            flat.collect(std::iter::once(owner));
+            for (&id, text) in expected.iter().zip(["abc", "abc", "abcdefgh"]) {
+                assert!(matches!(flat.get(id), Value::Str(s) if s == text));
+            }
+        }
+    }
+
+    #[test]
+    fn flat_dense_reservation_falls_back_before_pending_or_crossed_collection() {
+        let mut heap = Heap::new();
+        let before = (heap.slots.len(), heap.free_count, heap.temporary_mark());
+        assert!(heap.reserve_flat_dense_text_list(usize::MAX).is_err());
+        assert_eq!(
+            (heap.slots.len(), heap.free_count, heap.temporary_mark()),
+            before
+        );
+        heap.next_collection = heap.slots.len() + 1;
+        assert!(!heap.reserve_flat_dense_text_list(1).unwrap());
+        heap.next_collection = usize::MAX;
+        heap.collect_next_statement = true;
+        assert!(!heap.reserve_flat_dense_text_list(1).unwrap());
     }
 
     #[test]
