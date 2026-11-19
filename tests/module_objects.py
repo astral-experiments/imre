@@ -56,10 +56,25 @@ def main():
         assert events == ["miss", "store"] and set(units) >= {"main", "leaf", "unchanged"}
         assert set(units.values()) == {"miss"} and output() == "7\n10\n"
         original = target.read_bytes()
+        objects = root / "cache/v1/objects"
+        original_keys = set(objects.glob("*.key"))
         leaf.write_text(initial.replace("return 7", "return 8"))
         events, changed = build("body_edit")
         assert events == ["miss", "store"] and changed["leaf"] == "miss" and changed["unchanged"] == "hit"
         assert output() == "8\n10\n"
+
+        # Misplace a complete, otherwise valid record for the previous leaf body.
+        edited_keys = set(objects.glob("*.key"))
+        old_leaf_key, = edited_keys - original_keys
+        leaf.write_text(initial.replace("return 7", "return 9"))
+        build("second_body_edit")
+        new_leaf_key, = set(objects.glob("*.key")) - edited_keys
+        new_leaf_key.write_bytes(old_leaf_key.read_bytes())
+        main.write_text(entry + "# Recheck the objects.\n")
+        events, repaired = build("misplaced_leaf_record")
+        assert events == ["miss", "store"] and repaired == {"main": "hit", "leaf": "miss", "unchanged": "hit"}
+        assert output() == "9\n10\n"
+        main.write_text(entry)
 
         leaf.write_text('def amount() -> str:\n    return "new ABI"\n')
         events, abi = build("callee_return_abi")
@@ -84,7 +99,6 @@ def main():
         assert target.read_bytes() == original
         # Corrupt all cached object blobs, force the frontend to re-run, and
         # verify every required object is regenerated and the exact ELF is restored.
-        objects = root / "cache/v1/objects"
         blobs = list(objects.glob("*.o"))
         assert blobs
         for f in blobs:
