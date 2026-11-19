@@ -124,24 +124,45 @@ jobs:
           done
           cp imre-installer.sh install.sh
           sha256sum --binary install.sh *.tar.gz.sha256 >> sha256.sum
-      - name: Publish to Astral Labs
-        shell: bash
-        working-directory: public
+      - name: Publish versioned release assets
+        uses: astral-sh/github-actions/upload-r2@46d9685eed35b39a3d83a8dde3a3b4e1bff97a8a # 2026.11.19.0
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.MIRROR_R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MIRROR_R2_SECRET_ACCESS_KEY }}
-          AWS_ENDPOINT_URL: https://${{ vars.MIRROR_R2_CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
-          AWS_DEFAULT_REGION: auto
-          R2_BUCKET: ${{ vars.MIRROR_R2_BUCKET_NAME }}
+        with:
+          account-id: ${{ vars.MIRROR_R2_CLOUDFLARE_ACCOUNT_ID }}
+          bucket: ${{ vars.MIRROR_R2_BUCKET_NAME }}
+          source-directory: public
+          prefix: imre/releases/${{ env.RELEASE_TAG }}
+          if-exists: skip
+          cache-control: public, max-age=31536000, immutable
+
+      - name: Verify the public mirror and check the latest release
+        id: mirror
+        shell: bash
+        working-directory: public
+        env:
           PRERELEASE: ${{ fromJson(needs.plan.outputs.val).announcement_is_prerelease }}
         run: |
-          aws s3 cp --recursive --cache-control 'public, max-age=31536000, immutable' \
-            . "s3://$R2_BUCKET/imre/releases/$RELEASE_TAG/"
           curl -LsSf --retry 3 "https://labs.astral.sh/imre/releases/$RELEASE_TAG/install.sh" | cmp - install.sh
           if [[ "$PRERELEASE" == false ]]; then
             latest=$(gh release view --json tagName --jq .tagName)
             if [[ "$RELEASE_TAG" == "$latest" ]]; then
-              aws s3 cp --cache-control 'public, max-age=300' \
-                install.sh "s3://$R2_BUCKET/imre/install.sh"
+              echo 'publish_latest=true' >> "$GITHUB_OUTPUT"
             fi
           fi
+
+      - name: Publish latest installer
+        if: steps.mirror.outputs.publish_latest == 'true'
+        uses: astral-sh/github-actions/upload-r2@46d9685eed35b39a3d83a8dde3a3b4e1bff97a8a # 2026.11.19.0
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.MIRROR_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.MIRROR_R2_SECRET_ACCESS_KEY }}
+        with:
+          account-id: ${{ vars.MIRROR_R2_CLOUDFLARE_ACCOUNT_ID }}
+          bucket: ${{ vars.MIRROR_R2_BUCKET_NAME }}
+          source-directory: public
+          include: install.sh
+          prefix: imre
+          if-exists: overwrite
+          cache-control: public, max-age=300
