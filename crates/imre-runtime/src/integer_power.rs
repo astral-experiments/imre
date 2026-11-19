@@ -74,7 +74,15 @@ pub unsafe extern "C" fn imre_int_modpow(base: usize, exponent: usize, modulus: 
 
 /// Handles either sign of modulus and inverts the base for negative exponents.
 pub(super) fn modular_power(base: &Int, exponent: &Int, modulus: &Int) -> Result<Int> {
-    let (base, exponent, modulus) = (base.big(), exponent.big(), modulus.big());
+    let exponent = exponent.big();
+    if let Cow::Borrowed(exponent) = &exponent
+        && exponent.is_positive()
+        && let (Some(base), Some(modulus)) = (base.as_small(), modulus.as_small())
+        && (2..=u64::from(u32::MAX)).contains(&modulus.unsigned_abs())
+    {
+        return Ok(Int::from(word_modular_power(base, exponent, modulus)));
+    }
+    let (base, modulus) = (base.big(), modulus.big());
     if modulus.is_zero() {
         return Err(Error::new(
             Kind::ValueError,
@@ -102,4 +110,23 @@ pub(super) fn modular_power(base: &Int, exponent: &Int, modulus: &Int) -> Result
         base.modpow(&exponent, &modulus)
     };
     Ok(Int::new(result))
+}
+
+/// Reduces each product in one word when both residues fit in 32 bits.
+fn word_modular_power(base: i64, exponent: &BigInt, modulus: i64) -> i64 {
+    let magnitude = modulus.unsigned_abs();
+    let factor = base.rem_euclid(magnitude as i64) as u64;
+    let mut result = 1;
+    for bit in (0..exponent.bits()).rev() {
+        result = result * result % magnitude;
+        if exponent.bit(bit) {
+            result = result * factor % magnitude;
+        }
+    }
+    let result = result as i64;
+    if modulus < 0 && result != 0 {
+        result + modulus
+    } else {
+        result
+    }
 }
