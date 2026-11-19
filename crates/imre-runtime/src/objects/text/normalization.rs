@@ -61,11 +61,15 @@ pub(crate) fn normalize_unicode(form: &str, text: &str) -> Result<Option<Str>> {
         // CPython returns empty strings before validating the form.
         return Ok(None);
     }
+    let form = Form::parse(form)?;
+    if text.is_ascii() {
+        return Ok(None);
+    }
     // NUL has the same quick-check and combining properties as an unassigned scalar.
     let chars = text
         .chars()
         .map(|ch| if newer_printable(ch) { '\0' } else { ch });
-    match Form::parse(form)? {
+    match form {
         Form::Nfc => normalize(text, is_nfc_quick(chars), |s| s.nfc()),
         Form::Nfd => normalize(text, is_nfd_quick(chars), |s| s.nfd()),
         Form::Nfkc => normalize(text, is_nfkc_quick(chars), |s| s.nfkc()),
