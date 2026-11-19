@@ -2,7 +2,7 @@
 
 use super::{
     CheckedError, DeclaredSignatures, Session, annotation_type, changed_module_binding,
-    function_layout_writes, resolved_name_definition, return_scope,
+    function_layout_writes, nested_global_bindings, resolved_name_definition, return_scope,
 };
 use ruff_db::files::File;
 use ruff_python_ast::{
@@ -10,8 +10,12 @@ use ruff_python_ast::{
     visitor::{self, Visitor},
 };
 use ruff_text_size::{Ranged, TextRange, TextSize};
-use std::path::Path;
-use ty_python_core::{SemanticIndex, definition::DefinitionKind, scope::FileScopeId};
+use std::{collections::HashSet, path::Path};
+use ty_python_core::{
+    SemanticIndex,
+    definition::{Definition, DefinitionKind},
+    scope::FileScopeId,
+};
 use ty_python_semantic::{
     Db, HasType, SemanticModel,
     types::{Type, TypeDefinition, ide_support::ImportAliasResolution},
@@ -107,8 +111,18 @@ impl Calls<'_, '_> {
         expr: &Expr,
         active: &mut Vec<(usize, TextSize)>,
     ) -> bool {
-        if expr.inferred_type(model) == Some(Type::Never) {
-            return true;
+        let never = expr.inferred_type(model) == Some(Type::Never);
+        if never {
+            // A mutable first-party function can stop honoring its Never annotation.
+            // Other Never expressions retain the semantic checker's flow fact.
+            let selected_source = expr.as_call_expr().is_some_and(|call| {
+                matches!(call.func.inferred_type(model), Some(callee @ Type::FunctionLiteral(_))
+                    if matches!(callee.definition(&self.session.db, &model.program_environment()),
+                        Some(TypeDefinition::Function(definition)) if self.declarations.call_shapes(&self.session.db).binary_search(&definition).is_ok()))
+            });
+            if !selected_source {
+                return true;
+            }
         }
         let Expr::Call(call) = expr else {
             return false;
@@ -142,13 +156,18 @@ impl Calls<'_, '_> {
             .is_err()
             || !matches!(call.func.inferred_type(model), Some(callee @ Type::FunctionLiteral(_)) if matches!(callee.definition(db, &model.program_environment()), Some(TypeDefinition::Function(selected)) if selected == definition))
             || changed_module_binding(db, model, call, name, definition)
-            || self
-                .declarations
-                .program_files(db)
-                .iter()
-                .any(|&file| function_layout_writes(db, file).contains(&definition))
+            || nested_global_bindings(db, model.file()).contains(name.id.as_str())
+            || self.declarations.program_files(db).iter().any(|&file| {
+                let escapes = escaped_functions(db, file);
+                function_layout_writes(db, file).contains(&definition)
+                    || escapes.unresolved_code_write
+                    || escapes.functions.contains(&definition)
+            })
         {
             return false;
+        }
+        if never {
+            return true;
         }
         let DefinitionKind::Function(function) = definition.kind(db) else {
             return false;
@@ -340,5 +359,153 @@ impl<'ast> Visitor<'ast> for Calls<'_, '_> {
             return;
         }
         visitor::walk_expr(self, expr);
+    }
+}
+
+/// Functions exposed as values can have their code replaced through an alias,
+/// container, or callback. Direct named calls do not expose the function object.
+#[derive(Clone, Debug, Eq, PartialEq, salsa::SalsaValue)]
+struct FunctionEscapes<'db> {
+    functions: HashSet<Definition<'db>>,
+    unresolved_code_write: bool,
+}
+
+#[salsa::tracked(returns(ref))]
+fn escaped_functions<'db>(db: &'db dyn Db, file: File) -> FunctionEscapes<'db> {
+    struct Escapes<'db> {
+        model: SemanticModel<'db>,
+        index: &'db SemanticIndex<'db>,
+        unreachable: Vec<TextRange>,
+        facts: FunctionEscapes<'db>,
+    }
+    impl Escapes<'_> {
+        fn code_write(&mut self, receiver: &Expr) {
+            let db = self.model.db();
+            let env = self.model.program_environment();
+            match receiver.inferred_type(&self.model) {
+                Some(ty @ Type::FunctionLiteral(_)) => {
+                    if let Some(TypeDefinition::Function(definition)) = ty.definition(db, &env) {
+                        self.facts.functions.insert(definition);
+                    } else {
+                        self.facts.unresolved_code_write = true;
+                    }
+                }
+                Some(ty @ Type::NominalInstance(_))
+                    if !ty.is_assignable_to(
+                        db,
+                        &env,
+                        ty_python_semantic::types::KnownClass::FunctionType.to_instance(db, &env),
+                    ) => {}
+                _ => self.facts.unresolved_code_write = true,
+            }
+        }
+    }
+    impl<'ast> Visitor<'ast> for Escapes<'_> {
+        fn visit_annotation(&mut self, _: &'ast Expr) {}
+        fn visit_type_params(&mut self, _: &'ast TypeParams) {}
+        fn visit_expr(&mut self, expr: &'ast Expr) {
+            let range = expr.range();
+            if self.unreachable.iter().any(|r| r.contains_range(range))
+                || self
+                    .index
+                    .try_expression_scope_id(expr)
+                    .is_some_and(|scope| self.index.is_in_type_checking_block(scope, range))
+            {
+                return;
+            }
+            if let Expr::Call(call) = expr {
+                if let [receiver, name, ..] = call.arguments.args.as_ref()
+                    && name
+                        .as_string_literal_expr()
+                        .is_some_and(|literal| literal.value.to_str() == "__code__")
+                    && call.func.inferred_type(&self.model).is_some_and(|ty| {
+                        super::is_stdlib_function_type(&self.model, ty, "builtins", "setattr")
+                    })
+                {
+                    self.code_write(receiver);
+                }
+                if !call.func.is_name_expr() {
+                    self.visit_expr(&call.func);
+                }
+                for argument in imre_ast::evaluated_arguments(&call.arguments) {
+                    self.visit_expr(argument.value());
+                }
+                return;
+            }
+            if let Expr::Attribute(attribute) = expr
+                && attribute.ctx == ruff_python_ast::ExprContext::Store
+                && attribute.attr.as_str() == "__code__"
+            {
+                self.code_write(&attribute.value);
+                return;
+            }
+            // Reading a function's code/defaults is passive.
+            if let Expr::Attribute(attribute) = expr
+                && attribute.value.is_name_expr()
+                && matches!(
+                    attribute.attr.as_str(),
+                    "__code__" | "__defaults__" | "__kwdefaults__"
+                )
+            {
+                return;
+            }
+            if expr.is_name_expr()
+                && let Some(ty @ Type::FunctionLiteral(_)) = expr.inferred_type(&self.model)
+                && let Some(TypeDefinition::Function(definition)) =
+                    ty.definition(self.model.db(), &self.model.program_environment())
+            {
+                self.facts.functions.insert(definition);
+            }
+            visitor::walk_expr(self, expr);
+        }
+    }
+    let source = db.program_file(file);
+    let parsed = ruff_db::parsed::parsed_module(db, source.python_file(db)).load(db);
+    let mut escapes = Escapes {
+        model: SemanticModel::new(db, source),
+        index: ty_python_core::semantic_index(db, source),
+        unreachable: ty_python_semantic::types::ide_support::unreachable_ranges(db, source)
+            .iter()
+            .map(|r| r.range)
+            .collect(),
+        facts: FunctionEscapes {
+            functions: HashSet::new(),
+            unresolved_code_write: false,
+        },
+    };
+    escapes.visit_body(parsed.suite());
+    escapes.facts
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn nonreturning_proof_requires_an_unescaped_stable_function() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("main.py");
+        let prefix = "buffer = bytearray()\nbuffer.append(97)\nprint(buffer)\ndef take(first: int, second: int): pass\ndef die() -> int:\n    raise RuntimeError()\ndef replacement() -> int: return 1\n";
+        for mutation in [
+            "die.__code__ = replacement.__code__\n",
+            "alias = die\nalias.__code__ = replacement.__code__\n",
+            "aliases = [die]\naliases[0].__code__ = replacement.__code__\n",
+            "alias = globals()['die']\nalias.__code__ = replacement.__code__\n",
+            "setattr(die, '__code__', replacement.__code__)\n",
+            "def mutate():\n    global die\n    die = replacement\nmutate()\n",
+        ] {
+            std::fs::write(&path, format!("{prefix}{mutation}take(die(), True)\n")).unwrap();
+            let error = crate::check_file(&path, None).unwrap_err();
+            assert!(
+                error.contains("expected int, got bool"),
+                "{mutation}: {error}"
+            );
+        }
+        for passive in [
+            "",
+            "saved_code = die.__code__\n",
+            "if False:\n    alias = die\n    alias.__code__ = replacement.__code__\n",
+        ] {
+            std::fs::write(&path, format!("{prefix}{passive}take(die(), True)\n")).unwrap();
+            crate::check_file(&path, None).unwrap();
+        }
     }
 }
