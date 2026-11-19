@@ -82,7 +82,12 @@ pub(crate) fn registered(frame: crate::frontend::RegisteredRegion<'_>) -> Result
         }
         require(slot < frame.locals.len(), LOCAL)
     };
-    for &slot in frame.params.iter().chain(frame.local_names.keys()) {
+    // A formal can remain allocated after its last use disappears. It needs a valid local
+    // index, but only an actual read or store requires a named or private frame slot.
+    for &slot in frame.params {
+        require(slot < frame.locals.len(), LOCAL)?;
+    }
+    for &slot in frame.local_names.keys() {
         local(slot, &mut required)?;
     }
     let mut result = Ok(());
