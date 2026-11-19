@@ -187,12 +187,18 @@ def assertNotRegex(self, text, unexpected_regex, msg=None):
         msg = self._formatMessage(msg, standardMsg)
         raise self.failureException(msg)
 
+assertRegex.__qualname__ = "TestCase.assertRegex"
 TestCase.assertRegex = assertRegex
+assertNotRegex.__qualname__ = "TestCase.assertNotRegex"
 TestCase.assertNotRegex = assertNotRegex
+assertRaisesRegex.__qualname__ = "TestCase.assertRaisesRegex"
 TestCase.assertRaisesRegex = assertRaisesRegex
 assertRaises.__qualname__ = "TestCase.assertRaises"
 TestCase.assertRaises = assertRaises
+_assertNotWarns.__qualname__ = "TestCase._assertNotWarns"
 TestCase._assertNotWarns = _assertNotWarns
+assertWarns.__qualname__ = "TestCase.assertWarns"
 TestCase.assertWarns = assertWarns
+assertWarnsRegex.__qualname__ = "TestCase.assertWarnsRegex"
 TestCase.assertWarnsRegex = assertWarnsRegex
 del assertRegex, assertNotRegex, assertRaises, assertRaisesRegex, _assertNotWarns, assertWarns, assertWarnsRegex
