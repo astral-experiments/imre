@@ -861,15 +861,18 @@ jobs:
           if ! grep -q '^Passed 10 ThinLTO CLI checks$' "$phase_dir/cli.log"; then echo 'SUPPLEMENTAL_CLI_SUMMARY_UNCONFIRMED'; exit 1; fi
           if ! python3 tests/run_suites_children.py >"$phase_dir/children.log" 2>&1; then echo 'SUPPLEMENTAL_CHILD_CONTROL_FAILED'; exit 1; fi
           overall=0
-          for sample in first second; do
+          for sample in jobs4 jobs8; do
             sample_dir="$phase_dir/$sample"
             mkdir -m 700 "$sample_dir"
+            export IMRE_CI_LTO_CACHE="$sample_dir/cache"
+            mkdir -m 700 "$IMRE_CI_LTO_CACHE"
             set +e
             python3 - "$imre_target" "$sample_dir" "$sample" "$imre_sysroot" 2>"$sample_dir/controller.stderr" <<'PY'
           import ctypes, errno, json, os, re, signal, stat, subprocess, sys, time
           from pathlib import Path
           target, directory, sample, sysroot = sys.argv[1:]
-          assert sample in ('first', 'second')
+          assert sample in ('jobs4', 'jobs8')
+          requested_jobs = int(sample[4:])
           root = Path(directory)
           assert root.is_dir() and stat.S_IMODE(root.stat().st_mode) == 0o700
           trace = root / 'linker.jsonl'
@@ -881,7 +884,7 @@ jobs:
           with os.fdopen(fd, 'w') as f:
               f.write(shim_source)
           backend = root / 'backend-shim'
-          backend_source = "#!/usr/bin/python3\nimport json, os, stat, sys, time\nfrom pathlib import Path\ntrace = Path(__file__).with_name('linker.jsonl')\nfd = os.open(trace, os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK)\nst = os.fstat(fd)\nassert stat.S_ISREG(st.st_mode) and st.st_uid == os.getuid() and stat.S_IMODE(st.st_mode) == 0o600 and st.st_nlink == 1 and st.st_size < 256*1024\njobs = [x.partition('=')[2] for x in sys.argv[1:] if x.startswith('--thinlto-jobs=')]\nselected = int(jobs[0]) if len(jobs)==1 and jobs[0].isdigit() else None\ndata = Path('/proc/self/stat').read_text()\nfields = data[data.rfind(')')+2:].split()\nevent = {'event':'BACKEND','monotonic_ns':time.monotonic_ns(),'pid':os.getpid(),'selected_backend_jobs':selected,'start_ticks':int(fields[19])}\nline = (json.dumps(event,separators=(',',':'))+'\\n').encode()\nassert len(line)<512\nos.write(fd,line); os.fsync(fd); os.close(fd)\nif selected != 4: sys.exit(2)\nreal = os.environ.pop('IMRE_PHASE_REAL_LLD')\nos.environ['IMRE_CI_LLD'] = real\nos.execv(real,[real,*sys.argv[1:]])\n"
+          backend_source = "#!/usr/bin/python3\nimport json, os, stat, sys, time\nfrom pathlib import Path\ntrace = Path(__file__).with_name('linker.jsonl')\nfd = os.open(trace, os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK)\nst = os.fstat(fd)\nassert stat.S_ISREG(st.st_mode) and st.st_uid == os.getuid() and stat.S_IMODE(st.st_mode) == 0o600 and st.st_nlink == 1 and st.st_size < 256*1024\nargs = list(sys.argv[1:])\njobs = [(i,x.partition('=')[2]) for i,x in enumerate(args) if x.startswith('--thinlto-jobs=')]\nrequested = os.environ.pop('IMRE_PHASE_REQUESTED_BACKEND_JOBS')\nif len(jobs)!=1 or jobs[0][1]!='4' or requested not in ('4','8'): sys.exit(2)\nselected = int(requested)\nargs[jobs[0][0]] = '--thinlto-jobs='+requested\ndata = Path('/proc/self/stat').read_text()\nfields = data[data.rfind(')')+2:].split()\nevent = {'event':'BACKEND','monotonic_ns':time.monotonic_ns(),'pid':os.getpid(),'selected_backend_jobs':selected,'start_ticks':int(fields[19])}\nline = (json.dumps(event,separators=(',',':'))+'\\n').encode()\nassert len(line)<512\nos.write(fd,line); os.fsync(fd); os.close(fd)\nreal = os.environ.pop('IMRE_PHASE_REAL_LLD')\nos.environ['IMRE_CI_LLD'] = real\nos.execv(real,[real,*args])\n"
           fd = os.open(backend, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o700)
           with os.fdopen(fd, 'w') as f:
               f.write(backend_source)
@@ -907,9 +910,16 @@ jobs:
           except BaseException:
               os.close(launcher_fd); raise
           assert (launcher_stat.st_dev,launcher_stat.st_ino)!=(rust_lld_stat.st_dev,rust_lld_stat.st_ino)
-          child_env = dict(os.environ, IMRE_CI_LLD=str(backend), IMRE_PHASE_REAL_LLD=real_lld)
+          child_env = dict(os.environ, IMRE_CI_LLD=str(backend), IMRE_PHASE_REAL_LLD=real_lld, IMRE_PHASE_REQUESTED_BACKEND_JOBS=str(requested_jobs))
           cache = Path(os.environ['IMRE_CI_LTO_CACHE'])
-          assert cache.is_dir() and cache.resolve(strict=True).is_relative_to(Path(os.environ['RUNNER_TEMP']).resolve(strict=True))
+          assert cache == root / 'cache' and cache.resolve(strict=True).is_relative_to(Path(os.environ['RUNNER_TEMP']).resolve(strict=True))
+          cache_fd = os.open(cache,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+          cache_root_before = os.fstat(cache_fd)
+          assert stat.S_ISDIR(cache_root_before.st_mode) and cache_root_before.st_uid==os.getuid() and stat.S_IMODE(cache_root_before.st_mode)==0o700
+          def cache_guard():
+              held,named = os.fstat(cache_fd),os.stat(cache,follow_symlinks=False)
+              sig=lambda s:(s.st_dev,s.st_ino,s.st_uid,s.st_gid,s.st_mode)
+              if sig(held)!=sig(cache_root_before) or sig(named)!=sig(cache_root_before): raise RuntimeError('arm cache root identity drift')
           def cache_count():
               counts = {'regular_files':0,'directories':0,'symlinks':0,'other':0,'entries':0}
               snap_start = time.monotonic()
@@ -935,12 +945,15 @@ jobs:
                               counts['directories'] += 1
                           elif e.is_file(follow_symlinks=False): counts['regular_files'] += 1
                           else: counts['other'] += 1
-              fd = os.open(cache, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+              cache_guard()
+              fd = os.open('.', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,dir_fd=cache_fd)
               try: walk(fd,0)
               finally: os.close(fd)
+              cache_guard()
               if time.monotonic()-snap_start > 30: raise RuntimeError('cache snapshot deadline')
               return counts
           cache_before = cache_count()
+          if cache_before['entries']!=0: raise RuntimeError('sample cache not initially empty')
           ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) == 0 or sys.exit('subreaper unavailable')
           command = ['python3', 'tests/run_suites.py', '--workers', '1', '--kill-failed-children', '--log-dir', str(root / 'suite'), '--suites', 'classes', '--', '--compiler', 'target/release/imre', '--runtime', 'target/lto/release/libimre_runtime.a', '--clang', 'clang-18', '--target', target, '--lto-linker', str(shim), '--opt-levels', '3']
           pending = []
@@ -1021,7 +1034,7 @@ jobs:
               allowed = {e['child_pid'] for e in events_now if e.get('event')=='FLOW_START' and e.get('pid') in shims}
               if len(allowed)>128: raise RuntimeError('link flow cap')
               for e in events_now:
-                  if e.get('event') != 'BACKEND' or e.get('selected_backend_jobs') != 4: continue
+                  if e.get('event') != 'BACKEND' or e.get('selected_backend_jobs') != requested_jobs: continue
                   pid = e['pid']
                   if pid not in allowed: continue
                   if pid not in tracked:
@@ -1039,16 +1052,36 @@ jobs:
                       continuity = bool(outer_exited and row.get('first_live_ns') is not None and row.get('suite_group_id')==pgid and prior and row.get('suite_group_start_ticks')==prior.get('start_ticks'))
                       if continuity: os.fstat(prior['fd'])
                       if state not in ('Z','X') and (direct or continuity) and ticks == row['start_ticks'] and (exe.st_dev,exe.st_ino)==(rust_lld_stat.st_dev,rust_lld_stat.st_ino):
+                          argv_fd = os.open('/proc/'+str(pid)+'/cmdline',os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+                          try:
+                              argv_bytes=b''
+                              while True:
+                                  chunk=os.read(argv_fd,min(65536,256*1024+1-len(argv_bytes)))
+                                  if not chunk: break
+                                  argv_bytes+=chunk
+                                  if len(argv_bytes)>256*1024: raise RuntimeError('rust-lld argv cap')
+                          finally: os.close(argv_fd)
+                          budgets=[x for x in argv_bytes.split(b'\0') if x.startswith(b'--thinlto-jobs=')]
+                          if budgets!=[('--thinlto-jobs='+str(requested_jobs)).encode()]: raise RuntimeError('rust-lld argv budget mismatch')
+                          caches=[x for x in argv_bytes.split(b'\0') if x.startswith(b'--thinlto-cache-dir=')]
+                          if caches!=[('--thinlto-cache-dir='+str(cache)).encode()]: raise RuntimeError('rust-lld argv cache mismatch')
+                          cache_guard()
+                          signal.pidfd_send_signal(row['fd'],0)
+                          after_state,after_ppid,after_pgid,after_ticks=proc_fields(pid)
+                          after_exe=os.stat('/proc/'+str(pid)+'/exe')
+                          if after_state in ('Z','X') or after_pgid!=pgid or after_ticks!=ticks or (after_exe.st_dev,after_exe.st_ino)!=(rust_lld_stat.st_dev,rust_lld_stat.st_ino): raise RuntimeError('rust-lld identity changed across argv read')
                           group_ticks = verified_groups[pgid] if direct else prior['start_ticks']
                           if row.get('suite_group_id') not in (None,pgid) or row.get('suite_group_start_ticks') not in (None,group_ticks): raise RuntimeError('backend suite group drift')
                           row['suite_group_id'],row['suite_group_start_ticks']=pgid,group_ticks
                           row['last_live_mode']='DIRECT_SUITE_GROUP' if direct else 'PRIOR_AUTHENTICATED_GROUP_CONTINUITY'
+                          row['rust_lld_jobs_argv']=requested_jobs
+                          row['rust_lld_cache_dir_certified']=True
                           if row['first_live_ns'] is None: row['first_live_ns'] = now
                           row['last_live_ns'] = now
                           live_now.add(pid)
                   except (ProcessLookupError, FileNotFoundError): pass
               return live_now
-          def qualify_flows(events, observations):
+          def qualify_flows(events, observations, requested_jobs):
               entries, flows, backends, exits = {}, {}, {}, {}
               fields = {'ENTRY':{'event','pid','monotonic_ns'},'FLOW_START':{'event','pid','monotonic_ns','child_pid'},'BACKEND':{'event','pid','monotonic_ns','selected_backend_jobs','start_ticks'},'EXIT':{'event','pid','monotonic_ns','returncode'}}
               for e in events:
@@ -1068,11 +1101,11 @@ jobs:
               matches = []
               for shim_pid, entry in entries.items():
                   flow, backend = flows[shim_pid], backends[flows[shim_pid]['child_pid']]
-                  if flow['monotonic_ns']<entry['monotonic_ns'] or backend['monotonic_ns']<entry['monotonic_ns'] or backend.get('selected_backend_jobs')!=4: return False, 'ORDER_OR_CONFIGURED_BUDGET', []
+                  if flow['monotonic_ns']<entry['monotonic_ns'] or backend['monotonic_ns']<entry['monotonic_ns'] or backend.get('selected_backend_jobs')!=requested_jobs: return False, 'ORDER_OR_CONFIGURED_BUDGET', []
                   if shim_pid in exits and exits[shim_pid]['monotonic_ns']<max(flow['monotonic_ns'],backend['monotonic_ns']): return False, 'EXIT_ORDER', []
                   obs = observations.get(backend['pid'])
-                  live = bool(obs and obs.get('start_ticks')==backend.get('start_ticks') and obs.get('backend_ns')==backend['monotonic_ns'] and type(obs.get('suite_group_id')) is int and obs['suite_group_id']>0 and type(obs.get('suite_group_start_ticks')) is int and obs['suite_group_start_ticks']>0 and isinstance(obs.get('first_live_ns'),int) and isinstance(obs.get('last_live_ns'),int) and obs['last_live_ns']>=obs['first_live_ns']>=backend['monotonic_ns'])
-                  matches.append({'shim_pid':shim_pid,'backend_pid':backend['pid'],'configured_backend_jobs_argv':4,'lld_live_observed':live,'suite_group_id':obs.get('suite_group_id') if live else None,'suite_group_start_ticks':obs.get('suite_group_start_ticks') if live else None,'trace_exit_observed':shim_pid in exits})
+                  live = bool(obs and obs.get('start_ticks')==backend.get('start_ticks') and obs.get('backend_ns')==backend['monotonic_ns'] and obs.get('rust_lld_jobs_argv')==requested_jobs and obs.get('rust_lld_cache_dir_certified') is True and type(obs.get('suite_group_id')) is int and obs['suite_group_id']>0 and type(obs.get('suite_group_start_ticks')) is int and obs['suite_group_start_ticks']>0 and isinstance(obs.get('first_live_ns'),int) and isinstance(obs.get('last_live_ns'),int) and obs['last_live_ns']>=obs['first_live_ns']>=backend['monotonic_ns'])
+                  matches.append({'shim_pid':shim_pid,'backend_pid':backend['pid'],'configured_backend_jobs_argv':requested_jobs,'rust_lld_jobs_argv_certified':requested_jobs if live else 'UNCONFIRMED','rust_lld_cache_dir_certified':True if live else 'UNCONFIRMED','lld_live_observed':live,'suite_group_id':obs.get('suite_group_id') if live else None,'suite_group_start_ticks':obs.get('suite_group_start_ticks') if live else None,'trace_exit_observed':shim_pid in exits})
               if not any(m['lld_live_observed'] for m in matches): return False, 'NO_AUTHENTICATED_REAL_LLD_LIVENESS', matches
               return True, 'MATCHED_UNIQUE_FLOW_AND_REAL_LLD', matches
           def adopted_children(leader,deadline):
@@ -1196,7 +1229,7 @@ jobs:
           lines = raw.read_text(errors='replace').splitlines() if cleanup and raw.exists() and raw.stat().st_size <= 16*1024**2 else []
           rows = [m.groups() for x in lines if (m := re.search(r'\b(PASS|FAIL|SKIP)\s+(classes)\s+\(([0-9.]+)s\)', x))]
           events = snapshot_events if snapshot_ok else []
-          proof_ok, proof_reason, matches = qualify_flows(events,tracked)
+          proof_ok, proof_reason, matches = qualify_flows(events,tracked,requested_jobs)
           accepted = events if proof_ok else []
           entries = {e['pid']:e for e in accepted if e['event']=='ENTRY'}
           exits = {e['pid']:e for e in accepted if e['event']=='EXIT'}
@@ -1205,13 +1238,21 @@ jobs:
           for pid in entries.keys()-exits.keys():
               child_pid = flow.get(pid)
               row = tracked.get(child_pid)
-              lower = (row['last_live_ns']-row['first_live_ns'])/1e9 if row and row['first_live_ns'] is not None else None
-              in_flight.append({'shim_pid':pid,'backend_pid':child_pid,'trace_exit_absent_at_precleanup_snapshot':True,'sampled_lld_live_status_before_snapshot':'CONFIRMED_LIVE' if child_pid in snapshot_live else 'UNCONFIRMED','sampled_lld_live_mode':row.get('last_live_mode') if row and child_pid in snapshot_live else 'UNCONFIRMED','sampled_lld_live_observation_ns':row['last_live_ns'] if row and child_pid in snapshot_live else None,'first_confirmed_lld_live_ns':row['first_live_ns'] if row else None,'last_confirmed_lld_live_ns':row['last_live_ns'] if row else None,'actual_lld_duration_lower_bound_seconds':lower})
-          cache_after = cache_count() if cleanup else 'UNCONFIRMED_UNREAPED'
+              certified = bool(row and row.get('rust_lld_jobs_argv')==requested_jobs and row.get('rust_lld_cache_dir_certified') is True and row.get('first_live_ns') is not None)
+              lower = (row['last_live_ns']-row['first_live_ns'])/1e9 if certified else None
+              in_flight.append({'shim_pid':pid,'backend_pid':child_pid,'trace_exit_absent_at_precleanup_snapshot':True,'rust_lld_jobs_argv_certified':requested_jobs if certified else 'UNCONFIRMED','rust_lld_cache_dir_certified':True if certified else 'UNCONFIRMED','sampled_lld_live_status_before_snapshot':'CONFIRMED_LIVE' if certified and child_pid in snapshot_live else 'UNCONFIRMED','sampled_lld_live_mode':row.get('last_live_mode') if certified and child_pid in snapshot_live else 'UNCONFIRMED','sampled_lld_live_observation_ns':row['last_live_ns'] if certified and child_pid in snapshot_live else None,'first_confirmed_lld_live_ns':row['first_live_ns'] if certified else None,'last_confirmed_lld_live_ns':row['last_live_ns'] if certified else None,'actual_lld_duration_lower_bound_seconds':lower})
+          cache_root_postflight='UNCONFIRMED'
+          try:
+              cache_guard()
+              cache_after=cache_count() if cleanup else 'UNCONFIRMED_UNREAPED'
+              cache_root_postflight='PRESERVED' if cleanup else 'UNCONFIRMED'
+          except BaseException:
+              cache_after='UNCONFIRMED'; outcome='INCOMPLETE'
+          finally: os.close(cache_fd)
           timed_out = any('TimeoutExpired' in x and 'timed out after 60 seconds' in x for x in lines)
           known_fixture = any('class_data_setup.py' in x for x in lines) if timed_out else False
           if not proof_ok or not snapshot_ok: outcome = 'INCOMPLETE'
-          summary = {'scope':'SUPPLEMENTAL_ORIGINAL_CLASSES_PHASE_PROBE_V7_NO_FULL35_CREDIT','sample':sample,'cli_passed':10,'children_control':'PASS','suite_selected':1,'actual_started':child is not None,'suite_launch_monotonic_ns':launch_ns,'failure_or_exit_observed_monotonic_ns':observed_ns,'precleanup_snapshot_monotonic_ns':snapshot_ns,'final_observed_monotonic_ns':final_ns,'outcome':outcome,'runner_exit':rc,'suite_result':rows[0][0] if len(rows)==1 else 'UNKNOWN','suite_duration_seconds':float(rows[0][2]) if len(rows)==1 else None,'build_timeout60_observed':timed_out,'known_fixture':known_fixture,'linker_event_counts_at_snapshot':{kind:sum(e['event']==kind for e in accepted) for kind in ('ENTRY','FLOW_START','BACKEND','EXIT')} if proof_ok else 'UNCONFIRMED','flow_proof':proof_reason,'flow_matches':matches if proof_ok else [],'configured_backend_jobs_argv':4 if proof_ok else 'UNCONFIRMED','thread_utilization_claim':False,'in_flight_at_precleanup_snapshot':in_flight,'cache_before':cache_before,'cache_after':cache_after,'cache_hit_claim':False,'signal_observed':bool(pending),'adopted_children_accounted':adopted_count,'adopted_census_seconds':census_seconds,'all_owned_reaped':cleanup,'toolchain_executable_postflight':'PRESERVED' if tool_postflight else 'UNCONFIRMED','original_full35_credit':0}
+          summary = {'scope':'SUPPLEMENTAL_ORIGINAL_CLASSES_JOBS4_VS8_V2_NO_FULL35_CREDIT','sample':sample,'cli_passed':10,'children_control':'PASS','suite_selected':1,'actual_started':child is not None,'suite_launch_monotonic_ns':launch_ns,'failure_or_exit_observed_monotonic_ns':observed_ns,'precleanup_snapshot_monotonic_ns':snapshot_ns,'final_observed_monotonic_ns':final_ns,'outcome':outcome,'runner_exit':rc,'suite_result':rows[0][0] if len(rows)==1 else 'UNKNOWN','suite_duration_seconds':float(rows[0][2]) if len(rows)==1 else None,'build_timeout60_observed':timed_out,'known_fixture':known_fixture,'linker_event_counts_at_snapshot':{kind:sum(e['event']==kind for e in accepted) for kind in ('ENTRY','FLOW_START','BACKEND','EXIT')} if proof_ok else 'UNCONFIRMED','flow_proof':proof_reason,'flow_matches':matches if proof_ok else [],'requested_backend_jobs':requested_jobs,'configured_backend_jobs_argv':requested_jobs if proof_ok else 'UNCONFIRMED','wrapper_backend_jobs_argv':4 if proof_ok else 'UNCONFIRMED','thread_utilization_claim':False,'in_flight_at_precleanup_snapshot':in_flight,'cache_root_identity':{'device':cache_root_before.st_dev,'inode':cache_root_before.st_ino},'cache_root_postflight':cache_root_postflight,'cache_before':cache_before,'cache_after':cache_after,'cache_hit_claim':False,'signal_observed':bool(pending),'adopted_children_accounted':adopted_count,'adopted_census_seconds':census_seconds,'all_owned_reaped':cleanup,'toolchain_executable_postflight':'PRESERVED' if tool_postflight else 'UNCONFIRMED','original_full35_credit':0}
           if proof_ok:
               summary['linker_events_at_precleanup_snapshot'] = [{**{key:e[key] for key in ('event','pid','monotonic_ns','child_pid','selected_backend_jobs','start_ticks','returncode') if key in e},'offset_seconds_from_suite_launch':(e['monotonic_ns']-launch_ns)/1e9 if launch_ns is not None else None} for e in accepted]
           print(json.dumps(summary, separators=(',',':')))
