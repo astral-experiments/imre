@@ -4767,13 +4767,35 @@ impl Heap {
         index
     }
 
+    /// Copy the next eligible prevalidated text into compact_str's inline representation.
+    ///
+    /// # Safety
+    /// `at` must identify a complete ASCII text entry in this immutable input.
+    #[inline(always)]
+    unsafe fn inline_dense_ascii_text(input: &[u8], at: usize) -> Option<(crate::Str, usize)> {
+        // SAFETY: the caller obtained this entry from the same complete preflighted input.
+        let length = usize::from(unsafe { *input.get_unchecked(at + 1) });
+        if !(3..=8).contains(&length) {
+            return None;
+        }
+        // SAFETY: preflight established the complete ASCII payload range.
+        let text = unsafe {
+            std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                input.as_ptr().add(at + 2),
+                length,
+            ))
+        };
+        Some((text.into(), at + length + 3))
+    }
+
     /// Fill a prevalidated dense ASCII TEXT prefix without exposing an inconsistent free list.
     ///
     /// The caller must have reserved `count` text slots, operand roots and output IDs. The
     /// immutable input is a sequence of the validated short-text opcode, length, ASCII payload,
     /// and memo opcode. The batch stops before any payload outside the allocation-free 3–8 byte
     /// range. No callback, checkpoint, collector, recoverable error, or arbitrary iterator runs
-    /// while the free head is held locally. Every leaf is rooted and published in source order.
+    /// while the free head is held locally. Leaf roots and output IDs are written into reserved
+    /// spare capacity and published in source order before the next observable boundary.
     ///
     /// # Safety
     /// All `count` encoded entries beginning at `at` must have been fully validated in this exact
@@ -4802,55 +4824,69 @@ impl Heap {
         debug_assert!(self.traces.capacity() - self.traces.len() >= additional);
 
         let mut free_head = self.free_head;
-        let mut popped = 0usize;
         let mut consumed = 0usize;
+        let reusable = count.min(self.free_count);
+        let values_len = values.len();
+        let output = &mut values.spare_capacity_mut()[..count];
         let live = &mut self.execution.current_mut().live;
-        while consumed < count {
-            // SAFETY: the caller guarantees that each dense entry, including this length byte,
-            // was preflighted against this immutable input.
-            let length = usize::from(unsafe { *input.get_unchecked(at + 1) });
-            if !(3..=8).contains(&length) {
+        let live_len = live.len();
+        let roots = &mut live.spare_capacity_mut()[..count];
+        while consumed < reusable {
+            // SAFETY: this is the next complete entry in the preflighted immutable input.
+            let Some((text, next)) = (unsafe { Self::inline_dense_ascii_text(input, at) }) else {
                 break;
-            }
-            // SAFETY: preflight checked the exact payload range and its ASCII contents.
-            let text = unsafe {
-                std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-                    input.as_ptr().add(at + 2),
-                    length,
-                ))
             };
-            // compact_str stores at most eight bytes inline and cannot allocate or fail here.
-            let text: crate::Str = text.into();
-            let index = if free_head != END {
-                let index = free_head;
-                let slot = &mut self.slots[index];
-                free_head = slot.gc_next.replace(UNMARKED);
-                popped += 1;
-                self.slot_shapes[index] = SlotShape::AsciiStr;
-                slot.value = Some(Value::Str(text));
-                slot.may_have_buffer_views = false;
-                slot.generation = 0;
-                slot.untracked_tuple.set(false);
-                slot.has_gc_header = false;
-                slot.finalization = Finalization::None;
-                index
-            } else {
-                Self::append_reserved_text_slot(
+            debug_assert_ne!(free_head, END);
+            let index = free_head;
+            let slot = &mut self.slots[index];
+            free_head = slot.gc_next.replace(UNMARKED);
+            self.slot_shapes[index] = SlotShape::AsciiStr;
+            slot.value = Some(Value::Str(text));
+            slot.may_have_buffer_views = false;
+            slot.generation = 0;
+            slot.untracked_tuple.set(false);
+            slot.has_gc_header = false;
+            slot.finalization = Finalization::None;
+            let id = index as Id;
+            roots[consumed].write(id);
+            output[consumed].write(id);
+            at = next;
+            consumed += 1;
+        }
+        let popped = consumed;
+        // If an ineligible text stopped the recycled segment, the scalar reader must see it
+        // before any fresh slot can be appended.
+        if consumed == reusable {
+            while consumed < count {
+                // SAFETY: this is the next complete entry in the preflighted immutable input.
+                let Some((text, next)) = (unsafe { Self::inline_dense_ascii_text(input, at) })
+                else {
+                    break;
+                };
+                let index = Self::append_reserved_text_slot(
                     &mut self.slots,
                     &mut self.slot_shapes,
                     &mut self.traces,
                     text,
                     SlotShape::AsciiStr,
-                )
-            };
-            let id = index as Id;
-            live.push(id);
-            values.push(id);
-            at += length + 3;
-            consumed += 1;
+                );
+                let id = index as Id;
+                roots[consumed].write(id);
+                output[consumed].write(id);
+                at = next;
+                consumed += 1;
+            }
         }
         self.free_head = free_head;
         self.free_count -= popped;
+        // SAFETY: both reserved ranges contain exactly `consumed` initialized Copy IDs. The
+        // closed region cannot allocate, collect, invoke a callback, checkpoint or unwind on
+        // valid preflighted input, so no observer can inspect the unpublished root IDs. Restore
+        // the free list and publish both lengths before returning to the reader.
+        unsafe {
+            live.set_len(live_len + consumed);
+            values.set_len(values_len + consumed);
+        }
         (at, consumed)
     }
 
@@ -8849,6 +8885,93 @@ mod tests {
         assert!(matches!(batch.get(values[0]), Value::Str(s) if s == "abc"));
         assert!(matches!(batch.get(values[1]), Value::Str(s) if s == "abcdefgh"));
         assert!(matches!(batch.get(values[2]), Value::Str(s) if s == "x"));
+    }
+
+    #[test]
+    fn dense_ascii_segments_match_scalar_allocation_across_free_chain_boundaries() {
+        fn seeded(free: usize) -> (Heap, usize, Vec<Id>) {
+            let mut heap = Heap::new();
+            let mark = heap.temporary_mark();
+            let ids: Vec<_> = (0..8)
+                .map(|n| heap.alloc(Value::Str(format!("occupied-{n}").into())))
+                .collect();
+            heap.release_temporaries_since(mark);
+            // Alternate occupied and retired slots so following the free chain cannot be
+            // replaced by indexing through a contiguous region of the heap.
+            for &index in &[1, 5, 3, 7][..free] {
+                heap.retire_slot(ids[index] as usize);
+            }
+            heap.reserve_unobserved_texts(3).unwrap();
+            (heap, mark, ids)
+        }
+
+        let input = b"\x8c\x03abc\x94\x8c\x05defgh\x94\x8c\x07ijklmno\x94";
+        for free in [0, 1, 3, 4] {
+            let (mut batch, mark, _) = seeded(free);
+            let (mut scalar, scalar_mark, _) = seeded(free);
+            let mut values = Vec::with_capacity(4);
+            values.push(NONE);
+            // SAFETY: input contains exactly three complete eligible ASCII entries, and both
+            // output and heap/root capacities were reserved above.
+            let (at, count) =
+                unsafe { batch.append_reserved_dense_ascii_texts(input, 0, 3, &mut values) };
+            let expected = [
+                scalar.unobserved_text("abc", true),
+                scalar.unobserved_text("defgh", true),
+                scalar.unobserved_text("ijklmno", true),
+            ];
+            assert_eq!((at, count), (input.len(), 3), "free={free}");
+            assert_eq!(&values[1..], &expected, "free={free}");
+            assert_eq!(values[0], NONE);
+            assert_eq!(batch.free_head, scalar.free_head, "free={free}");
+            assert_eq!(batch.free_count, scalar.free_count, "free={free}");
+            assert_eq!(batch.slots.len(), scalar.slots.len(), "free={free}");
+            assert_eq!(
+                batch.execution.current().live[mark..],
+                scalar.execution.current().live[scalar_mark..],
+                "free={free}"
+            );
+            for &id in &expected {
+                assert!(batch.slot_shapes[id as usize] == SlotShape::AsciiStr);
+                assert_eq!(batch.traces[id as usize].get(), UNMARKED);
+                assert!(matches!(batch.get(id), Value::Str(_)));
+            }
+            let owner = batch.alloc(Value::List(values[1..].to_vec()));
+            let scalar_owner = scalar.alloc(Value::List(expected.to_vec()));
+            assert_eq!(owner, scalar_owner, "free={free}");
+        }
+
+        let mixed = b"\x8c\x03abc\x94\x8c\x01x\x94\x8c\x04tail\x94";
+        // Stop inside the recycled prefix, exactly at its append boundary, or after an append.
+        for free in [4, 1, 0] {
+            let (mut batch, mark, _) = seeded(free);
+            let (mut scalar, scalar_mark, _) = seeded(free);
+            let mut values = Vec::with_capacity(3);
+            // SAFETY: all entries are complete, prevalidated ASCII and capacity is reserved;
+            // the middle singleton intentionally terminates the eligible batch.
+            let (at, count) =
+                unsafe { batch.append_reserved_dense_ascii_texts(mixed, 0, 3, &mut values) };
+            assert_eq!((at, count), (6, 1), "free={free}");
+            assert_eq!(values, [scalar.unobserved_text("abc", true)], "free={free}");
+            assert_eq!(batch.free_head, scalar.free_head, "free={free}");
+            assert_eq!(batch.free_count, scalar.free_count, "free={free}");
+            assert_eq!(batch.execution.current().live.len(), mark + 1);
+            assert_eq!(
+                batch.unobserved_text("x", true),
+                scalar.unobserved_text("x", true)
+            );
+            assert_eq!(
+                batch.unobserved_text("tail", true),
+                scalar.unobserved_text("tail", true)
+            );
+            assert_eq!(batch.free_head, scalar.free_head, "free={free}");
+            assert_eq!(batch.free_count, scalar.free_count, "free={free}");
+            assert_eq!(
+                batch.execution.current().live[mark..],
+                scalar.execution.current().live[scalar_mark..],
+                "free={free}"
+            );
+        }
     }
 
     #[test]
