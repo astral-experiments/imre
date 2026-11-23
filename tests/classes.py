@@ -149,14 +149,12 @@ class Child(Base):
 Cell(1).copy({"unknown": 2})
 """,
     "explicit_initializer_call": CELL + "value = Cell(1)\nvalue.__init__(2)\n",
-    "missing_method_annotation": CELL.replace("amount: int", "amount"),
     "wrong_method_return": CELL.replace("return self.value", 'return "wrong"'),
     "wrong_self_name": CELL.replace("def __init__(self,", "def __init__(other,").replace("self.value = value", "other.value = value"),
     "wrong_self_annotation": CELL.replace("def __init__(self,", "def __init__(self: int,"),
     "missing_self": CELL.replace("def add(self, amount: int)", "def add(amount: int)"),
     "method_expression_default": CELL.replace("amount: int)", "amount: int = 1 + 1)"),
     "method_unknown_keyword": CELL + "Cell(1).add(unknown=2)\n",
-    "untyped_constructor": CELL.replace("def __init__(self, value: int)", "def __init__(self, value)"),
     "dynamic_attribute": CELL + "value = Cell(1)\nvalue.extra = 2\n",
     "dynamic_lookup": CELL + 'print(getattr(Cell(1), "value"))\n',
     "instance_dictionary": CELL + "print(Cell(1).__dict__)\n",
@@ -194,7 +192,6 @@ Cell(1).copy({"unknown": 2})
     "str_wrong_body": CELL + '    def __str__(self):\n        return self.value\n',
     "private_mangling": CELL.replace("value", "__value"),
     "class_surrogate_docstring": CELL.replace("class Cell:\n", 'class Cell:\n    "\\ud800"\n'),
-    "staticmethod": CELL.replace("    def add(", "    @staticmethod\n    def add("),
     "classmethod": CELL.replace("    def add(", "    @classmethod\n    def add("),
     "property": CELL.replace("    def add(", "    @property\n    def add("),
     "read_only_assignment": "class C:\n    @property\n    def value(self) -> int: return 1\nC().value = 2\n",
@@ -210,6 +207,9 @@ Cell(1).copy({"unknown": 2})
 
 
 CHECKED = {
+    "missing_method_annotation": CELL.replace("amount: int", "amount"),
+    "untyped_constructor": CELL.replace("def __init__(self, value: int)", "def __init__(self, value)"),
+    "staticmethod": CELL.replace("    def add(", "    @staticmethod\n    def add("),
     "recursive_method": CELL.replace("return self.value", "return self.add(amount)"),
     "mutual_method_recursion": CELL.replace("return self.value", "return self.other(amount)")
         + "    def other(self, amount: int) -> int:\n        return self.add(amount)\n",

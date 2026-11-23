@@ -239,6 +239,7 @@ impl Checker<'_> {
                 "partial requires a callable with a known signature",
             ));
         };
+        let declared = self.value_declaration(&callable);
         // A known definition uses its direct ABI. For a bound method, capture
         // the receiver before any bound arguments; a dynamic target owns the
         // callable itself in position zero of the private, immutable frame.
@@ -287,7 +288,41 @@ impl Checker<'_> {
                 continue;
             }
             let value = match parameters.get(evaluated.len()) {
-                Some(&ty) => self.expr_expected_or(arg, ty, Some(marker))?,
+                Some(&ty) => match self.expr_expected_or(arg, ty, Some(marker)) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        if matches!(&error, Failure::Diagnostic(d) if d.kind == Kind::ExactType)
+                            && self.unrepresented.borrow().is_none()
+                            && !matches!(returns, Type::Coroutine(_))
+                            && !function.is_starred_expr()
+                            && bound.len() <= parameters.len()
+                            && bound.iter().all(ast::Expr::is_literal_expr)
+                            && call.arguments.keywords.is_empty()
+                            && self.fixed_callback_call(call)
+                            && let Some(declaration) = declared.or_else(|| {
+                                self.callback_signature(function)?.positional_declaration(
+                                    evaluated.len(),
+                                    ty,
+                                    parameters.len(),
+                                )
+                            })
+                        {
+                            // This region can no longer emit. Follow the value through
+                            // ordinary assignments without treating capture as invocation.
+                            self.require_registered_representation(|| error)?;
+                            let remaining = self
+                                .types
+                                .callable(parameters[bound.len()..].to_vec(), returns);
+                            let slot = self.hidden(remaining);
+                            self.assigned.set_value_source(
+                                slot,
+                                Some(ValueSource::CapturedArgument(declaration, arg.range())),
+                            );
+                            return Ok(self.local(slot));
+                        }
+                        return Err(error);
+                    }
+                },
                 None => self.expr(arg)?,
             };
             evaluated.push((scope.hold(self, value), arg));

@@ -20,18 +20,14 @@ use crate::watch::FileSystem;
 /// Compare a selected source spelling with the checked graph's physical file.
 /// Windows temp paths can use an 8.3 name while canonical paths use a verbatim long name.
 pub(crate) fn same_source_path(left: &Path, right: &Path) -> bool {
-    if left == right {
-        return true;
-    }
     #[cfg(windows)]
-    {
-        std::fs::canonicalize(left)
+    if left != right {
+        return std::fs::canonicalize(left)
             .ok()
             .zip(std::fs::canonicalize(right).ok())
-            .is_some_and(|(left, right)| left == right)
+            .is_some_and(|(left, right)| left == right);
     }
-    #[cfg(not(windows))]
-    false
+    left == right
 }
 
 mod boxed_exports;
@@ -3806,6 +3802,12 @@ impl SourceGraph {
     pub(crate) fn checked_inert_return(&self, module: ModuleId, annotation: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::InertReturn(annotation));
+    }
+
+    /// ty counts Placeholder as bound. Native coercion matched the remaining signature.
+    pub(crate) fn checked_partial_signature(&self, module: ModuleId, operand: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::PartialSignature(operand));
     }
 
     /// The native positional-only binder already raises at this exact keyword.

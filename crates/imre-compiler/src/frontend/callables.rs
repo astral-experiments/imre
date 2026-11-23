@@ -3,6 +3,76 @@
 
 use super::*;
 
+impl Signature {
+    pub(super) fn positional_declaration(
+        &self,
+        index: usize,
+        item: Type,
+        arity: usize,
+    ) -> Option<TypeDeclaration> {
+        if self.params.len() != arity
+            || !self.params.iter().all(|p| p.kind.accepts_positional())
+            || self.params.get(index)?.ty != item
+        {
+            return None;
+        }
+        self.parameter_declaration(index)
+    }
+}
+
+impl Checker<'_> {
+    /// An initializer call supplies a fixed witness only on the normal path,
+    /// before any Python operation could have replaced its module bindings.
+    pub(super) fn fixed_callback_call(&self, call: &ast::ExprCall) -> bool {
+        self.tracks_called_bindings()
+            && self.module_namespace.is_unexposed()
+            && self.reachable
+            && self
+                .graph
+                .session
+                .operand_types(self.module)
+                .unconditional_module_call(call)
+    }
+
+    /// An inferred callable layout needs a single source target to own its contract.
+    pub(super) fn callback_signature(&self, operand: &ast::Expr) -> Option<&Signature> {
+        if let Some(binding) = self.local_function_binding(operand) {
+            return Some(&binding.target(self.source, operand).ok()?.signature);
+        }
+        let types = self.graph.session.operand_types(self.module);
+        self.functions.get(&types.function_declaration(operand)?)
+    }
+
+    pub(super) fn item_declaration(
+        &self,
+        operand: &ast::Expr,
+        value: &Expr,
+        item: Type,
+    ) -> Option<TypeDeclaration> {
+        self.value_declaration(value).or_else(|| {
+            self.callback_signature(operand)?
+                .positional_declaration(0, item, 1)
+        })
+    }
+
+    /// An eager consumer gets the items in a nonempty literal sequence without
+    /// consulting live mutable storage or running another iterable's protocol.
+    pub(super) fn literal_callback_items(&self, source: &ast::Expr) -> bool {
+        let values = match source {
+            ast::Expr::List(list) => &list.elts,
+            ast::Expr::Tuple(tuple) => &tuple.elts,
+            _ => return false,
+        };
+        !values.is_empty()
+            && crate::modules::inert_literal(source)
+            && self
+                .graph
+                .session
+                .unreachable_range(self.module, source.range())
+                .is_none()
+    }
+}
+
 /// A callable signature is not a storage edge, but a callable value may own a
 /// bound receiver. Such values cannot enter heap aggregates in this milestone.
 pub(super) fn contains_callable(ty: Type, types: &Types) -> bool {
@@ -889,6 +959,14 @@ impl<'a> Checker<'a> {
                 "indirect calls require the full positional Callable signature; keywords and omitted defaults are unsupported",
             ));
         }
+        if let Some(ValueSource::CapturedArgument(declaration, range)) =
+            self.value_source(&callable)
+            && self.fixed_callback_call(call)
+            && call.arguments.args.iter().all(ast::Expr::is_literal_expr)
+            && let Some(error) = self.unrepresented.borrow().as_ref()
+        {
+            return Err(error.clone().expected_from(Some(declaration), range));
+        }
         let local = call
             .func
             .as_name_expr()
@@ -934,6 +1012,7 @@ impl<'a> Checker<'a> {
                 !arg.is_literal_expr() || calls::scalar_literal(arg, source).is_err()
             })
         });
+        let origin = self.value_source(&callable);
         for (slot, (argument, ty)) in call.arguments.args.iter().zip(params).enumerate() {
             let checked_tail = || last_source_operand.is_none_or(|last| last <= slot);
             let value = if registered_site.is_some() || slot == 0 && index_callable {
@@ -954,11 +1033,25 @@ impl<'a> Checker<'a> {
                 let context = sequence_callee.map_or(ty, |(inference, id)| {
                     inference.sequence_context(id, slot, ty, argument)
                 });
+                // A stored source function still owns its declared mutable operands.
+                let container_contract = if self.types.is_display_container(context) {
+                    declaration.or_else(|| {
+                        let Some(ValueSource::Function(id)) = origin else {
+                            return None;
+                        };
+                        self.functions
+                            .values()
+                            .find(|s| s.id == id)?
+                            .parameter_declaration(slot)
+                    })
+                } else {
+                    None
+                };
                 calls::Supplied::Source(argument).check_with(
                     self,
                     context,
                     false,
-                    None,
+                    container_contract,
                     |checker, value, expected, site| {
                         if checker.terminating_operand(&value) && checked_tail() {
                             return Ok(value);
@@ -976,6 +1069,7 @@ impl<'a> Checker<'a> {
                             // The inferred signature supplies a layout for this copy. Only a
                             // saved target or a written declaration owns its argument contract.
                             if saved.is_none()
+                                && container_contract.is_none()
                                 && declaration.is_none()
                                 && matches!(&error, Failure::Diagnostic(d) if d.kind == Kind::ExactType)
                                 && matches!(checker.value_source(&callable), Some(ValueSource::Function(_)))
@@ -994,6 +1088,7 @@ impl<'a> Checker<'a> {
                             else {
                                 return error;
                             };
+                            let declaration = declaration.or_else(|| checker.forwarded_declaration(call, slot, expected));
                             error
                                 .at_callable_argument(site.range(), || parameter)
                                 .expected_from(declaration, site.range())

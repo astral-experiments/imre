@@ -215,7 +215,10 @@ pub(crate) fn assigned_names(body: &[ast::Stmt]) -> HashSet<String> {
 
 /// Report each written name as it is encountered. A named handler or an
 /// explicit deletion can also clear a binding on the next loop iteration.
-pub(crate) fn visit_assignments(body: &[ast::Stmt], store: &mut dyn FnMut(&str, bool)) -> bool {
+pub(crate) fn visit_assignments(
+    body: &[ast::Stmt],
+    store: &mut dyn FnMut(&str, Option<ast::Operator>),
+) -> bool {
     let mut visitor = Assignments {
         store,
         may_delete: false,
@@ -225,16 +228,16 @@ pub(crate) fn visit_assignments(body: &[ast::Stmt], store: &mut dyn FnMut(&str, 
 }
 
 struct Assignments<'a> {
-    store: &'a mut dyn FnMut(&str, bool),
+    store: &'a mut dyn FnMut(&str, Option<ast::Operator>),
     may_delete: bool,
 }
 
 impl<'a> Visitor<'a> for Assignments<'_> {
     fn visit_stmt(&mut self, statement: &'a ast::Stmt) {
         match statement {
-            ast::Stmt::FunctionDef(function) => (self.store)(function.name.as_str(), false),
+            ast::Stmt::FunctionDef(function) => (self.store)(function.name.as_str(), None),
             ast::Stmt::AugAssign(assign) if let Some(name) = assign.target.as_name_expr() => {
-                (self.store)(name.id.as_str(), true);
+                (self.store)(name.id.as_str(), Some(assign.op));
                 self.visit_expr(&assign.value);
             }
             _ => {
@@ -252,7 +255,7 @@ impl<'a> Visitor<'a> for Assignments<'_> {
             _ => None,
         };
         if let Some(name) = name {
-            (self.store)(name.as_str(), false);
+            (self.store)(name.as_str(), None);
         }
         walk_pattern(self, pattern);
     }
@@ -264,7 +267,7 @@ impl<'a> Visitor<'a> for Assignments<'_> {
         if let ast::Expr::Name(name) = expression
             && name.ctx == ast::ExprContext::Store
         {
-            (self.store)(name.id.as_str(), false);
+            (self.store)(name.id.as_str(), None);
         }
         walk_expr(self, expression);
     }
@@ -282,7 +285,7 @@ impl<'a> Visitor<'a> for Assignments<'_> {
         let ast::ExceptHandler::ExceptHandler(handler_) = handler;
         if let Some(name) = &handler_.name {
             self.may_delete = true;
-            (self.store)(name.as_str(), false);
+            (self.store)(name.as_str(), None);
         }
         walk_except_handler(self, handler);
     }

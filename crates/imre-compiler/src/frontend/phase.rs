@@ -446,6 +446,13 @@ impl Failure {
         self
     }
 
+    /// Use only for the final conversion of an already checked operand when
+    /// the destination is known to be inferred. Nested errors remain terminal.
+    pub(super) fn is_storage_mismatch(&self, site: &impl Ranged) -> bool {
+        matches!(self, Self::Diagnostic(d)
+            if d.exact_operand() == Some(site.range()) && d.operand_declaration().is_none())
+    }
+
     pub(super) fn is_representation(&self) -> bool {
         matches!(self, Self::Diagnostic(d) if d.kind.is_representation())
     }

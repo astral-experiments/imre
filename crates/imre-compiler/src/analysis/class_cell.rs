@@ -5,14 +5,18 @@ use ruff_python_parser::semantic_errors::{SemanticSyntaxError, SemanticSyntaxErr
 use ty_python_core::scope::{NodeWithScopeRef, ScopeKind};
 use ty_python_semantic::Db;
 
+pub(super) fn implicit_cell(name: &str) -> bool {
+    matches!(
+        name,
+        "__class__" | "__classdict__" | "__conditional_annotations__"
+    )
+}
+
 pub(super) fn binds_nonlocal(db: &dyn Db, file: File, error: &SemanticSyntaxError) -> bool {
     let SemanticSyntaxErrorKind::NonlocalWithoutBinding(name) = &error.kind else {
         return false;
     };
-    if !matches!(
-        name.as_str(),
-        "__class__" | "__classdict__" | "__conditional_annotations__"
-    ) {
+    if !implicit_cell(name) {
         return false;
     }
     let program = db.program_file(file);

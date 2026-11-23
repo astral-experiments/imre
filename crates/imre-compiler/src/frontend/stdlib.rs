@@ -3,6 +3,12 @@
 use super::*;
 use crate::ir::SortKeys;
 
+#[derive(Clone, Copy)]
+struct SortCallback {
+    slot: usize,
+    declaration: Option<TypeDeclaration>,
+}
+
 /// These calls bind the original string method and its operands in the Python frame.
 pub(super) fn registered_string_method(call: &ast::ExprCall) -> Option<&ast::ExprAttribute> {
     let method = call.func.as_attribute_expr()?;
@@ -332,7 +338,7 @@ impl Checker<'_> {
             self.sortable_key(pulled, call)
                 .inspect_err(|_| self.forget_pull_writes(&input))?;
         }
-        let object_key = callback.is_some_and(|slot| {
+        let object_key = callback.is_some_and(|SortCallback { slot, .. }| {
             self.types
                 .signature(self.locals[slot])
                 .is_some_and(|(parameters, _)| parameters.as_slice() == [Type::ObjectValue])
@@ -586,7 +592,7 @@ impl Checker<'_> {
         element: Type,
         body: &mut Vec<Statement>,
         clear: &mut Vec<usize>,
-    ) -> Result<(Option<usize>, Expr), String> {
+    ) -> Result<(Option<SortCallback>, Expr), String> {
         if let Err(keyword) = key {
             return Err(error(
                 self.source,
@@ -603,13 +609,22 @@ impl Checker<'_> {
                 _ => unreachable!("keyword names were checked"),
             };
             let slot = self.hidden(value.ty);
-            body.push(Statement::Assign(slot, value));
             clear.push(slot);
             if keyword.arg.as_ref().unwrap() == "reverse" {
                 reverse = self.local(slot);
             } else if self.locals[slot] != Type::None {
-                callback = Some(slot);
+                let declaration = if let [input] = call.arguments.args.as_slice()
+                    && self.literal_callback_items(input)
+                    && let Some((params, _)) = self.types.signature(value.ty)
+                    && let [item] = params.as_slice()
+                {
+                    self.item_declaration(&keyword.value, &value, *item)
+                } else {
+                    None
+                };
+                callback = Some(SortCallback { slot, declaration });
             }
+            body.push(Statement::Assign(slot, value));
         }
         Ok((callback, reverse))
     }
@@ -619,13 +634,13 @@ impl Checker<'_> {
         &mut self,
         call: &ast::ExprCall,
         result: usize,
-        (callback, source): (Option<usize>, SortKeys),
+        (callback, source): (Option<SortCallback>, SortKeys),
         reverse: Expr,
         body: &mut Vec<Statement>,
         clear: &mut Vec<usize>,
     ) -> Result<(), String> {
         let element = self.types.element(self.locals[result]).unwrap();
-        if let Some(slot) = callback
+        if let Some(SortCallback { slot, .. }) = callback
             && let Type::CmpKey(frame, _) = self.locals[slot]
         {
             body.push(Statement::Expr(self.sort_cmp_key(
@@ -638,7 +653,11 @@ impl Checker<'_> {
             )?));
             return Ok(());
         }
-        let (source, operands) = if let Some(callback) = callback {
+        let (source, operands) = if let Some(SortCallback {
+            slot: callback,
+            declaration,
+        }) = callback
+        {
             let (parameters, key) = self.types.signature(self.locals[callback]).unwrap();
             let [parameter] = parameters.as_slice() else {
                 return Err(error(
@@ -670,7 +689,9 @@ impl Checker<'_> {
                         kind: ExprKind::Invoke {
                             callable: Box::new(checker.local(callback)),
                             args: ir::CallArgs::positional(vec![
-                                checker.coerce(value, *parameter, call)?,
+                                checker.coerce(value, *parameter, call).map_err(|error| {
+                                    error.expected_from(declaration, call.range())
+                                })?,
                             ]),
                         },
                     };

@@ -161,13 +161,14 @@ fn a_program_root_package_keeps_the_initializer_diagnostic_on_its_own_source() {
         ..Default::default()
     };
     let mut graph = resolve(dir.path(), "checked_initializer", &options).unwrap();
-    crate::checked_lower(&mut graph).unwrap();
+    let crate::CheckedProgram::Runtime(reason) = crate::checked_lower(&mut graph).unwrap() else {
+        panic!("expected a declared argument diagnostic")
+    };
     let error = graph
         .source_contract
         .as_ref()
         .unwrap()
-        .original(&graph)
-        .as_ref()
+        .original(&graph, Some(&reason), None)
         .unwrap_err();
     assert!(
         error.contains("__init__.py:2:33: Imre: expected int, got str"),
@@ -408,7 +409,7 @@ fn checked_function_preserves_a_user_file_at_the_sdk_path() {
     session
         .add_shipped_declaration(site, &private_path, &normalized)
         .unwrap();
-    let copy = session.copy_for_diagnostics(None, None).unwrap();
+    let copy = session.diagnostic_copy().unwrap();
     assert_eq!(session.selected_file(&sdk_path).unwrap().2.as_str(), user);
     assert_eq!(
         copy.selected_file(&private_path).unwrap().2.as_str(),

@@ -939,10 +939,20 @@ impl<'s> Checker<'s> {
     }
 
     /// Select both written callables before the consuming operation chooses a representation.
-    pub(super) fn bound_map<'e>(&self, call: &'e ast::ExprCall) -> Option<CallbackPipeline<'e>> {
+    pub(super) fn bound_callback_pipeline<'e>(
+        &self,
+        call: &'e ast::ExprCall,
+    ) -> Option<CallbackPipeline<'e>> {
         let callee = call.func.as_name_expr()?;
-        if !self.unshadowed_builtin(&call.func, "map") || self.live_module_name("map") {
+        let name = callee.id.as_str();
+        if !matches!(name, "map" | "filter")
+            || !self.unshadowed_builtin(&call.func, name)
+            || self.live_module_name(name)
+        {
             return None;
+        }
+        if name == "filter" {
+            return Some(CallbackPipeline::Filter);
         }
         if let [first @ ast::Expr::Name(converter), rest @ ..] = call.arguments.args.as_ref() {
             let spelling = converter.id.as_str();
@@ -1094,10 +1104,9 @@ impl<'s> Checker<'s> {
                 input.evaluate.append(&mut input.acquire);
                 input
             }
-            "map" if let Some(mapped) = self.bound_map(call) => {
-                self.callback_input(call, element, mapped)?
+            "map" | "filter" if let Some(pipeline) = self.bound_callback_pipeline(call) => {
+                self.callback_input(call, element, pipeline, false)?
             }
-            "filter" => self.callback_input(call, element, CallbackPipeline::Filter)?,
             "enumerate" => {
                 if !call.arguments.keywords.is_empty()
                     || !(1..=2).contains(&call.arguments.args.len())
@@ -2707,22 +2716,24 @@ impl<'s> Checker<'s> {
         call: &ast::ExprCall,
         element: Option<Type>,
         pipeline: CallbackPipeline<'_>,
+        eager: bool,
     ) -> Result<Prepared, String> {
         let filter = matches!(pipeline, CallbackPipeline::Filter);
         enum Callback<'e, 's> {
             Builtin(&'e ast::ExprName),
             Written(ItemCallback<'e, 's>),
         }
-        let (callback, source, input_hint) = if let CallbackPipeline::MapBuiltin {
-            converter,
-            source,
-            ..
+        let (callback, source) = if let CallbackPipeline::MapBuiltin {
+            converter, source, ..
         } = pipeline
         {
             self.reject_builtin_keywords(call)?;
-            (Callback::Builtin(converter), source, None)
+            (
+                Callback::Builtin(converter),
+                self.expansion_input(source, None)?,
+            )
         } else {
-            let [callback, source] = call.arguments.args.as_ref() else {
+            let [operand, source] = call.arguments.args.as_ref() else {
                 return Err(error(
                     self.source,
                     call,
@@ -2736,7 +2747,7 @@ impl<'s> Checker<'s> {
                     "map/filter do not accept keyword arguments",
                 ));
             }
-            let callback = self.item_callback(callback)?;
+            let callback = self.item_callback(operand)?;
             let callback_input = match &callback {
                 ItemCallback::Value(value)
                     if self.types.index_callable_signature(value.ty).is_none() =>
@@ -2758,18 +2769,49 @@ impl<'s> Checker<'s> {
             // The destination describes surviving values. The truth predicate may
             // still receive None from a generator, list display, or nested pipeline.
             // The internal len argument frame belongs to the call, not the source iterable.
-            let input_hint = callback_input
-                .filter(|ty| !self.types.is_len_argument(*ty))
-                .or_else(|| {
-                    if filter && matches!(&callback, ItemCallback::Value(callback) if callback.ty == Type::None) {
-                        element.map(|ty| self.types.optional(ty))
-                    } else {
-                        filter.then_some(element).flatten()
+            let callback_input = callback_input.filter(|ty| !self.types.is_len_argument(*ty));
+            let input_hint = callback_input.or_else(|| {
+                if filter && matches!(&callback, ItemCallback::Value(callback) if callback.ty == Type::None) {
+                    element.map(|ty| self.types.optional(ty))
+                } else {
+                    filter.then_some(element).flatten()
+                }
+            });
+            // An eager consumer pulls the written items of a fresh literal sequence.
+            // Carry the parameter's declaration to those coercions only. A mutable
+            // source, short-circuiting consumer or inner adapter can change which
+            // items reach the callback. A filter destination describes its output.
+            let source = if eager
+                && let Some(item) = callback_input
+                && self.literal_callback_items(source)
+                && let Some(ty) = self.expansion_hint(source, item)
+                && let Some(declaration) = (match &callback {
+                    ItemCallback::Function(_, signature) => {
+                        signature.positional_declaration(0, item, 1)
                     }
-                });
-            (Callback::Written(callback), source, input_hint)
+                    ItemCallback::Value(value) => self.item_declaration(operand, value, item),
+                    ItemCallback::Lambda(_) => None,
+                }) {
+                let value = self.expr_expected_from(source, ty, Some(declaration))?;
+                self.iteration_value(value, false, source)?
+            } else {
+                self.expansion_input(source, input_hint)
+                    .map_err(|failure| {
+                        // A layout hint for a fresh literal cannot impose the
+                        // parameter contract of an inferred or unpulled callback.
+                        if callback_input.is_some()
+                            && crate::modules::inert_literal(source)
+                            && matches!(&failure, Failure::Diagnostic(d)
+                            if d.kind == Kind::ExactType && d.operand_declaration().is_none())
+                        {
+                            failure.classify(Kind::ScopedObject)
+                        } else {
+                            failure
+                        }
+                    })?
+            };
+            (Callback::Written(callback), source)
         };
-        let source = self.expansion_input(source, input_hint)?;
         let mut input = self.prepare_iteration(source, call, false)?;
         let input_type = self.locals[input.value];
         let (operation, truth_filter) = match callback {

@@ -110,11 +110,20 @@ fn keyword_slot<'a>(
     }
 }
 
+type FixedOperand<'a> = (&'a ast::Expr, Option<(&'a str, TextRange)>);
+
+fn fixed_operand(arg: ast::ArgOrKeyword<'_>) -> FixedOperand<'_> {
+    let keyword = arg
+        .as_keyword()
+        .map(|kw| (kw.arg.as_deref().expect("fixed keyword"), kw.range()));
+    (arg.value(), keyword)
+}
+
 /// Bind supplied values in evaluation order, leaving omitted slots for the caller. Checked
 /// lowering and the initializer proof use different value consumers for the same
 /// slots. Checking one supplied value can fail before a later binding error.
 fn bind_fixed<'a, P, E, B>(
-    call: &'a ast::ExprCall,
+    operands: impl Iterator<Item = FixedOperand<'a>>,
     parameters: &[P],
     shape: impl Fn(&P) -> (&str, ParameterKind),
     offset: usize,
@@ -125,9 +134,9 @@ fn bind_fixed<'a, P, E, B>(
     if offset > 0 {
         order[0] = 0;
     }
-    for (position, supplied) in call.arguments.iter_source_order().enumerate() {
-        let index = match supplied {
-            ast::ArgOrKeyword::Arg(value) => {
+    for (position, (value, keyword)) in operands.enumerate() {
+        let index = match keyword {
+            None => {
                 if !parameters
                     .get(position)
                     .is_some_and(|p| shape(p).1.accepts_positional())
@@ -136,15 +145,12 @@ fn bind_fixed<'a, P, E, B>(
                 }
                 position
             }
-            ast::ArgOrKeyword::Keyword(keyword) => {
-                let name = keyword.arg.as_deref().expect("fixed keyword");
-                keyword_slot(parameters.iter().map(&shape), name, None, |i| {
-                    order[i + offset] != usize::MAX
-                })
-                .map_err(|reason| error(keyword.range(), reason))?
-            }
+            Some((name, range)) => keyword_slot(parameters.iter().map(&shape), name, None, |i| {
+                order[i + offset] != usize::MAX
+            })
+            .map_err(|reason| error(range, reason))?,
         };
-        if let ControlFlow::Break(stop) = bind(index, supplied.value())? {
+        if let ControlFlow::Break(stop) = bind(index, value)? {
             return Ok(ControlFlow::Break(stop));
         }
         order[index + offset] = position + offset;
@@ -207,6 +213,61 @@ fn bind_source_arguments_after<'a>(
     if has_unpacking(call) {
         return None;
     }
+    bind_source_operands(
+        call.arguments.iter_source_order().map(fixed_operand),
+        parameters,
+        skip,
+    )
+}
+
+/// Bind a selected source call, including flat tuple/list and string-keyed
+/// dictionary displays. Borrow the original expressions in Python evaluation
+/// order. Unknown expansions and repeated keys cannot prove a fixed binding.
+pub(crate) fn fixed_display_call_arguments<'a>(
+    call: &'a ast::ExprCall,
+    parameters: &'a ast::Parameters,
+    bound: bool,
+) -> Option<Vec<SourceArgument<'a>>> {
+    if bound && parameters.posonlyargs.is_empty() && parameters.args.is_empty() {
+        return None;
+    }
+    let skip = usize::from(bound);
+    if !has_unpacking(call) {
+        return bind_source_arguments_after(call, parameters, skip)?.complete();
+    }
+    let mut operands = Vec::new();
+    for arg in imre_ast::evaluated_arguments(&call.arguments) {
+        match arg {
+            ast::ArgOrKeyword::Arg(ast::Expr::Starred(star)) => {
+                let elements = match &*star.value {
+                    ast::Expr::Tuple(tuple) => &tuple.elts,
+                    ast::Expr::List(list) => &list.elts,
+                    _ => return None,
+                };
+                for value in elements {
+                    if value.is_starred_expr() {
+                        return None;
+                    }
+                    operands.push((value, None));
+                }
+            }
+            ast::ArgOrKeyword::Keyword(kw) if kw.arg.is_none() => {
+                for item in &kw.value.as_dict_expr()?.items {
+                    let key = item.key.as_ref()?.as_string_literal_expr()?;
+                    operands.push((&item.value, Some((key.value.to_str(), key.range()))));
+                }
+            }
+            _ => operands.push(fixed_operand(arg)),
+        }
+    }
+    bind_source_operands(operands.into_iter(), parameters, skip)?.complete()
+}
+
+fn bind_source_operands<'a>(
+    operands: impl Iterator<Item = FixedOperand<'a>>,
+    parameters: &'a ast::Parameters,
+    skip: usize,
+) -> Option<FixedArguments<SourceArgument<'a>, &'a ast::ParameterWithDefault>> {
     let fixed: Vec<_> = parameters
         .iter_non_variadic_params()
         .enumerate()
@@ -214,7 +275,7 @@ fn bind_source_arguments_after<'a>(
         .map(|(i, p)| (p, ParameterKind::fixed(parameters, i)))
         .collect();
     supplied_fixed_parameters(
-        call,
+        operands,
         &fixed,
         |(p, k)| (p.name().as_str(), *k),
         |(p, _)| p.default.is_none().then_some(*p),
@@ -224,15 +285,15 @@ fn bind_source_arguments_after<'a>(
 
 /// Keep the first missing formal alongside the supplied values in evaluation order.
 fn supplied_fixed_parameters<'a, P, T, M>(
-    call: &'a ast::ExprCall,
+    operands: impl Iterator<Item = FixedOperand<'a>>,
     parameters: &[P],
     shape: impl Fn(&P) -> (&str, ParameterKind),
     required: impl Fn(&P) -> Option<M>,
     mut value: impl FnMut(usize, &'a ast::Expr) -> T,
 ) -> Option<FixedArguments<T, M>> {
-    let mut supplied = Vec::with_capacity(call.arguments.len());
+    let mut supplied = Vec::with_capacity(operands.size_hint().0);
     let order = bind_fixed(
-        call,
+        operands,
         parameters,
         shape,
         0,
@@ -267,7 +328,7 @@ pub(super) fn checked_parameter_indices(
         .then(Vec::new);
     }
     supplied_fixed_parameters(
-        call,
+        call.arguments.iter_source_order().map(fixed_operand),
         parameters,
         |p| (p.name.as_str(), p.kind),
         |p| p.default.is_none().then_some(()),
@@ -882,7 +943,7 @@ impl Checker<'_> {
             .then(Vec::new);
             let source = self.source;
             let order = bind_fixed(
-                call,
+                call.arguments.iter_source_order().map(fixed_operand),
                 params,
                 |p| (&p.name, p.kind),
                 offset,
@@ -902,6 +963,9 @@ impl Checker<'_> {
                     if let Some(returns) = stop_return
                         && self.terminating_operand(&value)
                     {
+                        // This operand cannot supply a value to the parameter.
+                        self.graph
+                            .checked_argument_type(self.module, supplied.range());
                         let stop = if values.is_empty() {
                             value
                         } else {
@@ -1477,6 +1541,96 @@ impl Checker<'_> {
                 call,
                 "keyword arguments are unsupported for this builtin",
             ))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_displays_bind_original_values_in_evaluation_order() {
+        let parsed = ruff_python_parser::parse_module(
+            "def f(self, x, /, y=0, *, z, w): pass\nf(w=a, *(b,), *[c], **{'z': d})",
+        )
+        .unwrap();
+        let [ast::Stmt::FunctionDef(f), ast::Stmt::Expr(stmt)] = parsed.suite().as_slice() else {
+            panic!()
+        };
+        let call = stmt.value.as_call_expr().unwrap();
+        let bound = fixed_display_call_arguments(call, &f.parameters, true).unwrap();
+        let names: Vec<_> = bound
+            .iter()
+            .map(|(p, v)| (p.name().as_str(), v.as_name_expr().unwrap().id.as_str()))
+            .collect();
+        assert_eq!(names, [("x", "b"), ("y", "c"), ("w", "a"), ("z", "d")]);
+        assert!(fixed_bound_call_arguments(call, &f.parameters).is_none());
+    }
+
+    #[test]
+    fn source_displays_require_a_complete_unambiguous_binding() {
+        let parsed = ruff_python_parser::parse_module("def f(x, /, y=1): pass").unwrap();
+        let params = &parsed.suite()[0].as_function_def_stmt().unwrap().parameters;
+        for (args, valid) in [
+            ("1, *(), **{}", true),
+            ("*(1,), **{'y': 2}", true),
+            ("**{'x': 1}", false),
+            ("*(1, 2), **{'y': 3}", false),
+            ("1, y=2, **{'y': 3}", false),
+            ("1, **{'y': 2}, **{'y': 3}", false),
+            ("1, **{'y': 2, 'y': 3}", false),
+            ("*()", false),
+            ("*(1, 2, 3)", false),
+            ("*args", false),
+            ("*(1, *args)", false),
+            ("1, **kw", false),
+            ("1, **{**kw}", false),
+            ("1, **{key: 2}", false),
+            ("1, **{0: 2}", false),
+        ] {
+            let parsed = ruff_python_parser::parse_module(&format!("f({args})")).unwrap();
+            let call = parsed.suite()[0]
+                .as_expr_stmt()
+                .unwrap()
+                .value
+                .as_call_expr()
+                .unwrap();
+            assert_eq!(
+                fixed_display_call_arguments(call, params, false).is_some(),
+                valid,
+                "{args}"
+            );
+        }
+    }
+
+    #[test]
+    fn saved_source_display_calls_can_use_the_registered_binder() {
+        let project = tempfile::tempdir().unwrap();
+        let entry = project.path().join("main.py");
+        for decl in [
+            "def g(x: int): return x",
+            "def f(x: int): return x\ng = f",
+            "class C:\n    def f(self, x: int): return x\ng = C().f",
+        ] {
+            for args in ["*(42,)", "**{'x': 42}"] {
+                let source = format!("{decl}\nprint(g({args}))\n");
+                std::fs::write(&entry, &source).unwrap();
+                crate::check_file(&entry, None).unwrap();
+                crate::compile_file(&entry, None, &Default::default()).unwrap();
+                for prefix in ["", "import unittest\n"] {
+                    for invalid in ["True", "'bad'"] {
+                        let bad = format!("{prefix}{}", source.replace("42", invalid));
+                        std::fs::write(&entry, &bad).unwrap();
+                        let error = crate::check_file(&entry, None).expect_err(&bad);
+                        assert!(
+                            error.contains("expected int")
+                                || error.contains("invalid-argument-type"),
+                            "{bad}\n{error}"
+                        );
+                    }
+                }
+            }
         }
     }
 }

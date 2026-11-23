@@ -190,6 +190,152 @@ fn fallback_call_bytearray_preserves_exact_argument_contract() {
 }
 
 #[test]
+fn source_arguments_hold_for_file_and_named_entries() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("app.py");
+    let named = crate::CompileOptions {
+        module_entry: Some("app".into()),
+        require_checked_module_entry: true,
+        script_startup: Some((Default::default(), "imre".into())),
+        extension_paths: vec![dir.path().to_owned()],
+        pythonpath: 0..1,
+        ..Default::default()
+    };
+    let source = "class Box:\n    def method(self, x: int) -> int: return x + 1\nb = Box()\nf = b.method\nprint(f(True))\n";
+    for prefix in ["", "import unittest\n"] {
+        fs::write(&path, format!("{prefix}{source}")).unwrap();
+        for options in [&crate::CompileOptions::default(), &named] {
+            let path = if options.module_entry.is_some() {
+                std::path::Path::new("-m")
+            } else {
+                path.as_path()
+            };
+            let error = crate::compile_file_with_boxed_units(path, None, options)
+                .err()
+                .expect("a bound method retains its parameter contract");
+            assert!(
+                error.contains(":9: Imre: expected int, got bool"),
+                "{error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn source_arguments_follow_the_selected_callable() {
+    let dir = tempdir().unwrap();
+    let app = dir.path().join("app.py");
+    let api = dir.path().join("api.py");
+    let declarations = r#"type Count = int
+def take(n: Count) -> int: return n
+class Box:
+    def take(self, skip=0, /, *, n: Count) -> int: return n
+    @staticmethod
+    def static(n: int) -> int: return n
+    @classmethod
+    def factory(cls, n: int) -> int: return n
+class Other:
+    def take(self, *, n: bool) -> bool: return n
+"#;
+    fs::write(&api, declarations).unwrap();
+    let prefix = "import api\nfrom api import Box as B\nprint(bytearray())\nb = B()\nf = b.take\n";
+    let mut compiler = crate::IncrementalCompiler::default();
+    for call in [
+        "f(n=True)",
+        "b.take(n=True)",
+        "B.take(b, n=True)",
+        "m = B.static\nm(True)",
+        "m = B.factory\nm(True)",
+        "api.take(True)",
+        "alias = api.take\nalias(True)",
+        "saved = f\nf = api.Other().take\nsaved(n=True)",
+    ] {
+        fs::write(&app, format!("{prefix}{call}\n")).unwrap();
+        let error = compiler.check_file(&app, None).expect_err(call);
+        assert!(error.contains("expected int, got bool"), "{call}: {error}");
+    }
+    fs::write(&app, format!("{prefix}f(n=7)\nf = api.Other().take\nf(n=True)\ndef run(f): return f(n=True)\nrun(f)\n")).unwrap();
+    compiler.check_file(&app, None).unwrap();
+}
+
+#[test]
+fn source_arguments_capture_inherited_methods_at_lookup() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("app.py");
+    let source = r#"print(bytearray())
+class T:
+    def take(self, x: int) -> int: return x + 1
+class U(T): pass
+def other(self, x): return x
+obj = U()
+saved = obj.take
+T.take = other
+live = obj.take
+print(live(True), saved(ARG))
+"#;
+    fs::write(&path, source.replace("ARG", "1")).unwrap();
+    crate::check_file(&path, None).unwrap();
+    fs::write(&path, source.replace("ARG", "True")).unwrap();
+    let error = crate::check_file(&path, None).unwrap_err();
+    assert!(
+        error.contains("app.py:10:25: Imre: expected int, got bool"),
+        "{error}"
+    );
+    assert!(!error.contains("app.py:10:12:"), "{error}");
+}
+
+#[test]
+fn source_arguments_evaluate_bound_operands_in_call_order() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("app.py");
+    let source = r#"print(bytearray())
+class Box:
+    def take(self, a: int, b: int): pass
+    def stop(self) -> int: raise ValueError()
+obj = Box()
+f = obj.take
+stop = obj.stop
+try: f(ARGS)
+except ValueError: pass
+"#;
+    fs::write(&path, source.replace("ARGS", "b=stop(), a=True")).unwrap();
+    crate::check_file(&path, None).unwrap();
+    fs::write(&path, source.replace("ARGS", "b=True, a=stop()")).unwrap();
+    let error = crate::check_file(&path, None).unwrap_err();
+    assert!(
+        error.contains("app.py:8:10: Imre: expected int, got bool"),
+        "{error}"
+    );
+}
+
+#[test]
+fn source_arguments_check_display_operands_before_contextual_widening() {
+    let dir = tempdir().unwrap();
+    let entry = dir.path().join("app.py");
+    let mut compiler = crate::IncrementalCompiler::default();
+    for (annotation, operand) in [
+        ("list[int]", "[True]"),
+        ("dict[str, list[int]]", "{'v': [1, True]}"),
+        ("tuple[bool, int]", "(False, True)"),
+        ("tuple[int, ...]", "(1, True)"),
+        ("set[int]", "{True}"),
+    ] {
+        fs::write(&entry, format!("type Items = {annotation}\ndef take(a: Items): pass\nprint(bytearray())\nf = take\nf({operand})\n")).unwrap();
+        let error = compiler.check_file(&entry, None).expect_err(annotation);
+        assert!(
+            error.contains("expected int, got bool"),
+            "{annotation}: {error}"
+        );
+    }
+    fs::write(
+        &entry,
+        "def take(a: list[int | bool]): pass\nprint(bytearray())\nf = take\nf([True, 2])\n",
+    )
+    .unwrap();
+    compiler.check_file(&entry, None).unwrap();
+}
+
+#[test]
 fn fallback_call_aliases_and_nested_operands() {
     let project = tempdir().unwrap();
     let entry = project.path().join("main.py");
@@ -260,8 +406,96 @@ fn fallback_call_partial_binding_and_deferred_source_policy() {
             "{error}"
         );
     }
-    fs::write(&entry, "from typing import TYPE_CHECKING\ndef take(value: int):\n    pass\nprint(bytearray())\nif False:\n    take(True)\nif TYPE_CHECKING:\n    take(True)\ntake(*(True,))\n").unwrap();
+    let header = "from typing import TYPE_CHECKING\ndef take(value: int):\n    pass\nprint(bytearray())\nif False:\n    take(True)\nif TYPE_CHECKING:\n    take(True)\n";
+    fs::write(&entry, format!("{header}take(*(1,))\n")).unwrap();
     crate::check_file(&entry, None).unwrap();
+    fs::write(&entry, format!("{header}take(*(True,))\n")).unwrap();
+    let error = crate::check_file(&entry, None).unwrap_err();
+    assert!(
+        error.contains(":9:8: Imre: expected int, got bool"),
+        "{error}"
+    );
+}
+
+#[test]
+fn unannotated_raise_stops_only_later_argument_checks() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    for prefix in ["", "import unittest\n"] {
+        let source = format!(
+            "{prefix}def boom():raise ValueError()\ndef take(a:int,b:int):return 0\ntry:take(boom(),True)\nexcept ValueError:pass\n"
+        );
+        fs::write(&entry, &source).unwrap();
+        crate::check_file(&entry, None).unwrap();
+        crate::compile_file(&entry, None, &Default::default()).unwrap();
+
+        fs::write(&entry, source.replace("boom(),True", "True,boom()")).unwrap();
+        let error = crate::check_file(&entry, None).unwrap_err();
+        assert!(
+            error.contains(":10: Imre: expected int, got bool"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn unannotated_nonreturning_calls_require_stable_source() {
+    // Check fallback directly so native refusals (e.g. decorators) cannot mask
+    // a lost argument diagnostic.
+    let check = |setup: &str| {
+        let root = std::path::Path::new("/project");
+        let main = root.join("main.py");
+        let helper = root.join("helper.py");
+        let mut session = super::Session::new(root, &[]).unwrap();
+        session
+            .add(
+                &helper,
+                "value = 1\ndef stop(): raise ValueError()\n",
+                crate::SourceKind::File,
+            )
+            .unwrap();
+        let source = format!(
+            "def take(a: int, b: int): return 0\ndef ok(): return 1\n{setup}\ntake(boom(), True)\n"
+        );
+        session
+            .add(&main, &source, crate::SourceKind::File)
+            .unwrap();
+        session.set_closed_program_rules();
+        let sources = [(helper, true, None), (main, true, None)];
+        let roots = session.closed_file_roots(&sources, None, &[], None);
+        session.closed_program_errors(&roots, None)
+    };
+    for setup in [
+        "def boom(x=1): raise ValueError()",
+        "def boom() -> int: raise ValueError()\nsaved = boom",
+        "def boom(): raise ValueError()\nsaved = boom",
+        "from helper import stop as boom",
+        "import helper\nhelper.value = 2\nfrom helper import stop as boom\nx = helper.value",
+        "from helper import stop\ndef boom(): return stop()",
+    ] {
+        check(setup).unwrap_or_else(|e| panic!("{setup}: {e}"));
+    }
+    for setup in [
+        "def boom(x=True):\n    if x: return 1\n    raise ValueError()",
+        "def boom(): raise ValueError()\nboom = ok",
+        "def boom(): raise ValueError()\nglobals()['boom'] = ok",
+        "def boom(): raise ValueError()\ndef change(): globals()['boom'] = ok\nchange()",
+        "def boom(): raise ValueError()\nok.__globals__['boom'] = ok",
+        "import sys\ndef boom(): raise ValueError()\nsys.modules[__name__].boom = ok",
+        "def boom(): raise ValueError()\ndef change():\n    global boom\n    boom = ok\nchange()",
+        "def replace(f): return ok\n@replace\ndef boom(): raise ValueError()",
+        "def boom(x=1): raise ValueError()\nboom.__defaults__ = (2,)",
+        "def boom(): raise ValueError()\nsaved = boom\nsaved.__code__ = ok.__code__",
+        "def boom(): raise ValueError()\nsetattr(boom, '__code__', ok.__code__)",
+        "def boom(): raise ValueError()\ndef patch(f): f.__code__ = ok.__code__\npatch(boom)",
+        "import helper\nhelper.stop = ok\nfrom helper import stop as boom",
+    ] {
+        let error = check(setup).expect_err(setup);
+        assert!(
+            error.contains(":14: Imre: expected int, got bool"),
+            "{setup}: {error}"
+        );
+    }
 }
 
 #[test]
@@ -353,6 +587,107 @@ fn object_fallback_checks_unique_parameter_reassignments() {
     let first = error.find("Literal[\"first\"]").unwrap();
     let last = error.find("Literal[\"last\"]").unwrap();
     assert!(first < last, "{error}");
+}
+
+#[test]
+fn source_stores_and_results_survive_registration() {
+    let project = tempdir().unwrap();
+    let root = project.path();
+    let entry = root.join("main.py");
+    let helper = "class Box:\n    def __init__(self): self.value: int = 2\ndef flag() -> bool: return True\n";
+    fs::write(root.join("helper.py"), helper).unwrap();
+    fs::write(root.join("peer.py"), "print(bytearray())\n").unwrap();
+    for (body, expected) in [
+        ("box = Box()\nbox.value = flag()", "expected int, got bool"),
+        (
+            "def result() -> int:\n    value = flag()\n    return value\nresult()",
+            "expected int, got bool",
+        ),
+        ("value: int = 2\nvalue += 1.5", "float"),
+    ] {
+        for import in ["", "import unittest\n", "import peer\n"] {
+            fs::write(
+                &entry,
+                format!("{import}from helper import Box, flag\n{body}\n"),
+            )
+            .unwrap();
+            let error = crate::compile_file(&entry, None, &Default::default())
+                .err()
+                .unwrap_or_else(|| panic!("accepted {import}{body}"));
+            assert!(
+                error.contains("main.py:") && error.contains(expected),
+                "{error}"
+            );
+        }
+    }
+    // Neither file contributes a function or class to the selected graph.
+    fs::write(root.join("helper.py"), "count: int = 1\n").unwrap();
+    fs::write(&entry, "import peer\nimport helper\nhelper.count = True\n").unwrap();
+    let error = crate::check_file(&entry, None).unwrap_err();
+    assert!(error.contains("expected int, got bool"), "{error}");
+}
+
+#[test]
+fn registered_stores_follow_declarations_and_container_elements() {
+    let project = tempdir().unwrap();
+    let check = |source: &str| {
+        let module = ("main".into(), project.path().join("main.py"), source.into());
+        super::check_registered_project(
+            project.path(),
+            &[],
+            std::iter::once(RegisteredSource::new(&module, true, None)),
+            None,
+            None,
+            None,
+            None,
+        )
+    };
+    for body in [
+        "class Box:\n    n: int = False",
+        "class Box:\n    def __init__(self): self.n: int = False",
+        "def local():\n    n: int\n    n = 1 == 1",
+        "n: int = 0\ndef change():\n    global n\n    n = True",
+        "def outer():\n    n: int = 1\n    def inner():\n        nonlocal n\n        n = False",
+        "def optional() -> int | None: return False",
+        "n: int = 1\npair = (True, 2)\nn, other = pair",
+        "items: list[int] = [1]\nitems = [True]",
+        "rows: list[list[int]] = [[1]]\nrows[0][0] = True",
+        "def change(items: list[int], i: int): items[i] = False",
+        "type Rows = list[tuple[str, int]]\ndef rows() -> Rows: return [('a', True)]",
+        "values: dict[str, int] = {'x': False}",
+    ] {
+        let error = check(body).expect_err(body);
+        assert!(error.contains("expected int, got bool"), "{body}: {error}");
+    }
+    for body in [
+        "items: list[int] = [1]\nother = ['a']\nitems = other",
+        "def change(n: int): n /= 2",
+        "class Box:\n    def __init__(self): self.n: int = 2\nb = Box()\nb.n += 1.5",
+    ] {
+        let error = check(body).expect_err(body);
+        assert!(error.contains("invalid-assignment"), "{body}: {error}");
+    }
+    check(
+        "n: int = 0
+def f(x) -> int:
+    n = False
+    n = 'other'
+    return 1
+f(1)
+f('a')
+class A:
+    def __init__(self): self.n: int = 1
+class B:
+    def __init__(self): self.n = 1
+b = B()
+b.n = True
+amount: float = 1.0
+amount += 1
+items: list[int | bool] = [0, True]
+nullable: int | None = None
+",
+    )
+    .unwrap();
 }
 
 #[test]
@@ -760,9 +1095,16 @@ fn registered_parameter_changes_recheck_the_unchanged_caller() {
         super::check_registered_project(
             root,
             &[],
-            sources.iter().map(|s| RegisteredSource::new(s, true, None)),
+            sources.iter().enumerate().map(|(i, s)| {
+                let id = if i == 0 {
+                    graph.entry
+                } else {
+                    graph.python_file("api").unwrap()
+                };
+                RegisteredSource::new(s, true, Some(id))
+            }),
             None,
-            Some((&graph, &Default::default())),
+            Some((&graph, &Default::default(), None)),
             None,
             Some((&mut cache, true)),
         )
@@ -792,7 +1134,7 @@ fn registered_parameter_changes_recheck_the_unchanged_caller() {
             .enumerate()
             .map(|(i, s)| RegisteredSource::new(s, i == 0, None)),
         None,
-        Some((&graph, &Default::default())),
+        Some((&graph, &Default::default(), None)),
         None,
         Some((&mut cache, true)),
     )
@@ -912,7 +1254,8 @@ fn registered_sdk_interface_belongs_to_its_original_source() {
                 .into(),
         ),
     ];
-    let check = |sources: &[_]| {
+    let mut cache = AnalysisCache::default();
+    let mut check = |sources: &[_]| {
         super::check_registered_project(
             root,
             std::slice::from_ref(&sdk),
@@ -923,7 +1266,7 @@ fn registered_sdk_interface_belongs_to_its_original_source() {
             None,
             None,
             None,
-            None,
+            Some((&mut cache, true)),
         )
     };
 
@@ -934,6 +1277,8 @@ fn registered_sdk_interface_belongs_to_its_original_source() {
         error.contains("invalid-return-type") && error.contains("main.py:3"),
         "{error}"
     );
+    sources[0].2 = original.into();
+    check(&sources).unwrap();
 }
 
 #[test]
@@ -2867,4 +3212,12 @@ fn a_live_any_argument_does_not_prove_a_scalar_layout() {
         Some(ArgumentContract::Checked)
     ));
     assert!(contract(&run.body[2]).is_none());
+}
+
+#[test]
+fn only_the_builtin_inventory_supplies_a_string_tuple() {
+    let source = "from sys import builtin_module_names as names\ndef inventory() -> tuple[str, ...]: return names\nprint(len(inventory()))\n";
+    crate::check(source).unwrap();
+    assert!(crate::check(&source.replace("tuple[str", "tuple[int")).is_err());
+    assert!(crate::check(&source.replace("builtin_module_names", "argv")).is_err());
 }

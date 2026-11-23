@@ -1271,10 +1271,20 @@ pub(crate) struct RegisteredSource<'a> {
 }
 
 impl<'a> RegisteredSource<'a> {
-    /// Use typeshed for SDK modules whose core classes are supplied by native initialization.
+    /// Preserve ty's interfaces for native SDK classes, decorators and ABCs.
+    /// A Python shadow always supplies its own definitions.
     pub(crate) fn uses_typeshed_interface(&self) -> bool {
         !self.is_program
-            && matches!(self.name, "typing" | "abc" | "enum")
+            && matches!(
+                self.name,
+                "typing"
+                    | "abc"
+                    | "enum"
+                    | "_collections_abc"
+                    | "collections"
+                    | "contextlib"
+                    | "dataclasses"
+            )
             && self.is_original_bundled_source(bundled_module_source(self.name, false))
     }
 
@@ -3519,7 +3529,9 @@ pub(crate) fn compile(
                 unit: id,
                 optimization: python_optimization,
             });
-            registration.unit = output.is_some().then_some(id);
+            // Saved-entry admission needs the physical slot even in a check without emission.
+            registration.unit =
+                (output.is_some() || options.require_checked_module_entry).then_some(id);
             registration.declares_signatures = application || checked_provider;
             if application && let Some(graph) = checked_graph {
                 registration.guarded_stub = graph.session.guarded_stub(

@@ -144,8 +144,10 @@ fn ty_rechecks_an_importer_when_a_used_parameter_is_renamed() {
     let mut ty_check = || {
         let mut graph = crate::modules::SourceGraph::load(&entry, None, &[]).unwrap();
         let fresh = graph.session.check_scopes(None, &[]);
-        let (incremental, ran) =
-            with_checked_files(|| cache.check_scopes(&mut graph.session, &graph.inputs, None, &[]));
+        let (incremental, ran) = with_checked_files(|| {
+            let owner = cache.fixed_session(&mut graph.session, &graph.inputs)?;
+            owner.fixed_errors(0..owner.files.len(), None, &[])
+        });
         assert_eq!(incremental, fresh);
         // The first request, the rename that makes the call invalid, and the repair all
         // execute the importer's diagnostic query as well as the provider's.
@@ -321,5 +323,46 @@ print(take(saved(), 'wrong'))\n";
             error.contains(":7:21") && error.contains(expected),
             "{error}"
         );
+    }
+}
+
+#[test]
+fn file_and_saved_module_check_defaults_on_every_selected_revision() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("app.py");
+    let named = CompileOptions {
+        module_entry: Some("app".into()),
+        require_checked_module_entry: true,
+        script_startup: Some((Default::default(), "imre".into())),
+        extension_paths: vec![project.path().to_owned()],
+        pythonpath: 0..1,
+        ..CompileOptions::default()
+    };
+    for options in [&CompileOptions::default(), &named] {
+        let mut cache = IncrementalCompiler::default();
+        for (prefix, value) in [
+            ("", "1"),
+            ("", "True"),
+            ("import unittest\n", "True"),
+            ("import unittest\n", "1"),
+        ] {
+            fs::write(
+                &entry,
+                format!("{prefix}def f(i: int = {value}): return i\nprint(f())\n"),
+            )
+            .unwrap();
+            let result =
+                crate::check_file_with(&entry, None, options, Some(&mut cache), Default::default());
+            assert_eq!(
+                result,
+                crate::check_file_with_options(&entry, None, options)
+            );
+            if value == "True" {
+                let error = result.unwrap_err();
+                assert!(error.contains("int, got bool"), "{error}");
+            } else {
+                result.unwrap();
+            }
+        }
     }
 }

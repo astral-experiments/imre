@@ -746,6 +746,16 @@ impl Checker<'_> {
             self.narrowed.remove_mut(slot);
         }
         let value = self.local(result);
+        if !emit && matches!(collector, Collector::Display(_)) {
+            // Inference elides the loop and its accumulator initializer. Carry
+            // that fresh allocation into assignment just as full lowering does.
+            self.assigned.set_value_source(
+                result,
+                Some(ValueSource::Container(std::rc::Rc::new(
+                    assignments::Container::new(value.ty, false),
+                ))),
+            );
+        }
         if discarded && prefix.is_empty() {
             // Validation kept the result type, but there are no operations to unwind.
             return Ok(value);

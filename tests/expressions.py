@@ -10,8 +10,6 @@ from assignments import main
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "expressions"
 
 REJECTED = {
-    "conditional_int_string": 'print(1 if True else "wrong")\n',
-    "conditional_container_types": 'values = [1] if True else ["wrong"]\n',
     "conditional_wrong_context": "values: list[str] = [] if True else [1]\n",
     "conditional_wrong_optional": "value: int | None = None if True else False\n",
     "conditional_distinct_optionals": "def bad(number: int | None, flag: bool | None, choose: bool) -> int | None:\n    return number if choose else flag\n",
@@ -51,6 +49,8 @@ IMPORTED_REJECTIONS = {
 }
 
 CHECKED = {
+    "conditional_int_string": 'print(1 if True else "wrong")\n',
+    "conditional_container_types": 'values = [1] if True else ["wrong"]\n',
     "conditional_recursion": "def recursive(value: int) -> int:\n    return recursive(value) if False else value\nrecursive(1)\n",
     "conditional_indirect_recursion": "def first(value: int) -> int:\n    return second(value) if False else value\ndef second(value: int) -> int:\n    return first(value) if True else 0\nfirst(1)\n",
     "unused_conditional_recursion": {

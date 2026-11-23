@@ -358,7 +358,7 @@ impl StatementLowering for Checker<'_> {
                         expected,
                         |_, _| false,
                         |_, value, _, _| Ok(value),
-                        None,
+                        checker.return_declaration,
                     )
                 })?
             }

@@ -194,7 +194,11 @@ def check_registered_entry_operand(imre, root, run):
     entry.write_text(saved + "print(model(saved()))\n")
     result = run(imre, "-m", entry.stem)
     assert (result.returncode, result.stdout, result.stderr) == (13, b"stopped\n", b""), result
-    entry.write_text(saved + "print(model(stop()))\n")
+    returned = saved + "print(model(stop()))\n"
+    entry.write_text(returned)
+    result = run(imre, "-m", entry.stem)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"10\n", b""), result
+    entry.write_text(returned.replace("items = [3]", "items: list[int] = [3]"))
     result = run(imre, "-m", entry.stem)
     assert result.returncode and not result.stdout, result
     assert b"checked_operand.py:3:18: Imre: expected int, got bool" in result.stderr, result

@@ -15,6 +15,7 @@ pub(crate) use initializer_calls::{
 };
 mod run_path;
 mod shipped_exports;
+mod stores;
 mod tuple_displays;
 
 use std::cell::Cell;
@@ -144,7 +145,7 @@ impl RegisteredSourceError {
 
 impl Database {
     fn registered_source_errors(&self, file: File) -> Vec<RegisteredSourceError> {
-        self.check_file(file)
+        source_diagnostics(self, file)
             .iter()
             .filter(|diagnostic| diagnostic.severity() >= Severity::Error)
             .filter(|diagnostic| !correlated_calls::explains(self, file, diagnostic))
@@ -177,6 +178,9 @@ pub(crate) struct Session {
     files: Vec<File>,
     /// Physical annotation providers with no runtime module or executable body.
     declarations: Vec<File>,
+    /// Stub placements are part of the selected import environment, even when
+    /// the physical paths of all Python winners stay the same.
+    sdk_interfaces: Vec<&'static str>,
     external_loader_declarations: File,
     execution_names: File,
     tuple_spreads: Vec<HashMap<TextSize, usize>>,
@@ -188,32 +192,87 @@ pub(crate) struct Session {
     pub(crate) explicit_check: bool,
 }
 
-/// The fixed checker's declaration proof can be consumed by more than one
-/// registration. A failed cold lowering does not need that proof until its
-/// original bindings are selected.
-pub(crate) enum SourceContract {
-    Checked(Result<(), String>),
-    Pending {
-        native: Box<crate::frontend::phase::Diagnostic>,
-        result: std::cell::OnceCell<Result<(), String>>,
-    },
+/// Diagnostic inputs from lowering. Only a selected graph can consume these
+/// scopes. Even a ty-clean file still owes Imre's explicit source contracts.
+pub(crate) struct SourceContract {
+    skipped: Option<Vec<Vec<TextRange>>>,
+    overloads: Vec<Vec<CheckedDiagnostic>>,
+    /// Incremental lowering can retain a separate quiet inference database.
+    owner: Option<Box<Session>>,
 }
 
 impl SourceContract {
-    pub(crate) fn original(&self, graph: &crate::modules::SourceGraph) -> &Result<(), String> {
-        match self {
-            Self::Checked(result) => result,
-            Self::Pending { native, result } => result.get_or_init(|| {
-                let (skipped, overloads) = graph.diagnostic_scopes();
-                let roots = graph.session.closed_file_roots(
-                    &graph.modules,
-                    skipped.as_deref(),
-                    &overloads,
-                    Some(&graph.registered_source_errors.borrow()),
-                );
-                graph.session.closed_program_errors(&roots, Some(native))
-            }),
+    pub(crate) fn prepare(
+        graph: &mut crate::modules::SourceGraph,
+        cache: Option<&mut AnalysisCache>,
+        fixed: bool,
+    ) -> Result<Self, String> {
+        let (skipped, overloads) = graph.diagnostic_scopes();
+        let session = &mut graph.session;
+        let owner = if let Some(cache) = cache {
+            let diagnostics = if fixed {
+                cache.fixed_session(session, &graph.inputs)?
+            } else {
+                session.closed_program_session(Some(cache), &graph.inputs)?
+            };
+            Some(Box::new(diagnostics.clone()))
+        } else {
+            if fixed {
+                session.set_fixed_rules();
+            } else if !session.uses_registered_body_rules() {
+                session.set_closed_program_rules();
+            }
+            None
+        };
+        Ok(Self {
+            skipped,
+            overloads,
+            owner,
+        })
+    }
+
+    pub(crate) fn fixed_errors(&self, graph: &crate::modules::SourceGraph) -> Result<(), String> {
+        let registered = graph.registered_source_errors.borrow();
+        let remaining = (0..graph.modules.len()).filter(|id| {
+            !graph.modules[*id].checks_source_contracts()
+                || !registered.get(id).is_some_and(Vec::is_empty)
+        });
+        self.owner(graph)
+            .fixed_errors(remaining, self.skipped.as_deref(), &self.overloads)
+    }
+
+    fn owner<'a>(&'a self, graph: &'a crate::modules::SourceGraph) -> &'a Session {
+        self.owner.as_deref().unwrap_or(&graph.session)
+    }
+
+    pub(crate) fn original(
+        &self,
+        graph: &crate::modules::SourceGraph,
+        native: Option<&crate::frontend::phase::Diagnostic>,
+        extra: Option<FallbackChecks>,
+    ) -> Result<(), String> {
+        let owner = self.owner(graph);
+        let roots = owner.closed_file_roots(
+            &graph.modules,
+            self.skipped.as_deref(),
+            &self.overloads,
+            Some(&graph.registered_source_errors.borrow()),
+        );
+        owner.closed_program_errors(&roots, native)?;
+        if let Some(extra) = extra {
+            owner.check_fallback_contracts(
+                self.skipped.as_deref(),
+                &self.overloads,
+                extra.calls,
+                roots
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, root)| !root.body_checked)
+                    .map(|(id, _)| (id, id)),
+                extra.checked_file.then_some(&graph.modules),
+            )?;
         }
+        Ok(())
     }
 }
 
@@ -323,6 +382,8 @@ impl RegisteredLayouts {
 
 #[derive(Clone, Copy)]
 pub(crate) struct OperandTypes<'a> {
+    /// The selected registration owns application variable contracts.
+    program_stores: bool,
     session: &'a Session,
     module: usize,
 }
@@ -399,10 +460,59 @@ impl<'session> OperandTypes<'session> {
         self.checked_scalar(operand.into(), ScalarMatch::Assignable)
     }
 
+    /// Comprehension and deferred scopes can share their initializer's native
+    /// checker. Only an actual module operand can witness an unconditional call.
+    pub(crate) fn unconditional_module_call(self, call: &ExprCall) -> bool {
+        self.original_operand(&self.parsed(), call.into())
+            .is_some_and(|(_, scope, _)| {
+                scope.is_global()
+                    && self
+                        .session
+                        .unconditional_operand(self.module, scope, None, call.range())
+            })
+    }
+
+    /// A read of the original formal on the regular function's unconditional path.
+    pub(crate) fn unconditional_parameter(self, operand: &Expr) -> Option<TextRange> {
+        let parsed = self.parsed();
+        let (original, scope, file) = self.original_operand(&parsed, operand.into())?;
+        let index = ty_python_core::semantic_index(&self.session.db, file);
+        let function = index.scope(scope).node().as_function()?.node(&parsed);
+        let parameter =
+            self.session
+                .parameter_read(self.session.files[self.module], &parsed, original)?;
+        (function.parameters.range().contains_range(parameter)
+            && self
+                .session
+                .unconditional_function_operand(self.module, function, operand.range()))
+        .then_some(parameter)
+    }
+
+    /// A saved name or tuple member can still select one exact function.
+    /// A shared callable layout alone does not identify a source declaration.
+    pub(crate) fn function_declaration(
+        self,
+        operand: &Expr,
+    ) -> Option<crate::modules::DefinitionId> {
+        self.linked_declaration(operand, |ty| {
+            matches!(ty, ty_python_semantic::types::Type::FunctionLiteral(_))
+        })
+    }
+
     /// The linked class that owns a nominal receiver at this physical operand.
     pub(crate) fn instance_declaration(
         self,
         operand: &Expr,
+    ) -> Option<crate::modules::DefinitionId> {
+        self.linked_declaration(operand, |ty| {
+            matches!(ty, ty_python_semantic::types::Type::NominalInstance(_))
+        })
+    }
+
+    fn linked_declaration(
+        self,
+        operand: &Expr,
+        accepts: impl FnOnce(ty_python_semantic::types::Type<'session>) -> bool,
     ) -> Option<crate::modules::DefinitionId> {
         use ty_python_semantic::types::Type;
 
@@ -410,9 +520,10 @@ impl<'session> OperandTypes<'session> {
         let (original, _, owner) = self.original_operand(&parsed, operand.into())?;
         let session = self.session;
         let model = SemanticModel::new(&session.db, owner);
-        let ty @ Type::NominalInstance(_) = original.inferred_type(&model)? else {
+        let ty = original.inferred_type(&model)?;
+        if !accepts(ty) {
             return None;
-        };
+        }
         let name = ty
             .definition(&session.db, &model.program_environment())?
             .focus_range(&session.db)?;
@@ -420,7 +531,12 @@ impl<'session> OperandTypes<'session> {
         let parsed = session.parsed(name.file());
         let body = parsed.suite();
         let statement = body.partition_point(|stmt| stmt.end() <= name.range().start());
-        (body.get(statement)?.as_class_def_stmt()?.name.range() == name.range())
+        let declared = match (ty, body.get(statement)?) {
+            (Type::NominalInstance(_), Stmt::ClassDef(c)) => &c.name,
+            (Type::FunctionLiteral(_), Stmt::FunctionDef(f)) => &f.name,
+            _ => return None,
+        };
+        (declared.range() == name.range())
             .then_some(crate::modules::DefinitionId { module, statement })
     }
 
@@ -460,6 +576,81 @@ impl<'session> OperandTypes<'session> {
             declared,
             ScalarMatch::Exact,
         )
+    }
+
+    pub(crate) fn with_program_stores(mut self, enabled: bool) -> Self {
+        self.program_stores = enabled;
+        self
+    }
+
+    /// Only the unique variable annotation reaching the indexed destination
+    /// constrains a later store. Parameters have their own call boundary.
+    pub(crate) fn declared_store(self, target: &Expr) -> Option<crate::ir::Type> {
+        use ty_python_core::definition::DefinitionKind;
+        if !self.program_stores {
+            return None;
+        }
+        let db = &self.session.db;
+        let file = self.session.files[self.module];
+        let index = ty_python_core::semantic_index(db, db.program_file(file));
+        let [binding] = index.try_definitions(target.into())? else {
+            return None;
+        };
+        let parsed = self.parsed();
+        let original = match binding.kind(db) {
+            DefinitionKind::Assignment(a) => a.target(&parsed),
+            DefinitionKind::For(a) => a.target(&parsed),
+            _ => return None,
+        };
+        if original != target {
+            return None;
+        }
+        let declaration = stores::reaching_declaration(db, *binding)?;
+        let DefinitionKind::AnnotatedAssignment(ann) = declaration.kind(db) else {
+            return None;
+        };
+        let annotation = ann.annotation(&parsed);
+        if index.is_in_type_checking_block(declaration.file_scope(db), annotation.range()) {
+            return None;
+        }
+        self.scalar_initializer(annotation, false)
+    }
+
+    /// Outside the program keep the existing function-local initializer policy.
+    pub(crate) fn scalar_initializer(
+        self,
+        annotation: &Expr,
+        local: bool,
+    ) -> Option<crate::ir::Type> {
+        use ty_python_semantic::types::KnownClass;
+        if !self.program_stores && !local {
+            return None;
+        }
+        let scalar = self.local_scalar_annotation(annotation)?;
+        // ty can simplify an explicitly written numeric union to one scalar.
+        // A single exact guard must not discard its other accepted arms.
+        let alternatives: &[_] = match scalar {
+            crate::ir::Type::Int if self.program_stores => &[KnownClass::Bool],
+            crate::ir::Type::Float if self.program_stores => &[KnownClass::Int, KnownClass::Bool],
+            _ => return Some(scalar),
+        };
+        let db = &self.session.db;
+        let file = self.session.files[self.module];
+        let model = SemanticModel::new(db, db.program_file(file));
+        let wider = |model: &SemanticModel<'_>, annotation: &Expr| {
+            alternatives.iter().any(|class| {
+                let actual = class.to_instance(model.db(), &model.program_environment());
+                Session::written_scalar_union_accepts(model, annotation, actual)
+            })
+        };
+        let union = if let Expr::StringLiteral(text) = annotation
+            && let Some((parsed, inner)) = model.enter_string_annotation(text)
+        {
+            wider(&inner, &parsed.syntax().body)
+        } else {
+            wider(&model, annotation)
+        };
+        (!union).then_some(scalar)
     }
 
     /// A dynamically typed item can keep its original handle in a Python container.
@@ -625,6 +816,49 @@ impl<'session> OperandTypes<'session> {
             })
     }
 
+    /// The registered binder can place an unambiguous saved source call.
+    /// The shared operand check validates its types at the original locations.
+    pub(crate) fn binds_saved_spread(self, call: &ExprCall) -> bool {
+        use ty_python_semantic::types::{Type, TypeDefinition};
+
+        let parsed = self.parsed();
+        let Some((Expr::Call(call), _, file)) = self.original_operand(&parsed, call.into()) else {
+            return false;
+        };
+        let db = &self.session.db;
+        let model = SemanticModel::new(db, file);
+        let Some(ty @ (Type::FunctionLiteral(_) | Type::BoundMethod(_))) =
+            call.func.inferred_type(&model)
+        else {
+            return false;
+        };
+        let Some(TypeDefinition::Function(def)) = ty.definition(db, &model.program_environment())
+        else {
+            return false;
+        };
+        let ty_python_core::definition::DefinitionKind::Function(f) = def.kind(db) else {
+            return false;
+        };
+        let owner = def.file(db);
+        if !self.session.files.contains(&owner) {
+            return false;
+        }
+        let ast = self.session.parsed(owner);
+        let function = f.node(&ast);
+        if !function.decorator_list.is_empty() || function.type_params.is_some() {
+            return false;
+        }
+        let bound = matches!(ty, Type::BoundMethod(_));
+        // With a full positional prefix only empty ** displays could bind.
+        // Ordinary keyword lowering already handles that case.
+        if !call.arguments.args.iter().any(Expr::is_starred_expr)
+            && call.arguments.args.len() + usize::from(bound) == function.parameters.len()
+        {
+            return false;
+        }
+        crate::frontend::fixed_display_call_arguments(call, &function.parameters, bound).is_some()
+    }
+
     /// The untaken continuation needs the exact result of the original call.
     pub(crate) fn stopped_call_result(self, call: &ExprCall) -> Option<crate::ir::Type> {
         self.checked_scalar(call.into(), ScalarMatch::Exact)
@@ -727,12 +961,14 @@ pub(crate) fn check_registered_project<'a>(
     checked: Option<(
         &crate::modules::SourceGraph,
         &crate::dynamic::ProviderSources<'_>,
+        Option<FallbackChecks>,
     )>,
     refusal: Option<&crate::frontend::phase::Diagnostic>,
     cache: Option<(&mut AnalysisCache, bool)>,
 ) -> Result<Option<RegisteredLayouts>, String> {
     let sources = sources.into_iter();
-    let (checked, providers) = checked.unzip();
+    let extra = checked.and_then(|(_, _, extra)| extra);
+    let (checked, providers) = checked.map(|(g, p, _)| (g, p)).unzip();
     let requested_class = checked
         .zip(refusal)
         .and_then(|(graph, report)| match report.kind {
@@ -744,9 +980,10 @@ pub(crate) fn check_registered_project<'a>(
     let capacity = sources.len();
     let saved_graph =
         checked.is_some_and(|graph| graph.modules[graph.entry].saved_source_contract());
-    let sources = sources.filter(|source| {
-        !source.uses_typeshed_interface() && !(saved_graph && source.is_original_bundled_provider())
-    });
+    let selected = sources.filter(|source| !source.uses_typeshed_interface());
+    let sources = selected
+        .clone()
+        .filter(|source| !(saved_graph && source.is_original_bundled_provider()));
     if sources.clone().next().is_none() {
         return requested_class.map_or(Ok(None), |(_, report, ..)| Err(report.to_string()));
     }
@@ -754,10 +991,10 @@ pub(crate) fn check_registered_project<'a>(
         .into_iter()
         .flat_map(|p| p.values().copied())
         .filter(|(path, _)| path.extension().is_some_and(|ext| ext == "pyi"));
+    let mut admitted_saved = false;
     if requested_class.is_none()
         && let Some(graph) = checked
         && !graph.has_checked_only_import
-        // This result belongs to the checked adapter, before a native declaration won.
         && declarations.clone().next().is_none()
         && let Some(contract) = &graph.source_contract
     {
@@ -784,26 +1021,22 @@ pub(crate) fn check_registered_project<'a>(
             {
                 return false;
             }
+            let module = &graph.modules[id];
             let file = session.files[id];
-            if file_entry {
-                // Registration can select a different semantic file or check different parser text.
-                let module = &graph.modules[id];
-                if !crate::modules::same_source_path(
-                    winner.semantic_path.unwrap_or(winner.path),
-                    &module.path,
-                ) || winner.source != module.original_source()
-                    || !session.file_matches_parser_input(
+            // A slot can survive while its semantic path, source or parser input changes.
+            if !crate::modules::same_source_path(
+                winner.semantic_path.unwrap_or(winner.path),
+                &module.path,
+            ) || winner.source != module.original_source()
+                || !(session.file_matches_parser_input(file, &module.source)
+                    || session.file_matches_parser_input(
                         file,
                         &imre_ast::indentation::prepare(&module.source).text,
-                    )
-                {
-                    return false;
-                }
-                if id == graph.entry {
-                    return true;
-                }
+                    ))
+            {
+                return false;
             }
-            if winner.name == "__main__" {
+            if (file_entry && id == graph.entry) || winner.name == "__main__" {
                 return true;
             }
             // A checked bundled declaration can mask a different runtime definition.
@@ -813,25 +1046,21 @@ pub(crate) fn check_registered_project<'a>(
                 .and_then(|m| m.file(&session.db))
                 == Some(file)
         });
-        if admitted
+        let admitted = admitted
             && graph.modules.iter().enumerate().all(|(id, module)| {
                 module.bundled
                     || module.is_namespace()
                     || module.path.extension().is_some_and(|ext| ext == "pyi")
                     || matched.contains(&id)
-            })
-        {
+            });
+        admitted_saved = saved_graph && admitted;
+        // An exact saved application can still import a different SDK adapter.
+        // Admission covers the files, but the selected bindings need their own check.
+        if admitted && providers.is_none_or(HashMap::is_empty) {
             let winners = sources.map(|winner| (winner.checked_module.unwrap(), winner));
-            let owner = cache
-                .as_ref()
-                .and_then(|(cache, _)| cache.closed_diagnostics.as_ref())
-                .filter(|prior| {
-                    prior.same_files(&graph.session, &graph.inputs)
-                        && prior.inputs.files == graph.inputs.files
-                })
-                .map_or(&graph.session, |prior| &prior.session);
+            let owner = contract.owner(graph);
             graph.session.check_registered_execution(
-                || contract.original(graph).clone(),
+                || contract.original(graph, refusal, extra),
                 winners.clone(),
                 has_file_body,
                 checked.zip(refusal),
@@ -840,22 +1069,20 @@ pub(crate) fn check_registered_project<'a>(
             return Ok(RegisteredLayouts::from_winners(
                 || graph.session.clone(),
                 winners.filter(|(id, winner)| {
-                    let physical = &graph.modules[*id];
-                    crate::modules::same_source_path(&physical.path, winner.path)
-                        && (file_entry || physical.original_source() == winner.source)
+                    crate::modules::same_source_path(&graph.modules[*id].path, winner.path)
                 }),
             ));
         }
     }
 
-    if let Some(graph) = checked.filter(|graph| graph.modules[graph.entry].saved_source_contract())
-    {
+    if let Some(graph) = checked.filter(|_| saved_graph && !admitted_saved) {
         return Err(format!(
             "cannot save module {:?}: selected registrations do not match its original checked source graph",
             graph.modules[graph.entry].name
         ));
     }
 
+    let sources = selected;
     let mut session = Session::with_storage(
         root,
         extension_roots,
@@ -952,11 +1179,32 @@ pub(crate) fn check_registered_project<'a>(
     } else {
         session.set_closed_program_rules();
     }
+    session.explicit_check = checked.is_some_and(|g| g.session.explicit_check);
     let winners = (first_winner..).zip(sources);
     session.check_registered_execution(
         || {
             let roots = session.closed_file_roots(&paths, None, &[], None);
             session.closed_program_errors(&roots, refusal)?;
+            if let Some((graph, extra)) = checked.zip(extra)
+                && let Some(contract) = &graph.source_contract
+            {
+                // Keep the loader's extra call checks only for surviving source slots.
+                // Their imports and declarations belong to this selection.
+                let surviving = winners.clone().filter_map(|(selected, winner)| {
+                    let id = winner.checked_module?;
+                    let module = &graph.modules[id];
+                    (module.original_source() == winner.source
+                        && !providers.is_some_and(|p| p.contains_key(&id)))
+                    .then_some((selected, id))
+                });
+                session.check_fallback_contracts(
+                    contract.skipped.as_deref(),
+                    &contract.overloads,
+                    extra.calls,
+                    surviving,
+                    extra.checked_file.then_some(&graph.modules),
+                )?;
+            }
             if let Some((graph, report, owner, class)) = requested_class {
                 session
                     .check_selected_class_return(graph, owner, class, winners.clone())
@@ -1007,6 +1255,30 @@ impl Session {
             .is_some_and(|symbol| {
                 !symbol.is_bound() && !symbol.is_declared() && !symbol.is_nonlocal()
             })
+    }
+
+    /// Resolve a store in its binding scope. A function's `global` statement
+    /// refers to the module's declaration, even when this write has none.
+    pub(crate) fn inferred_name_store(&self, module: usize, target: &Expr) -> bool {
+        let Some(name) = target.as_name_expr() else {
+            return false;
+        };
+        let index =
+            ty_python_core::semantic_index(&self.db, self.db.program_file(self.files[module]));
+        let Some(scope) = index.try_expression_scope_id(target) else {
+            return false;
+        };
+        let Some(symbol) = index.place_table(scope).symbol_by_name(name.id.as_str()) else {
+            return false;
+        };
+        if scope.is_global() || symbol.is_global() {
+            index
+                .place_table(FileScopeId::global())
+                .symbol_by_name(name.id.as_str())
+                .is_some_and(|global| global.is_bound() && !global.is_declared())
+        } else {
+            self.inferred_local_definitions(module, target).is_some()
+        }
     }
 
     /// Find the definitions of an unannotated function local with multiple writes.
@@ -1595,17 +1867,21 @@ impl Session {
                 Some(report)
             } else if let Some((graph, report)) = native
                 && start.main_body
-                && let Some(site) = report.entry_operand()
-                && site.module == graph.entry
-                && start.checked_module == Some(site.module)
-                && start.source == graph.modules[site.module].original_source()
-                && graph.session.unconditional_module_operand(
-                    site.module,
-                    site.statement,
-                    site.operand,
-                )
+                && start.checked_module == Some(graph.entry)
+                && start.source == graph.modules[graph.entry].original_source()
             {
-                Some(report)
+                // Inference can report an unplaceable dependency before the entry.
+                // Its position in the report list cannot invalidate a proved operand.
+                report.reports().find(|report| {
+                    report.entry_operand().is_some_and(|site| {
+                        site.module == graph.entry
+                            && graph.session.unconditional_module_operand(
+                                site.module,
+                                site.statement,
+                                site.operand,
+                            )
+                    })
+                })
             } else {
                 None
             }
@@ -1915,9 +2191,11 @@ impl Session {
         let stdlib_stubs = intrinsic.join(".stdlib-stubs");
         // Keep each paired declaration beside the SDK body that actually won. Other
         // registered sources retain their own interface and normal search precedence.
-        let provider_stub = |name: &str| match registered {
+        let mut sdk_interfaces = Vec::new();
+        let mut provider_stub = |name: &'static str| match registered {
             None => project.join(name),
             Some(selected) if selected(&Path::new(name).with_extension("py")) => {
+                sdk_interfaces.push(name);
                 SystemPath::new(crate::dynamic::BUNDLED_SOURCE_ROOT).join(name)
             }
             Some(_) => stdlib_stubs.join(name),
@@ -2055,16 +2333,13 @@ impl Session {
         settings.search_paths = ty_module_resolver::SearchPathSettings::new(roots)
             .to_search_paths(&system, &vendored, &ty_module_resolver::FallibleStrategy)
             .map_err(|error| error.to_string())?;
-        // The closed checker enforces these type contracts and fixed tuple bounds.
-        // Invalid indices and zero slice steps can also be runtime errors. Disable
-        // these ty diagnostics before it expands types to construct their messages.
+        // Keep the declaration lints enabled for the source checker. Suppress
+        // diagnostics on operations with separately checked runtime semantics
+        // before ty expands their types to construct messages.
         let registry = default_lint_registry();
         let mut rules = RuleSelection::from_registry(registry);
         for name in [
             "unsupported-operator",
-            "invalid-assignment",
-            "invalid-argument-type",
-            "invalid-return-type",
             "zero-stepsize-in-slice",
             "index-out-of-bounds",
             "unresolved-attribute",
@@ -2094,6 +2369,7 @@ impl Session {
             db,
             files: Vec::new(),
             declarations: Vec::new(),
+            sdk_interfaces,
             external_loader_declarations,
             execution_names,
             tuple_spreads: Vec::new(),
@@ -2446,19 +2722,10 @@ impl Session {
         Ok(self.parsed(file))
     }
 
-    /// Use the existing parsed files for a check, then restore the caller's inference rules.
-    pub(crate) fn with_diagnostic_rules<T>(&mut self, check: impl FnOnce(&mut Self) -> T) -> T {
-        let input = DiagnosticRules::get(&self.db);
-        let previous = input.rules(&self.db).clone();
-        let result = check(self);
-        input.set_rules(&mut self.db).to(previous);
-        result
-    }
-
     /// Start diagnostics with independent rules and Salsa storage. Every file has already
     /// passed the loader's preflight in this snapshot.
     pub(crate) fn diagnostic_copy(&self) -> Result<Self, String> {
-        self.copy_for_diagnostics(None, None)
+        self.copy_for_diagnostics(None)
     }
 
     /// Track the exact suites excluded by the selected entry profile for cross-file diagnostics.
@@ -2540,46 +2807,15 @@ impl Session {
             .then(|| self.db.registered_source_errors(self.files[module]))
     }
 
-    pub(crate) fn copy_for_diagnostics(
-        &self,
-        script_entry: Option<File>,
-        registrations: Option<&crate::dynamic::RegisteredSources<'_>>,
-    ) -> Result<Self, String> {
-        let selected = |path: &Path| {
-            registrations.is_some_and(|sources| {
-                sources
-                    .winners
-                    .iter()
-                    .any(|winner| winner.matches_bundled_source(path))
-            })
-        };
+    fn copy_for_diagnostics(&self, script_entry: Option<File>) -> Result<Self, String> {
         let mut copy = Self::with_storage(
             &self.root,
-            registrations.map_or(&self.extension_roots, |sources| sources.roots),
+            &self.extension_roots,
             salsa::Storage::default(),
-            script_entry.map(|_| &selected as &dyn Fn(&Path) -> bool),
+            script_entry.map(|_| &(|_: &Path| false) as &dyn Fn(&Path) -> bool),
         )?;
         copy.explicit_check = self.explicit_check;
-        if let Some(registrations) = registrations {
-            // Declarations can be re-exported from another selected Python module.
-            for winner in registrations
-                .winners
-                .iter()
-                .filter(|s| s.checked_module.is_none() && !s.uses_typeshed_interface())
-            {
-                copy.seed(winner.path, winner.source)?;
-            }
-        }
-        for (id, &file) in self.files.iter().enumerate() {
-            if let Some(&(path, body)) = registrations.and_then(|r| r.provider_sources.get(&id)) {
-                // Keep the module index used by checked callers, and the original
-                // filename and search root used by the Python import.
-                let path = path.to_str().ok_or("module paths must be valid UTF-8")?;
-                let input = imre_ast::indentation::prepare(body);
-                let file = copy.write_file(path, &input.text)?;
-                copy.files.push(file);
-                continue;
-            }
+        for &file in &self.files {
             let path = file
                 .path(&self.db)
                 .as_system_path()
@@ -2599,9 +2835,6 @@ impl Session {
             .iter()
             .enumerate()
             .filter_map(|(module, file)| {
-                if registrations.is_some_and(|r| r.provider_sources.contains_key(&module)) {
-                    return None;
-                }
                 exclusions
                     .get(file.path(&self.db).as_str())
                     .cloned()
@@ -2715,17 +2948,6 @@ impl Session {
         index
             .try_node_scope(ty_python_core::scope::NodeWithScopeRef::Function(function))
             .map(|scope| scope.is_generator_function(index))
-    }
-
-    /// Whether this definition needs Python argument binding in a suspended generator frame.
-    pub(crate) fn is_untyped_generator_local(
-        &self,
-        module: usize,
-        function: &ruff_python_ast::StmtFunctionDef,
-    ) -> bool {
-        let index =
-            ty_python_core::semantic_index(&self.db, self.db.program_file(self.files[module]));
-        untyped_generator_local(index, function).is_some()
     }
 
     pub(crate) fn bound_module_names(&self, module: usize) -> Vec<String> {
@@ -3602,6 +3824,7 @@ impl Session {
 
     pub(crate) fn operand_types(&self, module: usize) -> OperandTypes<'_> {
         OperandTypes {
+            program_stores: false,
             session: self,
             module,
         }
@@ -3756,125 +3979,85 @@ impl Session {
         )
     }
 
-    /// Preserve first-party contracts when lowering a checked file to object operations.
-    pub(crate) fn check_fallback_contracts(
-        &mut self,
+    /// Extra object-call diagnostics use selected semantic files and the
+    /// surviving source slots' diagnostic masks.
+    fn check_fallback_contracts(
+        &self,
         skipped: Option<&[Vec<TextRange>]>,
         overloads: &[Vec<CheckedDiagnostic>],
         calls: FallbackCalls,
-        roots: impl Iterator<Item = usize> + Clone,
+        roots: impl Iterator<Item = (usize, usize)>,
         checked_modules: Option<&[crate::modules::SourceModule]>,
-        native: Option<&crate::frontend::phase::Diagnostic>,
     ) -> Result<(), String> {
-        let checks = match calls {
-            FallbackCalls::All | FallbackCalls::DecoratorFactories => FileChecks::FallbackCalls,
-            FallbackCalls::FunctionBodies => FileChecks::FunctionBodyCalls,
-            FallbackCalls::NamedFunctions => FileChecks::NamedFunctionCalls,
-            FallbackCalls::None | FallbackCalls::Entry(_) => {
-                debug_assert!(checked_modules.is_some());
-                FileChecks::NamedFunctionCalls
-            }
-        };
-        self.set_fallback_rules(
-            matches!(calls, FallbackCalls::DecoratorFactories),
-            checked_modules.is_some(),
-        );
-        self.errors(
-            roots.clone(),
-            skipped,
-            overloads,
-            checks,
-            checked_modules,
-            native,
-        )?;
-
-        let entry = match calls {
-            FallbackCalls::Entry(id) => Some(id),
-            _ => None,
-        };
-        let probe_modules = checked_modules.filter(|_| checks == FileChecks::NamedFunctionCalls);
-        let probes = roots.filter_map(|id| {
-            let guards = &probe_modules?[id].optional_imports;
-            (Some(id) != entry && !guards.is_empty()).then_some((id, Some(guards)))
-        });
-        // An entry guard owns calls throughout its entry. A deferred import owns
-        // only calls inside its try statement, whose operands fixed lowering skipped.
-        let owners = entry.map(|id| (id, None)).into_iter().chain(probes);
         let mut errors = Vec::new();
-        for (id, guards) in owners {
-            let checked = CheckedFile::new(
-                &self.db,
-                self.files[id],
-                skipped.map_or(&[][..], |ranges| ranges[id].as_slice()),
-                overloads[id].as_slice(),
-                FileChecks::FallbackCalls,
-                checked_modules.is_some_and(|modules| !modules[id].bundled),
-                self.explicit_check,
-                None,
-                &[][..],
-            );
-            for error in file_errors(&self.db, checked) {
-                if guards.is_none_or(|guards| {
-                    CALL_ARGUMENT_RULES.contains(&error.rule.as_str())
+        for (selected, id) in roots {
+            let checks = match calls {
+                FallbackCalls::All => FileChecks::FallbackCalls,
+                FallbackCalls::DecoratorFactories => FileChecks::DecoratorFactories,
+                FallbackCalls::FunctionBodies => FileChecks::FunctionBodyCalls,
+                FallbackCalls::Entry(entry) if id == entry => FileChecks::FallbackCalls,
+                _ => FileChecks::NamedFunctionCalls,
+            };
+            let module = checked_modules.map(|modules| &modules[id]);
+            let check = |checks| {
+                file_errors(
+                    &self.db,
+                    CheckedFile::new(
+                        &self.db,
+                        self.files[selected],
+                        skipped.map_or(&[][..], |ranges| ranges[id].as_slice()),
+                        overloads.get(id).map_or(&[][..], Vec::as_slice),
+                        checks,
+                        module.is_some_and(|m| !m.bundled),
+                        self.explicit_check,
+                        None,
+                        &[][..],
+                    ),
+                )
+            };
+            errors.extend(check(checks).iter().map(|error| error.rendered.as_str()));
+            // A deferred import owns calls inside its try statement.
+            if checks == FileChecks::NamedFunctionCalls
+                && let Some(module) = module.filter(|m| !m.optional_imports.is_empty())
+                && errors.is_empty()
+            {
+                for error in check(FileChecks::FallbackCalls) {
+                    if CALL_ARGUMENT_RULES.contains(&error.rule.as_str())
                         && error.range.is_some_and(|range| {
-                            guards.keys().any(|guard| guard.contains_range(range))
+                            module
+                                .optional_imports
+                                .keys()
+                                .any(|guard| guard.contains_range(range))
                         })
-                }) {
-                    errors.push(error.rendered.as_str());
+                    {
+                        errors.push(error.rendered.as_str());
+                    }
                 }
             }
         }
-        if !errors.is_empty() {
-            return Err(errors.join("\n"));
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("\n"))
         }
-        Ok(())
     }
 
-    fn set_fallback_rules(&mut self, check_callees: bool, checked_file: bool) {
-        let mut rules = RuleSelection::default();
-        let callee = check_callees.then_some("call-non-callable");
-        for name in ["invalid-return-type"]
-            .into_iter()
-            .chain(CALL_ARGUMENT_RULES.iter().copied())
-            .chain(callee)
-            .chain(checked_file.then_some("invalid-assignment"))
-        {
-            rules.enable(
-                default_lint_registry()
-                    .get(name)
-                    .expect("registered ty lint"),
-                Severity::Error,
-                ty_python_semantic::lint::LintSource::Default,
-            );
-        }
-        DiagnosticRules::get(&self.db)
-            .set_rules(&mut self.db)
-            .to(Arc::new(rules));
-    }
-
-    /// Checks every loaded file, including unused functions and inactive main guards.
-    pub(crate) fn check_scopes(
+    #[cfg(test)]
+    fn check_scopes(
         &mut self,
         skipped: Option<&[Vec<TextRange>]>,
         overloads: &[Vec<CheckedDiagnostic>],
     ) -> Result<(), String> {
-        self.check_scopes_in(0..self.files.len(), skipped, overloads)
+        self.set_fixed_rules();
+        self.fixed_errors(0..self.files.len(), skipped, overloads)
     }
 
-    /// Apply the fixed rules to modules whose source has not already passed the default rules.
-    pub(crate) fn check_scopes_in(
-        &mut self,
-        modules: impl Iterator<Item = usize>,
-        skipped: Option<&[Vec<TextRange>]>,
-        overloads: &[Vec<CheckedDiagnostic>],
-    ) -> Result<(), String> {
+    fn set_fixed_rules(&mut self) {
         DiagnosticRules::get(&self.db)
             .set_rules(&mut self.db)
             .to(self.rules.clone());
-        self.errors(modules, skipped, overloads, FileChecks::Full, None, None)
     }
 
-    /// Check explicit source signatures before choosing a representation.
     /// Borrow the rule-enabled owner of the current source revision.
     pub(crate) fn closed_program_session<'a>(
         &'a mut self,
@@ -3918,24 +4101,20 @@ impl Session {
     }
 
     pub(crate) fn set_closed_program_rules(&mut self) {
-        // Native lowering and the ordinary fallback checker own the rest of the type
-        // contract. Check the same declared signatures when lowering stops at a
-        // representation choice, or registration selects a different source graph.
+        // The source checker and supplemental fallback diagnostics filter the
+        // same ty results without changing rules or invalidating inference.
         let mut rules = RuleSelection::default();
         for name in [
-            "invalid-argument-type",
             "invalid-return-type",
             "empty-body",
+            "invalid-parameter-default",
             "invalid-assignment",
             "unresolved-import",
+            "call-non-callable",
         ]
         .into_iter()
-        .chain(
-            CALL_ARGUMENT_RULES
-                .iter()
-                .copied()
-                .filter(|rule| is_call_shape_rule(rule)),
-        ) {
+        .chain(CALL_ARGUMENT_RULES.iter().copied())
+        {
             rules.enable(
                 default_lint_registry()
                     .get(name)
@@ -4025,89 +4204,6 @@ impl Session {
         }
     }
 
-    /// Validate first-party scalar stores before admitting object fallback. Python
-    /// assignability may accept a value that cannot satisfy Imre's fixed representation:
-    ///
-    /// ```python
-    /// status: int = True
-    /// ```
-    /// Unreachable, type-checking-only, and excluded source spans do not execute stores.
-    fn exact_scalar_stores(
-        &self,
-        file: File,
-        path: &Path,
-        skipped: &[TextRange],
-        checked: &[CheckedDiagnostic],
-        errors: &mut Vec<(TextSize, String)>,
-    ) {
-        use ty_python_core::{definition::DefinitionKind, scope::NodeWithScopeKind};
-
-        let db = &self.db;
-        let source = db.program_file(file);
-        let index = ty_python_core::semantic_index(db, source);
-        let parsed = self.parsed(file);
-        let model = SemanticModel::new(db, source);
-        let env = model.program_environment();
-        let unreachable = std::cell::LazyCell::new(|| {
-            ty_python_semantic::types::ide_support::unreachable_ranges(db, source)
-        });
-        for scope in index.scope_ids() {
-            // A metaclass can interpret class annotations as schema fields.
-            if matches!(scope.node(db), NodeWithScopeKind::Class(_)) {
-                continue;
-            }
-            let scope = scope.file_scope_id(db);
-            let definitions = index.use_def_map(scope);
-            for (_, definition, _) in definitions.definitions_with_usage() {
-                let (annotation, value) = match definition.kind(db) {
-                    DefinitionKind::AnnotatedAssignment(a) if a.target(&parsed).is_name_expr() => {
-                        (Some(a.annotation(&parsed)), a.value(&parsed))
-                    }
-                    DefinitionKind::Assignment(a)
-                        if a.unpack().is_none() && a.target(&parsed).is_name_expr() =>
-                    {
-                        let mut declarations = definitions.declarations_at_binding(definition);
-                        let annotation = declarations
-                            .next()
-                            .filter(|_| declarations.next().is_none())
-                            .and_then(|d| d.declaration.definition())
-                            .filter(|d| d.file(db) == file)
-                            .and_then(|d| match d.kind(db) {
-                                DefinitionKind::AnnotatedAssignment(a) => {
-                                    Some(a.annotation(&parsed))
-                                }
-                                DefinitionKind::Parameter(p) => p.annotation(&parsed),
-                                _ => None,
-                            });
-                        (annotation, Some(a.value(&parsed)))
-                    }
-                    _ => continue,
-                };
-                let (Some(annotation), Some(value)) = (annotation, value) else {
-                    continue;
-                };
-                if index.is_in_type_checking_block(scope, value.range())
-                    || skipped.iter().any(|r| r.contains_range(value.range()))
-                    || checked.contains(&CheckedDiagnostic::FrameScalarStore(value.range()))
-                {
-                    continue;
-                }
-                if let Some(expected) = annotation_type(db, &model, annotation)
-                    && let Some(actual) = value.inferred_type(&model)
-                    // Keep ty's diagnostic where the declared-initializer check covers it;
-                    // other scalar stores still need an independent contract diagnostic.
-                    && (actual.is_assignable_to(db, &env, expected)
-                        || contract_initializer(db, file, &parsed, value.range()).is_none())
-                    && !Self::written_scalar_union_accepts(&model, annotation, actual)
-                    && let Some(error) = Self::scalar_contract_error(&model, expected, value, actual, || true)
-                    && !unreachable.iter().any(|r| r.range.contains_range(value.range()))
-                {
-                    errors.push((value.start(), error.with_path(path).to_string()));
-                }
-            }
-        }
-    }
-
     /// Project physical source slots into the explicit file roles and diagnostic masks.
     /// Keep slot order and duplicates: original diagnostic matching uses the first owner.
     pub(crate) fn closed_file_roots<'a>(
@@ -4155,6 +4251,7 @@ impl Session {
         if !roots.iter().any(|root| root.role.first_party) {
             return Ok(());
         }
+        let mut defaults = HashMap::<File, Vec<_>>::new();
         let mut written_return = None;
         let mut call_shapes = Vec::new();
         let mut program_files = Vec::new();
@@ -4208,13 +4305,45 @@ impl Session {
                         }
                     }
                     let parameter_start = parameters.len();
-                    parameters.extend(
-                        function
-                            .parameters
-                            .iter()
-                            .filter(|p| p.annotation().is_some())
-                            .map(|p| (file, p.range())),
-                    );
+                    for parameter in function.parameters.iter() {
+                        let Some(annotation) = parameter.annotation() else {
+                            continue;
+                        };
+                        parameters.push((file, parameter.range()));
+                        // A default is a declaration-time value even if no call
+                        // ever supplies the parameter. ty accepts scalar subtypes.
+                        let Some((path, value)) = root.diagnostic_path.zip(parameter.default())
+                        else {
+                            continue;
+                        };
+                        let model = SemanticModel::new(&self.db, source);
+                        if !root.skipped.iter().any(|r| r.contains_range(value.range()))
+                            && let Some(expected) = annotation_type(&self.db, &model, annotation)
+                            && let Some(actual) = value.inferred_type(&model)
+                            && actual.is_assignable_to(
+                                &self.db,
+                                &model.program_environment(),
+                                expected,
+                            )
+                            && !Self::written_scalar_union_accepts(&model, annotation, actual)
+                            && let Some(error) =
+                                Self::scalar_contract_error(&model, expected, value, actual, || {
+                                    true
+                                })
+                            && !index.is_in_type_checking_block(
+                                scope.file_scope_id(&self.db),
+                                function.range(),
+                            )
+                            && !excluded
+                                .iter()
+                                .any(|r| r.range.contains_range(value.range()))
+                        {
+                            defaults
+                                .entry(file)
+                                .or_default()
+                                .push((value.start(), error.with_path(path).to_string()));
+                        }
+                    }
                     if root.role.program
                         && function.decorator_list.is_empty()
                         && function.type_params.is_none()
@@ -4226,8 +4355,19 @@ impl Session {
                 }
             }
         }
-        let has_signatures =
-            !parameters.is_empty() || !result_scopes.is_empty() || !class_files.is_empty();
+        // Another file can write an explicitly declared module attribute even
+        // when neither file contributes a function or class.
+        let has_shared_contracts = !parameters.is_empty()
+            || !result_scopes.is_empty()
+            || !class_files.is_empty()
+            || program_files.iter().any(|&file| {
+                ty_python_core::semantic_index(&self.db, self.db.program_file(file))
+                    .use_def_map(FileScopeId::global())
+                    .definitions_with_usage()
+                    .any(|(_, def, _)| {
+                        matches!(def.kind(&self.db), DefinitionKind::AnnotatedAssignment(_))
+                    })
+            });
         for scopes in result_scopes.values_mut() {
             scopes.sort_unstable();
         }
@@ -4246,7 +4386,7 @@ impl Session {
         let mut errors = Vec::new();
         for (root, path) in project_files.clone() {
             let file = root.file;
-            if !has_signatures {
+            if !has_shared_contracts {
                 let index = ty_python_core::semantic_index(&self.db, self.db.program_file(file));
                 if !index.scope_ids().any(|scope| {
                     index
@@ -4259,8 +4399,7 @@ impl Session {
                     continue;
                 }
             }
-            let mut dormant = Vec::new();
-            self.exact_scalar_stores(file, path, root.skipped, root.overloads, &mut dormant);
+            let mut dormant = defaults.remove(&file).unwrap_or_default();
             if !declarations.parameters(&self.db).is_empty() {
                 self.dormant_call_errors(file, path, declarations, &mut dormant);
             }
@@ -4281,25 +4420,22 @@ impl Session {
             } else {
                 file_errors(&self.db, checked).as_slice()
             };
-            let mut exact_calls = Vec::new();
+            let mut exact = Vec::new();
             let returns = result_scopes.get(&file).map_or(&[][..], Vec::as_slice);
-            if !declarations.parameters(&self.db).is_empty() || !returns.is_empty() {
-                self.exact_scalar_calls(
-                    file,
-                    path,
-                    declarations,
-                    returns,
-                    root.skipped,
-                    ty_errors,
-                    &mut exact_calls,
-                );
-            }
+            self.exact_operands(
+                root,
+                path,
+                declarations.program_files(&self.db),
+                returns,
+                ty_errors,
+                &mut exact,
+            );
             // Merge source diagnostics in operand order, including cached ty-clean bodies.
             let mut dormant: Vec<_> = dormant
                 .into_iter()
                 .map(|(start, message)| (start, message, false))
                 .chain(
-                    exact_calls
+                    exact
                         .into_iter()
                         .map(|(start, message)| (start, message, true)),
                 )
@@ -4349,23 +4485,6 @@ impl Session {
     }
 
     /// Preserve the original error only for the same operand and parameter declaration.
-    fn original_operand<'a>(
-        &self,
-        error: &CheckedError,
-        modules: &[impl ClosedSource],
-        index: usize,
-        report: &'a crate::frontend::phase::Diagnostic,
-    ) -> Option<&'a crate::frontend::phase::Diagnostic> {
-        let (owner, _) = error.declaration?;
-        let owner = self.files.iter().position(|&file| file == owner)?;
-        Self::matching_original_operand(
-            error,
-            modules[owner].checked_source(owner),
-            modules[index].checked_source(index),
-            report,
-        )
-    }
-
     fn matching_original_operand<'a>(
         error: &CheckedError,
         declaration: Option<(usize, &Path)>,
@@ -4378,14 +4497,11 @@ impl Session {
         report.matching_declared_operand(path, error.range?, declaration, annotation)
     }
 
-    fn errors(
+    fn fixed_errors(
         &self,
         roots: impl Iterator<Item = usize>,
         skipped: Option<&[Vec<TextRange>]>,
         overloads: &[Vec<CheckedDiagnostic>],
-        checks: FileChecks,
-        checked_modules: Option<&[crate::modules::SourceModule]>,
-        native: Option<&crate::frontend::phase::Diagnostic>,
     ) -> Result<(), String> {
         let errors: Vec<_> = roots
             .flat_map(|index| {
@@ -4395,21 +4511,15 @@ impl Session {
                     file,
                     skipped.map_or(&[][..], |ranges| ranges[index].as_slice()),
                     overloads.get(index).map_or(&[][..], Vec::as_slice),
-                    checks,
-                    checked_modules.is_some_and(|modules| !modules[index].bundled),
+                    FileChecks::Full,
+                    false,
                     self.explicit_check,
                     None,
                     &[][..],
                 );
-                file_errors(&self.db, checked).iter().map(move |error| {
-                    let original = native.and_then(|report| {
-                        self.original_operand(error, checked_modules?, index, report)
-                    });
-                    original.map_or_else(
-                        || std::borrow::Cow::Borrowed(error.rendered.as_str()),
-                        |report| std::borrow::Cow::Owned(report.to_string()),
-                    )
-                })
+                file_errors(&self.db, checked)
+                    .iter()
+                    .map(|error| error.rendered.as_str())
             })
             .collect();
         if errors.is_empty() {
@@ -4458,6 +4568,13 @@ enum FileChecks {
     FunctionBodyCalls,
     NamedFunctionCalls,
     FallbackCalls,
+    DecoratorFactories,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct FallbackChecks {
+    pub(crate) calls: FallbackCalls,
+    pub(crate) checked_file: bool,
 }
 
 /// Files in which a checked object fallback also enforces call arguments.
@@ -4609,20 +4726,19 @@ fn sole_global_name<'db>(
 fn changed_module_binding<'db>(
     db: &'db dyn LiteralSourceDb,
     model: &SemanticModel<'db>,
-    call: &ExprCall,
-    name: &ruff_python_ast::ExprName,
+    value: &Expr,
     definition: ty_python_core::definition::Definition<'db>,
 ) -> bool {
     let caller = model.file();
     let index = ty_python_core::semantic_index(db, model.program_file());
-    let scope = index.try_expression_scope_id(call.func.as_ref());
+    let scope = index.try_expression_scope_id(value);
     let written = |binding: ty_python_core::definition::Definition<'db>, key: String| {
         let file = binding.file(db);
         let parsed =
             ruff_db::parsed::parsed_module(db, db.program_file(file).python_file(db)).load(db);
         let bound = binding.focus_range(db, &parsed).end();
         first_global_item_write(db, file, key, bound).is_some_and(|site| {
-            file != caller || site < call.start() || scope.is_some_and(|scope| !scope.is_global())
+            file != caller || site < value.start() || scope.is_some_and(|scope| !scope.is_global())
         })
     };
     if definition.file(db) != caller
@@ -4633,12 +4749,14 @@ fn changed_module_binding<'db>(
     {
         return true;
     }
-    let Some(scope) = scope else { return false };
+    let Some((scope, name)) = scope.zip(value.as_name_expr()) else {
+        return false;
+    };
     let Some(symbol) = index.place_table(scope).symbol_id(name.id.as_str()) else {
         return false;
     };
     index.symbol_resolves_to_global_scope(symbol, scope)
-        && shipped_exports::binding_at_use(db, caller, &call.func)
+        && shipped_exports::binding_at_use(db, caller, value)
             .or_else(|| sole_global_name(model, name))
             .is_some_and(|binding| written(binding, name.id.to_string()))
 }
@@ -4724,6 +4842,7 @@ pub(crate) enum CheckedDiagnostic {
     Call(TextRange),
     NonCallable(TextRange),
     InertReturn(TextRange),
+    PartialSignature(TextRange),
     DictDeletion(TextRange),
     DeferredName(TextRange),
     Keyword(TextRange),
@@ -4758,6 +4877,7 @@ impl CheckedDiagnostic {
             Self::BuiltinAttribute(range) => (range, 14),
             Self::ExcessArgument(range) => (range, 6),
             Self::InertReturn(range) => (range, 13),
+            Self::PartialSignature(range) => (range, 18),
             Self::PositionalKeyword(range) => (range, 7),
             Self::DeferredName(range) => (range, 9),
             Self::NonIterableSpread(range) => (range, 10),
@@ -4781,6 +4901,10 @@ impl CheckedDiagnostic {
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
             Self::NonCallable(call) => diagnostic == "call-non-callable" && call == range,
             Self::InertReturn(annotation) => diagnostic == "empty-body" && annotation == range,
+            Self::PartialSignature(operand) => {
+                operand == range
+                    && matches!(diagnostic, "invalid-argument-type" | "invalid-return-type")
+            }
             Self::DictDeletion(target) => diagnostic == "not-subscriptable" && target == range,
             Self::RuntimeOverload(name) => diagnostic == "invalid-overload" && name == range,
             Self::DeferredName(name) => diagnostic == "unresolved-reference" && name == range,
@@ -4960,6 +5084,20 @@ fn dormant_returns(
     })
 }
 
+/// Fixed diagnostics and declaration diagnostics share one ty query and
+/// independently filter its results. Signature edits need not rerun ty on
+/// importers that did not read the changed declaration.
+#[salsa::tracked(returns(ref))]
+fn source_diagnostics(db: &dyn LiteralSourceDb, file: File) -> Vec<Diagnostic> {
+    #[cfg(test)]
+    FILE_CHECKS.with_borrow_mut(|checks| {
+        if let Some(checks) = checks {
+            checks.push(file.path(db).to_string());
+        }
+    });
+    db.check_file(file)
+}
+
 /// A per-file result depends on the ty queries it actually read, including any other source
 /// consulted to render a diagnostic. Every revision still requests the result for every file.
 #[salsa::tracked(returns(ref))]
@@ -4973,18 +5111,27 @@ fn file_errors<'db>(db: &'db dyn LiteralSourceDb, checked: CheckedFile<'db>) -> 
     if fallback.as_ref().is_some_and(fallback_data_module) {
         return Vec::new();
     }
-    #[cfg(test)]
-    FILE_CHECKS.with_borrow_mut(|checks| {
-        if let Some(checks) = checks {
-            checks.push(file.path(db).to_string());
-        }
-    });
     let skipped = checked.skipped(db);
     let overloads = checked.overloads(db);
-    db.check_file(file)
+    source_diagnostics(db, file)
         .iter()
         .filter(|diagnostic| {
             let rule = diagnostic.id().as_str();
+            if checks == FileChecks::Full
+                && matches!(
+                    rule,
+                    "invalid-assignment" | "invalid-argument-type" | "invalid-return-type"
+                )
+            {
+                return false;
+            }
+            if !full
+                && !matches!(rule, "invalid-assignment" | "invalid-return-type")
+                && !CALL_ARGUMENT_RULES.contains(&rule)
+                && !(checks == FileChecks::DecoratorFactories && rule == "call-non-callable")
+            {
+                return false;
+            }
             let check_argument = match checks {
                 FileChecks::Full => {
                     matches!(rule, "too-many-positional-arguments" | "missing-argument")
@@ -5009,6 +5156,8 @@ fn file_errors<'db>(db: &'db dyn LiteralSourceDb, checked: CheckedFile<'db>) -> 
                     .is_some_and(|range| {
                         skipped.iter().any(|scope| scope.contains_range(range))
                             || (check_argument && runtime_argument(db, checked, range, rule))
+                            || (rule == "invalid-return-type" && returns_builtin_module_names(db, file, range))
+                            || (rule == "invalid-assignment" && weak_proxy_field(db, file, range))
                             // ty also reports implicit None returns at the annotation span.
                             || (checks != FileChecks::DeclaredSignatures
                                 && diagnostic.id().is_lint_named("invalid-return-type")
@@ -5038,9 +5187,16 @@ fn file_errors<'db>(db: &'db dyn LiteralSourceDb, checked: CheckedFile<'db>) -> 
                     parameter
                 }
                 Some(sources) if diagnostic.id().is_lint_named("invalid-assignment") => {
-                    let scalar =
-                        range.and_then(|range| contract_initializer(db, file, &parse(), range));
-                    if scalar.is_none()
+                    let declaration = range.and_then(|range| {
+                        stores::assignment_declaration(
+                            db,
+                            file,
+                            &parse(),
+                            range,
+                            sources.program_files(db),
+                        )
+                    });
+                    if declaration.is_none()
                         && !has_declared_nominal_target(
                             db,
                             file,
@@ -5050,7 +5206,7 @@ fn file_errors<'db>(db: &'db dyn LiteralSourceDb, checked: CheckedFile<'db>) -> 
                     {
                         return None;
                     }
-                    scalar.map(|annotation| (file, annotation))
+                    declaration
                 }
                 _ if checks == FileChecks::DeclaredSignatures
                     && matches!(
@@ -5062,6 +5218,7 @@ fn file_errors<'db>(db: &'db dyn LiteralSourceDb, checked: CheckedFile<'db>) -> 
                     checked.result_scopes(db).binary_search(&scope).ok()?;
                     None
                 }
+                Some(_) if diagnostic.id().is_lint_named("invalid-parameter-default") => None,
                 Some(_) if is_call_shape_rule(diagnostic.id().as_str()) && range.is_some() => None,
                 Some(_)
                     if diagnostic.id().is_lint_named("unresolved-import")
@@ -5570,6 +5727,107 @@ pub(crate) fn explicit_returns(
     exits.returns
 }
 
+/// A typed constructor field can hold a weak proxy to its declared record.
+fn weak_proxy_field(db: &dyn Db, file: File, range: TextRange) -> bool {
+    use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
+    use ty_python_semantic::types::Type;
+    let program = db.program_file(file);
+    let parsed = ruff_db::parsed::parsed_module(db, program.python_file(db)).load(db);
+    if !parsed.syntax().range().contains_range(range) {
+        return false;
+    }
+    let nodes = covering_node(parsed.syntax().into(), range);
+    let mut parents = nodes.ancestors();
+    let Some(field) = parents.find_map(|node| match node {
+        AnyNodeRef::StmtAnnAssign(field) => Some(field),
+        _ => None,
+    }) else {
+        return false;
+    };
+    let Some(Expr::Call(call)) = field.value.as_deref() else {
+        return false;
+    };
+    let model = SemanticModel::new(db, program);
+    let Some(expected @ Type::NominalInstance(_)) = annotation_type(db, &model, &field.annotation)
+    else {
+        return false;
+    };
+    call.range() == range
+        && field.target.is_attribute_expr()
+        && parents.find_map(|node| match node {
+            AnyNodeRef::StmtFunctionDef(f) => Some(f.name.as_str()),
+            _ => None,
+        }) == Some("__init__")
+        && resolves_to_stdlib_function(&model, &call.func, "_weakref", "proxy")
+        && call
+            .arguments
+            .args
+            .first()
+            .and_then(|arg| arg.inferred_type(&model))
+            == Some(expected)
+}
+
+/// Typeshed describes sys.builtin_module_names as Sequence[str]. The sealed
+/// provider supplies a tuple. Narrow only a diagnostic on that exact export.
+fn returns_builtin_module_names(db: &dyn Db, file: File, range: TextRange) -> bool {
+    use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
+    use ty_python_semantic::types::{KnownClass, Type};
+    let program = db.program_file(file);
+    let parsed = ruff_db::parsed::parsed_module(db, program.python_file(db)).load(db);
+    if !parsed.syntax().range().contains_range(range) {
+        return false;
+    }
+    let nodes = covering_node(parsed.syntax().into(), range);
+    let mut parents = nodes.ancestors();
+    let Some(value) = parents.find_map(|node| match node {
+        AnyNodeRef::StmtReturn(ret) => ret.value.as_deref().filter(|v| v.range() == range),
+        _ => None,
+    }) else {
+        return false;
+    };
+    let model = SemanticModel::new(db, program);
+    let provider = match value {
+        Expr::Attribute(a) if a.attr.as_str() == "builtin_module_names" => {
+            match a.value.inferred_type(&model) {
+                Some(Type::ModuleLiteral(m)) => m.module(db).file(db),
+                _ => None,
+            }
+        }
+        Expr::Name(name) => {
+            resolved_name_definition(&model, name, ImportAliasResolution::ResolveAliases)
+                .filter(|d| {
+                    let scope = d.file_scope(db);
+                    scope.is_global()
+                        && d.place(db).as_symbol().is_some_and(|id| {
+                            let index =
+                                ty_python_core::semantic_index(db, db.program_file(d.file(db)));
+                            index.place_table(scope).symbol_id("builtin_module_names") == Some(id)
+                        })
+                })
+                .map(|d| d.file(db))
+        }
+        _ => None,
+    };
+    if provider.is_none()
+        || provider != ruff_db::files::vendored_path_to_file(db, "stdlib/sys/__init__.pyi").ok()
+    {
+        return false;
+    }
+    let Some(function) = parents.find_map(|node| match node {
+        AnyNodeRef::StmtFunctionDef(f) => Some(f),
+        _ => None,
+    }) else {
+        return false;
+    };
+    let env = model.program_environment();
+    let tuple = Type::homogeneous_tuple(db, &env, KnownClass::Str.to_instance(db, &env));
+    function
+        .returns
+        .as_deref()
+        .and_then(|annotation| annotation_type(db, &model, annotation))
+        == Some(tuple)
+}
+
 /// Resolve an explicit return, or the annotation where ty reports a bottom
 /// function's implicit return, to its original scope.
 fn return_scope(db: &dyn Db, file: File, range: TextRange) -> Option<FileScopeId> {
@@ -5705,12 +5963,12 @@ fn runtime_argument(
     } else {
         None
     };
-    if let Some((name, definition)) = named
+    if let Some((_, definition)) = named
         && matches!(
             definition.kind(db),
             ty_python_core::definition::DefinitionKind::Function(_)
         )
-        && changed_module_binding(db, &model, call, name, definition)
+        && changed_module_binding(db, &model, &call.func, definition)
     {
         return true;
     }
@@ -6018,6 +6276,7 @@ impl CachedSession {
     }
 
     fn update(&mut self, fresh: &Session, inputs: &crate::SourceInputs) -> Result<(), String> {
+        self.session.explicit_check = fresh.explicit_check;
         self.session.tuple_spreads.clone_from(&fresh.tuple_spreads);
         self.session.copy_profile_exclusions_from(fresh);
         for (index, (old, new)) in self.inputs.files.iter_mut().zip(&inputs.files).enumerate() {
@@ -6079,6 +6338,7 @@ impl AnalysisCache {
         if let Some(DiagnosticSession::Registered(mut prior)) = self.diagnostics.take()
             && prior.root == fresh.root
             && prior.extension_roots == fresh.extension_roots
+            && prior.sdk_interfaces == fresh.sdk_interfaces
             && prior.files.len() == fresh.files.len()
             && prior
                 .files
@@ -6103,42 +6363,33 @@ impl AnalysisCache {
         Ok(())
     }
 
-    pub(crate) fn check_scopes(
+    fn fixed_session(
         &mut self,
         fresh: &mut Session,
         inputs: &crate::SourceInputs,
-        skipped: Option<&[Vec<TextRange>]>,
-        overloads: &[Vec<CheckedDiagnostic>],
-    ) -> Result<(), String> {
+    ) -> Result<&Session, String> {
         if let Some(DiagnosticSession::Native(cached)) = &mut self.diagnostics
             && cached.same_files(fresh, inputs)
         {
             cached.update(fresh, inputs)?;
-            return cached.session.errors(
-                0..cached.session.files.len(),
-                skipped,
-                overloads,
-                FileChecks::Full,
-                None,
-                None,
-            );
-        }
-        if self.hints.is_some() {
-            // The quiet database must retain its inference with diagnostics disabled.
-            let mut session = fresh.diagnostic_copy()?;
-            let result = session.check_scopes(skipped, overloads);
+        } else {
+            // Preserve the quiet database if lowering used its type hints.
+            let session = if self.hints.is_some() {
+                let mut copy = fresh.diagnostic_copy()?;
+                copy.set_fixed_rules();
+                copy
+            } else {
+                fresh.set_fixed_rules();
+                fresh.clone()
+            };
             self.diagnostics = Some(DiagnosticSession::Native(CachedSession::new(
                 session, inputs,
             )));
-            result
-        } else {
-            let result = fresh.check_scopes(skipped, overloads);
-            self.diagnostics = Some(DiagnosticSession::Native(CachedSession::new(
-                fresh.clone(),
-                inputs,
-            )));
-            result
         }
+        let Some(DiagnosticSession::Native(cached)) = &self.diagnostics else {
+            unreachable!()
+        };
+        Ok(&cached.session)
     }
 }
 
@@ -6633,13 +6884,13 @@ mod diagnostic_mode_tests {
                 crate::SourceKind::File,
             )
             .unwrap();
+        session.set_closed_program_rules();
         let errors = session
             .check_fallback_contracts(
                 None,
                 &[],
                 FallbackCalls::NamedFunctions,
-                0..session.files.len(),
-                None,
+                (0..session.files.len()).map(|id| (id, id)),
                 None,
             )
             .unwrap_err();
@@ -6663,13 +6914,13 @@ mod diagnostic_mode_tests {
             )
             .unwrap();
         FILE_CHECKS.with_borrow_mut(|checks| *checks = Some(Vec::new()));
+        session.set_closed_program_rules();
         session
             .check_fallback_contracts(
                 None,
                 &[vec![]],
                 FallbackCalls::All,
-                0..session.files.len(),
-                None,
+                (0..session.files.len()).map(|id| (id, id)),
                 None,
             )
             .unwrap();
@@ -6743,26 +6994,12 @@ mod diagnostic_mode_tests {
         let whole = TextRange::new(0.into(), 40.into());
         assert!(
             session
-                .errors(
-                    0..session.files.len(),
-                    Some(&[vec![whole]]),
-                    &[],
-                    FileChecks::Full,
-                    None,
-                    None,
-                )
+                .fixed_errors(0..session.files.len(), Some(&[vec![whole]]), &[])
                 .is_ok()
         );
         assert_eq!(
             session
-                .errors(
-                    0..session.files.len(),
-                    None,
-                    &[],
-                    FileChecks::Full,
-                    None,
-                    None
-                )
+                .fixed_errors(0..session.files.len(), None, &[])
                 .unwrap_err(),
             message
         );

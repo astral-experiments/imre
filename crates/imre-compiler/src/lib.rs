@@ -566,6 +566,11 @@ fn object_fallback(
                                             .to_owned(),
                                     );
                             }
+                            graph
+                                .source_contract
+                                .as_ref()
+                                .expect("fixed source diagnostics")
+                                .original(&graph, None, None)?;
                             let Some(output) = output.as_deref_mut() else {
                                 return Ok(graph.inputs);
                             };
@@ -641,7 +646,7 @@ fn object_fallback(
             if (kind.is_representation() || execution.is_some())
                 && let Some(contract) = &graph.source_contract
             {
-                contract.original(&graph).clone()?;
+                contract.original(&graph, refusal.as_ref(), None)?;
             }
             if let Some(id) = execution {
                 graph.session.check_execution_escapes(std::iter::once((
@@ -697,96 +702,62 @@ fn object_fallback(
         || graph
             .as_ref()
             .is_some_and(|g| g.needs_object_runtime.get() || g.traceback_objects);
-    let check_returns = |graph: Option<&mut modules::SourceGraph>,
-                         entry_requests_objects: bool,
-                         registrations: Option<&dynamic::RegisteredSources<'_>>|
-     -> Result<(), String> {
-        if let Some(graph) = graph.filter(|g| !g.has_checked_only_import) {
-            let check_file_contracts = checked_file || options.require_checked_module_entry;
-            let requested = graph.check_fallback_calls.get();
-            // A runtime class export can admit a new import graph. Keep direct source-call
-            // diagnostics unless this entry already requested Python object semantics.
-            let check_class_import = graph.imports_runtime_class && !entry_requests_objects;
-            if !check_file_contracts
-                && !check_class_import
-                && !matches!(requested, analysis::FallbackCalls::FunctionBodies)
-            {
-                return Ok(());
-            }
-            let replaced = registrations.filter(|r| !r.provider_sources.is_empty());
-            let body_checks = graph.registered_source_errors.borrow();
-            // A clean body check covers the fallback lints on the original bindings.
-            // Replacing a dependency also changes the contract of its callers.
-            let checked_source = |id: usize| {
-                !incremental
-                    && replaced.is_none()
-                    && graph.modules[id].checks_source_contracts()
-                    && body_checks.get(&id).is_some_and(Vec::is_empty)
-            };
-            let (skipped, overloads) = graph.diagnostic_scopes();
-            let entry = &graph.modules[graph.entry];
-            let all_calls = !matches!(requested, analysis::FallbackCalls::None)
-                || check_file_contracts && graph.has_object_constructor_fallback.get()
-                || !entry.optional_imports.is_empty()
-                || !graph.needs_object_runtime.get() && kind.checks_object_calls()
-                || check_file_contracts && graph.uses_source_loader();
-            let checked_calls = if !check_file_contracts {
-                if check_class_import
-                    && !matches!(requested, analysis::FallbackCalls::FunctionBodies)
-                {
-                    analysis::FallbackCalls::NamedFunctions
-                } else {
-                    requested
-                }
-            } else if graph.check_method_factories.get() {
-                analysis::FallbackCalls::DecoratorFactories
-            } else if all_calls {
-                analysis::FallbackCalls::All
-            } else if check_class_import {
-                analysis::FallbackCalls::NamedFunctions
-            } else if !checked_source(graph.entry) && entry.has_entry_guard() {
-                analysis::FallbackCalls::Entry(graph.entry)
-            } else {
-                analysis::FallbackCalls::None
-            };
-            let check = |session: &mut analysis::Session| {
-                session.check_fallback_contracts(
-                    skipped.as_deref(),
-                    &overloads,
-                    checked_calls,
-                    // A replaced adapter is an import dependency. Its checked spans
-                    // and layout errors belong to the original fixed source.
-                    (0..graph.modules.len()).filter(|id| {
-                        !checked_source(*id)
-                            && replaced.is_none_or(|r| !r.provider_sources.contains_key(id))
-                    }),
-                    check_file_contracts.then_some(&graph.modules),
-                    replaced.is_none().then_some(refusal.as_ref()).flatten(),
-                )
-            };
-            if incremental || replaced.is_some() {
-                check(&mut graph.session.copy_for_diagnostics(None, replaced)?)?;
-            } else {
-                graph.session.with_diagnostic_rules(check)?;
-            }
+    let fallback_checks = |graph: &modules::SourceGraph, entry_requests_objects: bool| {
+        if graph.has_checked_only_import {
+            return None;
         }
-        Ok(())
+        let check_file_contracts = checked_file || options.require_checked_module_entry;
+        let requested = graph.check_fallback_calls.get();
+        // A runtime class export can admit a new import graph. Keep direct source-call
+        // diagnostics unless this entry already requested Python object semantics.
+        let check_class_import = graph.imports_runtime_class && !entry_requests_objects;
+        if !check_file_contracts
+            && !check_class_import
+            && !matches!(requested, analysis::FallbackCalls::FunctionBodies)
+        {
+            return None;
+        }
+        let entry = &graph.modules[graph.entry];
+        let all_calls = !matches!(requested, analysis::FallbackCalls::None)
+            || check_file_contracts && graph.has_object_constructor_fallback.get()
+            || !entry.optional_imports.is_empty()
+            || !graph.needs_object_runtime.get() && kind.checks_object_calls()
+            || check_file_contracts && graph.uses_source_loader();
+        let checked_calls = if !check_file_contracts {
+            if check_class_import && !matches!(requested, analysis::FallbackCalls::FunctionBodies) {
+                analysis::FallbackCalls::NamedFunctions
+            } else {
+                requested
+            }
+        } else if graph.check_method_factories.get() {
+            analysis::FallbackCalls::DecoratorFactories
+        } else if all_calls {
+            analysis::FallbackCalls::All
+        } else if check_class_import {
+            analysis::FallbackCalls::NamedFunctions
+        } else if entry.has_entry_guard() {
+            analysis::FallbackCalls::Entry(graph.entry)
+        } else {
+            analysis::FallbackCalls::None
+        };
+        Some(analysis::FallbackChecks {
+            calls: checked_calls,
+            checked_file: check_file_contracts,
+        })
     };
     let checking = output.is_none();
-    let check = |mut checked_graph: Option<&mut modules::SourceGraph>,
+    let check = |checked_graph: Option<&mut modules::SourceGraph>,
                  entry_requests_objects,
                  registered: Option<dynamic::RegisteredSources<'_>>| {
-        // A lowering refusal does not prove the original first-party scalar stores.
-        if let Some(graph) = checked_graph.as_deref()
+        let extra = checked_graph
+            .as_deref()
+            .and_then(|g| fallback_checks(g, entry_requests_objects));
+        if registered.is_none()
+            && let Some(graph) = checked_graph.as_deref()
             && let Some(contract) = &graph.source_contract
         {
-            contract.original(graph).clone()?;
+            contract.original(graph, refusal.as_ref(), extra)?;
         }
-        check_returns(
-            checked_graph.as_deref_mut(),
-            entry_requests_objects,
-            registered.as_ref(),
-        )?;
         if let Some(mut registered) = registered {
             let layouts = analysis::check_registered_project(
                 registered.root,
@@ -795,7 +766,7 @@ fn object_fallback(
                 registered.has_file_body,
                 checked_graph
                     .as_deref()
-                    .map(|g| (g, &registered.provider_sources)),
+                    .map(|g| (g, &registered.provider_sources, extra)),
                 refusal.as_ref(),
                 cache.map(|compiler| (&mut compiler.cache, checking)),
             )?;
@@ -834,7 +805,7 @@ fn object_fallback(
                     registered.has_file_body,
                     checked_graph
                         .as_deref()
-                        .map(|g| (g, &registered.provider_sources)),
+                        .map(|g| (g, &registered.provider_sources, None)),
                     None,
                     None,
                 )?;
@@ -1282,55 +1253,21 @@ fn checked_lower_with(
         }
         result => result,
     };
-    if cache.is_none()
-        && let Err(reason) = lowered
-    {
-        graph.session.set_closed_program_rules();
-        graph.source_contract = Some(analysis::SourceContract::Pending {
-            native: Box::new(reason.clone()),
-            result: Default::default(),
-        });
-        return Ok(CheckedProgram::Runtime(reason));
-    }
-    let (skipped, overloads) = graph.diagnostic_scopes();
-    let skipped = skipped.as_deref();
-    // A fully lowered graph has already checked the actual first-party definitions.
-    // Keep its existing diagnostics and proof scopes. When a representation is
-    // unavailable, the declared Python call contracts still apply to the graph.
-    let session = &mut graph.session;
-    let result = if lowered.is_ok() {
-        lowered.and_then(|ir| {
-            if let Some(compiler) = cache.as_deref_mut() {
-                compiler
-                    .cache
-                    .check_scopes(session, &graph.inputs, skipped, &overloads)?;
-            } else {
-                let registered = graph.registered_source_errors.borrow();
-                let remaining = (0..graph.modules.len()).filter(|id| {
-                    !graph.modules[*id].checks_source_contracts()
-                        || !registered.get(id).is_some_and(Vec::is_empty)
-                });
-                session.check_scopes_in(remaining, skipped, &overloads)?;
-            }
-            graph.source_contract = Some(analysis::SourceContract::Checked(Ok(())));
-            Ok(ir)
-        })
-    } else {
-        let native = lowered.as_ref().err();
-        let checked = session
-            .closed_program_session(
-                cache.as_deref_mut().map(|compiler| &mut compiler.cache),
-                &graph.inputs,
-            )
-            .and_then(|owner| {
-                let roots = owner.closed_file_roots(&graph.modules, skipped, &overloads, None);
-                owner.closed_program_errors(&roots, native)
-            });
-        // An inapplicable object representation cannot replace a native source or ABI
-        // diagnostic. A real registration checks this result before emitting its body.
-        graph.source_contract = Some(analysis::SourceContract::Checked(checked));
-        lowered
-    };
+    let fixed = matches!(lowered, Ok(CheckedProgram::Native(_)));
+    let contract = analysis::SourceContract::prepare(
+        graph,
+        cache.as_deref_mut().map(|compiler| &mut compiler.cache),
+        fixed,
+    )?;
+    // Fixed layout diagnostics can still request registration. The selected
+    // source contract runs once, after placement or provider selection.
+    let result = lowered.and_then(|program| {
+        if fixed {
+            contract.fixed_errors(graph)?;
+        }
+        Ok(program)
+    });
+    graph.source_contract = Some(contract);
     match result {
         Ok(program) => Ok(program),
         Err(reason) => {
@@ -2002,14 +1939,20 @@ print("result", call(b=2, a=1))
     }
 
     #[test]
-    fn mixed_appends_keep_the_original_module_list_layout() {
+    fn mixed_appends_respect_declared_module_list_storage() {
         let project = tempfile::tempdir().unwrap();
         let path = project.path().join("app.py");
         for (first, second, line) in [("7", "'rhs'", 7), ("'rhs'", "7", 4)] {
             let source = format!(
                 "events = []\n\ndef first():\n    events.append({first})\n\ndef second():\n    events.append({second})\n\nfirst()\nsecond()\n"
             );
-            std::fs::write(&path, source).unwrap();
+            std::fs::write(&path, &source).unwrap();
+            super::check_file(&path, None).unwrap();
+            std::fs::write(
+                &path,
+                source.replace("events = []", "events: list[int] = []"),
+            )
+            .unwrap();
             let error = super::check_file(&path, None).unwrap_err();
             assert!(
                 error.contains(&format!("app.py:{line}:19: Imre: expected int, got str")),
@@ -2039,12 +1982,15 @@ print("result", call(b=2, a=1))
     }
 
     #[test]
-    fn indexed_store_keeps_the_original_module_list_layout() {
+    fn indexed_store_respects_declared_module_list_storage() {
         let project = tempfile::tempdir().unwrap();
         let path = project.path().join("app.py");
+        let source = "events = []\n\ndef replace():\n    events[0] = 7\n\ndef add():\n    events.append('rhs')\n\nadd()\nreplace()\n";
+        std::fs::write(&path, source).unwrap();
+        super::check_file(&path, None).unwrap();
         std::fs::write(
             &path,
-            "events = []\n\ndef replace():\n    events[0] = 7\n\ndef add():\n    events.append('rhs')\n\nadd()\nreplace()\n",
+            source.replace("events = []", "events: list[int] = []"),
         )
         .unwrap();
         let error = super::check_file(&path, None).unwrap_err();
@@ -2541,10 +2487,9 @@ print(is_number(3))
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("subject.py");
         let mut compiler = super::IncrementalCompiler::default();
-        for (item, expected) in [
-            ("(a, b)", "expected int, got tuple[int, int]"),
-            ("a", "iterator values require an immediate"),
-        ] {
+        // Neither insertion declares a layout. Both reach the unsupported iterator.
+        for item in ["(a, b)", "a"] {
+            let expected = "iterator values require an immediate";
             let source = format!(
                 "def f():\n    rows = []\n    for a, b in zip([1], [2], strict=True):\n        rows.append({item})\n    nested = []\n    for _ in range(2):\n        nested = zip(nested)\nf()\n"
             );

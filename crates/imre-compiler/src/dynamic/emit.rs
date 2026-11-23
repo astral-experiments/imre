@@ -623,7 +623,8 @@ impl<'a> PreparedBody<'a> {
         }
         let values = crate::frontend::RegisteredSource {
             python_optimization,
-            operand_types,
+            operand_types: operand_types
+                .map(|types| types.with_program_stores(matches!(origin, ModuleOrigin::Program(_)))),
             text: source,
             private_names: Some(&private_names),
             replacements: &replacements,
@@ -6457,6 +6458,140 @@ second = (lambda data: data)(t'{client.lookup(*args)}{(lambda v: v)(values)}')",
             let body = &prepared.source.scopes.functions[&start].body;
             assert_eq!(matches!(body, Some(NamedBody::Borrowed(_))), python_binding);
         }
+    }
+
+    #[test]
+    fn registered_stores_keep_the_selected_sources_ownership() {
+        use crate::ir::{Builtin, ExprKind, Statement, walk_expressions};
+        let text = concat!(
+            "def run():\n",
+            "    result: int = read()\n",
+            "    result = read()\n",
+            "result: str = read()\n",
+            "first = result = read()\n",
+        );
+        let graph = crate::modules::SourceGraph::single(text).unwrap();
+        let types = graph.session.operand_types(graph.entry);
+        let syntax = types.parsed();
+        let checks = |body: &[Statement]| {
+            let mut guards = Vec::new();
+            let mut calls = 0;
+            walk_expressions(body, &mut |expr| match &expr.kind {
+                ExprKind::Builtin(Builtin::RegisteredLocalScalar(name), _) => guards.push(*name),
+                ExprKind::Invoke { .. } => calls += 1,
+                _ => {}
+            });
+            assert_eq!(calls, 2);
+            guards
+        };
+        for (origin, module_checks, function_checks) in [
+            (
+                ModuleOrigin::Program(None),
+                vec!["str", "str"],
+                vec!["int", "int"],
+            ),
+            (ModuleOrigin::Provider(None), vec![], vec!["int"]),
+            (ModuleOrigin::Bundled(None), vec![], vec!["int"]),
+        ] {
+            let path = Path::new("example.py");
+            let input =
+                ParsedModule::with_parser(path, text.into(), Some(Cow::Borrowed(&syntax))).unwrap();
+            let mut prepared = PreparedBody::from_parsed(
+                "example",
+                path,
+                input,
+                0,
+                origin,
+                LiteralSites::default(),
+                (Some(types), None, None, None, None),
+            )
+            .unwrap();
+            assert_eq!(
+                checks(&prepared.initializer.checked.function.body),
+                module_checks
+            );
+            let function = prepared.source.take_prepared_function(TextSize::default());
+            assert_eq!(checks(&function.function.body), function_checks);
+        }
+    }
+
+    #[test]
+    fn registered_stores_follow_global_and_nonlocal_owners() {
+        use crate::ir::{Builtin, ExprKind, walk_expressions};
+        let text = r#"x: int = 1
+plain = 0
+changed: int = 0
+def write():
+    global x, plain, changed
+    x = "bad"
+    plain, x = read()
+    for x in read():
+        pass
+    changed = read()
+changed: str = "new"
+def outer():
+    x: str = "ok"
+    __class__: int = 1
+    class Nested:
+        x: bytes = b"class field"
+        def write_cell(self):
+            nonlocal __class__, x
+            __class__ = read()
+            x = read()
+    def middle():
+        nonlocal x
+        def inner():
+            nonlocal x
+            x = read()
+        return inner
+    def shadow(x: bytes):
+        def write_parameter():
+            nonlocal x
+            x = read()
+        return write_parameter
+    def local():
+        x = read()
+        def write_untyped():
+            nonlocal x
+            x = read()
+        return write_untyped
+    return middle
+"#;
+        let graph = crate::modules::SourceGraph::single(text).unwrap();
+        let types = graph.session.operand_types(graph.entry);
+        let syntax = types.parsed();
+        let path = Path::new("example.py");
+        let input =
+            ParsedModule::with_parser(path, text.into(), Some(Cow::Borrowed(&syntax))).unwrap();
+        let mut prepared = PreparedBody::from_parsed(
+            "example",
+            path,
+            input,
+            0,
+            ModuleOrigin::Program(None),
+            LiteralSites::default(),
+            (Some(types), None, None, None, None),
+        )
+        .unwrap();
+        let mut checks = |name: &str| {
+            let start = text.find(&format!("def {name}(")).unwrap();
+            let function = prepared
+                .source
+                .take_prepared_function(TextSize::try_from(start).unwrap());
+            let mut guards = Vec::new();
+            walk_expressions(&function.function.body, &mut |expr| {
+                if let ExprKind::Builtin(Builtin::RegisteredLocalScalar(name), _) = &expr.kind {
+                    guards.push(*name);
+                }
+            });
+            guards
+        };
+        assert_eq!(checks("write"), ["int", "int", "int"]);
+        assert_eq!(checks("write_cell"), ["str"]);
+        assert_eq!(checks("inner"), ["str"]);
+        assert!(checks("write_parameter").is_empty());
+        assert!(checks("local").is_empty());
+        assert!(checks("write_untyped").is_empty());
     }
 
     #[test]
