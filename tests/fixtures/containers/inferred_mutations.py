@@ -50,3 +50,8 @@ cycle = []
 cycle.append(cycle)
 copied = deepcopy(cycle)
 print(cycle[0] is cycle, copied[0] is copied, copied is not cycle)
+
+flags = [True]
+original = flags
+flags[:] = [42]
+print(original, flags is original)

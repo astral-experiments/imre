@@ -372,6 +372,62 @@ impl<'db> Calls<'db, '_> {
             || self.binding_changed(model, &call.func, definition, &mut Vec::new())
     }
 
+    /// Body proofs require both the callable binding and its code to survive.
+    fn stable(
+        &self,
+        model: &SemanticModel<'db>,
+        call: &ExprCall,
+        definition: Definition<'db>,
+    ) -> bool {
+        !self.changed(model, call, definition)
+            && !self.program.iter().any(|&file| {
+                *may_replace(
+                    &self.session.db,
+                    file,
+                    definition,
+                    model.file(),
+                    call.func.as_name_expr().map(|n| n.id.clone()),
+                )
+            })
+    }
+
+    /// A passive first-party function that returns a parameter forwards this
+    /// call's operand. An opaque earlier initializer need not prevent checking
+    /// the result when the selected definition and argument binding are stable.
+    fn forwarded_type(&self, value: &Expr) -> Option<Type<'db>> {
+        let call = value.as_call_expr()?;
+        let (definition, method) = self.selected(&self.model, call)?;
+        let db = &self.session.db;
+        let DefinitionKind::Function(function) = definition.kind(db) else {
+            return None;
+        };
+        let file = definition.file(db);
+        let parsed = self.session.parsed(file);
+        let function = function.node(&parsed);
+        if function.is_async || function.returns.is_some() {
+            return None;
+        }
+        let (_, returned) =
+            super::initializer_calls::passive_function_return(function, |value| {
+                self.session.parameter_read(file, &parsed, value)
+            })??;
+        let (_, operand) =
+            crate::frontend::fixed_display_call_arguments(call, &function.parameters, method)?
+                .into_iter()
+                .find(|(p, _)| p.name().range() == returned)?;
+        if self.session.indexed_generator(file, function) != Some(false)
+            || !self.stable(&self.model, call, definition)
+        {
+            return None;
+        }
+        let actual = operand.inferred_type(&self.model)?;
+        if actual.is_unknown() {
+            self.forwarded_type(operand)
+        } else {
+            Some(actual)
+        }
+    }
+
     fn excluded(&self, expr: &Expr) -> bool {
         let range = expr.range();
         self.skipped
@@ -445,18 +501,7 @@ impl<'db> Calls<'db, '_> {
             return false;
         }
         // Only inspect possible replacements if this body could stop evaluation.
-        let stable = || {
-            !self.changed(model, call, definition)
-                && !self.program.iter().any(|&file| {
-                    *may_replace(
-                        db,
-                        file,
-                        definition,
-                        model.file(),
-                        call.func.as_name_expr().map(|n| n.id.clone()),
-                    )
-                })
-        };
+        let stable = || self.stable(model, call, definition);
         if self.session.nonreturning_function(module, function) {
             return stable();
         }
@@ -575,6 +620,11 @@ impl<'db> Calls<'db, '_> {
             && let Some(actual) = value.inferred_type(&self.model)
             && let Some(expected) = annotation_type(db, owner, annotation)
             && actual.is_assignable_to(db, &self.model.program_environment(), expected)
+            && let Some(actual) = if actual.is_unknown() {
+                self.forwarded_type(value)
+            } else {
+                Some(actual)
+            }
             && !Session::written_scalar_union_accepts(owner, annotation, actual)
             && let Some(error) =
                 Session::scalar_contract_error(&self.model, expected, value, actual, || true)

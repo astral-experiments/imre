@@ -379,7 +379,7 @@ REJECTED = {
             "def typed(n: int) -> int: return n\n"
             "print(urlopen('data:,hello').read(), typed('wrong'))\n"
         ),
-    }, "invalid-argument-type"),
+    }, "main.py:8:44: Imre: expected int, got str"),
     "optional_probe_with_additional_binding": ({
         "main.py": "from probe import other\n",
         "probe.py": (
@@ -486,7 +486,7 @@ REJECTED = {
     }, "expected int, got str"),
     "codeop_import_keeps_return_check": ({
         "main.py": 'import codeop\ndef wrong() -> int:\n    return "invalid return"\nwrong()\n',
-    }, "invalid-return-type"),
+    }, "main.py:3:12: Imre: expected int, got str"),
     "function_wildcard": ({
         "main.py": "def invalid():\n    from helper import *\n", "helper.py": HELPER,
     }, "SyntaxError: import * only allowed at module level"),
@@ -879,7 +879,7 @@ REJECTED = {
             "if not feature.available:\n    raise RuntimeError('missing feature')\n"
             "def typed(value: int) -> int: return value\ntyped('wrong')\n"
         ),
-    }, "invalid-argument-type"),
+    }, "main.py:7:7: Imre: expected int, got str"),
     "invalid_call_after_imported_initializer": ({
         "feature.py": "def require(enabled: bool):\n    if not enabled: raise RuntimeError('unavailable')\n",
         "main.py": "import feature\nfeature.require(True)\ndef typed(value: int) -> int: return value\ntyped('bad')\n",
@@ -953,6 +953,27 @@ RUNTIME_ERRORS = {
 }
 
 ACCEPTED = {
+    "unread_from_import_initializes_once": {
+        "peripheral.py": "value = bytearray(b'initialized')\nprint(value)\n",
+        "main.py": "from peripheral import value as left, value as right\nprint('main')\n",
+    },
+    "qualified_rebinding": {
+        "library.py": "VALUE = 1\n",
+        "main.py": (
+            "import library\nfrom library import VALUE as before\n"
+            "library.VALUE = 2\nprint(before, library.VALUE)\n"
+        ),
+    },
+    "unread_import_initializes_once": {
+        "peripheral.py": "print(bytearray(b'initialized'))\n",
+        "main.py": (
+            "import peripheral as first\nimport peripheral as second\n"
+            "def main() -> None:\n"
+            "    def add(n: int) -> int: return n + 3\n"
+            "    print(add(5))\n"
+            "main()\n"
+        ),
+    },
     "conditional": {"main.py": "if False:\n    import math\nprint('done')\n"},
     "parameter_function_shadow": {
         "main.py": "from helper import f\ndef g(f: int) -> int:\n    return f\nprint(g(7))\n",

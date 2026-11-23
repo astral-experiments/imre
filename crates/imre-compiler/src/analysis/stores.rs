@@ -434,7 +434,13 @@ pub(super) fn value_error<'db>(
     let check = |annotation: &Expr, value: &Expr| value_error(model, owner, annotation, value, &[]);
     if let Some((item, tail)) = items.split_last() {
         if item.slice.is_slice_expr() {
-            return None;
+            // A slice assignment replaces a run of elements. A further
+            // subscript projects a copy, so it cannot constrain this list.
+            return if tail.is_empty() && builtin(KnownClass::List) {
+                value_error(model, owner, annotation, value, &[])
+            } else {
+                None
+            };
         }
         return match args {
             [element] if builtin(KnownClass::List) => {

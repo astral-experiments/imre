@@ -175,6 +175,7 @@ struct Imports {
     module_flags: u32,
     explicit_roots: Vec<PathBuf>,
     runtime_imports: bool,
+    has_import_use: bool,
     private_names: imre_ast::Names,
     invalid_executable: Option<Box<ModuleSyntaxError>>,
     uses_import_builtin: bool,
@@ -442,7 +443,12 @@ impl Imports {
     }
     fn add(&mut self, level: u32, name: &str) {
         self.names.push((level, name.to_owned()));
-        if level == 0
+        self.has_import_use = true;
+        self.runtime_imports |= Self::runtime_provider(level, name);
+    }
+
+    fn runtime_provider(level: u32, name: &str) -> bool {
+        level == 0
             && matches!(
                 name,
                 "_imp"
@@ -492,9 +498,6 @@ impl Imports {
                     | "string.templatelib"
                     | "runpy"
             )
-        {
-            self.runtime_imports = true;
-        }
     }
 }
 
@@ -585,8 +588,9 @@ impl<'a> Visitor<'a> for GetterHeader<'_> {
     fn visit_body(&mut self, _body: &'a [Stmt]) {}
 }
 
-impl<'a> Visitor<'a> for Imports {
-    fn visit_stmt(&mut self, s: &'a Stmt) {
+impl Imports {
+    /// Keep discovery and registration metadata even for imports without a reader.
+    fn scan_statement(&mut self, s: &Stmt, unread: Option<&HashSet<TextRange>>) {
         let first_name = self.names.len();
         if let Stmt::With(statement) = s
             && !statement.is_async
@@ -615,8 +619,10 @@ impl<'a> Visitor<'a> for Imports {
                     let name = alias.name.as_str();
                     let bound = alias.asname.as_ref().unwrap_or(&alias.name);
                     self.imports_logging |= name == "logging";
-                    if matches!(name, "__future__" | "_operator") {
-                        self.runtime_imports = true;
+                    if unread.is_none_or(|u| !u.contains(&alias.range())) {
+                        self.has_import_use = true;
+                        self.runtime_imports |= Self::runtime_provider(0, name)
+                            || matches!(name, "__future__" | "_operator");
                     }
                     match name {
                         "sys" => self.sys_names.insert(bound.to_string()),
@@ -637,13 +643,14 @@ impl<'a> Visitor<'a> for Imports {
                         "importlib.machinery" => self.machinery_names.insert(bound.to_string()),
                         _ => false,
                     };
-                    self.add(0, name);
+                    self.names.push((0, name.to_owned()));
                 }
             }
             Stmt::ImportFrom(imp) => {
                 let name = imp.module.as_ref().map_or("", |m| m.as_str());
                 self.imports_logging |= imp.level == 0 && name == "logging";
-                self.add(imp.level, name);
+                self.names.push((imp.level, name.to_owned()));
+                let mut runtime = Self::runtime_provider(imp.level, name);
                 for a in &imp.names {
                     let suffix = a.name.as_str();
                     if imp.level == 0
@@ -653,7 +660,7 @@ impl<'a> Visitor<'a> for Imports {
                             || name == "weakref" && suffix == "finalize"
                             || boxed_signal_export(name, suffix))
                     {
-                        self.runtime_imports = true;
+                        runtime = true;
                     }
                     if imp.level == 0
                         && name == "unittest.mock"
@@ -667,7 +674,7 @@ impl<'a> Visitor<'a> for Imports {
                             .insert(a.asname.as_ref().unwrap_or(&a.name).to_string());
                     }
                     if imp.level == 0 && name == "importlib" && suffix == "machinery" {
-                        self.runtime_imports = true;
+                        runtime = true;
                         self.machinery_names
                             .insert(a.asname.as_ref().unwrap_or(&a.name).to_string());
                     }
@@ -678,7 +685,7 @@ impl<'a> Visitor<'a> for Imports {
                             || (name == "string" && suffix == "templatelib")
                             || (name == "pathlib" && matches!(suffix, "_local" | "types")))
                     {
-                        self.runtime_imports = true;
+                        runtime = true;
                     }
                     if suffix != "*" {
                         self.names.push((
@@ -690,6 +697,10 @@ impl<'a> Visitor<'a> for Imports {
                             },
                         ));
                     }
+                }
+                if unread.is_none_or(|u| !u.contains(&imp.range())) {
+                    self.has_import_use = true;
+                    self.runtime_imports |= runtime;
                 }
             }
             Stmt::FunctionDef(function)
@@ -755,6 +766,13 @@ impl<'a> Visitor<'a> for Imports {
         }
         visitor::walk_stmt(self, s);
     }
+}
+
+impl<'a> Visitor<'a> for Imports {
+    fn visit_stmt(&mut self, s: &'a Stmt) {
+        self.scan_statement(s, None);
+    }
+
     fn visit_expr(&mut self, e: &'a Expr) {
         if let Some(hints) = &mut self.provider {
             match e {
@@ -1036,6 +1054,7 @@ fn scan_imports(
         file_alternative.map(|(path, _)| path),
         None,
         selected_provider,
+        None,
     )?;
     let scanned = (original
         && (shipped || parsed.is_some() && !imports.private_names.rewritten)
@@ -1113,6 +1132,7 @@ fn retained_imports<'a, 'p>(
             None,
             None,
             selected_provider,
+            None,
         )
         .map(|imports| (imports, None));
     }
@@ -1124,6 +1144,7 @@ fn retained_imports<'a, 'p>(
         None,
         checked,
         selected_provider,
+        None,
     )?;
     let lowered = imports.invalid_executable.is_none().then(|| {
         let names = std::mem::take(&mut imports.private_names);
@@ -1155,6 +1176,7 @@ fn imports_from_body(
     file_alternative: Option<&Path>,
     checked: Option<crate::analysis::OperandTypes<'_>>,
     selected_provider: Option<ProviderHints>,
+    unread: Option<&HashSet<TextRange>>,
 ) -> Result<Imports, String> {
     let error = ModuleSyntaxError::in_body(normalized, body);
     let module_flags = imre_ast::future_flags(body);
@@ -1204,7 +1226,7 @@ fn imports_from_body(
             GetterHeader(&mut imports).visit_stmt(stmt);
             getter_bodies.push(&function.body);
         } else {
-            imports.visit_stmt(stmt);
+            imports.scan_statement(stmt, unread);
         }
     }
     if let Some(getter) = getter
@@ -1465,10 +1487,12 @@ pub(crate) fn compile(
     let entry_types = file_entry
         .zip(entry_file)
         .map(|(graph, _)| graph.session.operand_types(graph.entry));
+    let unread = file_entry.map(|g| &g.modules[g.entry].unread_imports);
     let mut entry_imports = |text: &str,
                              mut body: Cow<'_, ast::Suite>|
      -> Result<Imports, String> {
-        let mut imports = imports_from_body(text, &mut body, None, None, entry_types, None)?;
+        let mut imports =
+            imports_from_body(text, &mut body, None, None, entry_types, None, unread)?;
         // Generic functions can admit an unresolved entry. A runtime-class import
         // also needs the entry's own request when checking its first-party callers.
         if module_entry.is_none()
@@ -1558,7 +1582,7 @@ pub(crate) fn compile(
         None | Some(ObjectOperation::OrderedCommandImport) => {
             first.invalid_executable.is_some()
                 || entry_requests_objects
-                || (object_imports && !first.names.is_empty())
+                || (object_imports && first.has_import_use)
         }
     };
     // Existing object imports keep their normal project-module lookup. Only a new
@@ -4313,7 +4337,7 @@ import pkgutil as loader
     let mut body = Cow::Borrowed(&module.syntax().body);
     let mut getter = Imports::default();
     let imports =
-        imports_from_body(source, &mut body, Some(&mut getter), None, None, None).unwrap();
+        imports_from_body(source, &mut body, Some(&mut getter), None, None, None, None).unwrap();
     assert!(matches!(body, Cow::Borrowed(_)));
     assert!(imports.runtime_imports);
     let eager = imports

@@ -438,6 +438,14 @@ impl Checker<'_> {
         receiver: &Expr,
         attribute: &ast::ExprAttribute,
     ) -> phase::Result<Option<Expr>, String> {
+        if matches!(receiver.ty, Type::Callable(_))
+            && matches!(
+                self.value_source(receiver),
+                Some(ValueSource::CapturedArgument(..))
+            )
+        {
+            return Err(self.scoped_builtin_error("a deferred partial attribute", attribute));
+        }
         let name = attribute.attr.as_str();
         if let Some(base) = self.types.constructor_base(receiver.ty)
             && self.classes.methods[base].get(name).is_some_and(|sig| {

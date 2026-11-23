@@ -559,6 +559,12 @@ fn object_fallback(
                     let module = &mut fixed.ir.0;
                     verify_after(module, "lowering")?;
                     match callables::layouts(module, std::mem::take(&mut fixed.callables)) {
+                        Ok(_) if graph.register_import_effects.get() => {
+                            // The application passed fixed admission. Python must
+                            // still execute every selected import at its original site.
+                            fixed.register_definitions(&graph);
+                            None
+                        }
                         Ok(program) => {
                             if !options.include_modules.is_empty() {
                                 return Err(
@@ -680,7 +686,7 @@ fn object_fallback(
     let operation = graph.as_ref().and_then(|g| {
         if checked_entry {
             Some(dynamic::ObjectOperation::CheckedEntry)
-        } else if kind.is_class_layout() {
+        } else if kind.is_class_layout() || matches!(kind, LoweringKind::SourceClassReturn { .. }) {
             Some(dynamic::ObjectOperation::ClassLayout)
         } else {
             (kind.checks_object_calls()

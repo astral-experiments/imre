@@ -292,7 +292,6 @@ impl Checker<'_> {
                     Ok(value) => value,
                     Err(error) => {
                         if matches!(&error, Failure::Diagnostic(d) if d.kind == Kind::ExactType)
-                            && self.unrepresented.borrow().is_none()
                             && !matches!(returns, Type::Coroutine(_))
                             && !function.is_starred_expr()
                             && bound.len() <= parameters.len()
@@ -309,14 +308,15 @@ impl Checker<'_> {
                         {
                             // This region can no longer emit. Follow the value through
                             // ordinary assignments without treating capture as invocation.
-                            self.require_registered_representation(|| error)?;
+                            self.require_registered_operation(call)?;
+                            let error = error.expected_from(Some(declaration), arg.range());
                             let remaining = self
                                 .types
                                 .callable(parameters[bound.len()..].to_vec(), returns);
                             let slot = self.hidden(remaining);
                             self.assigned.set_value_source(
                                 slot,
-                                Some(ValueSource::CapturedArgument(declaration, arg.range())),
+                                Some(ValueSource::CapturedArgument(std::rc::Rc::new(error), None)),
                             );
                             return Ok(self.local(slot));
                         }

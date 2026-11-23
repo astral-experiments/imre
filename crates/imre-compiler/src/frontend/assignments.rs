@@ -130,8 +130,8 @@ pub(super) enum ValueSource {
         function: usize,
         index: usize,
     },
-    /// Check-only partial. Its capture refusal is retained by finish_region.
-    CapturedArgument(TypeDeclaration, TextRange),
+    /// A refused capture is an argument contract only if this partial is invoked.
+    CapturedArgument(std::rc::Rc<Failure>, Option<TypeDeclaration>),
     LiteralStrings(Type),
     Function(usize),
     /// A different source method can occupy this captured slot when it is called.
@@ -996,6 +996,14 @@ impl Checker<'_> {
                 {
                     // Check the item against the receiver reached after evaluating the RHS.
                     return None;
+                }
+                if matches!(receiver.ty, Type::ListInt | Type::List(_))
+                    && subscript.slice.is_slice_expr()
+                {
+                    // A slice consumes items, not a single element.
+                    return rhs
+                        .filter(|rhs| rhs.is_list_expr())
+                        .map(|_| (receiver.ty, declaration));
                 }
                 if matches!(receiver.ty, Type::Document(_)) {
                     return Some((

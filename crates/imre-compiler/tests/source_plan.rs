@@ -380,10 +380,12 @@ fn bound_callbacks_keep_the_written_operand_contract() {
 fn dynamic_and_deferred_callbacks_do_not_inherit_another_targets_contract() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("callbacks.py");
+    let mut errors = Vec::new();
     for body in [
         "def sorted(xs, key): return xs\nprint(sorted([True], key=key))",
         "xs = [True]\nxs[:] = [1]\nprint(sorted(xs, key=key) == [True])",
         "keys = [key]\nkeys[0] = pred\nprint(sorted([True], key=keys[0]))",
+        "keys = [key]\nother = keys\nother[0] = pred\nprint(sorted([True], key=keys[0]))",
         "def apply(fn, x): return fn(x)\nprint(apply(key, 1), apply(pred, True))",
         "def apply(fn, flag): return fn(True) if flag else fn(1)\nprint(apply(key, False), apply(pred, True))",
         "def apply(fn):\n    fn = pred\n    return fn(True)\nprint(apply(key))",
@@ -392,12 +394,34 @@ fn dynamic_and_deferred_callbacks_do_not_inherit_another_targets_contract() {
         "g = partial(key, True)\nprint(g.args)",
         "g = partial(key, True)\ng.__setstate__((pred, (True,), {}, None))\nprint(g())",
         "g = partial(key, True)\nif False: print(g())",
+        "keys = [key]\nkeys[0] = pred\nprint(list(map(keys[0], [True])))",
     ] {
-        let source = format!(
-            "import unittest\nfrom functools import partial\ndef key(x: int): return x\ndef pred(x: bool): return x\n{body}\n"
-        );
-        std::fs::write(&path, &source).unwrap();
-        check_file(&path, None).unwrap_or_else(|error| panic!("{source}\n{error}"));
+        for import in ["", "import unittest\n"] {
+            let source = format!(
+                "{import}from functools import partial\ndef key(x: int): return x\ndef pred(x: bool): return x\n{body}\n"
+            );
+            std::fs::write(&path, &source).unwrap();
+            if let Err(error) = check_file(&path, None) {
+                errors.push(format!("{source}\n{error}"));
+            }
+        }
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}
+
+#[test]
+fn registration_preserves_independent_callback_contracts() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("callbacks.py");
+    for import in ["", "import unittest\n"] {
+        for body in [
+            "from functools import partial\nfrom typing import Callable\na = partial(key, False)\nb: Callable[[], int] = partial(key, True)\nprint(b())",
+            "from typing import Callable\ndef run(fn: Callable[[int], int], flag): return fn(True) if flag else fn(0)\nprint(run(key, False))",
+            "def pred(x: bool): return x\nkeys = [key]\nkeys[0] = pred\nprint(list(map(key, [True])))",
+        ] {
+            let source = format!("{import}def key(x: int): return x\n{body}\n");
+            check_callback_refusal(&path, &source, "True");
+        }
     }
 }
 
@@ -425,4 +449,62 @@ fn inferred_stores_preserve_fixed_bindings_and_nested_diagnostics() {
     .unwrap();
     let error = check_file(&file, None).unwrap_err();
     assert!(error.contains("expected app.A, got str"), "{error}");
+}
+
+#[test]
+fn returned_parameter_retains_the_supplied_type_across_imports() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    std::fs::write(
+        project.path().join("supplier.py"),
+        "def project(first, *, selected): return selected\n",
+    )
+    .unwrap();
+    for prefix in ["", "import unittest\n"] {
+        for (argument, expected) in [
+            ("42", None),
+            ("True", Some("bool")),
+            ("'wrong'", Some("str")),
+        ] {
+            let program = format!(
+                "{prefix}from supplier import project\n\
+                 def take(value: int) -> int: return value\n\
+                 print(take(project(1, selected={argument})))\n\
+                 import opcode\n"
+            );
+            std::fs::write(&entry, &program).unwrap();
+            let checked = check_file(&entry, None);
+            if let Some(actual) = expected {
+                let message = checked.unwrap_err();
+                assert!(
+                    message.contains(&format!("expected int, got {actual}")),
+                    "{message}"
+                );
+            } else {
+                checked.unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn registered_import_keeps_reachable_only_exclusions() {
+    let root = tempfile::tempdir().unwrap();
+    let entry = root.path().join("entry.py");
+    let options = CompileOptions {
+        reachable_only: true,
+        ..Default::default()
+    };
+    for prefix in ["", "import unittest\n", "from unittest import TestCase\n"] {
+        for body in [
+            "def dead() -> int: return True\n",
+            "def f(x: int): return x\ndef dead(): print(f(True))\n",
+        ] {
+            for (call, ok) in [("print(7)", true), ("print(dead())", false)] {
+                std::fs::write(&entry, format!("{prefix}{body}{call}\n")).unwrap();
+                let result = imre_compiler::check_file_with_options(&entry, None, &options);
+                assert_eq!(result.is_ok(), ok, "{prefix}{body}{call}: {result:?}");
+            }
+        }
+    }
 }

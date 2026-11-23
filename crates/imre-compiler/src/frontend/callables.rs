@@ -959,13 +959,11 @@ impl<'a> Checker<'a> {
                 "indirect calls require the full positional Callable signature; keywords and omitted defaults are unsupported",
             ));
         }
-        if let Some(ValueSource::CapturedArgument(declaration, range)) =
-            self.value_source(&callable)
+        if let Some(ValueSource::CapturedArgument(error, _)) = self.value_source(&callable)
             && self.fixed_callback_call(call)
             && call.arguments.args.iter().all(ast::Expr::is_literal_expr)
-            && let Some(error) = self.unrepresented.borrow().as_ref()
         {
-            return Err(error.clone().expected_from(Some(declaration), range));
+            return Err((*error).clone());
         }
         let local = call
             .func
@@ -1089,9 +1087,17 @@ impl<'a> Checker<'a> {
                                 return error;
                             };
                             let declaration = declaration.or_else(|| checker.forwarded_declaration(call, slot, expected));
+                            // An unannotated formal can receive different callbacks.
+                            // Without a witnessed invocation the fixed ABI is speculative.
+                            if !parameter && declaration.is_none() && saved.is_none()
+                                && matches!(&error, Failure::Diagnostic(d) if d.kind == Kind::ExactType)
+                                && checker.graph.session.reads_parameter(checker.module, &call.func)
+                            {
+                                return checker.scoped_builtin_error("an inferred callback argument", site);
+                            }
                             error
-                                .at_callable_argument(site.range(), || parameter)
                                 .expected_from(declaration, site.range())
+                                .at_callable_argument(site.range(), || parameter)
                         })
                     },
                 )?

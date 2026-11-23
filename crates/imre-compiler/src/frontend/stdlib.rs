@@ -736,6 +736,9 @@ impl Checker<'_> {
         } else {
             self.expr(expression)?
         };
+        if matches!(value.ty, Type::PythonObject | Type::ObjectValue) {
+            return Err(self.scoped_builtin_error("a live sort key", expression));
+        }
         if !matches!(value.ty, Type::None | Type::CmpKey(..))
             && self.types.signature(value.ty).is_none()
         {

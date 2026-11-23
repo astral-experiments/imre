@@ -86,7 +86,7 @@ pub(crate) fn passive_function(function: &StmtFunctionDef) -> bool {
 
 /// Resolve the first return using the operands available to this caller. An empty
 /// result denotes an implicit or bare return. An open operand ends the proof.
-fn passive_function_return<T>(
+pub(super) fn passive_function_return<T>(
     function: &StmtFunctionDef,
     operand: impl Fn(&Expr) -> Option<T>,
 ) -> Option<Option<(TextRange, T)>> {

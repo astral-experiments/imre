@@ -800,6 +800,56 @@ pub(super) struct InitializationOrder {
 impl Initialization {
     /// Infers values in execution order while deferring callable body checks.
     pub fn lower(
+        checker: Checker<'_>,
+        available: &mut HashSet<DefinitionId>,
+        range: Range<usize>,
+        output: Option<&mut Vec<Self>>,
+    ) -> Result<(), String> {
+        let graph = checker.graph;
+        if !graph.modules[checker.module].initializer_only {
+            return Self::lower_body(checker, available, range, output);
+        }
+        let module = checker.module;
+        let mut output = output;
+        let (result, deferred, _) = graph.isolate_object_requests(|| {
+            Self::lower_body(checker, available, range, output.as_deref_mut())
+        });
+        // Preserve ordinary initializer errors. An object operation at this
+        // import site can execute after the application passes admission.
+        match result {
+            Err(reason) if reason.is_object() => {
+                graph.register_import_effects.set(true);
+                // Helpers were numbered after the initializers. Reserve this
+                // slot for placement, with no native source to publish.
+                if let Some(output) = output {
+                    output.push(Self {
+                        order: InitializationOrder {
+                            module,
+                            checkpoints: Vec::new(),
+                            source: None,
+                        },
+                        function: ir::Function {
+                            params: Vec::new(),
+                            returns: Type::None,
+                            locals: Vec::new(),
+                            body: Vec::new(),
+                        },
+                        calls: HashSet::new(),
+                    });
+                }
+            }
+            result => result?,
+        }
+        if let Some(reason) = deferred {
+            if !reason.kind.is_object() {
+                return Err(reason.into());
+            }
+            graph.register_import_effects.set(true);
+        }
+        Ok(())
+    }
+
+    fn lower_body(
         mut checker: Checker<'_>,
         available: &mut HashSet<DefinitionId>,
         range: Range<usize>,
@@ -879,7 +929,11 @@ impl Initialization {
                 available.insert(definition);
             }
             if let Some(site) = module.registered_imports.get(&index) {
-                checker.require_registered_operation(site)?;
+                if module.unread_imports.contains(&statement.range()) {
+                    checker.graph.register_import_effects.set(true);
+                } else {
+                    checker.require_registered_operation(site)?;
+                }
             }
             match statement {
                 ast::Stmt::ClassDef(_) => {

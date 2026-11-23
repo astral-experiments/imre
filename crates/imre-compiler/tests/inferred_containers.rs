@@ -6,6 +6,7 @@ fn inferred_storage_follows_the_allocation() {
     let file = dir.path().join("main.py");
     for imports in ["", "import unittest\n"] {
         for body in [
+            "values = [1, 2]; values[:] = [3]; print(values)",
             "a = []; a.append(1); a.append('str'); print(a)",
             "x = y = [1]; x.extend(['text']); print(y)",
             "def change(xs, flag):\n    if flag: xs.append(True)\na: list[int] = []\nchange(a, False)\nchange([1], True)",
@@ -39,6 +40,7 @@ fn mutable_contracts_survive_aliases_and_boxed_writes() {
     let file = dir.path().join("main.py");
     for imports in ["", "import unittest\n"] {
         for body in [
+            "values: list[int] = [1, 2]; values[:] = [True]",
             "a: list[int] = []; b = a; b.append('wrong')",
             "def change(xs): xs.append(True)\na: list[int] = []\nchange(a)",
             "a: list[int] = [1]; b = a; b.extend(['wrong'])",

@@ -784,6 +784,12 @@ impl Checker<'_> {
                     ));
                 }
                 let receiver = self.json_mutation_receiver(receiver, subscript)?;
+                if matches!(receiver.ty, Type::ListInt | Type::List(_))
+                    && let ast::Expr::Slice(slice) = &*subscript.slice
+                {
+                    self.slice(receiver, slice, subscript.range())?;
+                    return Err(self.scoped_builtin_error("a list slice assignment", target));
+                }
                 let declaration = self.value_declaration(&receiver);
                 let (key, element) = self
                     .types

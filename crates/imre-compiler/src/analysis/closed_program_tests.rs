@@ -622,9 +622,14 @@ fn source_stores_and_results_survive_registration() {
     }
     // Neither file contributes a function or class to the selected graph.
     fs::write(root.join("helper.py"), "count: int = 1\n").unwrap();
-    fs::write(&entry, "import peer\nimport helper\nhelper.count = True\n").unwrap();
-    let error = crate::check_file(&entry, None).unwrap_err();
-    assert!(error.contains("expected int, got bool"), "{error}");
+    for prefix in ["", "import peer\n", "import unittest\n"] {
+        let body = format!("{prefix}import helper\nhelper.count = True\n");
+        fs::write(&entry, &body).unwrap();
+        let error = crate::check_file(&entry, None).unwrap_err();
+        assert!(error.contains("expected int, got bool"), "{error}");
+        fs::write(&entry, body.replace("= True", "= 2")).unwrap();
+        crate::check_file(&entry, None).unwrap();
+    }
 }
 
 #[test]

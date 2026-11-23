@@ -2973,6 +2973,9 @@ impl<'s> Checker<'s> {
         } else {
             self.expr(expression)?
         };
+        if matches!(value.ty, Type::PythonObject | Type::ObjectValue) {
+            return Err(self.scoped_builtin_error("a live iterator callback", expression));
+        }
         Ok(ItemCallback::Value(value))
     }
 

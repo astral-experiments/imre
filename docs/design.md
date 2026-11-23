@@ -42,6 +42,14 @@ When an inferred parameter or global changes layout, Imre recomputes results
 that depended on its previous layout. All readers of a global share the new layout.
 [Lowering outcomes](../crates/imre-compiler/src/frontend/phase.rs) · [Signature inference](../crates/imre-compiler/src/frontend/inference.rs)
 
+An import without a reader can still run code. Imre checks the imported
+first-party declarations and keeps the selected initializer at the original
+import site. If the initializer needs Python objects, the driver can register
+it after checking the calling program. That requirement alone cannot justify
+discarding an error in the caller. A later read or re-export can still require
+the provider's checked definitions.
+[Source resolution](../crates/imre-compiler/src/modules.rs) · [Regression sweep](../tests/import_invariance.py)
+
 ## What an ordinary build compiles
 
 Imre compiles executable Python bodies ahead of time. Runtime data can still drive object and method dispatch. For example, given `handlers = {"double": double, "triple": triple}`, the call `handlers[key](value)` selects a compiled function at runtime. Python evaluates the dictionary lookup before it evaluates the argument.

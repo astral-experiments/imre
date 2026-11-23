@@ -4987,6 +4987,13 @@ impl<'a> Checker<'a> {
             receiver
         };
         let Type::Class(class) = receiver.ty else {
+            if attribute.ctx == ast::ExprContext::Store
+                && let Some(Binding::Module(owner)) = self.resolve(&attribute.value)
+                && self.graph.modules[owner].is_program_source()
+            {
+                // All importers must observe the write to the same live namespace.
+                return Err(self.scoped_builtin_error("a module attribute write", attribute));
+            }
             return Err(error(
                 self.source,
                 attribute,
@@ -4996,6 +5003,15 @@ impl<'a> Checker<'a> {
         let (field, ty) = self
             .declared_field(class, attribute.attr.as_str())
             .ok_or_else(|| {
+                let record = &self.classes.declarations.definitions[class];
+                if attribute.ctx == ast::ExprContext::Store
+                    && record.fields.is_empty()
+                    && record.node.arguments.is_none()
+                    && record.node.decorator_list.is_empty()
+                    && self.graph.modules[record.definition.module].is_program_source()
+                {
+                    return self.scoped_builtin_error("an instance dictionary write", attribute);
+                }
                 self.missing_class_member(
                     class,
                     attribute.attr.as_str(),
@@ -6475,10 +6491,10 @@ impl<'a> Checker<'a> {
             ValueSource::Declaration(declaration)
             | ValueSource::CoroutineCallback(declaration, _) => Some(declaration),
             ValueSource::Container(owner) => owner.declaration.get(),
+            ValueSource::CapturedArgument(_, declaration) => declaration,
             ValueSource::FrameBinding(_)
             | ValueSource::FrameLocals { .. }
             | ValueSource::PythonCall
-            | ValueSource::CapturedArgument(..)
             | ValueSource::LiteralStrings(_)
             | ValueSource::InferredListReturn(_)
             | ValueSource::InferredListParameter { .. }
@@ -6497,6 +6513,10 @@ impl<'a> Checker<'a> {
                     && let Some(target) = value.unbound_function()
                 {
                     ValueSource::CoroutineCallback(declaration, target)
+                } else if matches!(value.ty, Type::Callable(_))
+                    && let Some(ValueSource::CapturedArgument(error, _)) = self.value_source(value)
+                {
+                    ValueSource::CapturedArgument(error, Some(declaration))
                 } else {
                     ValueSource::Declaration(declaration)
                 }
@@ -7391,6 +7411,31 @@ impl<'a> Checker<'a> {
 
     /// Let a complete Python body finish a function whose fixed positions no longer match.
     fn lower_block_with_placement(
+        &mut self,
+        statements: &[ast::Stmt],
+        output: Option<&mut Vec<Statement>>,
+        place: Option<&mut dyn FnMut(&mut Self) -> bool>,
+        function: Option<&ast::StmtFunctionDef>,
+    ) -> Result<bool, String> {
+        let graph = self.graph;
+        if function.is_none() || !graph.modules[self.module].initializer_only {
+            return self.lower_placed_block(statements, output, place, function);
+        }
+        let (result, deferred, _) = graph.isolate_object_requests(|| {
+            self.lower_placed_block(statements, output, place, function)
+        });
+        // A helper called during initialization may require its own Python
+        // body, but cannot enable fallback for an unrelated caller error.
+        if let Some(error) = deferred {
+            graph
+                .deferred_object_error
+                .borrow_mut()
+                .get_or_insert(error);
+        }
+        result
+    }
+
+    fn lower_placed_block(
         &mut self,
         statements: &[ast::Stmt],
         mut output: Option<&mut Vec<Statement>>,
@@ -12959,6 +13004,9 @@ impl<'a> Checker<'a> {
                                 }),
                             )
                         }
+                        "value" if receiver.ty == Type::Exception => {
+                            return Err(self.scoped_builtin_error("an iterator result", attribute));
+                        }
                         "args" => (Type::ObjectValue, Builtin::ExceptionArgs),
                         "code" => (Type::ObjectValue, Builtin::SystemExitCode),
                         "msg" => (Type::Str, Builtin::JsonErrorField(0)),
@@ -17202,6 +17250,14 @@ impl<'a> Checker<'a> {
                     })
                     .collect::<Result<_, _>>()?;
                 (Builtin::Print, Type::None)
+            }
+            // An isolated initializer cannot rely on the constructor to admit
+            // its module. Keep the display request at the consuming operation.
+            "print"
+                if self.graph.modules[self.module].initializer_only
+                    && args.iter().any(|arg| arg.ty == Type::ByteArray) =>
+            {
+                return Err(self.scoped_builtin_error("printing a bytearray", call));
             }
             "complex"
                 if self.graph.command_startup.is_some()

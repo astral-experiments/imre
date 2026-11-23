@@ -235,7 +235,7 @@ impl<M> Diagnostic<M> {
             .as_ref()
             .and_then(|p| p.checked_site.as_deref());
         if !matches!(site, Some(CheckedSite::Function(_, _, BodyCheck::Lowering)))
-            && self.kind == Kind::ExactType
+            && matches!(self.kind, Kind::ExactType | Kind::DeclaredArgument)
             && self
                 .operand_declaration()
                 .is_some_and(|owner| selected.clone().any(|(id, _)| id == owner.module))

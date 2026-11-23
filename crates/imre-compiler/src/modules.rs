@@ -2801,6 +2801,9 @@ pub(crate) struct SourceModule {
     pub(crate) bundled: bool,
     /// The registered source initializer publishes this module's live attributes.
     pub(crate) registered_namespace: bool,
+    /// The entry imports this source only for its initialization effects.
+    pub(crate) initializer_only: bool,
+    pub(crate) unread_imports: HashSet<TextRange>,
     /// The fixed interface can use one declaration from a complete shipped module.
     checked_declaration: Option<usize>,
     pub(crate) parsed: ParsedModuleRef,
@@ -3132,8 +3135,13 @@ impl SourceModule {
         if !self.bundled || self.bindings.contains_key(name) {
             return None;
         }
-        let source = shipped_interface(&self.name)?;
-        session.shipped_runtime_export(source.filename, source.runtime, name)
+        let (filename, source) = if self.initializer_only {
+            crate::dynamic::bundled_module_source(&self.name, false)?
+        } else {
+            let source = shipped_interface(&self.name)?;
+            (source.filename, source.runtime)
+        };
+        session.shipped_runtime_export(filename, source, name)
     }
 
     /// A type-only import in a native stub does not add a member to the C module.
@@ -3277,6 +3285,8 @@ pub(crate) struct SourceGraph {
     /// Import proofs belong to source resolution and survive representation changes.
     checked_builtin_imports: Vec<(ModuleId, TextRange)>,
     checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
+    /// Execute import effects in Python once the application passes admission.
+    pub(crate) register_import_effects: std::cell::Cell<bool>,
     pub(crate) needs_object_runtime: std::cell::Cell<bool>,
     /// A reachable native constructor can use its object implementation if typed lowering fails.
     pub(crate) has_object_constructor_fallback: std::cell::Cell<bool>,
@@ -3320,18 +3330,27 @@ impl SourceGraph {
         lower: impl FnOnce() -> Option<T>,
     ) -> Option<T> {
         let diagnostics = self.checked_diagnostic_count(module);
+        let (result, deferred, requested) = self.isolate_object_requests(lower);
+        self.checked_diagnostics.borrow_mut()[module].truncate(diagnostics);
+        result.filter(|_| deferred.is_none() && !requested)
+    }
+
+    /// Import initializers and speculative bodies cannot grant object
+    /// admission to another operation in the enclosing program.
+    pub(crate) fn isolate_object_requests<T>(
+        &self,
+        lower: impl FnOnce() -> T,
+    ) -> (T, Option<Diagnostic>, bool) {
         let deferred = self.deferred_object_error.take();
         let needs_object = self.needs_object_runtime.replace(false);
         let calls = self.check_fallback_calls.get();
         let constructor = self.has_object_constructor_fallback.replace(false);
         let result = lower();
-        let deferred_here = self.deferred_object_error.replace(deferred).is_some();
+        let deferred_here = self.deferred_object_error.replace(deferred);
         let needed_here = self.needs_object_runtime.replace(needs_object);
         let used_constructor = self.has_object_constructor_fallback.replace(constructor);
-        let result = result.filter(|_| !deferred_here && !needed_here && !used_constructor);
         self.check_fallback_calls.set(calls);
-        self.checked_diagnostics.borrow_mut()[module].truncate(diagnostics);
-        result
+        (result, deferred_here, needed_here || used_constructor)
     }
 
     pub(crate) fn clear_registered_functions(&self) {
@@ -4892,6 +4911,16 @@ impl SiteProbes {
 /// Import path, canonical identity, package flag, search-root index and native archive.
 type ModuleFile = (PathBuf, PathBuf, bool, usize, Option<NativeArchive>);
 
+#[derive(Clone, Copy, PartialEq)]
+enum ImportUse {
+    /// The importer may read any attribute of this namespace.
+    Definitions,
+    /// Only named members, including any explicit re-exports, have readers.
+    Named,
+    SourceExports,
+    Initialization,
+}
+
 enum ProjectProvider {
     File(ModuleFile),
     Zip(usize),
@@ -5110,6 +5139,8 @@ impl<'a> Loader<'a> {
             doctest_prompts: Vec::new(),
             bundled: false,
             registered_namespace: false,
+            initializer_only: false,
+            unread_imports: HashSet::new(),
             checked_declaration,
             parsed,
             is_package,
@@ -5249,6 +5280,9 @@ impl<'a> Loader<'a> {
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_builtin_imports: self.checked_builtin_imports,
             checked_diagnostics: std::cell::RefCell::new(vec![Vec::new(); self.modules.len()]),
+            register_import_effects: std::cell::Cell::new(
+                self.modules.iter().any(|m| m.initializer_only && m.bundled),
+            ),
             // An import that cannot be initialized here must not turn an unused
             // object-capable namespace into a reason to box the caller.
             needs_object_runtime: std::cell::Cell::new(
@@ -5318,10 +5352,40 @@ impl<'a> Loader<'a> {
     }
 
     fn scan(&mut self, id: ModuleId) -> Result<(), String> {
+        if self.modules[id].bundled {
+            // Activate adapter requests when their fixed definitions are first needed.
+            // token initializes its tables and quopri selects a codec from live module globals.
+            self.needs_object_imports |= matches!(
+                self.modules[id].name.as_str(),
+                "token"
+                    | "codeop"
+                    | "pyexpat"
+                    | "xml.parsers.expat"
+                    | "unittest.signals"
+                    | "html"
+                    | "wave"
+                    | "http.client"
+                    | "fractions"
+                    | "quopri"
+                    | "xml"
+                    | "zoneinfo"
+                    | "compression._common._streams"
+            );
+        }
         let is_entry = self.is_entry(id);
         let parsed = self.modules[id].parsed.clone();
         let selected = self.modules[id].checked_statements();
         let suite = &parsed.suite()[selected.clone()];
+        // An import-only launcher runs the providers themselves as its program.
+        if self.module_operand.is_none()
+            && (self.modules[id].initializer_only
+                || is_entry
+                    && suite
+                        .iter()
+                        .any(|s| !matches!(s, ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_))))
+        {
+            self.modules[id].unread_imports = self.session.unread_imports(id, suite, is_entry);
+        }
         let global_writes = self.session.nested_global_writes(id, parsed.tokens());
         let mut imports = Vec::new();
         let first_party = self.modules[id].is_program_source();
@@ -5926,7 +5990,15 @@ impl<'a> Loader<'a> {
             self.ordered_imports = true;
             return Ok(Binding::Module(child));
         }
-        self.load_source(&name, source_exports).map(Binding::Module)
+        self.load_source(
+            &name,
+            if source_exports {
+                ImportUse::SourceExports
+            } else {
+                ImportUse::Definitions
+            },
+        )
+        .map(Binding::Module)
     }
 
     fn import(&mut self, id: ModuleId, index: usize, statement: &ast::Stmt) -> Result<(), String> {
@@ -5937,7 +6009,12 @@ impl<'a> Loader<'a> {
                 }
                 for alias in &import.names {
                     let name = alias.name.as_str();
+                    let unread = self.modules[id].unread_imports.contains(&alias.range());
+                    let prior = self.needs_object_imports;
                     if let Some(module) = self.intrinsic_module(name, None)? {
+                        if unread && self.is_entry(id) {
+                            self.needs_object_imports = prior;
+                        }
                         if module == IntrinsicModule::Dataclasses {
                             self.modules[id]
                                 .registered_imports
@@ -5959,8 +6036,26 @@ impl<'a> Loader<'a> {
                         self.bind(id, local.as_str(), Binding::IntrinsicModule(module), alias)?;
                         continue;
                     }
-                    let target = self.load_module(name)?;
-                    self.register_namespace_import(id, index, alias.range(), target);
+                    let usage = if unread {
+                        ImportUse::Initialization
+                    } else if self.is_entry(id)
+                        && self.module_operand.is_none()
+                        && !name.contains('.')
+                    {
+                        ImportUse::Named
+                    } else {
+                        ImportUse::Definitions
+                    };
+                    let target = self.load_source(name, usage)?;
+                    if usage == ImportUse::Named
+                        && !self.modules[target].unread_imports.is_empty()
+                        && self.reads_namespace(id, alias, target)
+                    {
+                        self.activate_definitions(target)?;
+                    }
+                    if !self.modules[target].initializer_only {
+                        self.register_namespace_import(id, index, alias.range(), target);
+                    }
                     let (local, binding) = if let Some(local) = &alias.asname {
                         (local.as_str(), self.aliased_import(name)?)
                     } else {
@@ -6068,6 +6163,8 @@ impl<'a> Loader<'a> {
                     }
                     return Ok(());
                 }
+                let unread = self.modules[id].unread_imports.contains(&import.range());
+                let prior = self.needs_object_imports;
                 if import.level == 0
                     && let Some(module) = self.intrinsic_module(&name, Some(&import.names))?
                 {
@@ -6106,7 +6203,7 @@ impl<'a> Loader<'a> {
                                     Some(binding)
                                 }
                                 Err(_) if sealed_package_child(&name) && bundled_runtime_source(&name).is_some() => {
-                                    let provider = self.load_source(&name, true)?;
+                                    let provider = self.load_source(&name, ImportUse::SourceExports)?;
                                     self.import_namespace(id, statement.range(), provider);
                                     self.modules[provider].export(member)
                                 }
@@ -6220,6 +6317,9 @@ impl<'a> Loader<'a> {
                     {
                         self.checked_builtin_imports.push((id, name.range()));
                     }
+                    if unread {
+                        self.needs_object_imports = prior;
+                    }
                     return Ok(());
                 }
                 // Loading a new child briefly publishes the module on this package. A
@@ -6236,7 +6336,8 @@ impl<'a> Loader<'a> {
                     {
                         target
                     }
-                    _ => self.load_module(&name)?,
+                    _ if unread => self.load_source(&name, ImportUse::Initialization)?,
+                    _ => self.load_source(&name, ImportUse::Named)?,
                 };
                 self.register_namespace_import(id, index, statement.range(), target);
                 for (member, alias) in import.names.iter().enumerate() {
@@ -6291,13 +6392,16 @@ impl<'a> Loader<'a> {
                                 return Err(format!("cyclic import through {name:?}"));
                             }
                         }
-                        if let Binding::Module(child) = binding
-                            && self.loading.contains(&child)
-                        {
-                            return Err(format!(
-                                "cyclic import through {:?}",
-                                self.modules[child].name
-                            ));
+                        if let Binding::Module(child) = binding {
+                            if self.loading.contains(&child) {
+                                return Err(format!(
+                                    "cyclic import through {:?}",
+                                    self.modules[child].name
+                                ));
+                            }
+                            if !unread {
+                                self.activate_definitions(child)?;
+                            }
                         }
                         binding
                     } else if let Some(binding) =
@@ -6376,7 +6480,7 @@ impl<'a> Loader<'a> {
                     } else {
                         binding
                     };
-                    self.needs_object_imports |= binding == Binding::ConditionalValue;
+                    self.needs_object_imports |= !unread && binding == Binding::ConditionalValue;
                     self.imports_runtime_class |= binding == Binding::RuntimeClass;
                     let local = alias.asname.as_ref().unwrap_or(&alias.name);
                     // IMPORT_NAME resolves the whole fromlist before Python stores its aliases.
@@ -6668,12 +6772,85 @@ impl<'a> Loader<'a> {
     }
 
     fn load_module(&mut self, name: &str) -> Result<ModuleId, String> {
-        self.load_source(name, false)
+        self.load_source(name, ImportUse::Definitions)
+    }
+
+    /// Qualified reads of locally declared members need the same definitions
+    /// as named imports. If the module escapes, or an access might read a
+    /// re-export, conservatively activate the whole namespace.
+    fn reads_namespace(&self, importer: ModuleId, alias: &ast::Alias, target: ModuleId) -> bool {
+        use ast::visitor::{Visitor, walk_expr};
+
+        struct Reads<'a> {
+            name: &'a str,
+            provider: &'a SourceModule,
+            target: ModuleId,
+            namespace: bool,
+        }
+
+        impl<'a> Visitor<'a> for Reads<'_> {
+            fn visit_expr(&mut self, expr: &'a ast::Expr) {
+                if self.namespace {
+                    return;
+                }
+                if let ast::Expr::Attribute(attr) = expr
+                    && attr.ctx == ast::ExprContext::Load
+                    && attr.value.as_name_expr().is_some_and(|n| n.id == self.name)
+                    && matches!(self.provider.export(attr.attr.as_str()),
+                        Some(Binding::Definition(d) | Binding::Value(d)) if d.module == self.target)
+                {
+                    return;
+                }
+                if expr.as_name_expr().is_some_and(|n| n.id == self.name) {
+                    self.namespace = true;
+                } else {
+                    walk_expr(self, expr);
+                }
+            }
+        }
+
+        let mut reads = Reads {
+            name: alias.asname.as_ref().unwrap_or(&alias.name).as_str(),
+            provider: &self.modules[target],
+            target,
+            namespace: false,
+        };
+        reads.visit_body(self.modules[importer].parsed.suite());
+        reads.namespace
+    }
+
+    /// A later reader can also observe an initially unread module's re-exports.
+    /// Activate those bindings without scanning a first-party initializer twice.
+    fn activate_definitions(&mut self, id: ModuleId) -> Result<(), String> {
+        let module = &mut self.modules[id];
+        if std::mem::take(&mut module.initializer_only) && module.bundled {
+            module.registered_namespace = false;
+            self.loading.insert(id);
+            return self.scan(id);
+        }
+        if !module.unread_imports.is_empty() {
+            let unread = std::mem::take(&mut module.unread_imports);
+            let parsed = module.parsed.clone();
+            for alias in parsed
+                .suite()
+                .iter()
+                .filter_map(ast::Stmt::as_import_stmt)
+                .flat_map(|i| &i.names)
+            {
+                if unread.contains(&alias.range())
+                    && let Some(&target) = self.by_name.get(alias.name.as_str())
+                {
+                    self.activate_definitions(target)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// An unresolved sealed from-import may ask the selected bundled file for its exports.
     /// Ordinary module loads keep their checked definitions.
-    fn load_source(&mut self, name: &str, source_exports: bool) -> Result<ModuleId, String> {
+    fn load_source(&mut self, name: &str, usage: ImportUse) -> Result<ModuleId, String> {
+        let unread = usage == ImportUse::Initialization;
         if name == FRACTION_CLASS {
             return Err("the private Fraction implementation is not an importable module".into());
         }
@@ -6699,6 +6876,11 @@ impl<'a> Loader<'a> {
                 return Err(format!(
                     "cyclic import through {name:?} (the entry module cannot import itself)"
                 ));
+            }
+            if usage == ImportUse::Named && !self.modules[id].bundled {
+                self.modules[id].initializer_only = false;
+            } else if !unread {
+                self.activate_definitions(id)?;
             }
             return Ok(id);
         }
@@ -6770,7 +6952,6 @@ impl<'a> Loader<'a> {
             )),
             // The object runtime owns these exports, including the live unittest result registry.
             "pyexpat" | "xml.parsers.expat" | "unittest.signals" => {
-                self.needs_object_imports = true;
                 bundled_runtime_source(name).map(|(path, _)| (path, ""))
             }
             "pkgutil" => Some((
@@ -6822,7 +7003,7 @@ impl<'a> Loader<'a> {
             )),
             _ => {
                 path_first = name == "ssl" && self.allow_imports;
-                registered_namespace = source_exports
+                registered_namespace = usage == ImportUse::SourceExports
                     || matches!(name, "_tokenize" | "bisect" | "email" | "ssl" | "tokenize");
                 bundled_runtime_source(name)
             }
@@ -6840,7 +7021,7 @@ impl<'a> Loader<'a> {
             // Only a top-level match selects this file. Dotted children search the
             // initialized parent's path, which may contain multiple namespace portions.
             let selected = project.filter(|_| !name.contains('.'));
-            let result = self.load_new_module(name, path_first, selected);
+            let result = self.load_new_module(name, path_first, selected, usage);
             self.import_depth -= 1;
             if let Some(id) = result? {
                 return Ok(id);
@@ -6850,20 +7031,7 @@ impl<'a> Loader<'a> {
             if !path_first {
                 self.reject_stdlib_shadow(name)?;
             }
-            // token initializes its tables and quopri selects a codec from live module globals.
-            self.needs_object_imports |= matches!(
-                name,
-                "token"
-                    | "html"
-                    | "wave"
-                    | "http.client"
-                    | "fractions"
-                    | "quopri"
-                    | "xml"
-                    | "zoneinfo"
-                    | "compression._common._streams"
-            );
-            let parent = self.package_parent(name)?;
+            let parent = self.package_parent(name, unread)?;
             // Initializing the package may already have imported this child.
             if let Some(&id) = self.by_name.get(name) {
                 return Ok(id);
@@ -6883,9 +7051,15 @@ impl<'a> Loader<'a> {
                 input,
             )?;
             self.modules[id].bundled = true;
-            // codeop sets compiler flags on Python instances.
-            self.needs_object_imports |= name == "codeop";
-            if registered_namespace {
+            if unread
+                && !registered_namespace
+                && checked_declaration.is_none()
+                && crate::dynamic::bundled_module_source(name, false).is_some()
+            {
+                self.modules[id].initializer_only = true;
+                self.modules[id].registered_namespace = true;
+                self.loading.remove(&id);
+            } else if registered_namespace {
                 let binding = Binding::Intrinsic(Intrinsic::ScopedObjectExport(filename));
                 self.modules[id].registered_namespace = true;
                 self.loading.remove(&id);
@@ -6927,12 +7101,17 @@ impl<'a> Loader<'a> {
     }
 
     /// Resolve the containing package, including one that is importing this child itself.
-    fn package_parent<'n>(&mut self, name: &'n str) -> Result<Option<(ModuleId, &'n str)>, String> {
+    fn package_parent<'n>(
+        &mut self,
+        name: &'n str,
+        unread: bool,
+    ) -> Result<Option<(ModuleId, &'n str)>, String> {
         let Some((parent, child)) = name.rsplit_once('.') else {
             return Ok(None);
         };
         let id = match self.by_name.get(parent).copied() {
             Some(id) if self.loading.contains(&id) && self.modules[id].is_package => id,
+            _ if unread => self.load_source(parent, ImportUse::Initialization)?,
             _ => self.load_module(parent)?,
         };
         if !self.modules[id].is_package {
@@ -7168,7 +7347,9 @@ impl<'a> Loader<'a> {
         name: &str,
         path_fallback: bool,
         selected: Option<ProjectProvider>,
+        usage: ImportUse,
     ) -> Result<Option<ModuleId>, String> {
+        let unread = usage == ImportUse::Initialization;
         let first = name.split('.').next().unwrap_or("");
         let directory_main = name == "__main__" && self.module_operand.as_deref() == Some(name);
         let declaration = if directory_main || path_fallback || selected.is_some() {
@@ -7177,7 +7358,7 @@ impl<'a> Loader<'a> {
         } else {
             self.checked_import_declaration(first)?
         };
-        let parent = self.package_parent(name)?;
+        let parent = self.package_parent(name, unread)?;
         // Parent initialization can have loaded this child while exposing re-exports.
         if let Some(&id) = self.by_name.get(name) {
             if self.loading.contains(&id) {
@@ -7372,7 +7553,26 @@ impl<'a> Loader<'a> {
         let id = self.add_source(path, identity, name.to_owned(), is_package, input)?;
         self.modules[id].search_roots = SearchRoots::Single(root_index);
         self.modules[id].archive = archive;
+        // A first-party import still owns its dependency resolution, checked
+        // declarations and cyclic initialization order, even without readers.
+        if self.modules[id].is_program_source()
+            && !self.has_checked_only_import
+            && !self.ordered_imports
+        {
+            self.modules[id].initializer_only = unread;
+            if usage == ImportUse::Named && self.module_operand.is_none() {
+                self.modules[id].unread_imports =
+                    self.session
+                        .unread_imports(id, self.modules[id].parsed.suite(), false);
+            }
+        }
         self.scan(id)?;
+        if self.has_checked_only_import
+            || self.ordered_imports
+            || self.modules[id].executable.is_empty() && self.modules[id].unread_imports.is_empty()
+        {
+            self.activate_definitions(id)?;
+        }
         self.bind_child(name, id, parent)?;
         Ok(Some(id))
     }
@@ -7979,7 +8179,9 @@ else:
                 )
                 .unwrap();
             // Both graphs contain the same prepared child. Only one initializer imports it.
-            let child = loader.load_source("email.errors", true).unwrap();
+            let child = loader
+                .load_source("email.errors", super::ImportUse::SourceExports)
+                .unwrap();
             assert!(loader.modules[child].registered_namespace);
             loader.scan(entry).unwrap();
             let mut graph = loader.finish(entry, filename, false, None).unwrap();

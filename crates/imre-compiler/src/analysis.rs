@@ -234,8 +234,9 @@ impl SourceContract {
     pub(crate) fn fixed_errors(&self, graph: &crate::modules::SourceGraph) -> Result<(), String> {
         let registered = graph.registered_source_errors.borrow();
         let remaining = (0..graph.modules.len()).filter(|id| {
-            !graph.modules[*id].checks_source_contracts()
-                || !registered.get(id).is_some_and(Vec::is_empty)
+            !graph.modules[*id].registered_namespace
+                && (!graph.modules[*id].checks_source_contracts()
+                    || !registered.get(id).is_some_and(Vec::is_empty))
         });
         self.owner(graph)
             .fixed_errors(remaining, self.skipped.as_deref(), &self.overloads)
@@ -267,7 +268,9 @@ impl SourceContract {
                 roots
                     .iter()
                     .enumerate()
-                    .filter(|(_, root)| !root.body_checked)
+                    .filter(|(id, root)| {
+                        !root.body_checked && !graph.modules[*id].registered_namespace
+                    })
                     .map(|(id, _)| (id, id)),
                 extra.checked_file.then_some(&graph.modules),
             )?;
@@ -1183,7 +1186,19 @@ pub(crate) fn check_registered_project<'a>(
     let winners = (first_winner..).zip(sources);
     session.check_registered_execution(
         || {
-            let roots = session.closed_file_roots(&paths, None, &[], None);
+            let mut roots = session.closed_file_roots(&paths, None, &[], None);
+            if let Some(skipped) = checked
+                .and_then(|g| g.source_contract.as_ref())
+                .and_then(|contract| contract.skipped.as_ref())
+            {
+                // A new SDK provider may force a fresh session. The reachability
+                // policy still belongs to the unchanged application sources.
+                for root in &mut roots {
+                    if let Some((id, _)) = root.original {
+                        root.skipped = &skipped[id];
+                    }
+                }
+            }
             session.closed_program_errors(&roots, refusal)?;
             if let Some((graph, extra)) = checked.zip(extra)
                 && let Some(contract) = &graph.source_contract
@@ -1193,7 +1208,8 @@ pub(crate) fn check_registered_project<'a>(
                 let surviving = winners.clone().filter_map(|(selected, winner)| {
                     let id = winner.checked_module?;
                     let module = &graph.modules[id];
-                    (module.original_source() == winner.source
+                    (!module.registered_namespace
+                        && module.original_source() == winner.source
                         && !providers.is_some_and(|p| p.contains_key(&id)))
                     .then_some((selected, id))
                 });
@@ -3051,6 +3067,60 @@ impl Session {
                     .then_some(class.start())
             })
             .collect()
+    }
+
+    /// A module import with no lexical readers still executes. Conservatively
+    /// include reads in every nested scope, even when the name is shadowed.
+    pub(crate) fn unread_imports(
+        &self,
+        module: usize,
+        suite: &[Stmt],
+        entry: bool,
+    ) -> HashSet<TextRange> {
+        let mut candidates = Vec::new();
+        for stmt in suite {
+            match stmt {
+                Stmt::Import(import) => candidates.extend(
+                    import
+                        .names
+                        .iter()
+                        .map(|alias| (std::slice::from_ref(alias), alias.range())),
+                ),
+                // IMPORT_FROM reads the complete fromlist. Imported modules
+                // can re-export these names even without a local reader.
+                Stmt::ImportFrom(import)
+                    if entry
+                        && import
+                            .module
+                            .as_ref()
+                            .is_none_or(|m| m.as_str() != "__future__")
+                        && import.names.iter().all(|a| a.name.as_str() != "*") =>
+                {
+                    candidates.push((import.names.as_slice(), stmt.range()));
+                }
+                _ => {}
+            }
+        }
+        if candidates.is_empty() {
+            return HashSet::new();
+        }
+        let index =
+            ty_python_core::semantic_index(&self.db, self.db.program_file(self.files[module]));
+        for scope in index.scope_ids() {
+            let table = index.place_table(scope.file_scope_id(&self.db));
+            candidates.retain(|(aliases, _)| {
+                aliases.iter().all(|a| {
+                    let name = a.asname.as_ref().unwrap_or(&a.name).as_str();
+                    table
+                        .symbol_id(name.split('.').next().unwrap())
+                        .is_none_or(|id| !table.symbol(id).is_used())
+                })
+            });
+            if candidates.is_empty() {
+                break;
+            }
+        }
+        candidates.into_iter().map(|(_, range)| range).collect()
     }
 
     /// Only an assignment through an explicit global can replace the module's binding.
