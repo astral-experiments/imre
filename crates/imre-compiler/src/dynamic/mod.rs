@@ -1337,7 +1337,7 @@ impl<'a> RegisteredSource<'a> {
     /// Pair a checked declaration only with its own selected SDK file.
     pub(crate) fn matches_bundled_source(&self, path: &Path) -> bool {
         self.path.strip_prefix(BUNDLED_SOURCE_ROOT) == Ok(path)
-            && self.is_original_bundled_source(crate::modules::bundled_runtime_source(self.name))
+            && self.is_original_bundled_source(bundled_module_source(self.name, false))
     }
 
     fn is_original_bundled_source(&self, original: Option<(&str, &str)>) -> bool {
@@ -1493,6 +1493,13 @@ pub(crate) fn compile(
      -> Result<Imports, String> {
         let mut imports =
             imports_from_body(text, &mut body, None, None, entry_types, None, unread)?;
+        // An import-only entry runs its providers as the program. Honor an
+        // object request from a provider (for example, a wildcard binding)
+        // without letting an unread SDK name request it on its own.
+        imports.has_import_use |= !body.is_empty()
+            && body
+                .iter()
+                .all(|stmt| matches!(stmt, Stmt::Import(_) | Stmt::ImportFrom(_)));
         // Generic functions can admit an unresolved entry. A runtime-class import
         // also needs the entry's own request when checking its first-party callers.
         if module_entry.is_none()

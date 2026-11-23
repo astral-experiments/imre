@@ -1536,8 +1536,8 @@ impl Checker<'_> {
         if call.arguments.keywords.is_empty() {
             Ok(())
         } else {
-            Err(error(
-                self.source,
+            Err(self.classified_error(
+                Kind::UnsupportedRepresentation,
                 call,
                 "keyword arguments are unsupported for this builtin",
             ))

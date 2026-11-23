@@ -449,7 +449,8 @@ fn checked_shipped_files_reuse_equivalent_inputs_and_preserve_sdk_shadows() {
 #[test]
 fn checked_http_server_class_uses_the_complete_shipped_source() {
     let graph =
-        SourceGraph::single_with_mode("from http.server import HTTPServer\n", true).unwrap();
+        SourceGraph::single_with_mode("from http.server import HTTPServer\nHTTPServer\n", true)
+            .unwrap();
     let Some(super::Binding::Definition(id)) = graph.modules[graph.entry].export("HTTPServer")
     else {
         panic!("expected the checked class");

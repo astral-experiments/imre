@@ -2529,8 +2529,17 @@ impl Inference {
                 self.update(signature);
             }
         }
-        let needs_registered_entry =
-            !suspended_bodies.is_empty() || signatures.values().any(Signature::registered_frame);
+        // A widened result or method parameter has no fixed calling convention.
+        // Methods live in the class tables, outside the top-level signature map.
+        let needs_registered_entry = !suspended_bodies.is_empty()
+            || signatures.values().any(Signature::registered_frame)
+            || definitions.iter().any(|(_, function, signature)| {
+                function.returns.is_none() && signature.returns == Type::PythonObject
+                    || signature.method.is_some()
+                        && signature.params.iter().enumerate().any(|(i, param)| {
+                            param.ty == Type::PythonObject && signature.inferred_formal(i)
+                        })
+            });
         // A body checked before return publication has no Python operand sites. Its
         // exact ABI must still match the solved signature, and a registered graph
         // must take the ordinary placement path instead.

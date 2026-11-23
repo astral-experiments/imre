@@ -25,6 +25,12 @@ def either(flag):
     return "one"
 
 
+def rebind_local() -> None:
+    value = 1
+    value = "one"
+    print(value)
+
+
 def change(flag):
     value = 2
     if flag:
@@ -39,6 +45,7 @@ a = A()
 print(a.show("a"), a.show(1))
 print(choose(False), choose(True), change(False), change(True))
 print(either(False), either(True))
+rebind_local()
 
 
 def default(x=1):

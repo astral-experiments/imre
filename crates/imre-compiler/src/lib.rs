@@ -557,7 +557,6 @@ fn object_fallback(
                         return Err("named entry did not reach checked source registration".into());
                     }
                     let module = &mut fixed.ir.0;
-                    verify_after(module, "lowering")?;
                     match callables::layouts(module, std::mem::take(&mut fixed.callables)) {
                         Ok(_) if graph.register_import_effects.get() => {
                             // The application passed fixed admission. Python must
@@ -566,6 +565,9 @@ fn object_fallback(
                             None
                         }
                         Ok(program) => {
+                            // An isolated initializer can leave Python-only globals in
+                            // the candidate above. Verify the fixed IR when selected.
+                            verify_after(module, "lowering")?;
                             if !options.include_modules.is_empty() {
                                 return Err(
                                         "--include-module requires a runtime module loader; this entry is fully typed"

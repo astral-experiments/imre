@@ -16,12 +16,14 @@ from pathlib import Path
 
 SUITES = (
     "assignments",
+    "bytes",
     "callables",
     "calls",
     "classes",
     "comprehensions",
     "containers",
     "dataclass_records",
+    "differential",
     "expressions",
     "floats",
     "inference",
@@ -29,8 +31,13 @@ SUITES = (
     "iterator_pipelines",
     "matching",
     "module_values",
+    "paths",
     "primitives",
+    "text",
     "truthiness",
+    "tuple_keys",
+    "unpacking",
+    "workspaces",
 )
 PEER = "_imre_probe_peer"
 UNUSED = "_imre_probe_import"
@@ -45,16 +52,24 @@ IMPORTS = (
 def programs(tests):
     for suite in SUITES:
         data = runpy.run_path(str(tests / f"{suite}.py"))
+        # Supply the same prelude or entry file as each native test harness.
+        prefix = ""
+        if suite == "paths":
+            prefix = data["IMPORT"]
+        elif suite == "workspaces":
+            prefix = data["IMPORTS"]
         for kind in ("CHECKED", "REJECTED", "IMPORTED_REJECTIONS"):
             for name, files in data.get(kind, {}).items():
                 if isinstance(files, str):
-                    files = {"main.py": files}
+                    files = {"main.py": prefix + files}
+                elif suite == "module_values":
+                    files = {"main.py": "import library\n", **files}
                 if isinstance(files, dict) and "main.py" in files:
                     yield f"{suite}.{name}", files, kind == "CHECKED"
 
 
 def insertion_line(source):
-    module = ast.parse(source)
+    module = ast.parse(source.encode("utf-8"))
     body = iter(module.body)
     at = 0
     if ast.get_docstring(module, clean=False) is not None:
@@ -71,7 +86,8 @@ def compare(compiler, case, parity_only):
     source = files["main.py"]
     try:
         at = insertion_line(source)
-    except SyntaxError:
+    except (SyntaxError, ValueError):
+        # ast also rejects identifiers that normalize to None, True or False.
         return None
     assert all(UNUSED not in text and PEER not in text for text in files.values())
     lines = source.splitlines(keepends=True)
@@ -93,7 +109,11 @@ def compare(compiler, case, parity_only):
                 capture_output=True,
                 timeout=120,
             )
-            if p.returncode not in (0, 1) or "panicked" in p.stderr:
+            if (
+                p.returncode not in (0, 1)
+                or "panicked" in p.stderr
+                or "internal compiler error" in p.stderr
+            ):
                 raise RuntimeError(f"{name} crashed ({p.returncode})\n{p.stderr}")
             return p
 

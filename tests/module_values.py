@@ -65,7 +65,7 @@ REJECTED = {
     },
     "wrong_annotation": {"library.py": 'VALUE: int = "wrong"\n'},
     "wrong_mutation": {
-        "library.py": 'VALUES = {"a": 1}\ndef change() -> None:\n    VALUES["a"] = "wrong"\n'
+        "library.py": 'VALUES: dict[str, int] = {"a": 1}\ndef change() -> None:\n    VALUES["a"] = "wrong"\n'
     },
     "local_shadow": {
         "library.py": "VALUE = 1\ndef change() -> int:\n    VALUE = 2\n    return VALUE\n"

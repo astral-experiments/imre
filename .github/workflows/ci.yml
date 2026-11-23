@@ -249,7 +249,8 @@ jobs:
       - name: Free disk space for native test binaries
         run: cargo clean --profile dev
       - run: cargo build --workspace --release --locked --features imre-compiler/verify-ir
-      - name: Verify unused imports preserve compiler decisions
+      - &verify-import-invariance
+        name: Verify unused imports preserve compiler decisions
         run: python3 -B tests/import_invariance.py --compiler target/release/imre
       - &verify-stdlib-table
         name: Verify the standard library support table
@@ -737,6 +738,7 @@ jobs:
       - *cpython-reference
       - run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18
       - run: cargo build -p imre-compiler --release --locked --features imre-compiler/verify-ir
+      - *verify-import-invariance
       - *build-asan
       - *build-asan-providers
       - *asan-smoke

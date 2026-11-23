@@ -5376,14 +5376,8 @@ impl<'a> Loader<'a> {
         let parsed = self.modules[id].parsed.clone();
         let selected = self.modules[id].checked_statements();
         let suite = &parsed.suite()[selected.clone()];
-        // An import-only launcher runs the providers themselves as its program.
-        if self.module_operand.is_none()
-            && (self.modules[id].initializer_only
-                || is_entry
-                    && suite
-                        .iter()
-                        .any(|s| !matches!(s, ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_))))
-        {
+        // An import-only entry still needs to check each initializer independently.
+        if self.module_operand.is_none() && (self.modules[id].initializer_only || is_entry) {
             self.modules[id].unread_imports = self.session.unread_imports(id, suite, is_entry);
         }
         let global_writes = self.session.nested_global_writes(id, parsed.tokens());
