@@ -235,7 +235,7 @@ impl<M> Diagnostic<M> {
             .as_ref()
             .and_then(|p| p.checked_site.as_deref());
         if !matches!(site, Some(CheckedSite::Function(_, _, BodyCheck::Lowering)))
-            && self.kind == Kind::ExactType
+            && matches!(self.kind, Kind::ExactType | Kind::DeclaredArgument)
             && self
                 .operand_declaration()
                 .is_some_and(|owner| selected.clone().any(|(id, _)| id == owner.module))
@@ -444,6 +444,13 @@ impl Failure {
             d.kind = kind;
         }
         self
+    }
+
+    /// Use only for the final conversion of an already checked operand when
+    /// the destination is known to be inferred. Nested errors remain terminal.
+    pub(super) fn is_storage_mismatch(&self, site: &impl Ranged) -> bool {
+        matches!(self, Self::Diagnostic(d)
+            if d.exact_operand() == Some(site.range()) && d.operand_declaration().is_none())
     }
 
     pub(super) fn is_representation(&self) -> bool {

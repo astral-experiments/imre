@@ -358,7 +358,7 @@ impl StatementLowering for Checker<'_> {
                         expected,
                         |_, _| false,
                         |_, value, _, _| Ok(value),
-                        None,
+                        checker.return_declaration,
                     )
                 })?
             }
@@ -401,6 +401,7 @@ impl StatementLowering for Checker<'_> {
                 };
             if !terminates && !source_result {
                 let expected = self.registered_result_contract.unwrap_or(self.returns);
+                let actual = value.ty;
                 let checked = if self.registered_result_contract.is_some()
                     && value.ty == Type::PythonObject
                 {
@@ -432,6 +433,20 @@ impl StatementLowering for Checker<'_> {
                 };
                 value = checked.map_err(|failure| {
                     if matches!(&failure, Failure::Diagnostic(d) if d.kind == Kind::ExactType) {
+                        // Dormant numeric subtypes satisfy the source declaration,
+                        // even if the fixed ABI cannot represent this return.
+                        if matches!(
+                            (expected, actual),
+                            (Type::Int, Type::Bool) | (Type::Float, Type::Int | Type::Bool)
+                        ) && self.return_declaration.is_some()
+                            && self
+                                .graph
+                                .session
+                                .unreachable_range(self.module, origin)
+                                .is_some()
+                        {
+                            return failure.classify(Kind::ScopedObject);
+                        }
                         failure
                             .expected_from(self.return_declaration, origin)
                             .classify(Kind::ReturnType)
@@ -439,6 +454,12 @@ impl StatementLowering for Checker<'_> {
                         failure
                     }
                 })?;
+                if self.return_declaration.is_some() && self.native_type_proof(&value, expected) {
+                    self.graph.checked_native_type(
+                        self.module,
+                        crate::analysis::CheckedDiagnostic::NativeReturn(origin),
+                    );
+                }
             }
             ret.value.as_deref()
         };

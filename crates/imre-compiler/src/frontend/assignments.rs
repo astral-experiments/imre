@@ -121,7 +121,8 @@ pub(super) enum ValueSource {
     Declaration(TypeDeclaration),
     /// A single unbound target stored under an exact coroutine callback annotation.
     CoroutineCallback(TypeDeclaration, usize),
-    InferredList(DefinitionId),
+    /// All copies of a fresh allocation share its storage requirements.
+    Container(std::rc::Rc<Container>),
     /// The same mutable list returned by an unannotated source function.
     InferredListReturn(usize),
     /// An unannotated mutable parameter, including aliases of its original value.
@@ -129,10 +130,82 @@ pub(super) enum ValueSource {
         function: usize,
         index: usize,
     },
+    /// A refused capture is an argument contract only if this partial is invoked.
+    CapturedArgument(std::rc::Rc<Failure>, Option<TypeDeclaration>),
     LiteralStrings(Type),
     Function(usize),
     /// A different source method can occupy this captured slot when it is called.
     ReboundMethod,
+}
+
+pub(super) struct Container {
+    pub(super) module_list: Option<DefinitionId>,
+    pub(super) empty: std::cell::Cell<bool>,
+    pub(super) empty_keys: std::cell::Cell<bool>,
+    pub(super) layout: std::cell::Cell<Type>,
+    pub(super) declaration: std::cell::Cell<Option<TypeDeclaration>>,
+}
+
+impl Container {
+    pub(super) fn new(ty: Type, empty: bool) -> Self {
+        Self {
+            module_list: None,
+            empty: empty.into(),
+            empty_keys: empty.into(),
+            layout: ty.into(),
+            declaration: None.into(),
+        }
+    }
+}
+
+// A flow join can retain an origin only when both paths refer to the same allocation.
+impl PartialEq for Container {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self, other)
+    }
+}
+
+impl Eq for Container {}
+
+impl ValueSource {
+    pub(super) fn allocation(value: &Expr) -> Option<Self> {
+        fn display(value: &Expr) -> Option<bool> {
+            match &value.without_location().kind {
+                ExprKind::List(items) | ExprKind::Set { values: items, .. } => {
+                    Some(items.is_empty())
+                }
+                ExprKind::Dict(items) => Some(items.is_empty()),
+                _ => None,
+            }
+        }
+        let empty = display(value).or_else(|| {
+            // A collecting loop returns a private accumulator with a single initializer.
+            let ExprKind::Scope { body, value, clear } = &value.without_location().kind else {
+                return None;
+            };
+            let ExprKind::Local(result) = value.kind else {
+                return None;
+            };
+            if !clear.contains(&result)
+                || !matches!(
+                    value.ty,
+                    Type::ListInt | Type::List(_) | Type::Set(_) | Type::Dict(_)
+                )
+            {
+                return None;
+            }
+            let mut fresh = None;
+            ir::walk_writes(body, |slot, init| {
+                if slot == result {
+                    fresh = Some(fresh.is_none() && init.and_then(display).is_some());
+                }
+            });
+            (fresh == Some(true)).then_some(false)
+        })?;
+        Some(Self::Container(std::rc::Rc::new(Container::new(
+            value.ty, empty,
+        ))))
+    }
 }
 
 impl Assigned {
@@ -722,7 +795,12 @@ impl Checker<'_> {
         }
         let existing = self.names.get(name.id.as_str()).copied();
         let value = if let Some(slot) = existing {
-            self.expr_expected(&expression.value, self.locals[slot])?
+            self.assignment_rhs(
+                &expression.target,
+                &expression.value,
+                (self.locals[slot], self.declared_slots.get(&slot).copied()),
+                ResultUse::Fixed,
+            )?
         } else {
             // A new binding inherits literal context, not the consumer's type:
             // an optional guard can return a different type through `and`.
@@ -737,6 +815,9 @@ impl Checker<'_> {
             Cow::Owned(self.coerce(value.clone(), storage, expression)?)
         };
         let slot = self.declare(name.id.as_str(), storage, expression)?;
+        if let Some(&declaration) = self.declared_slots.get(&slot) {
+            self.declare_container(&stored, declaration, expression);
+        }
         self.assigned_value(slot, &stored);
         if let Some(exports) = &mut self.comprehension_exports {
             exports.insert(name.id.to_string(), slot);
@@ -910,6 +991,20 @@ impl Checker<'_> {
                 let receiver = probe.expr(&subscript.value).ok()?;
                 self.keep_module_list_layout(&receiver);
                 let declaration = probe.value_declaration(&receiver);
+                if probe.inferred_storage(&receiver).is_some()
+                    && rhs.is_some_and(|rhs| self.empty_argument_type(rhs).is_none())
+                {
+                    // Check the item against the receiver reached after evaluating the RHS.
+                    return None;
+                }
+                if matches!(receiver.ty, Type::ListInt | Type::List(_))
+                    && subscript.slice.is_slice_expr()
+                {
+                    // A slice consumes items, not a single element.
+                    return rhs
+                        .filter(|rhs| rhs.is_list_expr())
+                        .map(|_| (receiver.ty, declaration));
+                }
                 if matches!(receiver.ty, Type::Document(_)) {
                     return Some((
                         if matches!(&*subscript.slice, ast::Expr::Slice(_)) {

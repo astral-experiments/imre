@@ -309,6 +309,11 @@ impl Checker<'_> {
                 ));
                 continue;
             }
+            if reserved(name) && self.graph.modules[self.module].is_program_source() {
+                return Err(
+                    self.scoped_builtin_error("a local definition shadowing a builtin", statement)
+                );
+            }
             if reserved(name)
                 || self.names.contains_key(name)
                 || self.graph.modules[self.module].bindings.contains_key(name)
@@ -440,18 +445,7 @@ impl Checker<'_> {
                 .iter_non_variadic_params()
                 .any(|p| p.annotation().is_none())
         {
-            if self
-                .graph
-                .session
-                .is_untyped_generator_local(self.module, definition)
-            {
-                return Err(self.scoped_builtin_error("a generator-local function", definition));
-            }
-            return Err(error(
-                self.source,
-                definition,
-                "local functions require annotated parameters and return types",
-            ));
+            return Err(self.scoped_builtin_error("local function argument binding", definition));
         }
         let wraps = match definition.decorator_list.as_slice() {
             [decorator] => decorator.expression.as_call_expr().filter(|call| {
@@ -896,11 +890,7 @@ impl Checker<'_> {
             }
             let result = returns[0];
             if !returns.iter().all(|&ty| ty == result) {
-                return Err(error(
-                    self.source,
-                    definition,
-                    "local functions with different return layouts require an annotated result",
-                ));
+                return Err(self.scoped_builtin_error("local function return storage", definition));
             }
             signature.returns = result;
         }

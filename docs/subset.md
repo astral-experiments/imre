@@ -33,7 +33,7 @@ and binding keyword defaults remain unsupported.
 | Imports | Absolute, `from`, and package-relative imports; aliases and package re-exports; fixed module, definition, and exported value bindings; shared mutable values; no import cycles |
 | Copying | Shallow copies of mutable containers share their children. Plain fixed class instances copy their stored fields without rerunning the initializer; a class may override this through an inherited or explicit `__copy__(self)` method. Deep copy preserves aliases in closed builtin container graphs with immutable keys, using the implicit memo or literal `None`. |
 | Functions | Exact signatures declared or inferred from concrete calls, scalar defaults, and checked bodies; direct positional and keyword calls; positional-only, keyword-only, and read-only variadic positional parameters; exact callable values, bound methods, and noncapturing lambdas; direct and mutual recursion with resolved signatures |
-| Types | `int`, `float`, `bool`, `str`, `bytes`, `None`, sealed `pathlib.Path` and `subprocess.CompletedProcess[str]`, `typing.TextIO` and `typing.BinaryIO`, the sealed builtin `Exception` family, fixed nominal classes, string-valued `enum.StrEnum` and `typing.Literal`, concrete `list[T]`, `dict[K, V]`, and `set[T]`, fixed tuples such as `tuple[str, int]`, exact `typing.Callable[[T1, T2], R]` signatures, `str \| bytes`, and `T \| None`; locals have one inferred or declared storage type |
+| Types | `int`, `float`, `bool`, `str`, `bytes`, `None`, sealed `pathlib.Path` and `subprocess.CompletedProcess[str]`, `typing.TextIO` and `typing.BinaryIO`, the sealed builtin `Exception` family, fixed nominal classes, string-valued `enum.StrEnum` and `typing.Literal`, concrete `list[T]`, `dict[K, V]`, and `set[T]`, fixed tuples such as `tuple[str, int]`, exact `typing.Callable[[T1, T2], R]` signatures, `str \| bytes`, and `T \| None`. Each native local has one storage type. |
 | Classes | Fixed fields, explicit or dataclass-generated initialization, typed instance/class/static methods, properties with optional setters, method-local `typing.Self`, alias-visible mutation, and frozen dataclasses |
 | Statements | Single-target and chained assignment; nested and starred unpacking of fixed tuples, lists, strings, and bytes, annotated assignment, numeric augmented assignment, local string/bytes `+=` and bytes `*=`, dictionary entry deletion, `if`/`elif`/`else`, structural `match`/`case`, `while`, `for` over ranges, strings, bytes, concrete containers, or supported iterator pipelines, loop `else`, `break`, `continue`, `return`, `pass`, `assert condition[, string_message]`, `raise`, `try`/`except`/`else`/`finally`, and builtin file/workspace `with` |
 | Conditions | Truth tests for every supported concrete type; operand-returning `and`/`or`, boolean `not`, and short-circuit evaluation; conditional expressions `yes if condition else no`; assignment expressions `(name := value)`; local optional narrowing |
@@ -59,7 +59,7 @@ Block indentation compares tab stops of eight columns with the alternate one-col
 
 The compiler bounds syntax complexity before parsing each module. Deeply nested blocks, delimiters, or long chains of operators can exceed the limit. Splitting a long expression into intermediate assignments reduces its depth.
 
-Global rebinding, capturing closures, arbitrary decorators, reflection, dynamic attributes, general generator functions, escaping iterator values, slice assignment/deletion, open-ended call argument expansion, untyped variadic parameters, function defaults other than scalar literals, mutable-list augmented assignment, and arbitrary object identity comparisons are currently rejected. An async comprehension can consume an async generator in a saved executable. By default the compiler checks every function and branch. A closed entry profile can select particular branches of reachable functions. Recursive calls with resolved signatures count active Python frames against the current recursion limit. The compiler grows the native stack at entries on checked call cycles.
+Fixed layouts exclude arbitrary decorators, reflection, dynamic attributes, general generator functions, escaping iterator values, slice assignment and deletion, open-ended argument expansion, untyped variadic parameters, nonscalar defaults and arbitrary object identity comparisons. An async comprehension can consume an async generator in a saved executable. By default the compiler checks every function and branch. A closed entry profile can select particular branches of reachable functions. Recursive calls with resolved signatures count active Python frames against the current recursion limit. The compiler grows the native stack at entries on checked call cycles.
 
 ## Inferred function signatures and iterable consumers
 
@@ -75,7 +75,23 @@ print(checksum("12345"))
 
 For this call, Imre infers `checksum(str) -> int`. A function with a native signature needs a concrete type for each parameter and its result. The compiler can reuse the body it checked during inference. An uncalled function such as `def identity(value): return value` can appear in the same module even when no call supplies a type for `value`.
 
-An annotation constrains callers. Passing `"three"` to a parameter declared as `int` produces a build diagnostic. A `None` default gives a parameter the exact `None` type. Write `value: int | None = None` when callers can also pass an integer. An unresolved recursive return type or an unsupported return union can prevent the compiler from inferring a native signature.
+A function such as `def show(x): return x` can be called with both `show(1)`
+and `show("a")`. This also works for methods and parameters with scalar
+defaults. When the inputs, results or writes to an unannotated variable
+need different layouts, Imre can use Python object storage. Loop targets,
+unpacking, assignment expressions and writes to a global follow the same rule.
+A fresh unannotated list, set or dictionary can hold different kinds of values.
+An annotated alias still constrains the shared container, including list
+updates with `+=`. Functions with compatible layouts can use native arithmetic.
+
+In first-party code, Imre checks arguments against the selected source
+declaration, including a function or bound method saved under another name.
+An unrelated import can change where the compiler places a function. Its
+written argument, default, return and storage types still apply. When the
+compiler cannot determine a value's type, a registered frame can check a
+scalar return or a uniquely declared scalar variable at run time.
+
+An annotation constrains callers. Passing `"three"` to a parameter declared as `int` produces a build diagnostic. Write `value: int | None = None` to constrain a parameter to integers and `None`. An unresolved recursive return type or an unsupported return union can prevent the compiler from inferring a native signature.
 
 Imre compiles supported declared annotation expressions ahead of time; the selected compiler path reports unsupported forms at build time. For `annotationlib.get_annotations(..., eval_str=True)`, a manually supplied annotation string can resolve a name only when, after `eval` strips leading spaces and tabs, the entire remaining string is a non-keyword identifier. Other expressions require a checked body linked at build time. Imre rejects unlinked runtime source text with a hint to declare the annotation in source or avoid `eval_str`. When the compiler cannot prove which text reaches a mutable annotation mapping, that rejection occurs at runtime.
 
@@ -190,14 +206,30 @@ Indirect calls evaluate and retain the callable before evaluating arguments from
 
 A dictionary can hold compiled module functions. In `handlers[key](n=value)`, the selected function binds the keyword against its own parameter list. If evaluating the argument replaces the dictionary entry, the current call still invokes the function it already selected.
 
-Noncapturing lambdas obtain parameter types from an expected callable annotation, parameter, or return type, or from the input elements of `map`, `filter`, `sorted`, or `list.sort`. Their bodies are checked against that signature. Captured enclosing locals, `nonlocal`, lambda defaults, variadic parameters, and keyword-only lambda parameters are rejected. `Callable[..., R]` is also rejected. The fixed-layout type system rejects `Callable` storage in imported module globals, class fields, containers, and tuples, including optional or nested storage. For example, `def use(values: dict[str, Callable[[int], int]]) -> None` still receives a build diagnostic.
+Noncapturing lambdas obtain parameter types from an expected callable annotation, parameter, or return type, or from the input elements of `map`, `filter`, `sorted`, or `list.sort`. Their bodies are checked against that signature. The fixed callable layout excludes captured locals, `nonlocal`, lambda defaults, variadic parameters, and keyword-only lambda parameters. `Callable[..., R]` is also rejected. The fixed-layout type system rejects `Callable` storage in imported module globals, class fields, containers, and tuples, including optional or nested storage. For example, `def use(values: dict[str, Callable[[int], int]]) -> None` still receives a build diagnostic.
 
 An annotated `def` directly inside another function can read enclosing typed
 locals. Each direct call reads their current bindings after evaluating its
 explicit arguments. Mutable captured objects retain their identity. A local
 helper with positional parameters and no captures can also be a callback,
-including in `sorted(map(fingerprint, rows))`. Capturing helpers require a
-direct call, and local definitions must be reached before they are used.
+including in `sorted(map(fingerprint, rows))`.
+
+A nested function with unannotated parameters or an escaping closure can use a
+registered, ahead-of-time compiled body. Its free variables refer to the
+enclosing call’s cells, which stay alive after that call returns. For example,
+the following file prints `5`.
+
+```python
+def factory(n):
+    def add(x):
+        return n + x
+    return add
+
+print(factory(2)(3))
+```
+
+An escaping lambda without a declared callable signature can use the same
+storage. Local definitions must be reached before they are used.
 
 `map(callback, source)` accepts one iterable and a one-argument exact callable, in addition to the existing `map(int, source)` conversion. `filter(predicate, source)` truth-tests each callback result and yields the original element; the predicate need not return `bool`. `filter(None, source)` truth-tests the elements themselves and preserves the source element type, including optional types. Both capture their callback and source at construction but invoke callbacks only when pulled. Short-circuit consumers skip later callbacks and failures. Source mutation remains visible under the ordinary list, dictionary, and set iteration rules. Callback errors use the existing exception and cleanup machinery.
 
@@ -475,7 +507,7 @@ Integer bit operations preserve Python's arbitrary-precision signed semantics. N
 
 Conditions, comprehension filters, match guards, assertions, `not`, and `bool(value)` use Python's truth rules for the supported exact types. `None`, `False`, numeric zero, and empty strings, bytes, lists, dictionaries, sets, and tuples are false. NaN is true; both floating-point signed zeros are false. Native paths, fixed class instances, exceptions, and file handles are true, including closed files. `bool()` returns `False`. User-defined `__bool__` and `__len__` methods remain outside the subset.
 
-`and` and `or` evaluate operands from left to right and return the selected operand without copying it. Skipped operands do not execute, but still must type-check. A stored or returned result must fit one supported storage type, including the bounded string/bytes union or a nullable form. A truth context can consume differently typed operands directly, as in `if items and len(items):`. Context supplies the element type for empty container operands such as `names: list[str] = [] or ["name"]`.
+`and` and `or` evaluate operands from left to right and return the selected operand without copying it. Skipped operands do not execute, but still must type-check. A fixed-layout result must fit one supported storage type, including the bounded string/bytes union or a nullable form. An inferred result can also use Python object storage. A truth context can consume differently typed operands directly, as in `if items and len(items):`. Context supplies the element type for empty container operands such as `names: list[str] = [] or ["name"]`.
 
 ```python
 def display_name(name: str | None) -> str:
@@ -536,8 +568,8 @@ In module and function bodies, a tuple display consumes each `*source` completel
 ## Assignment expressions
 
 `(name := value)` evaluates its right-hand side once, stores it in a local, and
-returns that same value. The binding has one exact storage type, including an
-existing optional type; assigning a concrete value to optional storage does not
+returns that same value. An unannotated name can hold values of different
+types. Assigning a concrete value to optional storage does not
 make the expression result optional. An argument or container context can supply
 the type of an empty literal. Targets must be local names and cannot replace a
 fixed function, class, module binding, or builtin.
@@ -596,7 +628,7 @@ String indexing uses an exact `int` and returns a one-code-point string. Negativ
 
 `sequence[start:stop:step]` accepts a concrete list, string, or bytes and returns that same type. Typed boundaries supply context through a slice to literal receivers, so `return [][:]` works in a function returning `list[str]`; an existing list cannot change its element type. Each component may be an `int`, `None`, or `int | None`; omission is equivalent to `None`. Booleans are not integer bounds. Bounds and steps may have arbitrary precision, negative steps reverse traversal, bounds are clipped to the sequence, and a zero step raises `ValueError`. In particular, `values[::-1]` and `values[:-1:-1]` have different meanings. List slices create a separate list with shallow copies of the selected element references, preserving alias-visible mutations of contained objects.
 
-The receiver evaluates first, followed by start, stop and step in source order. All remain owned until the read completes; mutations performed by a bound expression affect the slice's current contents and length. A failed evaluation prevents later expressions and the read itself. Tuple slicing, slice objects as user values, string item assignment, and slice assignment/deletion remain unsupported.
+The receiver evaluates first, followed by start, stop and step in source order. All remain owned until the read completes; mutations performed by a bound expression affect the slice's current contents and length. A failed evaluation prevents later expressions and the read itself. List slice assignment can use a registered frame, preserving aliases to the original list. The fixed layout does not support slice assignment or deletion, slice objects as user values, or string item assignment.
 
 String loops, comprehensions, and loop-head `enumerate` capture the original immutable string once and advance by code point in linear time. Each yielded character has its own owner; replacing the source binding or field cannot invalidate the iterator or an earlier character. Repeated arbitrary string indexing may scan UTF-8, so use iteration when visiting every character.
 
@@ -682,6 +714,13 @@ print(adjust(8, label="orders", offset=2))
 Defaults must be `int`, `float`, `bool`, `str`, `bytes`, or `None` literals. A number may have one unary `+` or `-`; integers include arbitrary-precision hexadecimal, octal, and binary literals. Ordinary string/bytes-literal rules also apply to defaults. Each default must fit its parameter's exact type: `True` is not an `int` default, and `None` requires `None` or an optional annotation. Mutable containers, tuples, names, calls, arithmetic expressions, and f-strings cannot be defaults, even in an unused function. Literal defaults do not require mutable module state or a general function-object representation.
 
 The receiver of an instance call evaluates first. Supplied arguments then evaluate once in source order, independently of parameter order; a failure prevents later arguments and the callee from running. The compiler applies each parameter's exact type context to its argument, including empty containers and optional values, and retains evaluated values across later mutations and failures. Named arguments lower to ordinary positional native calls.
+
+Imre checks scalar arguments in evaluation order. It can use a first-party
+function body even if it has no annotations. If `boom()` always raises and
+`take` expects two integers,
+`take(boom(), True)` never reaches the boolean. In `take(True, boom())` the
+first argument still violates its contract. A possible replacement of the
+function or its code prevents this proof. The usual ty diagnostics still apply.
 
 Calls can expand a fixed tuple literal or local with `*args`, and a dictionary with distinct literal string keys with `**options`. The compiler can keep the type of each literal-key entry when a local dictionary is assigned once and used only for expansion. Its values are evaluated when the dictionary is created. Rebinding the original variables does not change those values. When a packed value has type `T | None` and the parameter requires `T`, the call checks for `None` and raises `TypeError` before entering the callee. Ordinary nullable parameters still receive `None`.
 

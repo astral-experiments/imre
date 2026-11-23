@@ -44,7 +44,7 @@ REJECTED = {
     "ty_ignored_error": 'def f() -> int:\n    return "wrong"  # ty: ignore[invalid-return-type]\nf()\n',
     "uninitialized": 'def f(flag: bool) -> int:\n    if flag:\n        x = 1\n    return x\nf(False)\n',
     "empty_loop": 'def f() -> int:\n    for x in range(0):\n        pass\n    return x\nf()\n',
-    "rebind_type": 'def f() -> None:\n    x = 1\n    x = "wrong"\nf()\n',
+    "rebind_type": 'def f() -> None:\n    x: int = 1\n    x = "wrong"\nf()\n',
     "rebind_builtin": 'def f() -> None:\n    len = 1\nf()\n',
     "dead_dynamic_code": 'def f() -> None:\n    if False:\n        eval("1 + 2")\nf()\n',
     "unknown_module": 'import missing_imre_test_module\nprint(1)\n',

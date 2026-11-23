@@ -190,7 +190,8 @@ pub(crate) use caller_cache::CallerCache;
 use calls::{Parameter, ParameterKind, parameter};
 pub(crate) use calls::{
     bind_source_arguments, fixed_bound_call_arguments, fixed_call_arguments,
-    known_declared_argument, missing_required_argument, scalar_literal,
+    fixed_display_call_arguments, known_declared_argument, missing_required_argument,
+    scalar_literal,
 };
 use comprehensions::Helpers;
 pub(crate) use function_text::{docstring, docstring_literal};
@@ -199,6 +200,13 @@ use module_values::{Initialization, ModuleValues};
 #[derive(Clone, Copy)]
 enum ParameterOrigin {
     Unspecified,
+    /// A source parameter without a written annotation, stub or implicit receiver type.
+    Inferred,
+    /// The body writes an item of another type through this inferred list.
+    ListWrite {
+        prior: Type,
+        item: Type,
+    },
     Stub,
     Source {
         declaration: TypeDeclaration,
@@ -226,6 +234,13 @@ impl Signature {
             } => Some(*declaration),
             _ => None,
         }
+    }
+
+    fn inferred_formal(&self, index: usize) -> bool {
+        matches!(
+            self.parameter_declarations.get(index),
+            Some(ParameterOrigin::Inferred | ParameterOrigin::ListWrite { .. })
+        )
     }
 
     /// An eager source frame reads its declared pack from the tuple bound by the Python caller.
@@ -1331,7 +1346,7 @@ fn lower_graph(
             matches!(stmt, ast::Stmt::FunctionDef(def) if inspect::marks_function(graph, graph.entry, def))
         });
     let helpers = Helpers::new(inference.len() + graph.initializers(entry_declarations).count());
-    let globals = ModuleValues::for_initializers(needs_registered_entry);
+    let globals = ModuleValues::for_initializers(needs_registered_entry, inference);
     let named = graph.registered_startup && !needs_registered_entry;
     let recover_completed = std::cell::Cell::new(named);
     let defer_capture = !named && !needs_registered_entry && cache.is_none();
@@ -2942,7 +2957,7 @@ fn signature(
     let mut declare = |index: usize,
                        module: ModuleId,
                        annotation: Option<&ast::Expr>,
-                       stub: bool,
+                       implicit: Option<ParameterOrigin>,
                        python_parameter: bool| {
         let origin = if let Some(annotation) = annotation
             && (python_parameter || graph.modules[module].is_program_source())
@@ -2956,8 +2971,8 @@ fn signature(
                 },
                 checks_calls: python_parameter || graph.modules[module].checks_source_contracts(),
             }
-        } else if stub {
-            ParameterOrigin::Stub
+        } else if let Some(origin) = implicit {
+            origin
         } else {
             return;
         };
@@ -3215,7 +3230,18 @@ fn signature(
             params.len(),
             module,
             annotation,
-            parameter.annotation().is_none() && stub.is_some(),
+            if parameter.annotation().is_some() {
+                None
+            } else if stub.is_some() {
+                Some(ParameterOrigin::Stub)
+            } else if graph.modules[module].is_program_source()
+                && (index != 0
+                    || method.is_none_or(|m| m.kind(classes) == crate::classes::MethodKind::Static))
+            {
+                Some(ParameterOrigin::Inferred)
+            } else {
+                None
+            },
             python_parameter,
         );
         params.push(Parameter {
@@ -3250,7 +3276,7 @@ fn signature(
             None
         };
         parameter_types.push(ty);
-        declare(params.len(), module, pack.annotation(), false, false);
+        declare(params.len(), module, pack.annotation(), None, false);
         params.push(Parameter {
             name: pack.name.to_string(),
             ty: ty.unwrap_or(Type::None),
@@ -3269,7 +3295,7 @@ fn signature(
         })?;
         let element = pack_element(element)?;
         let ty = types.dict(Type::Str, element);
-        declare(params.len(), module, keyword.annotation(), false, false);
+        declare(params.len(), module, keyword.annotation(), None, false);
         params.push(Parameter {
             name: keyword.name.to_string(),
             ty,
@@ -3289,7 +3315,7 @@ fn signature(
     if inert && let Some(annotation) = function.returns.as_deref() {
         graph.checked_inert_return(module, annotation.range());
         if let ast::Expr::Name(name) = annotation {
-            graph.deferred_name(module, name.range());
+            graph.deferred_names(module, name.range());
         }
     }
     let document_return = function
@@ -4269,6 +4295,8 @@ struct Checker<'a> {
     inferred_containers: HashSet<usize>,
     /// Annotations constrain later assignments to the same lexical slot.
     declared_slots: HashMap<usize, TypeDeclaration>,
+    /// Fixed formals without a source declaration, such as implicit receivers and stubs.
+    fixed_formals: Vec<usize>,
     /// Fresh bindings mentioned only as targets of a non-returning RHS have no stored layout.
     unstored_targets: HashSet<usize>,
     /// Fresh annotated lists whose inner lists may come from a document.
@@ -4417,6 +4445,7 @@ impl<'a> Checker<'a> {
             caller_frame_returns: None,
             inferred_containers: HashSet::new(),
             declared_slots: HashMap::new(),
+            fixed_formals: Vec::new(),
             unstored_targets: HashSet::new(),
             document_list_sites: HashMap::new(),
             nullable_assignments: HashMap::new(),
@@ -4552,6 +4581,9 @@ impl<'a> Checker<'a> {
                     layout.default.as_ref(),
                 )?
             };
+            if !signature.inferred_formal(index) && !self.declared_slots.contains_key(&slot) {
+                self.fixed_formals.push(slot);
+            }
             if layout.kind == ParameterKind::Variadic && parameter.annotation().is_some() {
                 self.positional_pack = Some((parameter.name().to_string(), slot));
             }
@@ -4639,6 +4671,12 @@ impl<'a> Checker<'a> {
                 || self.parameter_shadows_binding(name, ty, bound)
                 || default.is_some_and(Expr::is_unrepresented)
         };
+        if self.module_scope
+            && self.graph.modules[self.module].bindings.get(name)
+                == Some(&Binding::ConditionalValue)
+        {
+            return Err(self.scoped_builtin_error("conditional module binding", node));
+        }
         if reserved(name) && !local
             || (self.graph.modules[self.module].bindings.get(name).is_some_and(|binding| {
                     !matches!(binding, Binding::Value(def) if self.graph.modules[def.module].implicit_value_name(def.statement).is_some())
@@ -4949,6 +4987,13 @@ impl<'a> Checker<'a> {
             receiver
         };
         let Type::Class(class) = receiver.ty else {
+            if attribute.ctx == ast::ExprContext::Store
+                && let Some(Binding::Module(owner)) = self.resolve(&attribute.value)
+                && self.graph.modules[owner].is_program_source()
+            {
+                // All importers must observe the write to the same live namespace.
+                return Err(self.scoped_builtin_error("a module attribute write", attribute));
+            }
             return Err(error(
                 self.source,
                 attribute,
@@ -4958,6 +5003,15 @@ impl<'a> Checker<'a> {
         let (field, ty) = self
             .declared_field(class, attribute.attr.as_str())
             .ok_or_else(|| {
+                let record = &self.classes.declarations.definitions[class];
+                if attribute.ctx == ast::ExprContext::Store
+                    && record.fields.is_empty()
+                    && record.node.arguments.is_none()
+                    && record.node.decorator_list.is_empty()
+                    && self.graph.modules[record.definition.module].is_program_source()
+                {
+                    return self.scoped_builtin_error("an instance dictionary write", attribute);
+                }
                 self.missing_class_member(
                     class,
                     attribute.attr.as_str(),
@@ -4988,6 +5042,13 @@ impl<'a> Checker<'a> {
     /// Optional and finite-union promotions are explicit; containers stay invariant.
     fn coerce(&self, value: Expr, expected: Type, node: &impl Ranged) -> Result<Expr, String> {
         self.keep_module_list_layout(&value);
+        // A consumer of an existing mutable owner may populate it.
+        if self.types.is_display_container(expected)
+            && let Some(owner) = self.inferred_storage(&value)
+        {
+            owner.empty.set(false);
+            owner.empty_keys.set(false);
+        }
         if matches!(&value.kind, ExprKind::Builtin(Builtin::Unrepresented, _)) {
             return Ok(Expr {
                 ty: expected,
@@ -5066,6 +5127,10 @@ impl<'a> Checker<'a> {
             return self.coerce(date, expected, node);
         }
         if self.types.wrapped_signature(value.ty) == Some(expected) {
+            if self.types.partial_function(value.ty).is_some() {
+                self.graph
+                    .checked_partial_signature(self.module, node.range());
+            }
             return Ok(Expr {
                 ty: expected,
                 kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
@@ -5347,6 +5412,26 @@ impl<'a> Checker<'a> {
         )
     }
 
+    /// Only a concrete, successfully checked value can refine a ty diagnostic.
+    fn native_type_proof(&self, value: &Expr, expected: Type) -> bool {
+        self.inference.is_none()
+            && !value.is_unrepresented()
+            && self.unrepresented.borrow().is_none()
+            && !matches!(expected, Type::PythonObject | Type::ObjectValue)
+            && value.ty == expected
+    }
+
+    fn checked_native_operand(&self, operand: TextRange, declaration: TypeDeclaration) {
+        self.graph.checked_native_type(
+            self.module,
+            crate::analysis::CheckedDiagnostic::NativeOperand {
+                operand,
+                module: declaration.module,
+                annotation: declaration.annotation,
+            },
+        );
+    }
+
     fn annotated_local_value(
         &mut self,
         source: &ast::Expr,
@@ -5414,6 +5499,11 @@ impl<'a> Checker<'a> {
                 source,
                 "the annotated collection requires its fixed source layout",
             ));
+        }
+        if let Ok(value) = &checked
+            && self.native_type_proof(value, expected)
+        {
+            self.checked_native_operand(source.range(), declaration);
         }
         checked
     }
@@ -5718,6 +5808,9 @@ impl<'a> Checker<'a> {
                 let value = self.dictionary(dict, Some((Type::Str, Type::ObjectValue)), None)?;
                 self.coerce(value, concrete, expression)?
             }
+            ast::Expr::Lambda(lambda) if concrete == Type::PythonObject => {
+                self.lambda_value(lambda, None, None)?
+            }
             ast::Expr::Lambda(lambda) => {
                 let (params, returns) = self.types.signature(concrete).ok_or_else(|| {
                     error(
@@ -5731,7 +5824,7 @@ impl<'a> Checker<'a> {
             ast::Expr::Named(named) => self.with_expression_site(expression, |checker| {
                 checker.named_expression(named, Some(expected))
             })?,
-            ast::Expr::If(value) => self.conditional(value, Some(expected))?,
+            ast::Expr::If(value) => self.conditional(value, Some(expected), declaration)?,
             ast::Expr::BoolOp(value) => self.boolean_value(value, Some(expected))?,
             ast::Expr::Subscript(subscript)
                 if matches!(&*subscript.slice, ast::Expr::Slice(_))
@@ -5949,6 +6042,121 @@ impl<'a> Checker<'a> {
         value
     }
 
+    fn unreachable_storage(&self, site: &impl Ranged) -> bool {
+        !self.reachable
+            || self
+                .graph
+                .session
+                .unreachable_range(self.module, site.range())
+                == Some(ty_python_semantic::types::ide_support::UnreachableKind::Unconditional)
+    }
+
+    fn inferred_storage(&self, receiver: &Expr) -> Option<std::rc::Rc<assignments::Container>> {
+        match self.value_source(receiver)? {
+            ValueSource::Container(owner) if owner.declaration.get().is_none() => Some(owner),
+            _ => None,
+        }
+    }
+
+    /// A declared alias constrains the original owner for subsequent writes.
+    fn declare_container(&self, value: &Expr, declaration: TypeDeclaration, site: &impl Ranged) {
+        if let Some(owner) = self.inferred_storage(value)
+            && !self.unreachable_storage(site)
+        {
+            owner.declaration.set(Some(declaration));
+        }
+    }
+
+    fn container_read(&self, mut value: Expr, site: &impl Ranged) -> Result<Expr, String> {
+        if matches!(
+            value.ty,
+            Type::ListInt | Type::List(_) | Type::Set(_) | Type::Dict(_)
+        ) && let Some(ValueSource::Container(owner)) = self.value_source(&value)
+            && owner.layout.get() != value.ty
+            && !self.unreachable_storage(site)
+        {
+            self.require_registered_operation(site)?;
+            value.ty = owner.layout.get();
+        }
+        Ok(value)
+    }
+
+    /// Keep context for empty displays, but let a nonempty container choose its
+    /// own element types before constraining the enclosing allocation.
+    fn inserted_operand(
+        &mut self,
+        owner: &assignments::Container,
+        key: bool,
+        site: &ast::Expr,
+        expected: Type,
+    ) -> Result<Expr, String> {
+        let value = if self.types.is_display_container(expected)
+            && self.empty_argument_type(site).is_none()
+        {
+            self.expr(site)?
+        } else {
+            self.expr_expected_if(site, expected, |_, _| true)?
+        };
+        self.container_store(Some(owner), key, value, expected, site)
+    }
+
+    /// Only the final conversion into an inferred allocation constrains storage.
+    /// Keep checking with the boxed layout through all aliases. The region's
+    /// Python lowering owns the allocation and every write, without a copy.
+    fn container_store(
+        &self,
+        owner: Option<&assignments::Container>,
+        key: bool,
+        value: Expr,
+        expected: Type,
+        site: &impl Ranged,
+    ) -> Result<Expr, String> {
+        let actual = value.ty;
+        let converted = self.coerce(value, expected, site);
+        let Some(owner) = owner else { return converted };
+        if let Some(inference) = self.inference
+            && let Some(module) = owner.module_list
+            && self
+                .types
+                .observe_module_list_use(module, actual == Type::Str)
+        {
+            inference.layout_changed();
+        }
+        let empty = if key { &owner.empty_keys } else { &owner.empty };
+        let first = empty.get();
+        if first && !self.unreachable_storage(site) {
+            empty.set(false);
+        }
+        if let Err(Failure::Diagnostic(error)) = &converted
+            && error.exact_operand() == Some(site.range())
+            && owner.declaration.get().is_none()
+        {
+            self.require_registered_operation(site)?;
+            if !self.unreachable_storage(site) {
+                let current = owner.layout.get();
+                let item = if first {
+                    actual
+                } else if self.types.element(current).is_some() {
+                    Type::ObjectValue
+                } else {
+                    Type::PythonObject
+                };
+                let layout = match self.types.mapping(current) {
+                    Some((_, v)) if key => self.types.dict(item, v),
+                    Some((k, _)) => self.types.dict(k, item),
+                    None if self.types.set_element(current).is_some() => self.types.set(item),
+                    None => self.types.list(item),
+                };
+                owner.layout.set(layout);
+            }
+            return Ok(Expr {
+                ty: expected,
+                ..Expr::unrepresented()
+            });
+        }
+        converted
+    }
+
     /// A Python container stores the original handle when its source satisfies the item type.
     fn coerce_python_item(
         &self,
@@ -6018,7 +6226,12 @@ impl<'a> Checker<'a> {
     /// Checks both arms under their own narrowing facts, while contextual types
     /// reach literals before the branches join. Only optional promotion can
     /// widen a result; unrelated concrete storage types never share a value.
-    fn conditional(&mut self, value: &ast::ExprIf, expected: Option<Type>) -> Result<Expr, String> {
+    fn conditional(
+        &mut self,
+        value: &ast::ExprIf,
+        expected: Option<Type>,
+        declaration: Option<TypeDeclaration>,
+    ) -> Result<Expr, String> {
         fn empty_display(checker: &Checker<'_>, arm: &ast::Expr) -> bool {
             matches!(arm, ast::Expr::Dict(d) if d.items.is_empty())
                 || matches!(arm, ast::Expr::List(l) if l.elts.is_empty())
@@ -6037,7 +6250,7 @@ impl<'a> Checker<'a> {
                 let context =
                     expected.or_else(|| empty_display(checker, arm).then_some(sibling).flatten());
                 let checked = if let Some(ty) = context {
-                    checker.expr_expected(arm, ty)?
+                    checker.expr_expected_from(arm, ty, declaration)?
                 } else {
                     checker.expr(arm)?
                 };
@@ -6084,13 +6297,10 @@ impl<'a> Checker<'a> {
         // expression's narrower result when those original values agree.
         let yes = assignments::unpromoted(yes);
         let no = assignments::unpromoted(no);
-        let ty = self.types.join_results(yes.ty, no.ty).ok_or_else(|| {
-            error(
-                self.source,
-                value,
-                "conditional branches require the same concrete type or its optional form",
-            )
-        })?;
+        let ty = self
+            .types
+            .join_results(yes.ty, no.ty)
+            .ok_or_else(|| self.scoped_builtin_error("conditional result storage", value))?;
         let yes = self.coerce(yes, ty, &*value.body)?;
         let no = self.coerce(no, ty, &*value.orelse)?;
         Ok(Expr {
@@ -6211,11 +6421,19 @@ impl<'a> Checker<'a> {
     ) -> Result<(), String> {
         let may_delete = narrowing::visit_assignments(body, &mut |name, in_place| {
             // The next iteration can receive the replacement returned by __iadd__ and its peers.
-            if in_place && let Some(slot) = self.registered_in_place_local(name) {
+            if in_place.is_some()
+                && let Some(slot) = self.registered_in_place_local(name)
+            {
                 self.locals[slot] = Type::PythonObject;
             }
             if let Some(slot) = self.names.get(name) {
                 self.narrowed.remove_mut(slot);
+                // Exact list += retains the allocation on every backedge.
+                if in_place == Some(ast::Operator::Add)
+                    && self.types.element(self.locals[*slot]).is_some()
+                {
+                    return;
+                }
                 self.assigned
                     .set_type_source(*slot, self.declared_slots.get(slot).copied());
             }
@@ -6271,14 +6489,12 @@ impl<'a> Checker<'a> {
             ExprKind::Bind(_, inner) | ExprKind::Present(inner) | ExprKind::Unwrap(inner) => {
                 self.value_source(inner)
             }
+            ExprKind::Scope { body, value, .. } if body.is_empty() => self.value_source(value),
             ExprKind::Conditional(_, yes, no) => {
                 let source = self.value_source(yes)?;
                 (self.value_source(no).as_ref() == Some(&source)).then_some(source)
             }
-            _ => self
-                .globals
-                .list_origin(value)
-                .map(ValueSource::InferredList),
+            _ => self.globals.container_origin(value),
         }
     }
 
@@ -6287,8 +6503,9 @@ impl<'a> Checker<'a> {
     fn keep_module_list_layout(&self, value: &Expr) {
         if let Some(inference) = self.inference
             && matches!(value.ty, Type::List(_))
-            && let Some(ValueSource::InferredList(owner)) = self.value_source(value)
-            && self.types.observe_module_list_use(owner, false)
+            && let Some(ValueSource::Container(owner)) = self.value_source(value)
+            && let Some(module_list) = owner.module_list
+            && self.types.observe_module_list_use(module_list, false)
         {
             inference.layout_changed();
         }
@@ -6298,11 +6515,12 @@ impl<'a> Checker<'a> {
         match self.value_source(value)? {
             ValueSource::Declaration(declaration)
             | ValueSource::CoroutineCallback(declaration, _) => Some(declaration),
+            ValueSource::Container(owner) => owner.declaration.get(),
+            ValueSource::CapturedArgument(_, declaration) => declaration,
             ValueSource::FrameBinding(_)
             | ValueSource::FrameLocals { .. }
             | ValueSource::PythonCall
             | ValueSource::LiteralStrings(_)
-            | ValueSource::InferredList(_)
             | ValueSource::InferredListReturn(_)
             | ValueSource::InferredListParameter { .. }
             | ValueSource::Function(_)
@@ -6320,11 +6538,16 @@ impl<'a> Checker<'a> {
                     && let Some(target) = value.unbound_function()
                 {
                     ValueSource::CoroutineCallback(declaration, target)
+                } else if matches!(value.ty, Type::Callable(_))
+                    && let Some(ValueSource::CapturedArgument(error, _)) = self.value_source(value)
+                {
+                    ValueSource::CapturedArgument(error, Some(declaration))
                 } else {
                     ValueSource::Declaration(declaration)
                 }
             })
             .or_else(|| self.value_source(value));
+        let source = source.or_else(|| ValueSource::allocation(value));
         self.assigned.set_value_source(slot, source);
         if self.module_scope {
             self.namespace_assignment(slot, value);
@@ -6390,13 +6613,20 @@ impl<'a> Checker<'a> {
                 .contains(self.module, dict)
                 .then_some((Type::Str, Type::None))
         });
+        let mut inferred = None;
         let mut entries = Vec::with_capacity(dict.items.len());
         for item in &dict.items {
             let key = item
                 .key
                 .as_ref()
                 .ok_or_else(|| error(self.source, dict, "dictionary expansion is unsupported"))?;
-            let (key, value) = if let Some((key_type, value_type)) = types {
+            let (key, value) = if let Some(owner) = &inferred {
+                let (k, v) = types.unwrap();
+                (
+                    self.inserted_operand(owner, true, key, k)?,
+                    self.inserted_operand(owner, false, &item.value, v)?,
+                )
+            } else if let Some((key_type, value_type)) = types {
                 (
                     self.expr_expected_from(key, key_type, declaration)?,
                     self.expr_expected_from(&item.value, value_type, declaration)?,
@@ -6410,6 +6640,12 @@ impl<'a> Checker<'a> {
                             key,
                         ));
                     }
+                    if matches!(
+                        key_value.ty,
+                        Type::Class(_) | Type::Bool | Type::Float | Type::None
+                    ) {
+                        return Err(self.scoped_builtin_error("dictionary key hashing", key));
+                    }
                     return Err(error(
                         self.source,
                         key,
@@ -6418,6 +6654,10 @@ impl<'a> Checker<'a> {
                 }
                 let value = Self::inferred_stream(self.expr(&item.value)?);
                 types = Some((key_value.ty, value.ty));
+                inferred = Some(assignments::Container::new(
+                    self.types.dict(key_value.ty, value.ty),
+                    false,
+                ));
                 (key_value, value)
             };
             entries.push(ir::DictEntry {
@@ -6425,15 +6665,10 @@ impl<'a> Checker<'a> {
                 value,
             });
         }
-        let (key, value) = types.ok_or_else(|| {
-            error(
-                self.source,
-                dict,
-                "an empty dictionary requires a concrete dict[K, V] context",
-            )
-        })?;
+        // As with [], an untyped empty display starts with a provisional integer layout.
+        let (key, value) = types.unwrap_or((Type::Int, Type::Int));
         Ok(Expr {
-            ty: self.types.dict(key, value),
+            ty: inferred.map_or_else(|| self.types.dict(key, value), |owner| owner.layout.get()),
             kind: ExprKind::Dict(entries),
         })
     }
@@ -6453,9 +6688,12 @@ impl<'a> Checker<'a> {
             return self.expanded_sequence(&set.elts, expected, true, set);
         }
         let mut element = expected;
+        let mut inferred = None;
         let mut values = Vec::with_capacity(set.elts.len());
         for value in &set.elts {
-            let checked = if let Some(element) = element {
+            let checked = if let Some(owner) = &inferred {
+                self.inserted_operand(owner, false, value, element.unwrap())?
+            } else if let Some(element) = element {
                 self.expr_expected_from(value, element, declaration)?
             } else {
                 self.expr(value)?
@@ -6465,6 +6703,12 @@ impl<'a> Checker<'a> {
                     self.source,
                     value,
                     "set elements must be int, str, bytes, Path, or immutable scalar tuples",
+                ));
+            }
+            if element.is_none() {
+                inferred = Some(assignments::Container::new(
+                    self.types.set(checked.ty),
+                    false,
                 ));
             }
             element = Some(checked.ty);
@@ -6478,7 +6722,7 @@ impl<'a> Checker<'a> {
             )
         })?;
         Ok(Expr {
-            ty: self.types.set(element),
+            ty: inferred.map_or_else(|| self.types.set(element), |owner| owner.layout.get()),
             kind: ExprKind::Set { element, values },
         })
     }
@@ -6870,7 +7114,16 @@ impl<'a> Checker<'a> {
             let ast::Expr::Name(name) = target else {
                 return Err(error(self.source, target, "range target must be a name"));
             };
-            let target = self.declare(name.id.as_str(), Type::Int, target)?;
+            // The counter writes directly to an integer slot, bypassing assign.
+            let target = self
+                .declare(name.id.as_str(), Type::Int, target)
+                .map_err(|failure| {
+                    if self.inferred_store_conflict(target, target, &failure) {
+                        self.scoped_builtin_error("iteration target", target)
+                    } else {
+                        failure
+                    }
+                })?;
             self.narrowed.remove_mut(&target);
             let facts = self.narrowed.clone();
             let before = self.assigned.clone();
@@ -7183,6 +7436,31 @@ impl<'a> Checker<'a> {
 
     /// Let a complete Python body finish a function whose fixed positions no longer match.
     fn lower_block_with_placement(
+        &mut self,
+        statements: &[ast::Stmt],
+        output: Option<&mut Vec<Statement>>,
+        place: Option<&mut dyn FnMut(&mut Self) -> bool>,
+        function: Option<&ast::StmtFunctionDef>,
+    ) -> Result<bool, String> {
+        let graph = self.graph;
+        if function.is_none() || !graph.modules[self.module].initializer_only {
+            return self.lower_placed_block(statements, output, place, function);
+        }
+        let (result, deferred, _) = graph.isolate_object_requests(|| {
+            self.lower_placed_block(statements, output, place, function)
+        });
+        // A helper called during initialization may require its own Python
+        // body, but cannot enable fallback for an unrelated caller error.
+        if let Some(error) = deferred {
+            graph
+                .deferred_object_error
+                .borrow_mut()
+                .get_or_insert(error);
+        }
+        result
+    }
+
+    fn lower_placed_block(
         &mut self,
         statements: &[ast::Stmt],
         mut output: Option<&mut Vec<Statement>>,
@@ -7906,19 +8184,14 @@ impl<'a> Checker<'a> {
                         }
                         return Ok((vec![self.statement_at(rhs, Statement::Expr(value))], false));
                     }
-                    let value = if self.registered.is_some()
-                        && !self.module_scope
-                        && value.ty == Type::PythonObject
-                    {
-                        let scalar = self
-                            .graph
-                            .session
-                            .operand_types(self.module)
-                            .local_scalar_annotation(&assign.annotation);
+                    let value = if self.registered.is_some() && value.ty == Type::PythonObject {
+                        let scalar = registered::store_types(self.graph, self.module)
+                            .scalar_initializer(&assign.annotation, !self.module_scope);
                         registered::checked_local_scalar(scalar, value)
                     } else {
                         value
                     };
+                    self.declare_container(&value, declaration, rhs.as_ref());
                     if replacement.is_some() {
                         let statements = self.replace_local(name.id.as_str(), slot, ty, value);
                         self.bind_declared_type(self.names[name.id.as_str()], declaration);
@@ -8070,6 +8343,19 @@ impl<'a> Checker<'a> {
                         self.locals[slot] = Type::PythonObject;
                         self.assigned_value(slot, &value);
                         return Ok((vec![Statement::Assign(slot, value)], true));
+                    }
+                    if assign.op == ast::Operator::Add && self.types.element(left.ty).is_some() {
+                        // Check the same inserted items as extend. Python owns the in-place
+                        // update and writes the original list back even if the RHS rebinds it.
+                        let declaration = self.value_declaration(&left);
+                        let origin = self.value_source(&left);
+                        self.extend_list(left, &assign.value, None, Builtin::Append)
+                            .map_err(|e| e.expected_from(declaration, assign.value.range()))?;
+                        if let Some(&slot) = self.names.get(name.id.as_str()) {
+                            self.assigned.set_value_source(slot, origin);
+                        }
+                        self.require_registered_operation(statement)?;
+                        return Ok((Vec::new(), true));
                     }
                     if assign.op == ast::Operator::Add
                         && let Some(element) = self.types.deque_element(left.ty)
@@ -9511,7 +9797,8 @@ impl<'a> Checker<'a> {
                 }
                 self.locals[slot] = Type::PythonObject;
             }
-            self.coerce(value, self.locals[slot], target)?
+            self.coerce(value, self.locals[slot], target)
+                .or_else(|failure| self.widen_inferred_store(target, target, failure))?
         } else if let Some(partial) = self.types.partial_function(value.ty) {
             // Different partials can share a call signature without sharing a capture frame.
             self.coerce(value, partial.callable, target)?
@@ -9537,9 +9824,18 @@ impl<'a> Checker<'a> {
             self.declare_binding(name.id.as_str(), value.ty, target, existing.is_some(), None)?;
         if existing.is_none() {
             self.remember_inferred_container(slot);
+        } else if let Some(&declaration) = self.declared_slots.get(&slot) {
+            self.declare_container(&value, declaration, target);
         }
         self.assigned_value(slot, &value);
         if let Some(output) = output {
+            let value = if self.registered.is_some() && value.ty == Type::PythonObject {
+                let scalar =
+                    registered::store_types(self.graph, self.module).declared_store(target);
+                registered::checked_local_scalar(scalar, value)
+            } else {
+                value
+            };
             output.push(Statement::Assign(slot, value));
         }
         Ok(())
@@ -10216,7 +10512,7 @@ impl<'a> Checker<'a> {
             self.require_registered_operation(expression)?;
             return Ok(self.local(slot));
         }
-        let value = self.read_local(slot);
+        let value = self.container_read(self.read_local(slot), expression)?;
         if let Some(sites) = &mut self.fixed_sites
             && matches!(value.kind, ExprKind::Local(read) if read == slot)
             && value.ty == self.locals[slot]
@@ -10896,7 +11192,7 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::Lambda(lambda) => return self.lambda_value(lambda, None, None),
             ast::Expr::Named(value) => return self.named_expression(value, None),
-            ast::Expr::If(value) => return self.conditional(value, None),
+            ast::Expr::If(value) => return self.conditional(value, None, None),
             ast::Expr::Name(name)
                 if let Some(value) = debug_operand(name, self.graph.python_optimization()) =>
             {
@@ -11034,11 +11330,11 @@ impl<'a> Checker<'a> {
                     if self.can_mix_list_items(element, item.ty) {
                         mixed |= item.ty != element;
                     } else if element != item.ty && element != Type::PythonObject {
-                        return Err(self.classified_error(
-                            Kind::ScopedObject,
-                            list,
-                            "this list requires heterogeneous Python object storage",
-                        ));
+                        // Retain mixed element evidence when the list is later consumed
+                        // through a binding, just as for an inferred append.
+                        self.require_registered_operation(list)?;
+                        element = Type::ObjectValue;
+                        mixed = false;
                     }
                     values.push(item);
                 }
@@ -11714,6 +12010,14 @@ impl<'a> Checker<'a> {
                         )
                     });
                     if !numeric && !records && !paths && !tuples && !variable_tuple && !dates {
+                        if matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
+                            && ty != right
+                            && self.types.element(ty).is_some()
+                            && self.types.element(right).is_some()
+                        {
+                            // The other list is a comparison operand, not a destination.
+                            return Err(self.scoped_builtin_error("list comparison", expression));
+                        }
                         self.expect(ty, right, expression)?;
                     }
                     let strings = matches!(ty, Type::Str | Type::StrLiteral(_))
@@ -11929,6 +12233,12 @@ impl<'a> Checker<'a> {
                     });
                 }
                 if list.ty == Type::BuiltinClass {
+                    // The registered initializer evaluates this subscription and
+                    // can raise NameError after earlier import effects have run.
+                    if self.module_scope && self.graph.modules[self.module].initializer_only {
+                        self.graph
+                            .deferred_names(self.module, subscript.slice.range());
+                    }
                     return Err(self.object_builtin_error_with_checked_calls(
                         "a runtime generic alias",
                         subscript,
@@ -12725,6 +13035,9 @@ impl<'a> Checker<'a> {
                                 }),
                             )
                         }
+                        "value" if receiver.ty == Type::Exception => {
+                            return Err(self.scoped_builtin_error("an iterator result", attribute));
+                        }
                         "args" => (Type::ObjectValue, Builtin::ExceptionArgs),
                         "code" => (Type::ObjectValue, Builtin::SystemExitCode),
                         "msg" => (Type::Str, Builtin::JsonErrorField(0)),
@@ -13242,6 +13555,22 @@ impl<'a> Checker<'a> {
                 receiver = Some(target);
             }
         }
+        // A saved positional ABI has no unpacking binder. Check the original
+        // displays before keyword lowering replaces them with synthetic names.
+        if binding.is_none()
+            && calls::has_unpacking(call)
+            && let Some(name) = call.func.as_name_expr()
+            && let Some(&slot) = self.names.get(name.id.as_str())
+            && matches!(self.locals[slot], Type::Callable(_))
+            && (calls::starred(call) || self.saved_method(self.locals[slot]).is_none())
+            && self
+                .graph
+                .session
+                .operand_types(self.module)
+                .binds_saved_spread(call)
+        {
+            return Err(self.scoped_builtin_error("saved callable argument unpacking", call));
+        }
         if let Some(expanded) = self.expand_closed_call(call) {
             return self.call_on(&expanded, receiver);
         }
@@ -13356,10 +13685,18 @@ impl<'a> Checker<'a> {
         let [key, rest @ ..] = args else {
             return Err(error(self.source, call, "dict.setdefault requires a key"));
         };
-        let key = self.expr_expected(key, key_type)?;
-        let value = match rest {
-            [default] => self.expr_expected(default, value_type)?,
-            [] => self.coerce(Expr::none(), value_type, call)?,
+        let declaration = self.value_declaration(&receiver);
+        let owner = self.inferred_storage(&receiver);
+        let key = match &owner {
+            Some(owner) => self.inserted_operand(owner, true, key, key_type)?,
+            None => self.expr_expected_from(key, key_type, declaration)?,
+        };
+        let value = match (rest, &owner) {
+            ([default], Some(owner)) => self.inserted_operand(owner, false, default, value_type)?,
+            ([default], None) => self.expr_expected_from(default, value_type, declaration)?,
+            ([], _) => self
+                .container_store(owner.as_deref(), false, Expr::none(), value_type, call)
+                .map_err(|e| e.expected_from(declaration, call.range()))?,
             _ => {
                 return Err(error(
                     self.source,
@@ -15754,13 +16091,21 @@ impl<'a> Checker<'a> {
                     }
                 };
                 let stopped = self.terminating_operand(&receiver);
-                let value = self.expr_in_context(
-                    &call.arguments.args[0],
-                    element,
-                    |_, _| stopped,
-                    Self::coerce,
-                    self.value_declaration(&receiver),
-                )?;
+                let arg = &call.arguments.args[0];
+                let value = if !stopped
+                    && matches!(builtin, Builtin::SetAdd)
+                    && let Some(owner) = self.inferred_storage(&receiver)
+                {
+                    self.inserted_operand(&owner, false, arg, element)?
+                } else {
+                    self.expr_in_context(
+                        arg,
+                        element,
+                        |_, _| stopped,
+                        Self::coerce,
+                        self.value_declaration(&receiver),
+                    )?
+                };
                 if stopped {
                     // The operand was checked, but the method never consumes it.
                     return Ok(calls::ArgumentScope::stopped(
@@ -15862,10 +16207,17 @@ impl<'a> Checker<'a> {
             } else {
                 Builtin::Append
             };
-            if attribute.attr.as_str() == "extend" && call.arguments.args.len() == 1 {
-                return self.extend_list(receiver, attribute, call, append);
-            }
             let declaration = self.value_declaration(&receiver);
+            if attribute.attr.as_str() == "extend" && call.arguments.args.len() == 1 {
+                return self
+                    .extend_list(
+                        receiver,
+                        &call.arguments.args[0],
+                        Some((attribute, call)),
+                        append,
+                    )
+                    .map_err(|e| e.expected_from(declaration, call.range()));
+            }
             let mut args = Vec::new();
             let (builtin, ty) = match attribute.attr.as_str() {
                 "append" if call.arguments.args.len() == 1 => {
@@ -15876,25 +16228,7 @@ impl<'a> Checker<'a> {
                         } else {
                             Self::coerce
                         };
-                    let value = if let Some(inference) = self.inference
-                        && let Some(ValueSource::InferredList(owner)) = self.value_source(&receiver)
-                    {
-                        self.expr_in_context(
-                            arg,
-                            element,
-                            |_, _| false,
-                            |checker, value, expected, site| {
-                                if checker
-                                    .types
-                                    .observe_module_list_use(owner, value.ty == Type::Str)
-                                {
-                                    inference.layout_changed();
-                                }
-                                coerce_item(checker, value, expected, site)
-                            },
-                            declaration,
-                        )?
-                    } else if let Some(ValueSource::InferredListReturn(function)) = self.value_source(&receiver)
+                    let value = if let Some(ValueSource::InferredListReturn(function)) = self.value_source(&receiver)
                         && let Some(inference) = self.inference
                         && element != Type::ObjectValue
                         && self.graph.session.unreachable_range(self.module, call.range())
@@ -15921,7 +16255,13 @@ impl<'a> Checker<'a> {
                                 && checker.object_value_supported(actual)
                         })?;
                         if value.ty != element {
-                            inference.demand_list_write(function, index, receiver.ty, self.types);
+                            // A conditional append or an item inferred from another
+                            // caller cannot constrain every incoming list.
+                            let item = (arg.is_literal_expr()
+                                && self.graph.session.operand_types(self.module)
+                                    .unconditional_parameter(&attribute.value).is_some())
+                                .then_some(value.ty);
+                            inference.demand_list_write(function, index, receiver.ty, item, self.types);
                         }
                         coerce_item(self, value, element, arg)?
                     } else if let ExprKind::Local(slot) = receiver.kind
@@ -15939,6 +16279,10 @@ impl<'a> Checker<'a> {
                             inference.layout_changed();
                         }
                         self.coerce(value, element, arg)?
+                    } else if let Some(owner) = self.inferred_storage(&receiver)
+                        && !self.checked_call_contracts
+                    {
+                        self.inserted_operand(&owner, false, arg, element)?
                     } else {
                         match self.expr_in_context(arg, element, |_, _| false, coerce_item, declaration) {
                             Err(Failure::Diagnostic(report))
@@ -16938,6 +17282,14 @@ impl<'a> Checker<'a> {
                     .collect::<Result<_, _>>()?;
                 (Builtin::Print, Type::None)
             }
+            // An isolated initializer cannot rely on the constructor to admit
+            // its module. Keep the display request at the consuming operation.
+            "print"
+                if self.graph.modules[self.module].initializer_only
+                    && args.iter().any(|arg| arg.ty == Type::ByteArray) =>
+            {
+                return Err(self.scoped_builtin_error("printing a bytearray", call));
+            }
             "complex"
                 if self.graph.command_startup.is_some()
                     && self.unshadowed_builtin(&call.func, "complex") =>
@@ -17664,11 +18016,12 @@ print(choose("x"))
 "#;
         let graph = SourceGraph::single_with_mode(source, true).unwrap();
         assert!(super::lower(&graph).is_ok());
-        let graph = SourceGraph::single_with_mode(source, false).unwrap();
-        let error = super::lower(&graph)
+        let mut graph = SourceGraph::single_with_mode(source, false).unwrap();
+        let report = super::lower_with_caller_cache(&mut graph, None)
             .err()
-            .expect("whole-module checking inspects both suites");
-        assert!(error.contains("expected bytes, got str"), "{error}");
+            .expect("the two suites require different storage");
+        assert_eq!(report.kind, super::Kind::ScopedObject);
+        crate::check(source).unwrap();
     }
 
     #[test]

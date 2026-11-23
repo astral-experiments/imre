@@ -46,7 +46,7 @@ REJECTED = {
     "comprehension_iterable": "values = [item for item in (source := [1, 2])]\n",
     "nested_comprehension_iterable": "saved = 0\nvalues = [item for item in [(saved := inner) for inner in range(2)]]\n",
     "comprehension_filter_scope": "def bad(flag: bool) -> list[int]:\n    return [saved for index in range(2) if flag or (saved := index) > 0]\n",
-    "wrong_exact_type": 'value = 1\nprint((value := "wrong"))\n',
+    "wrong_exact_type": 'value: int = 1\nprint((value := "wrong"))\n',
     "wrong_optional_type": "value: int | None = None\nprint((value := False))\n",
     "attribute_target": "class Item:\n    value: int\n    def __init__(self) -> None:\n        self.value = 1\nitem = Item()\nprint((item.value := 2))\n",
     "builtin_target": "print((int := 1))\n",
@@ -54,7 +54,6 @@ REJECTED = {
     "annotated_list_rebind": 'def bad() -> None:\n    values: list[str] = ["a"]\n    items = [b"b"]\n    values = items\n',
     "annotated_after_inferred_list": 'def bad() -> None:\n    values = ["a"]\n    values: list[str]\n    items = [b"b"]\n    values = items\n',
     "parameter_list_rebind": 'def bad(values: list[str]) -> None:\n    items = [b"b"]\n    values = items\n',
-    "conditional_list_rebind": 'def bad(flag: bool) -> None:\n    values = ["a"]\n    items = [b"b"]\n    if flag:\n        values = items\n',
     "captured_list_rebind": 'def bad() -> None:\n    values = ["a"]\n    def read() -> str:\n        return values[0]\n    items = [b"b"]\n    values = items\n    print(read())\n',
     "conditional_type_change": "def scale(value: int, flag: bool) -> float:\n    if flag:\n        value: float = float(value)\n    return float(value)\n",
     "loop_type_change": "def scale(value: int) -> float:\n    while value > 0:\n        value: float = float(value)\n    return float(value)\n",
@@ -63,6 +62,7 @@ REJECTED = {
 }
 
 CHECKED = {
+    "conditional_list_rebind": 'def bad(flag: bool) -> None:\n    values = ["a"]\n    items = [b"b"]\n    if flag:\n        values = items\n',
     "recursive_comprehension": "def recurse() -> list[int]:\n    saved = 0\n    return [(saved := recurse()[0]) for index in range(0)]\n",
 }
 

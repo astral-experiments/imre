@@ -678,7 +678,13 @@ impl Pending {
                     "cannot infer parameter {name:?}; add an annotation or a concrete direct call"
                 ),
             )
-            .classified(Kind::UnresolvedLayout(module, function.start()))
+            .classified(
+                if signature.inferred_formal(index) && graph.modules[module].is_program_source() {
+                    Kind::ScopedObject
+                } else {
+                    Kind::UnresolvedLayout(module, function.start())
+                },
+            )
         } else {
             Diagnostic::at(
                 source,
@@ -701,6 +707,12 @@ struct SequenceParameter {
 #[derive(Default)]
 pub(super) struct Inference {
     pending: RefCell<Vec<Pending>>,
+    /// A fully bound initializer call supplied this fixed callback to the physical formal.
+    callback_arguments: RefCell<HashMap<(ModuleId, TextRange), Option<usize>>>,
+    /// An observed append that required wider storage for an incoming list.
+    list_writes: RefCell<HashMap<(usize, usize), (Type, Type)>>,
+    /// Heterogeneous module cells must keep their layout across discovery rounds.
+    pub(super) object_cells: std::rc::Rc<RefCell<HashSet<DefinitionId>>>,
     sequence_parameters: RefCell<HashMap<(usize, usize), SequenceParameter>>,
     document_fields: RefCell<HashSet<(usize, usize)>>,
     /// Source contract checks shared by discovery, recovery and final body lowering.
@@ -722,6 +734,55 @@ pub(super) struct Solution {
 }
 
 impl Inference {
+    /// Use the binder's formal order, before waiting for a return layout. A saved
+    /// slot is reliable here only if no later operand could have overwritten it.
+    fn observe_callbacks(
+        &self,
+        checker: &Checker<'_>,
+        call: &ast::ExprCall,
+        signature: &Signature,
+        args: &ir::CallArgs,
+    ) {
+        let callback = |index: usize| {
+            let value = &args.values[index];
+            match value.kind {
+                ExprKind::Local(slot) if index + 1 == args.values.len() => {
+                    checker.saved_call_target(slot)
+                }
+                _ => value.unbound_function(),
+            }
+        };
+        if signature.asynchronous || !args.order.iter().any(|&i| callback(i).is_some()) {
+            return;
+        }
+        if let Some(Binding::Definition(owner)) = checker.resolve(&call.func)
+            && checker
+                .functions
+                .get(&owner)
+                .is_some_and(|f| f.id == signature.id)
+            && let Some(function) = checker.graph.modules[owner.module].parsed.suite()
+                [owner.statement]
+                .as_function_def_stmt()
+            && checker.fixed_callback_call(call)
+        {
+            let mut callbacks = self.callback_arguments.borrow_mut();
+            for (parameter, &index) in
+                closed_calls::parameters(&function.parameters).zip(&args.order)
+            {
+                if parameter.annotation().is_none()
+                    && let Some(id) = callback(index)
+                {
+                    let target = callbacks
+                        .entry((owner.module, parameter.name().range()))
+                        .or_insert(Some(id));
+                    if *target != Some(id) {
+                        *target = None;
+                    }
+                }
+            }
+        }
+    }
+
     pub fn register(
         &self,
         params: Vec<Option<Type>>,
@@ -996,7 +1057,22 @@ impl Inference {
     fn update(&self, signature: &mut Signature) {
         let pending = self.pending.borrow();
         let inferred = &pending[signature.id];
-        for (parameter, ty) in signature.params.iter_mut().zip(&inferred.params) {
+        let writes = self.list_writes.borrow();
+        for (index, (parameter, ty)) in signature
+            .params
+            .iter_mut()
+            .zip(&inferred.params)
+            .enumerate()
+        {
+            if let Some(&(prior, item)) = writes.get(&(signature.id, index))
+                && matches!(
+                    signature.parameter_declarations.get(index),
+                    Some(ParameterOrigin::Inferred)
+                )
+            {
+                Arc::make_mut(&mut signature.parameter_declarations)[index] =
+                    ParameterOrigin::ListWrite { prior, item };
+            }
             if let Some(ty) = ty {
                 parameter.ty = *ty;
                 if *ty == documents::ANY
@@ -1059,12 +1135,24 @@ impl Inference {
     }
 
     /// An incompatible write constrains the original incoming list, never a copy.
-    pub(super) fn demand_list_write(&self, id: usize, index: usize, prior: Type, types: &Types) {
+    pub(super) fn demand_list_write(
+        &self,
+        id: usize,
+        index: usize,
+        prior: Type,
+        item: Option<Type>,
+        types: &Types,
+    ) {
         let wide = types.list(Type::ObjectValue);
         if self.inferred_parameter(id, index)
             && self.parameter(id, index) == Some(prior)
             && prior != wide
         {
+            if let Some(item) = item {
+                self.list_writes
+                    .borrow_mut()
+                    .insert((id, index), (prior, item));
+            }
             self.widen_parameter(id, index, wide);
         }
     }
@@ -1143,7 +1231,7 @@ impl Inference {
     }
 
     /// The default None establishes absence, not the payload type of supplied arguments.
-    /// An annotation or a non-None default keeps its original exact type contract.
+    /// Other scalar defaults supply the initial parameter layout.
     fn none_default(&self, id: usize, index: usize) -> bool {
         let pending = self.pending.borrow();
         pending[id].none_defaults.contains(&index) && pending[id].params[index] == Some(Type::None)
@@ -1511,7 +1599,7 @@ impl Inference {
                     || signatures.values().any(Signature::registered_frame));
             let class_globals = classes.declarations.has_class_values(graph.entry);
             let helpers = Helpers::new(self.len() + graph.initializers(class_globals).count());
-            let globals = ModuleValues::for_initializers(!registered.is_empty());
+            let globals = ModuleValues::for_initializers(!registered.is_empty(), self);
             let mut available = HashSet::new();
             let mut errors = Vec::new();
             let mut checked_callers = Vec::new();
@@ -1908,6 +1996,14 @@ impl Inference {
                                 .join_results(ty, other)
                                 .or_else(|| classes.parsers.common_namespace(ty, other))
                             else {
+                                if function.returns.is_none()
+                                    && graph.modules[*module].is_program_source()
+                                {
+                                    // An inferred result has no single native slot. Publish
+                                    // the Python layout and check callers' declared slots.
+                                    ty = Type::PythonObject;
+                                    break;
+                                }
                                 conflicting_returns.get_or_insert((*module, function.range()));
                                 return Ok(());
                             };
@@ -2433,8 +2529,17 @@ impl Inference {
                 self.update(signature);
             }
         }
-        let needs_registered_entry =
-            !suspended_bodies.is_empty() || signatures.values().any(Signature::registered_frame);
+        // A widened result or method parameter has no fixed calling convention.
+        // Methods live in the class tables, outside the top-level signature map.
+        let needs_registered_entry = !suspended_bodies.is_empty()
+            || signatures.values().any(Signature::registered_frame)
+            || definitions.iter().any(|(_, function, signature)| {
+                function.returns.is_none() && signature.returns == Type::PythonObject
+                    || signature.method.is_some()
+                        && signature.params.iter().enumerate().any(|(i, param)| {
+                            param.ty == Type::PythonObject && signature.inferred_formal(i)
+                        })
+            });
         // A body checked before return publication has no Python operand sites. Its
         // exact ABI must still match the solved signature, and a registered graph
         // must take the ordinary placement path instead.
@@ -2620,6 +2725,31 @@ impl Checker<'_> {
         }
     }
 
+    /// A complete call can witness the violation for its own callback only
+    /// when the inner invocation and its operands are independent of callers.
+    pub(super) fn forwarded_declaration(
+        &self,
+        call: &ast::ExprCall,
+        index: usize,
+        item: Type,
+    ) -> Option<TypeDeclaration> {
+        let inference = self.inference?;
+        let callbacks = inference.callback_arguments.borrow();
+        if callbacks.is_empty() || !call.arguments.args.iter().all(ast::Expr::is_literal_expr) {
+            return None;
+        }
+        let parameter = self
+            .graph
+            .session
+            .operand_types(self.module)
+            .unconditional_parameter(&call.func)?;
+        let id = (*callbacks.get(&(self.module, parameter))?)?;
+        self.functions
+            .values()
+            .find(|f| f.id == id)?
+            .positional_declaration(index, item, call.arguments.args.len())
+    }
+
     pub(super) fn source_call(
         &mut self,
         call: &ast::ExprCall,
@@ -2653,6 +2783,12 @@ impl Checker<'_> {
             ControlFlow::Continue(args) => args,
             ControlFlow::Break(stop) => return Ok(scope.finish(stop)),
         };
+        if direct
+            && self.module_scope
+            && let Some(inference) = self.inference
+        {
+            inference.observe_callbacks(self, call, signature, &args);
+        }
         let ty = self.enter_source_call(call, signature, CallEdge::Fixed)?;
         // A successfully bound source call can enter the definition's registered body.
         self.globals
@@ -2753,7 +2889,31 @@ impl Checker<'_> {
                         if can_stop && checker.terminating_operand(&value) {
                             Ok(value)
                         } else {
-                            checker.direct_value(value, site, expected, parameter.sign_only)
+                            // An inferred parameter may need wider storage because the
+                            // callee writes through it. The caller still owns the list.
+                            if let Some(&ParameterOrigin::ListWrite { prior, item }) = signature.parameter_declarations.get(index)
+                                && value.ty == prior
+                                && let Some(declaration) = checker.value_declaration(&value)
+                                && let Some(element) = checker.types.element(prior)
+                            {
+                                checker.expect(element, item, site)
+                                    .map_err(|error| error.expected_from(Some(declaration), site.range()))?;
+                            }
+                            match checker.direct_value(value, site, expected, parameter.sign_only) {
+                                Err(failure) if failure.is_storage_mismatch(site)
+                                    && signature.inferred_formal(index) => {
+                                    // Discard assumptions from a scalar default or earlier call.
+                                    // A container producer may still settle on a common native layout.
+                                    if let Some(inference) = inference
+                                        && expected.builtin_scalar_name().is_some()
+                                        && inference.parameter(signature.id, index) == Some(expected)
+                                    {
+                                        inference.widen_parameter(signature.id, index, Type::PythonObject);
+                                    }
+                                    Err(checker.scoped_builtin_error("inferred argument storage", site))
+                                }
+                                result => result,
+                            }
                         }
                     };
                 let timeout = selector_wait && parameter.name == "timeout";
@@ -2856,7 +3016,7 @@ impl Checker<'_> {
                             inference.widen_parameter(signature.id, index, supplied.ty);
                             return Ok(supplied);
                         }
-                        return checker.direct_value(supplied, node, ty, parameter.sign_only);
+                        return direct_value(checker, supplied, ty, node);
                     }
                     // An inferred argument can supply the optional layout for a prior
                     // None or its payload, or the union of two supported text layouts.
@@ -2891,9 +3051,9 @@ impl Checker<'_> {
                         };
                         let value = match argument {
                             calls::Supplied::Source(node) => {
-                                checker.expr_expected_if(node, ty, |_, actual| {
+                                checker.expr_in_context(node, ty, |_, actual| {
                                     wider(actual).is_some()
-                                })?
+                                }, direct_value, declaration)?
                             }
                             calls::Supplied::Field(value, _) => value,
                         };
@@ -2903,7 +3063,7 @@ impl Checker<'_> {
                         } else {
                             ty
                         };
-                        return checker.direct_value(value, node, expected, parameter.sign_only);
+                        return direct_value(checker, value, expected, node);
                     }
                     if matches!(ty, Type::Class(class) if checker.classes.parsers.namespace(class))
                     {
@@ -3039,23 +3199,29 @@ run(True, [1])
     fn fresh_list_cannot_join_past_another_reference() {
         let classes = "class Base: pass\nclass Left(Base): pass\nclass Right(Base): pass\n";
         for boundary in [
-            "    consume([values])\n",
             "    alias = values\n",
             "    alias = values\n    alias.append(Right())\n",
             "    values = []\n",
-            "    if flag: values = []\n",
             "    if not values: pass\n",
             "    print(0)\n",
         ] {
             let source = format!(
                 "{classes}def consume(groups: list[list[Left]]) -> None: pass\ndef run(flag: bool) -> None:\n    values = []\n    values.append(Left())\n{boundary}    values.append(Right())\nrun(True)\n"
             );
-            let error = crate::check(&source).unwrap_err();
-            assert!(
-                error.contains("expected __main__.Left, got __main__.Right"),
-                "{error}"
-            );
+            let mut graph = SourceGraph::single(&source).unwrap();
+            assert!(matches!(crate::checked_lower(&mut graph).unwrap(),
+                crate::CheckedProgram::Runtime(reason) if reason.kind.is_object()));
+            crate::check(&source).unwrap();
         }
+        // Distinct allocations at the join have no single proven origin.
+        let ambiguous = format!(
+            "{classes}def run(flag: bool) -> None:\n    values = []\n    values.append(Left())\n    if flag: values = []\n    values.append(Right())\nrun(True)\n"
+        );
+        assert!(crate::check(&ambiguous).is_err());
+        let typed = format!(
+            "{classes}def consume(groups: list[list[Left]]) -> None: pass\ndef run() -> None:\n    values = []\n    values.append(Left())\n    consume([values])\n    values.append(Right())\nrun()\n"
+        );
+        assert!(crate::check(&typed).is_err());
         let monomorphic = format!(
             "{classes}def run() -> None:\n    values = []\n    print(0)\n    values.append(Left())\n    values.append(Left())\nrun()\n"
         );
@@ -3063,26 +3229,18 @@ run(True, [1])
     }
 
     #[test]
-    fn list_contracts_and_nonconstructor_insertions_are_not_widened() {
+    fn only_inferred_class_lists_can_box_nonconstructor_insertions() {
         let classes = "class Base: pass\nclass Left(Base): pass\nclass Right(Base): pass\nclass Other: pass\ndef make() -> Right: return Right()\n";
-        for (declaration, value) in [
-            ("values: list[Left] = []", "Right()"),
-            ("values = []", "make()"),
-            ("values = []", "Other()"),
-        ] {
+        for value in ["Right()", "make()", "Other()"] {
             let source = format!(
-                "{classes}def run() -> None:\n    {declaration}\n    values.append(Left())\n    values.append({value})\nrun()\n"
+                "{classes}def run() -> None:\n    values: list[Left] = []\n    values.append(Left())\n    values.append({value})\nrun()\n"
             );
             assert!(crate::check(&source).is_err());
+            crate::check(&source.replace(": list[Left]", "")).unwrap();
         }
-        let incompatible = format!(
+        crate::check(&format!(
             "{classes}def run() -> None:\n    values = []\n    values.append(Left())\n    values.append(Right())\n    values.append(make())\nrun()\n"
-        );
-        let error = crate::check(&incompatible).unwrap_err();
-        assert!(
-            error.contains("expected __main__.Left, got __main__.Right"),
-            "{error}"
-        );
+        )).unwrap();
         crate::check(
             "def run() -> None:\n    values = []\n    alias = values\n    values.append(1)\n    seen = set()\n    seen.add(1)\nrun()\n",
         )
@@ -3290,7 +3448,7 @@ print(Reader().read())
         assert!(diagnostic.to_string().contains(":3:19:"), "{diagnostic}");
     }
     #[test]
-    fn a_procedure_waits_for_its_call_before_binding_the_next_argument() {
+    fn inferred_arguments_do_not_hide_an_invalid_operation_in_another_body() {
         let directory = tempfile::tempdir().unwrap();
         let file = directory.path().join("main.py");
         let source = concat!(
@@ -3306,7 +3464,7 @@ print(Reader().read())
         std::fs::write(&file, source).unwrap();
         let error = crate::check_file(&file, None).unwrap_err();
         assert!(
-            error.contains(":5:12: Imre: expected str, got int"),
+            error.contains(":20:21: Imre: expected str, bytes or pathlib.Path"),
             "{error}"
         );
     }
@@ -3354,12 +3512,10 @@ print(Reader().read())
         );
         std::fs::write(&file, &mixed).unwrap();
         crate::check_file(&file, None).unwrap();
+        // Without the raise, select has two possible results and no declared
+        // return type. A Python frame can return either value.
         std::fs::write(&file, mixed.replace("raise SystemExit(13)", "pass")).unwrap();
-        let error = crate::check_file(&file, None).unwrap_err();
-        assert!(
-            error.contains("inferred returns require one supported exact or nullable type"),
-            "{error}"
-        );
+        crate::check_file(&file, None).unwrap();
         let stored = source.replace(
             "def relay(arg): return take(arg)\nprint(relay(choose()))",
             "value: int = take(choose())\nprint(value)",

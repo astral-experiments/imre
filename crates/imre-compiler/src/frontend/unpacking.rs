@@ -53,6 +53,9 @@ pub(super) trait PatternBinder {
 
     fn pattern_hidden(&mut self, ty: Type) -> usize;
     fn pattern_local(&self, slot: usize) -> Expr;
+    fn pattern_capture(&mut self, value: &Expr) -> usize {
+        self.pattern_hidden(value.ty)
+    }
     fn pattern_store(
         &mut self,
         target: &ast::Expr,
@@ -100,7 +103,7 @@ impl PatternSnapshot {
     }
 
     fn capture(&mut self, binder: &mut (impl PatternBinder + ?Sized), item: Expr) {
-        let slot = binder.pattern_hidden(item.ty);
+        let slot = binder.pattern_capture(&item);
         self.body.push(Statement::Assign(slot, item));
         self.clear.push(slot);
     }
@@ -231,7 +234,7 @@ pub(super) fn bind_assignment<B: PatternBinder>(
         bind_input(binder, target, value, None, output)?;
         return Ok(());
     }
-    let slot = binder.pattern_hidden(value.ty);
+    let slot = binder.pattern_capture(&value);
     let mut body = vec![Statement::Assign(slot, value)];
     for (index, target) in targets.iter().enumerate() {
         let value = binder.pattern_local(slot);
@@ -362,7 +365,47 @@ impl Checker<'_> {
         }
     }
 
-    fn assignment_rhs(
+    /// Only the final conversion into a proven inferred binding may select
+    /// object storage. Failures inside its operand keep their own diagnostics.
+    pub(super) fn inferred_store_conflict(
+        &self,
+        target: &ast::Expr,
+        site: &impl Ranged,
+        failure: &Failure,
+    ) -> bool {
+        failure.is_storage_mismatch(site)
+            && self.graph.modules[self.module].is_program_source()
+            && self.graph.session.inferred_name_store(self.module, target)
+            && target
+                .as_name_expr()
+                .and_then(|name| self.stored_name(&name.id))
+                .is_none_or(|slot| {
+                    !self.declared_slots.contains_key(&slot) && !self.fixed_formals.contains(&slot)
+                })
+    }
+
+    /// Keep checking subsequent reads with object storage. A fixed body
+    /// containing this placeholder is discarded before emission.
+    pub(super) fn widen_inferred_store(
+        &mut self,
+        target: &ast::Expr,
+        site: &impl Ranged,
+        failure: Failure,
+    ) -> Result<Expr> {
+        if !self.inferred_store_conflict(target, site, &failure) {
+            return Err(failure);
+        }
+        self.require_registered_operation(site)?;
+        if let Some(slot) = target
+            .as_name_expr()
+            .and_then(|name| self.stored_name(&name.id))
+        {
+            self.locals[slot] = Type::PythonObject;
+        }
+        Ok(Expr::unrepresented())
+    }
+
+    pub(super) fn assignment_rhs(
         &mut self,
         target: &ast::Expr,
         value: &ast::Expr,
@@ -403,7 +446,18 @@ impl Checker<'_> {
                         checker.locals[slot] = Type::PythonObject;
                         return Ok(operand);
                     }
-                    checker.coerce_supplied_result(operand, expected, site)
+                    match checker.coerce_supplied_result(operand, expected, site) {
+                        Ok(value) if checker.native_type_proof(&value, expected) => {
+                            if let Some(owner) = declaration {
+                                checker.checked_native_operand(site.range(), owner);
+                            }
+                            Ok(value)
+                        }
+                        Err(failure) if declaration.is_none() => {
+                            checker.widen_inferred_store(target, site, failure)
+                        }
+                        result => result,
+                    }
                 },
                 declaration,
                 result,
@@ -573,7 +627,9 @@ impl Checker<'_> {
             } else {
                 value
             };
-            let value_site = scalar_item.map(|_| rhs);
+            let value_site = (scalar_item.is_some()
+                || context.is_none() && target.is_subscript_expr())
+            .then_some(rhs);
             let start = output.len();
             self.store_value(target, value, value_site, Some(output))?;
             if let Some(sites) = &mut self.fixed_sites
@@ -734,6 +790,12 @@ impl Checker<'_> {
                     ));
                 }
                 let receiver = self.json_mutation_receiver(receiver, subscript)?;
+                if matches!(receiver.ty, Type::ListInt | Type::List(_))
+                    && let ast::Expr::Slice(slice) = &*subscript.slice
+                {
+                    self.slice(receiver, slice, subscript.range())?;
+                    return Err(self.scoped_builtin_error("a list slice assignment", target));
+                }
                 let declaration = self.value_declaration(&receiver);
                 let (key, element) = self
                     .types
@@ -751,8 +813,9 @@ impl Checker<'_> {
                         )
                     })?;
                 let site = value_site.unwrap_or(target);
+                let owner = self.inferred_storage(&receiver);
                 let value = self
-                    .coerce(value, element, site)
+                    .container_store(owner.as_deref(), false, value, element, site)
                     .map_err(|error| error.expected_from(declaration, site.range()));
                 // A direct RHS owns its error before the key. An unpacked value is placed after its key.
                 if value_site.is_some()
@@ -762,6 +825,10 @@ impl Checker<'_> {
                 }
                 let index = if matches!(receiver.ty, Type::Deque(_)) {
                     self.integer_index(&subscript.slice)?
+                } else if let Some(owner) = owner
+                    && self.types.mapping(receiver.ty).is_some()
+                {
+                    self.inserted_operand(&owner, true, &subscript.slice, key)?
                 } else {
                     self.expr_expected_from(&subscript.slice, key, declaration)?
                 };
@@ -1263,6 +1330,16 @@ impl PatternBinder for Checker<'_> {
 
     fn pattern_hidden(&mut self, ty: Type) -> usize {
         self.hidden(ty)
+    }
+    fn pattern_capture(&mut self, value: &Expr) -> usize {
+        let slot = self.hidden(value.ty);
+        if self.types.is_display_container(value.ty) {
+            let source = self
+                .value_source(value)
+                .or_else(|| ValueSource::allocation(value));
+            self.assigned.set_value_source(slot, source);
+        }
+        slot
     }
     fn pattern_local(&self, slot: usize) -> Expr {
         if self.registered.is_some()

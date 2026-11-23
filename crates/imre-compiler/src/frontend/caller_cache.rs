@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use super::*;
-use crate::types::ShapePrefix;
+use crate::{analysis::CheckedDiagnostic, types::ShapePrefix};
 
 pub(super) type DefaultId = (usize, usize);
 
@@ -19,6 +19,7 @@ struct Structure {
 
 struct Revision {
     structure: Structure,
+    holes: Vec<Vec<TextRange>>,
 }
 
 impl Revision {
@@ -29,6 +30,7 @@ impl Revision {
         {
             return None;
         }
+        let mut holes = vec![Vec::new(); graph.modules.len()];
         let mut has_defaults = false;
         let mut masked = HashMap::new();
         for (module_id, module) in graph.modules.iter().enumerate() {
@@ -74,6 +76,7 @@ impl Revision {
                     }) {
                         hash.update(&(end - start).to_le_bytes());
                     }
+                    holes[module_id].push(default.range());
                     has_defaults = true;
                     previous = end;
                 }
@@ -104,6 +107,7 @@ impl Revision {
             })
             .collect();
         Some(Self {
+            holes,
             structure: Structure {
                 root: graph.session.root.clone(),
                 entry: graph.entry,
@@ -141,6 +145,45 @@ enum ScalarDefault {
     Bool(bool),
 }
 
+struct CachedBody {
+    context: Context,
+    body: LoweredBody,
+    module: ModuleId,
+    proofs: Vec<CheckedDiagnostic>,
+}
+
+impl CachedBody {
+    /// Between scalar defaults the structural key guarantees byte-identical text.
+    /// Move both ends of a proof with their respective sources. A site crossing
+    /// a changed default needs a fresh check.
+    fn relocate(&mut self, old: &Revision, new: &Revision) -> bool {
+        let relocate = |module: usize, site: &mut TextRange| {
+            let holes = &old.holes[module];
+            let prior = holes.partition_point(|hole| hole.end() <= site.start());
+            if holes
+                .get(prior)
+                .is_some_and(|hole| hole.start() < site.end())
+            {
+                return false;
+            }
+            if prior > 0 {
+                let offset = site.start() - holes[prior - 1].end();
+                *site = TextRange::at(new.holes[module][prior - 1].end() + offset, site.len());
+            }
+            true
+        };
+        self.proofs.iter_mut().all(|proof| match proof {
+            CheckedDiagnostic::NativeOperand {
+                operand,
+                module,
+                annotation,
+            } => relocate(self.module, operand) && relocate(*module, annotation),
+            CheckedDiagnostic::NativeReturn(operand) => relocate(self.module, operand),
+            _ => false,
+        })
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct CallerCache {
     revision: Option<Revision>,
@@ -148,7 +191,7 @@ pub(crate) struct CallerCache {
     defaults: HashMap<DefaultId, ScalarDefault>,
     shapes: ShapePrefix,
     abi: Vec<Type>,
-    bodies: HashMap<usize, (Context, LoweredBody)>,
+    bodies: HashMap<usize, CachedBody>,
 }
 
 impl CallerCache {
@@ -164,6 +207,10 @@ impl CallerCache {
             .is_none_or(|previous| previous.structure != current.structure)
         {
             self.bodies.clear();
+        } else if let Some(old) = &self.revision
+            && old.holes != current.holes
+        {
+            self.bodies.retain(|_, body| body.relocate(old, &current));
         }
         self.revision = Some(current);
         Some(self)
@@ -218,8 +265,13 @@ impl CallerCache {
         signature: &Signature,
     ) -> BodyResult {
         let before = Context::new(&checker);
-        if let Some((previous, body)) = self.bodies.get(&signature.id)
-            && before == *previous
+        if let Some(CachedBody {
+            context,
+            body,
+            proofs,
+            ..
+        }) = self.bodies.get(&signature.id)
+            && before == *context
             && checker.types.matches_prefix(&self.shapes)
             && body
                 .facts
@@ -227,6 +279,9 @@ impl CallerCache {
                 .as_ref()
                 .is_some_and(|reads| reads.iter().all(|id| !self.changed.contains(id)))
         {
+            for &proof in proofs {
+                checker.graph.checked_native_type(checker.module, proof);
+            }
             return Ok((body.clone(), HashMap::new()));
         }
         let (types, helpers, globals, session) = (
@@ -248,10 +303,18 @@ impl CallerCache {
             && before.helpers == helpers.len()
             && before.globals == globals.types().len()
             && before.class_bindings == globals.class_data.borrow().binding_count()
-            && diagnostics == graph.checked_diagnostic_count(module)
             && hints == session.hint_reads()
+            && let Some(proofs) = graph.native_proofs_since(module, diagnostics)
         {
-            self.bodies.insert(signature.id, (before, body.clone()));
+            self.bodies.insert(
+                signature.id,
+                CachedBody {
+                    context: before,
+                    body: body.clone(),
+                    module,
+                    proofs,
+                },
+            );
         } else {
             self.bodies.remove(&signature.id);
         }

@@ -15,7 +15,7 @@ REJECTED = {
     "nullable_order": 'values: list[tuple[int | None]] = [(None,), (1,)]\nsorted(values)',
     "float_order": 'sorted([(1.0,), (2.0,)])',
     "mutable_order": 'sorted([([1],), ([2],)])',
-    "mixed_key_shape": 'values = {(1, "one"): 1}\nvalues[("one", 1)] = 2',
+    "mixed_key_shape": 'values: dict[tuple[int, str], int] = {(1, "one"): 1}\nvalues[("one", 1)] = 2',
     "tuple_mutation": 'value = (1, "one")\nvalue[0] = 2',
     "list_compare_mutable": 'a = [([1],)]\nprint(a == a)',
     "list_compare_float": 'a = [(1.0,)]\nprint(a == a)',

@@ -478,10 +478,17 @@ pub(super) fn retain_generator(
     )
 }
 
+pub(super) fn store_types(graph: &SourceGraph, id: ModuleId) -> crate::analysis::OperandTypes<'_> {
+    graph
+        .session
+        .operand_types(id)
+        .with_program_stores(graph.modules[id].checks_source_contracts())
+}
+
 pub(super) fn function_source(graph: &SourceGraph, id: ModuleId) -> RegisteredSource<'_> {
     let module = &graph.modules[id];
     RegisteredSource {
-        operand_types: Some(graph.session.operand_types(id)),
+        operand_types: Some(store_types(graph, id)),
         ..module
             .registered_values()
             .operands(&module.source, graph.python_optimization())
@@ -3521,7 +3528,21 @@ impl unpacking::PatternBinder for SourceScope<'_> {
         output: &mut Vec<Statement>,
     ) -> StdResult<(), ()> {
         let store = match target {
-            ast::Expr::Name(name) => self.store(name.id.as_str(), value),
+            ast::Expr::Name(name) => {
+                // Check each destination after evaluating the shared RHS and
+                // completing any earlier stores in a chained assignment.
+                let expected = self
+                    .source
+                    .operand_types
+                    .filter(|_| {
+                        matches!(
+                            self.kind,
+                            RegisteredScope::Module | RegisteredScope::Function { .. }
+                        )
+                    })
+                    .and_then(|types| types.declared_store(target));
+                self.store(name.id.as_str(), checked_local_scalar(expected, value))
+            }
             ast::Expr::Attribute(attr) => {
                 let receiver = StatementOperand::Value(&attr.value)
                     .in_binding(self)
@@ -3717,13 +3738,19 @@ fn definition_value(
 
 impl SourceScope<'_> {
     fn local_initializer(&self, ann: &ast::StmtAnnAssign, value: Expr) -> Expr {
-        if !matches!(self.kind, RegisteredScope::Function { .. }) || !ann.target.is_name_expr() {
+        if !matches!(
+            self.kind,
+            RegisteredScope::Module | RegisteredScope::Function { .. }
+        ) || !ann.target.is_name_expr()
+        {
             return value;
         }
-        let expected = self
-            .source
-            .operand_types
-            .and_then(|types| types.local_scalar_annotation(&ann.annotation));
+        let expected = self.source.operand_types.and_then(|types| {
+            types.scalar_initializer(
+                &ann.annotation,
+                matches!(self.kind, RegisteredScope::Function { .. }),
+            )
+        });
         checked_local_scalar(expected, value)
     }
 
@@ -7703,6 +7730,36 @@ print(choose({left}), choose({right}))
             (2, 2, 2)
         );
         assert!(finalbody.is_empty() && crate::llvm::registered::supports(&checked));
+    }
+
+    #[test]
+    fn registered_stores_follow_the_reaching_variable_declaration() {
+        let text = concat!(
+            "type Count = int\n",
+            "result: Count = read()\nresult = read()\n",
+            "result: str = read()\nresult = read()\n",
+            "pending: bytes\npending = read()\n",
+            "choice: int | bool = read()\nchoice = read()\n",
+            "number: 'float | int' = read()\nnumber = read()\n",
+        );
+        let graph = SourceGraph::single(text).unwrap();
+        let entry = &graph.modules[graph.entry];
+        let guards = |kind| {
+            let source = function_source(&graph, graph.entry);
+            let suite = registered_suite(&entry.parsed.suite()[1..], kind, source).unwrap();
+            let mut checks = Vec::new();
+            ir::walk_expressions(&suite.function.body, &mut |value| {
+                if let ExprKind::Builtin(Builtin::RegisteredLocalScalar(name), _) = &value.kind {
+                    checks.push(*name);
+                }
+            });
+            checks
+        };
+        assert_eq!(
+            guards(RegisteredScope::Module),
+            ["int", "int", "str", "str", "bytes"]
+        );
+        assert!(guards(RegisteredScope::Class).is_empty());
     }
 
     #[test]

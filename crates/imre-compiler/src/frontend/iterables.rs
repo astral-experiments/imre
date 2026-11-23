@@ -504,7 +504,7 @@ impl Checker<'_> {
         element: Option<Type>,
     ) -> Result<(ExpansionSource, Option<&'e ast::Expr>), String> {
         if let ast::Expr::Call(call) = expression
-            && let Some(mapped) = self.bound_map(call)
+            && let Some(mapped) = self.bound_callback_pipeline(call)
         {
             let (callee, converter, source) = match mapped {
                 pipelines::CallbackPipeline::MapBuiltin {
@@ -513,7 +513,7 @@ impl Checker<'_> {
                     source,
                 } if converter.id == "int" => (callee, converter, source),
                 mapped => {
-                    let input = self.callback_input(call, element, mapped)?;
+                    let input = self.callback_input(call, element, mapped, true)?;
                     self.hint_empty_iteration(&input, element);
                     return Ok((ExpansionSource::Iteration(Iteration::Prepared(input)), None));
                 }

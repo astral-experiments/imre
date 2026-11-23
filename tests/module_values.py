@@ -65,7 +65,7 @@ REJECTED = {
     },
     "wrong_annotation": {"library.py": 'VALUE: int = "wrong"\n'},
     "wrong_mutation": {
-        "library.py": 'VALUES = {"a": 1}\ndef change() -> None:\n    VALUES["a"] = "wrong"\n'
+        "library.py": 'VALUES: dict[str, int] = {"a": 1}\ndef change() -> None:\n    VALUES["a"] = "wrong"\n'
     },
     "local_shadow": {
         "library.py": "VALUE = 1\ndef change() -> int:\n    VALUE = 2\n    return VALUE\n"
@@ -73,9 +73,9 @@ REJECTED = {
     "wrong_global_rebinding": {
         "library.py": 'VALUE: int = 1\ndef change() -> None:\n    global VALUE\n    VALUE = "wrong"\n'
     },
-    "qualified_rebinding": {
-        "main.py": "import library\nlibrary.VALUE = 2\n",
-        "library.py": "VALUE = 1\n",
+    "qualified_wrong_type": {
+        "main.py": "import library\nlibrary.VALUE = True\n",
+        "library.py": "VALUE: int = 1\n",
     },
     "conditional_export": {
         "main.py": "from library import VALUE\n",

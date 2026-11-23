@@ -24,6 +24,32 @@ With small, exact integers, the addition can use machine arithmetic. The call to
 
 The driver still chooses an entry layout for the module graph. When the entry needs Python module initialization or object lookup, it can register Python functions and retain checked bodies for eligible fixed-signature callees. Those functions share the statement and expression emitter. [Entry selection](../crates/imre-compiler/src/lib.rs) · [Module and callable preparation](../crates/imre-compiler/src/dynamic/emit.rs)
 
+Imre checks the selected application's declarations before emitting either layout.
+For a fixed entry, it uses the original source graph. For a registered entry, it
+uses the modules that won import resolution, reusing a cached check only while
+the sources, interfaces and diagnostic scopes match. A successful lowering or
+a clean ty result still leaves Imre's exact type checks to run. Native inference
+can report several failures at once. A dependency's missing representation
+cannot hide a checked operand in the application.
+[Source checks](../crates/imre-compiler/src/analysis.rs)
+
+A written annotation constrains a value. An inferred type describes a possible
+way to store it. If a closure needs Python cells or an unannotated variable
+needs several layouts, the compiler can request a registered frame. It keeps
+the checks on each operand and tracks the shared storage of mutable aliases.
+Both layouts compile ahead of time and preserve module initialization.
+When an inferred parameter or global changes layout, Imre recomputes results
+that depended on its previous layout. All readers of a global share the new layout.
+[Lowering outcomes](../crates/imre-compiler/src/frontend/phase.rs) · [Signature inference](../crates/imre-compiler/src/frontend/inference.rs)
+
+An import without a reader can still run code. Imre checks the imported
+first-party declarations and keeps the selected initializer at the original
+import site. If the initializer needs Python objects, the driver can register
+it after checking the calling program. That requirement alone cannot justify
+discarding an error in the caller. A later read or re-export can still require
+the provider's checked definitions.
+[Source resolution](../crates/imre-compiler/src/modules.rs) · [Regression sweep](../tests/import_invariance.py)
+
 ## What an ordinary build compiles
 
 Imre compiles executable Python bodies ahead of time. Runtime data can still drive object and method dispatch. For example, given `handlers = {"double": double, "triple": triple}`, the call `handlers[key](value)` selects a compiled function at runtime. Python evaluates the dictionary lookup before it evaluates the argument.

@@ -572,7 +572,7 @@ fn a_bound_callback_and_an_independent_lambda_lower_once() {
     let mixed = format!("{source}def escape(value: int):\n    return lambda: value\n");
     std::fs::write(&path, &mixed).unwrap();
     let mut passes = 0;
-    let error = object_fallback(
+    let inputs = object_fallback(
         None,
         ProgramEntry::File(&path, None),
         &CompileOptions::default(),
@@ -584,13 +584,9 @@ fn a_bound_callback_and_an_independent_lambda_lower_once() {
             checked_lower_with(graph, None, call_error)
         },
     )
-    .err()
     .unwrap();
     assert_eq!(passes, 1);
-    assert!(
-        error.contains("a lambda requires an exact Callable context"),
-        "{error}"
-    );
+    assert!(inputs.boxed_imports);
 
     for (invalid, expected) in [
         (

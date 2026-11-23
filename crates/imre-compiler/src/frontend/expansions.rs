@@ -566,12 +566,16 @@ impl Checker<'_> {
         target: Expr,
         source: Expr,
         node: &impl Ranged,
+        owner: Option<&assignments::Container>,
     ) -> Result<Expr, String> {
         let extend = |target, snapshot| Expr {
             ty: Type::None,
             kind: ExprKind::Builtin(Builtin::ListExtendSnapshot, vec![target, snapshot]),
         };
         if target.ty == source.ty {
+            if let Some(owner) = owner {
+                owner.empty.set(false);
+            }
             return Ok(extend(target, self.list_snapshot(source)));
         }
         let element = self.types.element(target.ty).unwrap();
@@ -596,7 +600,10 @@ impl Checker<'_> {
                     ty: Type::None,
                     kind: ExprKind::Builtin(
                         Builtin::Append,
-                        vec![checker.local(buffer), checker.coerce(value, element, node)?],
+                        vec![
+                            checker.local(buffer),
+                            checker.container_store(owner, false, value, element, node)?,
+                        ],
                     ),
                 })])
             },
@@ -628,19 +635,42 @@ impl Checker<'_> {
     pub(super) fn extend_list(
         &mut self,
         receiver: Expr,
-        method: &ast::ExprAttribute,
-        node: &ast::ExprCall,
+        source: &ast::Expr,
+        method: Option<(&ast::ExprAttribute, &ast::ExprCall)>,
         append: Builtin,
     ) -> Result<Expr, String> {
         self.keep_module_list_layout(&receiver);
-        let source = &node.arguments.args[0];
+        let node = &method.map_or(source.range(), |(_, call)| call.range());
         let element = self.types.element(receiver.ty).unwrap();
-        let mut input = match self.expansion_source(source, Some(element))? {
+        let allocation = self.inferred_storage(&receiver);
+        let owner = allocation.as_deref();
+        let hint =
+            (owner.is_none() || self.empty_argument_type(source).is_some()).then_some(element);
+        let declaration = self.value_declaration(&receiver);
+        let input = if let Some(declaration) = declaration
+            && matches!(
+                source,
+                ast::Expr::List(_) | ast::Expr::Tuple(_) | ast::Expr::Set(_)
+            )
+            && let Some(ty) = self.expansion_hint(source, element)
+        {
+            ExpansionSource::Value(self.expr_expected_from(source, ty, Some(declaration))?)
+        } else {
+            self.expansion_source(source, hint)
+                .map_err(|e| match source {
+                    ast::Expr::Generator(it) => e.expected_from(declaration, it.elt.range()),
+                    ast::Expr::ListComp(it) => e.expected_from(declaration, it.elt.range()),
+                    ast::Expr::SetComp(it) => e.expected_from(declaration, it.elt.range()),
+                    _ => e,
+                })?
+        };
+        let mut input = match input {
             ExpansionSource::Value(value)
             | ExpansionSource::Iteration(Iteration::Container {
                 iterable: value,
                 items: false,
-            }) if self.checked_call_contracts
+            }) if let Some((method, call)) = method
+                && self.checked_call_contracts
                 && (value.ty == receiver.ty || value.ty == Type::PythonObject)
                 && matches!(append, Builtin::Append) =>
             {
@@ -650,7 +680,7 @@ impl Checker<'_> {
                     .operands(self.source, self.graph.python_optimization())
                     .located(source, value);
                 return Ok(registered::values::bound_call(
-                    node,
+                    call,
                     registered::values::method_target(method),
                     receiver,
                     vec![value],
@@ -666,7 +696,7 @@ impl Checker<'_> {
             if matches!(append, Builtin::Append)
                 && matches!(iterable.ty, Type::ListInt | Type::List(_))
             {
-                return self.extend_exact_list(receiver, iterable, node);
+                return self.extend_exact_list(receiver, iterable, node, owner);
             }
             if iterable.ty == receiver.ty {
                 iterable = self.list_snapshot(iterable);
@@ -693,6 +723,7 @@ impl Checker<'_> {
                         self.local(destination),
                         self.local(list.value),
                         node,
+                        owner,
                     )?));
                     let next = std::mem::take(&mut prepared.next);
                     prepared.next = vec![Statement::If(
@@ -735,7 +766,7 @@ impl Checker<'_> {
                         append.clone(),
                         vec![
                             checker.local(destination),
-                            checker.coerce(value, element, node)?,
+                            checker.container_store(owner, false, value, element, node)?,
                         ],
                     ),
                 })])
@@ -753,7 +784,7 @@ impl Checker<'_> {
 
     /// Uses destination context for newly constructed sources, without coercing
     /// an existing mutable container to a different element layout.
-    fn expansion_hint(&self, expression: &ast::Expr, element: Type) -> Option<Type> {
+    pub(super) fn expansion_hint(&self, expression: &ast::Expr, element: Type) -> Option<Type> {
         match expression {
             ast::Expr::List(_) | ast::Expr::ListComp(_) => Some(self.types.list(element)),
             ast::Expr::Tuple(tuple)

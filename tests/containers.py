@@ -357,7 +357,7 @@ main()
 REJECTED = {
     "deepcopy_explicit_memo": "from copy import deepcopy\nx = [1]\nmemo: dict[int, list[int]] = {}\ny = deepcopy(x, memo)\n",
     "deepcopy_live_resource": "from copy import deepcopy\nwith open('input.txt') as f:\n    x = deepcopy([f])\n",
-    "deepcopy_unproved_cycle": "from copy import deepcopy\nx = []\nx.append(x)\ny = deepcopy(x)\n",
+    "deepcopy_declared_cycle": "from copy import deepcopy\nx: list[int] = []\nx.append(x)\ny = deepcopy(x)\n",
     "shadowed_namedtuple_factory": """
 from collections import namedtuple
 
@@ -400,8 +400,8 @@ print(point(), value("wrong"))
     "set_copy_wrong_element": "original = {1, 2}\nvalues: set[str] = set(original)\n",
     "set_bool_annotation": "values: set[bool] = set()\n",
     "set_bool_literal": "values = {True, False}\n",
-    "set_bool_int_literal": "values = {1, True}\n",
-    "set_mixed_literal": 'values = {1, "one"}\n',
+    "set_bool_int_literal": "values: set[int] = {1, True}\n",
+    "set_mixed_literal": 'values: set[int] = {1, "one"}\n',
     "set_list_elements": "values: set[list[int]] = set()\n",
     "set_mutable_tuple_elements": "values: set[tuple[int, list[int]]] = set()\n",
     "set_optional_elements": "values: set[int | None] = set()\n",
@@ -413,9 +413,9 @@ print(point(), value("wrong"))
             def __init__(self, children: set["Node"]) -> None:
                 self.children = children
     """,
-    "set_wrong_add": 'values = {"one"}\nvalues.add(1)\n',
-    "set_wrong_alias_add": 'values = {"one"}\nalias = values\nalias.add(1)\n',
-    "set_bool_int_add": "values = {1}\nvalues.add(True)\n",
+    "set_wrong_add": 'values: set[str] = {"one"}\nvalues.add(1)\n',
+    "set_wrong_alias_add": 'values: set[str] = {"one"}\nalias = values\nalias.add(1)\n',
+    "set_bool_int_add": "values: set[int] = {1}\nvalues.add(True)\n",
     "set_wrong_discard": 'values = {"one"}\nvalues.discard(1)\n',
     "set_bool_int_discard": "values = {1}\nvalues.discard(True)\n",
     "set_wrong_membership": 'values = {"one"}\nprint(1 in values)\n',
@@ -482,21 +482,21 @@ take({1})
                     values = None
                 print(len(values))
     """,
-    "dict_empty_without_context": "values = {}\n",
+    "dict_empty_wrong_context": "values: set[int] = {}\n",
     "dict_empty_constructor_without_context": "values = dict()\n",
     "dict_bool_key_annotation": "values: dict[bool, int] = {}\n",
     "dict_list_key_annotation": "values: dict[list[int], int] = {}\n",
     "dict_mutable_tuple_key_annotation": "values: dict[tuple[int, list[int]], int] = {}\n",
-    "dict_mixed_literal_keys": 'values = {1: 2, "one": 3}\n',
-    "dict_mixed_literal_values": 'values = {1: 2, 3: "four"}\n',
-    "dict_bool_int_literal_values": "values = {1: 2, 3: True}\n",
+    "dict_mixed_literal_keys": 'values: dict[int, int] = {1: 2, "one": 3}\n',
+    "dict_mixed_literal_values": 'values: dict[int, int] = {1: 2, 3: "four"}\n',
+    "dict_bool_int_literal_values": "values: dict[int, int] = {1: 2, 3: True}\n",
     "dict_wrong_key_write": "values: dict[str, int] = {}\nvalues[1] = 2\n",
     "dict_bool_int_key_write": "values: dict[int, int] = {}\nvalues[True] = 2\n",
     "dict_bool_int_key_read": "values = {1: 2}\nprint(values[True])\n",
     "dict_bool_int_membership": "values = {1: 2}\nprint(True in values)\n",
     "dict_wrong_key_delete": 'values = {1: 2}\ndel values["one"]\n',
-    "dict_wrong_value_write": 'values = {"one": 1}\nvalues["one"] = "two"\n',
-    "dict_wrong_alias_write": 'values = {"one": 1}\nalias = values\nalias["one"] = False\n',
+    "dict_wrong_value_write": 'values: dict[str, int] = {"one": 1}\nvalues["one"] = "two"\n',
+    "dict_wrong_alias_write": 'values: dict[str, int] = {"one": 1}\nalias = values\nalias["one"] = False\n',
     "dict_wrong_nested_alias_write": 'values: dict[str, list[int]] = {"row": [1]}\nalias = values["row"]\nalias.append("bad")\n',
     "dict_wrong_get_default": 'values = {"one": 1}\nprint(values.get("one", "wrong"))\n',
     "dict_bool_int_get_default": 'values = {"one": 1}\nprint(values.get("one", True))\n',
@@ -550,7 +550,7 @@ take({1})
                 pass
             return number
     """,
-    "iteration_target_type_mismatch": 'value = "text"\nfor value in [1]:\n    pass\n',
+    "iteration_target_type_mismatch": 'value: str = "text"\nfor value in [1]:\n    pass\n',
     "iteration_tuple_target_arity": "for first, second in [(1, 2, 3)]:\n    pass\n",
     "iteration_range_tuple_target": "for (value,) in range(2):\n    pass\n",
     "iteration_optional_iterable": """
@@ -564,7 +564,7 @@ take({1})
     "iteration_enumerate_keyword": "for index, value in enumerate([1], start=2):\n    pass\n",
     "iteration_enumerate_escapes": "iterator = enumerate([1])\n",
     "iteration_nested_wrong_arity": 'first, (second, third) = (1, ("two",))\n',
-    "iteration_repeated_name_type_mismatch": 'same, same = (1, "two")\n',
+    "iteration_repeated_name_type_mismatch": 'same: int\nsame, same = (1, "two")\n',
     "iteration_rhs_precedes_target_declaration": "first, second = (1, first)\n",
     "iteration_nested_rhs_precedes_target_declaration": "first, (second, third) = (1, (2, first))\n",
     "iteration_optional_target_invalidates_fact": """

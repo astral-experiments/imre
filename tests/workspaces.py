@@ -43,7 +43,7 @@ REJECTED = {
     "nullable_prefix": "with TemporaryDirectory(prefix=None):\n    pass",
     "wrong_suffix": "with TemporaryDirectory(suffix=Path('tail')):\n    pass",
     "unpacked_target": "with TemporaryDirectory() as (left, right):\n    pass",
-    "changed_target_type": "name = Path('.')\nwith TemporaryDirectory() as name:\n    pass",
+    "changed_target_type": "name: Path = Path('.')\nwith TemporaryDirectory() as name:\n    pass",
     "mkdir_wrong_mode": "Path('a').mkdir(mode='700')",
     "mkdir_bool_mode": "Path('a').mkdir(mode=True)",
     "mkdir_wrong_parents": "Path('a').mkdir(parents='yes')",

@@ -86,7 +86,7 @@ pub(crate) fn passive_function(function: &StmtFunctionDef) -> bool {
 
 /// Resolve the first return using the operands available to this caller. An empty
 /// result denotes an implicit or bare return. An open operand ends the proof.
-fn passive_function_return<T>(
+pub(super) fn passive_function_return<T>(
     function: &StmtFunctionDef,
     operand: impl Fn(&Expr) -> Option<T>,
 ) -> Option<Option<(TextRange, T)>> {
@@ -732,6 +732,7 @@ impl Session {
                     false,
                     self.explicit_check,
                     None,
+                    None,
                     &[scope][..],
                 );
                 let error = super::file_errors(&self.db, checked).first()?;
@@ -790,6 +791,7 @@ impl Session {
                     Session::scalar_contract_error(model, expected, value, actual, || {
                         bound.missing.is_none() && *reached
                     })
+                && !Self::sign_argument(&owner_model, function, p.name().as_str(), expected, actual)
             {
                 return Some(Err(error.classified(kind).with_path(path)));
             }
@@ -997,6 +999,24 @@ impl Session {
             .iter()
             .any(|s| s.range() == range)
             .then_some(def)
+    }
+
+    /// Match the fixed call convention for a float used only to compare with zero.
+    /// A boxed call keeps the original integer, which has the same sign even when
+    /// its magnitude would overflow a float. Defaults and container slots stay exact.
+    pub(super) fn sign_argument<'db>(
+        model: &SemanticModel<'db>,
+        function: &StmtFunctionDef,
+        parameter: &str,
+        expected: Type<'db>,
+        actual: Type<'db>,
+    ) -> bool {
+        let db = model.db();
+        let env = model.program_environment();
+        Self::scalar_layout(db, &env, expected, ScalarMatch::Exact) == Some(crate::ir::Type::Float)
+            && Self::scalar_layout(db, &env, actual, ScalarMatch::Assignable)
+                == Some(crate::ir::Type::Int)
+            && crate::frontend::only_compares_zero(&function.body, parameter)
     }
 
     /// A selected call can check an evaluated scalar against its written parameter.

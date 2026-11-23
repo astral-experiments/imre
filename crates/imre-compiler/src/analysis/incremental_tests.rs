@@ -144,8 +144,10 @@ fn ty_rechecks_an_importer_when_a_used_parameter_is_renamed() {
     let mut ty_check = || {
         let mut graph = crate::modules::SourceGraph::load(&entry, None, &[]).unwrap();
         let fresh = graph.session.check_scopes(None, &[]);
-        let (incremental, ran) =
-            with_checked_files(|| cache.check_scopes(&mut graph.session, &graph.inputs, None, &[]));
+        let (incremental, ran) = with_checked_files(|| {
+            let owner = cache.fixed_session(&mut graph.session, &graph.inputs)?;
+            owner.fixed_errors(0..owner.files.len(), None, &[])
+        });
         assert_eq!(incremental, fresh);
         // The first request, the rename that makes the call invalid, and the repair all
         // execute the importer's diagnostic query as well as the provider's.
@@ -322,4 +324,178 @@ print(take(saved(), 'wrong'))\n";
             "{error}"
         );
     }
+}
+
+#[test]
+fn file_and_saved_module_check_defaults_on_every_selected_revision() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("app.py");
+    let named = CompileOptions {
+        module_entry: Some("app".into()),
+        require_checked_module_entry: true,
+        script_startup: Some((Default::default(), "imre".into())),
+        extension_paths: vec![project.path().to_owned()],
+        pythonpath: 0..1,
+        ..CompileOptions::default()
+    };
+    for options in [&CompileOptions::default(), &named] {
+        let mut cache = IncrementalCompiler::default();
+        for (prefix, value) in [
+            ("", "1"),
+            ("", "True"),
+            ("import unittest\n", "True"),
+            ("import unittest\n", "1"),
+        ] {
+            fs::write(
+                &entry,
+                format!("{prefix}def f(i: int = {value}): return i\nprint(f())\n"),
+            )
+            .unwrap();
+            let result =
+                crate::check_file_with(&entry, None, options, Some(&mut cache), Default::default());
+            assert_eq!(
+                result,
+                crate::check_file_with_options(&entry, None, options)
+            );
+            if value == "True" {
+                let error = result.unwrap_err();
+                assert!(error.contains("int, got bool"), "{error}");
+            } else {
+                result.unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn unread_import_effects_cannot_admit_an_uninitialized_local() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    let provider = project.path().join("peripheral.py");
+    let package = project.path().join("package");
+    fs::create_dir(&package).unwrap();
+    fs::write(package.join("__init__.py"), "print(bytearray())\n").unwrap();
+    fs::write(package.join("leaf.py"), "print(bytearray())\n").unwrap();
+    fs::write(
+        &provider,
+        "value = bytearray(b'initialized')\nprint(value)\n",
+    )
+    .unwrap();
+    let body = concat!(
+        "from typing import Final\n",
+        "COUNT: Final = 1\n",
+        "def select(flag: bool) -> int:\n",
+        "    value = (saved := 1) if flag else 0\n",
+        "    return saved\n",
+    );
+    let mut compiler = IncrementalCompiler::default();
+    let mut run = |text: &str| {
+        fs::write(&entry, text).unwrap();
+        let result = compiler.check_file(&entry, None);
+        assert_eq!(result, check_file(&entry, None));
+        result
+    };
+    for prefix in [
+        "",
+        "import unittest as extra\n",
+        "import json\n",
+        "import peripheral as extra\n",
+        "from unittest import TestCase as extra\n",
+        "from peripheral import value as extra\n",
+        "import package as extra\n",
+        "import package.leaf as extra\n",
+        "import unittest.mock as extra\n",
+    ] {
+        let error = run(&format!("{prefix}{body}")).unwrap_err();
+        assert!(error.contains("local may be uninitialized"), "{error}");
+    }
+    fs::write(
+        &provider,
+        "def make(): return bytearray(b'initialized')\nvalue = make()\n",
+    )
+    .unwrap();
+    let error = run(&format!("from peripheral import value as unused\n{body}")).unwrap_err();
+    assert!(error.contains("local may be uninitialized"), "{error}");
+    let error = run("from peripheral import value, absent as unused\nprint(1)\n").unwrap_err();
+    assert!(
+        error.contains("has no static binding \"absent\""),
+        "{error}"
+    );
+    fs::write(
+        &provider,
+        "import unittest\ndef side(): print(bytearray(b'initialized'))\nside()\n",
+    )
+    .unwrap();
+    let error = run(&format!("import peripheral as extra\n{body}")).unwrap_err();
+    assert!(error.contains("local may be uninitialized"), "{error}");
+    let repaired = format!(
+        "import peripheral as extra\n{}",
+        body.replace("return saved", "return value")
+    );
+    run(&repaired).unwrap();
+    fs::write(
+        &provider,
+        "print(bytearray())\ndef bad(i: int = True): return i\nbad()\n",
+    )
+    .unwrap();
+    let error = run(&repaired).unwrap_err();
+    assert!(
+        error.contains("peripheral.py:2:18: Imre: default requires exact type int, got bool"),
+        "{error}"
+    );
+    // Another import that reads the same module still sees its original declarations.
+    fs::write(
+        &provider,
+        "def take(value: int) -> int: return value\nprint(bytearray())\n",
+    )
+    .unwrap();
+    let reads = "import peripheral as extra\nfrom peripheral import take as unused\nfrom peripheral import take\nprint(take(3))\n";
+    run(reads).unwrap();
+    assert!(run(&reads.replace("take(3)", "take(True)")).is_err());
+}
+
+#[test]
+fn a_named_import_does_not_consume_its_providers_other_imports() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    let provider = project.path().join("provider.py");
+    let body = concat!(
+        "from provider import twice\n",
+        "def select(flag: bool) -> int:\n",
+        "    if flag: saved = 1\n",
+        "    return saved\n",
+        "print(twice(2))\n"
+    );
+    fs::write(&entry, body).unwrap();
+    let mut compiler = IncrementalCompiler::default();
+    for imports in ["", "import unittest\n"] {
+        fs::write(
+            &provider,
+            format!("{imports}def twice(n: int): return n + n\n"),
+        )
+        .unwrap();
+        let checked = compiler.check_file(&entry, None);
+        assert_eq!(checked, check_file(&entry, None));
+        let error = checked.unwrap_err();
+        assert!(error.contains("local may be uninitialized"), "{error}");
+    }
+    let qualified = body
+        .replace("from provider import twice", "import provider as lib")
+        .replace("print(twice(2))", "print(lib.twice(2))");
+    fs::write(&entry, &qualified).unwrap();
+    assert!(
+        compiler
+            .check_file(&entry, None)
+            .unwrap_err()
+            .contains("local may be uninitialized")
+    );
+    fs::write(&entry, body.replace("return saved", "return 1")).unwrap();
+    compiler.check_file(&entry, None).unwrap();
+    // A later caller may read the re-export from this same provider.
+    fs::write(
+        &entry,
+        "from provider import twice, unittest\nprint(twice(1), unittest.TestCase)\n",
+    )
+    .unwrap();
+    compiler.check_file(&entry, None).unwrap();
 }

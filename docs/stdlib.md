@@ -79,7 +79,7 @@ The following import probes and native/host classifications are an archived ledg
 
 This inventory checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**Historical inventory:** 159 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 322 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
+**Historical inventory:** 166 of 297 modules accept an ordinary import; 0 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 322 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -108,7 +108,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `codecs` | Yes | `lookup`, codec names, stateless ASCII, Latin-1 and UTF-8 encoding and decoding, and byte-order marks. [Evidence](../benchmarks/cpython_stdlib/full/sys/BUILTINS.md) | — | — | — |
 | `codeop` | Yes | No API example recorded. | — | — | — |
 | `collections` | Yes | `Counter`, `deque`, `defaultdict` and selected `collections.abc.Mapping` operations. [Evidence](../benchmarks/cpython_stdlib/full/collections/README.md) | [8 / 659](../benchmarks/cpython_stdlib/full/collections/) | 8 | 14 |
-| `colorsys` | Reachable only | No API example recorded. | — | — | — |
+| `colorsys` | Yes | No API example recorded. | — | — | — |
 | `compression` | Yes | No API example recorded. | — | — | — |
 | `configparser` | Yes | Construct a parser and read section options with `get()`. [Evidence](../tests/fixtures/boxed_configparser.py) | — | — | — |
 | `contextlib` | Yes | `nullcontext` and selected single-yield `@contextmanager` functions. [Evidence](../tests/fixtures/processes/async_resource_arguments.py) | — | — | — |
@@ -171,6 +171,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `platform` | Yes | Read `system()`, `machine()`, and the running Python version from `python_version()`. [Evidence](../benchmarks/cpython_stdlib/interpreter_info.py) | — | — | — |
 | `posix` | Yes | Read and set supported POSIX user and group IDs; the companion suite is counted under `os`. [Evidence](../benchmarks/cpython_stdlib/full/os/CREDENTIALS.md) | — | — | — |
 | `posixpath` | Yes | POSIX `os.path` operations on strings and bytes; path tests are counted under `os`. [Evidence](../tests/fixtures/paths/os_path.py) | — | — | — |
+| `pprint` | Yes | No API example recorded. | — | — | — |
 | `pwd` | Yes | No API example recorded. | — | — | — |
 | `py_compile` | Yes | No API example recorded. | — | — | — |
 | `pydoc` | Rejected | Resolve a runtime-imported class or function by dotted name and render a Python function’s signature and docstring as plain text. [Evidence](../tests/fixtures/boxed_pydoc.py) | — | — | — |
@@ -256,7 +257,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `pickletools` |
 | `plistlib` |
 | `poplib` |
-| `pprint` |
 | `profile` |
 | `pstats` |
 | `pty` |
@@ -314,7 +314,9 @@ These include documented interfaces such as `__future__` and `_thread`, as well 
 | `_blake2` | Yes | No API example recorded. | — | — | — |
 | `_codecs` | Yes | No API example recorded. | — | — | — |
 | `_collections` | Yes | No API example recorded. | — | — | — |
+| `_collections_abc` | Yes | No API example recorded. | — | — | — |
 | `_colorize` | Yes | No API example recorded. | — | — | — |
+| `_compat_pickle` | Yes | No API example recorded. | — | — | — |
 | `_contextvars` | Yes | No API example recorded. | — | — | — |
 | `_datetime` | Yes | No API example recorded. | — | — | — |
 | `_frozen_importlib_external` | Yes | No API example recorded. | — | — | — |
@@ -330,16 +332,19 @@ These include documented interfaces such as `__future__` and `_thread`, as well 
 | `_opcode_metadata` | Yes | No API example recorded. | — | — | — |
 | `_operator` | Yes | No API example recorded. | — | — | — |
 | `_pickle` | Yes | No API example recorded. | — | — | — |
+| `_py_warnings` | Yes | No API example recorded. | — | — | — |
 | `_pyio` | Yes | No API example recorded. | — | — | — |
 | `_sha3` | Yes | No API example recorded. | — | — | — |
 | `_signal` | Yes | No API example recorded. | — | — | — |
 | `_socket` | Yes | No API example recorded. | — | — | — |
 | `_ssl` | Yes | No API example recorded. | — | — | — |
 | `_string` | Yes | `formatter_parser` and `formatter_field_name_split` iterate format fields and their components. [Evidence](../tests/fixtures/text/formatter_ownership.py) | — | — | — |
+| `_strptime` | Yes | No API example recorded. | — | — | — |
 | `_thread` | Yes | No API example recorded. | — | — | — |
 | `_tokenize` | Yes | No API example recorded. | — | — | — |
 | `_tracemalloc` | Yes | No API example recorded. | — | — | — |
 | `_warnings` | Yes | No API example recorded. | — | — | — |
+| `_weakrefset` | Yes | No API example recorded. | — | — | — |
 
 Both import modes reject the following names. They have no recorded API example or suite measurement.
 
@@ -359,8 +364,6 @@ Both import modes reject the following names. They have no recorded API example 
 | `_codecs_jp` |
 | `_codecs_kr` |
 | `_codecs_tw` |
-| `_collections_abc` |
-| `_compat_pickle` |
 | `_csv` |
 | `_ctypes` |
 | `_curses` |
@@ -385,7 +388,6 @@ Both import modes reject the following names. They have no recorded API example 
 | `_posixshmem` |
 | `_posixsubprocess` |
 | `_py_abc` |
-| `_py_warnings` |
 | `_pydatetime` |
 | `_pydecimal` |
 | `_pylong` |
@@ -401,7 +403,6 @@ Both import modes reject the following names. They have no recorded API example 
 | `_sre` |
 | `_stat` |
 | `_statistics` |
-| `_strptime` |
 | `_struct` |
 | `_suggestions` |
 | `_symtable` |
@@ -412,7 +413,6 @@ Both import modes reject the following names. They have no recorded API example 
 | `_typing` |
 | `_uuid` |
 | `_weakref` |
-| `_weakrefset` |
 | `_winapi` |
 | `_wmi` |
 | `_zoneinfo` |

@@ -24,7 +24,9 @@ pub(super) struct ModuleValues {
     /// The current body or initializer used a return that can still change this round.
     pub(super) provisional_return: Cell<bool>,
     definitions: RefCell<HashMap<(DefinitionId, usize), ModuleSlot>>,
-    list_origins: RefCell<HashMap<usize, DefinitionId>>,
+    container_origins: RefCell<HashMap<usize, ValueSource>>,
+    /// Readers of an inferred cell must agree on its layout across functions.
+    object_cells: Rc<RefCell<HashSet<DefinitionId>>>,
     class_slots: RefCell<HashMap<(DefinitionId, usize), usize>>,
     pub(super) unittest_skips: RefCell<HashMap<(DefinitionId, usize), (usize, usize)>>,
     literal_tuples: RefCell<HashMap<ClassLiteral, usize>>,
@@ -35,9 +37,13 @@ pub(super) struct ModuleValues {
 }
 
 impl ModuleValues {
-    pub(super) fn for_initializers(registered_initializers: bool) -> Self {
+    pub(super) fn for_initializers(
+        registered_initializers: bool,
+        inference: &inference::Inference,
+    ) -> Self {
         Self {
             registered_initializers,
+            object_cells: Rc::clone(&inference.object_cells),
             ..Self::default()
         }
     }
@@ -125,10 +131,10 @@ impl ModuleValues {
         }
     }
 
-    pub(super) fn list_origin(&self, value: &Expr) -> Option<DefinitionId> {
+    pub(super) fn container_origin(&self, value: &Expr) -> Option<ValueSource> {
         match &value.kind {
             ExprKind::Builtin(Builtin::GlobalGet(slot), _) => {
-                self.list_origins.borrow().get(slot).copied()
+                self.container_origins.borrow().get(slot).cloned()
             }
             _ => None,
         }
@@ -291,12 +297,16 @@ impl Checker<'_> {
                 .rebound_values
                 .contains(&definition.statement)
         {
+            if self.globals.object_cells.borrow().contains(&definition) {
+                self.require_registered_operation(at)?;
+                return Ok(Expr::unrepresented());
+            }
             return Ok(Expr {
                 ty: self.types.element(storage.ty).expect("module cell"),
                 kind: ExprKind::Builtin(Builtin::ListGet(None), vec![storage, Expr::integer(0)]),
             });
         }
-        Ok(storage)
+        self.container_read(storage, at)
     }
 
     /// Execute assignments in the class namespace at the definition's source position.
@@ -473,12 +483,32 @@ impl Checker<'_> {
         let storage = self.globals.slot_value(slot);
         let ty = self.types.element(storage.ty).expect("module cell");
         let value = match statement {
-            ast::Stmt::Assign(assign) => self.expr_expected(&assign.value, ty)?,
+            ast::Stmt::Assign(assign) => self.assignment_rhs(
+                &assign.targets[0],
+                &assign.value,
+                (ty, None),
+                ResultUse::Fixed,
+            )?,
             _ => {
                 let value = self.module_assignment(statement)?;
                 self.coerce(value, ty, statement)?
             }
         };
+        // A widened destination keeps the unrepresented object type instead
+        // of the initializer's type. Revisit readers checked before this write.
+        if value.ty == Type::PythonObject
+            && value.is_unrepresented()
+            && value.ty != ty
+            && let ast::Stmt::Assign(assign) = statement
+            && self
+                .graph
+                .session
+                .inferred_name_store(self.module, &assign.targets[0])
+            && self.globals.object_cells.borrow_mut().insert(first)
+            && let Some(inference) = self.inference
+        {
+            inference.layout_changed();
+        }
         Ok(Statement::assign_item(storage, Expr::integer(0), value))
     }
 
@@ -517,7 +547,17 @@ impl Checker<'_> {
                         self.classes.declarations,
                         self.types,
                     )?;
-                    self.expr_expected(value, ty)
+                    let result = self.expr_expected(value, ty)?;
+                    if self.native_type_proof(&result, ty) {
+                        self.checked_native_operand(
+                            value.range(),
+                            TypeDeclaration {
+                                module: self.module,
+                                annotation: assignment.annotation.range(),
+                            },
+                        );
+                    }
+                    Ok(result)
                 }
             }
             _ => unreachable!(),
@@ -546,8 +586,11 @@ impl Checker<'_> {
             for (member, (value, provisional)) in values.into_iter().enumerate() {
                 self.globals.provisional_return.set(provisional);
                 let slot = self.globals.insert_member(definition, member, value.ty);
-                if let Some(origin) = self.globals.list_origin(&value) {
-                    self.globals.list_origins.borrow_mut().insert(slot, origin);
+                if let Some(origin) = self.globals.container_origin(&value) {
+                    self.globals
+                        .container_origins
+                        .borrow_mut()
+                        .insert(slot, origin);
                 }
                 if let Some(target) = self.globals.saved_function(&value) {
                     self.globals.publish_function(slot, target);
@@ -603,6 +646,18 @@ impl Checker<'_> {
             && callables::contains_callable(value.ty, self.types)
             && callables::handler_signature(value.ty, self.types).is_none()
         {
+            if matches!(value.ty, Type::Callable(_))
+                && let ast::Stmt::Assign(assign) = statement
+                && let [target] = assign.targets.as_slice()
+                && target.is_name_expr()
+                && self.graph.modules[self.module].is_program_source()
+                && self
+                    .graph
+                    .session
+                    .unannotated_module_store(self.module, target)
+            {
+                return Err(self.scoped_builtin_error("module callable storage", statement));
+            }
             return Err(error(
                 self.source,
                 statement,
@@ -638,16 +693,40 @@ impl Checker<'_> {
             value
         };
         let slot = self.globals.insert(definition, value.ty);
-        if let Some(origin) = self
-            .types
-            .module_list_uses_strings(definition)
-            .map(|_| definition)
-            .or_else(|| match statement {
-                ast::Stmt::Assign(_) => self.globals.list_origin(&value),
+        if rebound.is_none() && self.types.is_display_container(value.ty) {
+            let origin = match statement {
+                ast::Stmt::AnnAssign(assign) => {
+                    let declaration = TypeDeclaration {
+                        module: self.module,
+                        annotation: assign.annotation.range(),
+                    };
+                    self.declare_container(&value, declaration, assign);
+                    Some(ValueSource::Declaration(declaration))
+                }
+                ast::Stmt::Assign(assign)
+                    if let [target] = assign.targets.as_slice()
+                        && self
+                            .graph
+                            .session
+                            .unannotated_module_store(self.module, target) =>
+                {
+                    if self.types.module_list_uses_strings(definition).is_some() {
+                        let mut owner = assignments::Container::new(value.ty, true);
+                        owner.module_list = Some(definition);
+                        Some(ValueSource::Container(Rc::new(owner)))
+                    } else {
+                        self.value_source(&value)
+                            .or_else(|| ValueSource::allocation(&value))
+                    }
+                }
                 _ => None,
-            })
-        {
-            self.globals.list_origins.borrow_mut().insert(slot, origin);
+            };
+            if let Some(origin) = origin {
+                self.globals
+                    .container_origins
+                    .borrow_mut()
+                    .insert(slot, origin);
+            }
         }
         if let Some(target) = saved {
             self.globals.publish_function(slot, target);
@@ -731,6 +810,60 @@ pub(super) struct InitializationOrder {
 impl Initialization {
     /// Infers values in execution order while deferring callable body checks.
     pub fn lower(
+        checker: Checker<'_>,
+        available: &mut HashSet<DefinitionId>,
+        range: Range<usize>,
+        output: Option<&mut Vec<Self>>,
+    ) -> Result<(), String> {
+        let graph = checker.graph;
+        if !graph.modules[checker.module].initializer_only {
+            return Self::lower_body(checker, available, range, output);
+        }
+        let module = checker.module;
+        let mut output = output;
+        let (result, deferred, _) = graph.isolate_object_requests(|| {
+            Self::lower_body(checker, available, range, output.as_deref_mut())
+        });
+        // An external provider's own annotations constrain its fixed layout.
+        // If that layout fails, Python can execute the provider once the
+        // application has passed its own source checks.
+        let provider_layout = !graph.modules[module].is_program_source()
+            && matches!(&result, Err(Failure::Diagnostic(d))
+                if d.kind == Kind::ExactType && d.operand_declaration().is_none());
+        match result {
+            Err(reason) if reason.is_object() || provider_layout => {
+                graph.register_import_effects.set(true);
+                // Helpers were numbered after the initializers. Reserve this
+                // slot for placement, with no native source to publish.
+                if let Some(output) = output {
+                    output.push(Self {
+                        order: InitializationOrder {
+                            module,
+                            checkpoints: Vec::new(),
+                            source: None,
+                        },
+                        function: ir::Function {
+                            params: Vec::new(),
+                            returns: Type::None,
+                            locals: Vec::new(),
+                            body: Vec::new(),
+                        },
+                        calls: HashSet::new(),
+                    });
+                }
+            }
+            result => result?,
+        }
+        if let Some(reason) = deferred {
+            if !reason.kind.is_object() {
+                return Err(reason.into());
+            }
+            graph.register_import_effects.set(true);
+        }
+        Ok(())
+    }
+
+    fn lower_body(
         mut checker: Checker<'_>,
         available: &mut HashSet<DefinitionId>,
         range: Range<usize>,
@@ -810,7 +943,11 @@ impl Initialization {
                 available.insert(definition);
             }
             if let Some(site) = module.registered_imports.get(&index) {
-                checker.require_registered_operation(site)?;
+                if module.unread_imports.contains(&statement.range()) {
+                    checker.graph.register_import_effects.set(true);
+                } else {
+                    checker.require_registered_operation(site)?;
+                }
             }
             match statement {
                 ast::Stmt::ClassDef(_) => {

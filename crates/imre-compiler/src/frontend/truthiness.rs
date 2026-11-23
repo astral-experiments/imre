@@ -233,6 +233,7 @@ impl Checker<'_> {
         mut expected: Option<Type>,
         class_skip: bool,
     ) -> Result<Expr, String> {
+        let fixed_context = expected.is_some_and(|ty| ty != Type::PythonObject);
         let and = boolean.op == ast::BoolOp::And;
         let (last, prefix) = boolean
             .values
@@ -295,11 +296,17 @@ impl Checker<'_> {
                 selected
             } else {
                 self.types.join_results(selected, right.ty).ok_or_else(|| {
-                    error(
-                        self.source,
-                        first,
-                        "and/or results require the same concrete type or its optional form",
-                    )
+                    // An earlier operand can supply a layout hint. Only the
+                    // incoming context can require a particular result type.
+                    if fixed_context {
+                        error(
+                            self.source,
+                            first,
+                            "and/or results require the same concrete type or its optional form",
+                        )
+                    } else {
+                        self.scoped_builtin_error("and/or result storage", first)
+                    }
                 })?
             };
             if known.is_none() {
