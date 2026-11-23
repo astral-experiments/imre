@@ -1171,21 +1171,6 @@ impl Intrinsic {
 }
 
 impl IntrinsicModule {
-    /// Ty resolves these builtin names solely against its bundled stdlib. Only
-    /// the exact import proved by the closed checker needs an import diagnostic.
-    pub(crate) fn lacks_builtin_stub(self) -> bool {
-        matches!(
-            self,
-            Self::Opcode
-                | Self::ReConstants
-                | Self::StringFormatting
-                | Self::CollectionsNative
-                | Self::DatetimeNative
-                | Self::FunctoolsNative
-                | Self::SignalNative
-        )
-    }
-
     fn named(name: &str) -> Option<Self> {
         match name {
             "array" => Some(Self::Array),
@@ -6042,9 +6027,9 @@ impl<'a> Loader<'a> {
                                 .or_insert(alias.range());
                         }
                         self.modules[id].import_child(alias.name.id(), module, statement.end());
-                        if module.lacks_builtin_stub() {
-                            self.checked_builtin_imports.push((id, alias.range()));
-                        }
+                        // Resolution here proves this module exists even if
+                        // ty's bundled typeshed has no corresponding stub.
+                        self.checked_builtin_imports.push((id, alias.range()));
                         if alias.asname.is_none()
                             && let Some((local, _)) = name.split_once('.')
                             && let Some(namespace) = IntrinsicModule::named(local)
@@ -6332,9 +6317,7 @@ impl<'a> Loader<'a> {
                         }
                         self.bind(id, local.as_str(), binding, alias)?;
                     }
-                    if module.lacks_builtin_stub()
-                        && let Some(name) = &import.module
-                    {
+                    if let Some(name) = &import.module {
                         self.checked_builtin_imports.push((id, name.range()));
                     }
                     if unread {

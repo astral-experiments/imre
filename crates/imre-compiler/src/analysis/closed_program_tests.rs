@@ -1079,6 +1079,28 @@ fn closed_program_keeps_first_party_contracts_across_cached_edits() {
 }
 
 #[test]
+fn an_intrinsic_import_needs_no_typeshed_stub() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    for import in [
+        "import _md5 as unused",
+        "import _sha3",
+        "from _md5 import md5 as unused",
+    ] {
+        fs::write(&entry, format!("{import}\n")).unwrap();
+        crate::check_file(&entry, None).unwrap();
+        fs::write(&entry, format!("{import}\ndef f(n: int): pass\nf(True)\n")).unwrap();
+        let error = crate::check_file(&entry, None).unwrap_err();
+        assert!(error.contains("expected int, got bool"), "{error}");
+    }
+    for import in ["import _md5, missing_peer", "from _md5 import missing_peer"] {
+        fs::write(&entry, format!("{import}\n")).unwrap();
+        let error = crate::check_file(&entry, None).unwrap_err();
+        assert!(error.contains("missing_peer"), "{error}");
+    }
+}
+
+#[test]
 fn native_storage_does_not_prove_a_new_type_contract() {
     let project = tempdir().unwrap();
     let entry = project.path().join("main.py");
