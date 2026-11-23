@@ -732,6 +732,7 @@ impl Session {
                     false,
                     self.explicit_check,
                     None,
+                    None,
                     &[scope][..],
                 );
                 let error = super::file_errors(&self.db, checked).first()?;

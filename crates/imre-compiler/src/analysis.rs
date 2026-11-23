@@ -272,6 +272,10 @@ impl SourceContract {
                         !root.body_checked && !graph.modules[*id].registered_namespace
                     })
                     .map(|(id, _)| (id, id)),
+                Some(OriginalFiles::new(
+                    &owner.db,
+                    owner.files.iter().copied().enumerate().collect::<Vec<_>>(),
+                )),
                 extra.checked_file.then_some(&graph.modules),
             )?;
         }
@@ -1187,15 +1191,33 @@ pub(crate) fn check_registered_project<'a>(
     session.check_registered_execution(
         || {
             let mut roots = session.closed_file_roots(&paths, None, &[], None);
-            if let Some(skipped) = checked
-                .and_then(|g| g.source_contract.as_ref())
-                .and_then(|contract| contract.skipped.as_ref())
+            // Provider edits can invalidate narrowing in an unchanged caller.
+            let mut same_bindings = false;
+            if let Some(graph) = checked
+                && let Some(contract) = &graph.source_contract
             {
-                // A new SDK provider may force a fresh session. The reachability
-                // policy still belongs to the unchanged application sources.
+                let mut unchanged = vec![false; graph.modules.len()];
+                for (selected, winner) in winners.clone() {
+                    if let Some((id, original)) = paths[selected].2 {
+                        unchanged[id] = crate::modules::same_source_path(
+                            original,
+                            winner.semantic_path.unwrap_or(winner.path),
+                        );
+                    }
+                }
+                same_bindings = graph
+                    .modules
+                    .iter()
+                    .enumerate()
+                    .all(|(id, module)| !module.checks_source_contracts() || unchanged[id]);
                 for root in &mut roots {
                     if let Some((id, _)) = root.original {
-                        root.skipped = &skipped[id];
+                        if let Some(skipped) = &contract.skipped {
+                            root.skipped = &skipped[id];
+                        }
+                        if same_bindings {
+                            root.overloads = &contract.overloads[id];
+                        }
                     }
                 }
             }
@@ -1218,6 +1240,15 @@ pub(crate) fn check_registered_project<'a>(
                     &contract.overloads,
                     extra.calls,
                     surviving,
+                    same_bindings.then(|| {
+                        OriginalFiles::new(
+                            &session.db,
+                            roots
+                                .iter()
+                                .filter_map(|root| Some((root.original?.0, root.file)))
+                                .collect::<Vec<_>>(),
+                        )
+                    }),
                     extra.checked_file.then_some(&graph.modules),
                 )?;
             }
@@ -4057,6 +4088,7 @@ impl Session {
         overloads: &[Vec<CheckedDiagnostic>],
         calls: FallbackCalls,
         roots: impl Iterator<Item = (usize, usize)>,
+        originals: Option<OriginalFiles<'_>>,
         checked_modules: Option<&[crate::modules::SourceModule]>,
     ) -> Result<(), String> {
         let mut errors = Vec::new();
@@ -4081,6 +4113,7 @@ impl Session {
                         module.is_some_and(|m| !m.bundled),
                         self.explicit_check,
                         None,
+                        originals,
                         &[][..],
                     ),
                 )
@@ -4450,6 +4483,13 @@ impl Session {
             call_shapes,
             program_files,
         );
+        let originals = OriginalFiles::new(
+            &self.db,
+            roots
+                .iter()
+                .filter_map(|root| Some((root.original?.0, root.file)))
+                .collect::<Vec<_>>(),
+        );
         let project_files = roots
             .iter()
             .filter_map(|root| root.diagnostic_path.map(|path| (root, path)));
@@ -4483,6 +4523,7 @@ impl Session {
                 true,
                 self.explicit_check,
                 Some(declarations),
+                Some(originals),
                 result_scopes.get(&file).map_or(&[][..], Vec::as_slice),
             );
             let ty_errors = if root.body_checked {
@@ -4585,6 +4626,7 @@ impl Session {
                     false,
                     self.explicit_check,
                     None,
+                    None,
                     &[][..],
                 );
                 file_errors(&self.db, checked)
@@ -4615,6 +4657,8 @@ struct CheckedFile<'db> {
     explicit_check: bool,
     #[returns(copy)]
     declarations: Option<DeclaredSignatures<'db>>,
+    #[returns(copy)]
+    originals: Option<OriginalFiles<'db>>,
     /// Explicit return diagnostics depend on the declared result scopes of this file.
     #[returns(ref)]
     result_scopes: Vec<FileScopeId>,
@@ -4629,6 +4673,13 @@ struct DeclaredSignatures<'db> {
     call_shapes: Vec<ty_python_core::definition::Definition<'db>>,
     #[returns(ref)]
     program_files: Vec<File>,
+}
+
+/// Files to which the native checker's declaration slots still refer.
+#[salsa::interned]
+struct OriginalFiles<'db> {
+    #[returns(ref)]
+    files: Vec<(usize, File)>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -4913,8 +4964,15 @@ pub(crate) enum CheckedDiagnostic {
     NonCallable(TextRange),
     InertReturn(TextRange),
     PartialSignature(TextRange),
+    /// A concrete native operand matched this written parameter or store.
+    NativeOperand {
+        operand: TextRange,
+        module: usize,
+        annotation: TextRange,
+    },
+    NativeReturn(TextRange),
     DictDeletion(TextRange),
-    DeferredName(TextRange),
+    DeferredNames(TextRange),
     Keyword(TextRange),
     CheckedIndexRead(TextRange),
     MissingArgument(TextRange),
@@ -4949,11 +5007,13 @@ impl CheckedDiagnostic {
             Self::InertReturn(range) => (range, 13),
             Self::PartialSignature(range) => (range, 18),
             Self::PositionalKeyword(range) => (range, 7),
-            Self::DeferredName(range) => (range, 9),
+            Self::DeferredNames(range) => (range, 9),
             Self::NonIterableSpread(range) => (range, 10),
             Self::RuntimeOverload(range) => (range, 12),
             Self::CallableKey(range) => (range, 16),
             Self::ArgumentType(range) => (range, 15),
+            Self::NativeOperand { operand, .. } => (operand, 19),
+            Self::NativeReturn(range) => (range, 20),
         };
         (range.start(), range.end(), kind)
     }
@@ -4971,13 +5031,17 @@ impl CheckedDiagnostic {
             Self::Call(call) => diagnostic == "no-matching-overload" && call == range,
             Self::NonCallable(call) => diagnostic == "call-non-callable" && call == range,
             Self::InertReturn(annotation) => diagnostic == "empty-body" && annotation == range,
+            Self::NativeReturn(_) => false,
+            Self::NativeOperand { .. } => false, // Requires a matching declaration as well.
             Self::PartialSignature(operand) => {
                 operand == range
                     && matches!(diagnostic, "invalid-argument-type" | "invalid-return-type")
             }
             Self::DictDeletion(target) => diagnostic == "not-subscriptable" && target == range,
             Self::RuntimeOverload(name) => diagnostic == "invalid-overload" && name == range,
-            Self::DeferredName(name) => diagnostic == "unresolved-reference" && name == range,
+            Self::DeferredNames(operand) => {
+                diagnostic == "unresolved-reference" && operand.contains_range(range)
+            }
             Self::OptionalLockContext(expr) => {
                 diagnostic == "invalid-context-manager" && expr == range
             }
@@ -5226,6 +5290,9 @@ fn file_errors<'db>(db: &'db dyn LiteralSourceDb, checked: CheckedFile<'db>) -> 
                     .is_some_and(|range| {
                         skipped.iter().any(|scope| scope.contains_range(range))
                             || (check_argument && runtime_argument(db, checked, range, rule))
+                            || (rule == "invalid-return-type" && checked.originals(db).is_some()
+                                && overloads.contains(&CheckedDiagnostic::NativeReturn(range))
+                                && native_annotation(db, file, range, true))
                             || (rule == "invalid-return-type" && returns_builtin_module_names(db, file, range))
                             || (rule == "invalid-assignment" && weak_proxy_field(db, file, range))
                             // ty also reports implicit None returns at the annotation span.
@@ -5301,8 +5368,7 @@ fn file_errors<'db>(db: &'db dyn LiteralSourceDb, checked: CheckedFile<'db>) -> 
                 Some(_) => return None,
                 // A reached installed function contributes only its own explicit return sites.
                 None if checks == FileChecks::DeclaredSignatures => return None,
-                None if checks == FileChecks::NamedFunctionCalls
-                    && diagnostic.id().is_lint_named("invalid-argument-type") =>
+                None if diagnostic.id().is_lint_named("invalid-argument-type") =>
                 {
                     parameter_labels(diagnostic).find_map(|(owner, range)| {
                         use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
@@ -5322,6 +5388,18 @@ fn file_errors<'db>(db: &'db dyn LiteralSourceDb, checked: CheckedFile<'db>) -> 
                 }
                 None => None,
             };
+            // Native narrowing can be stronger than ty's approximation. It
+            // applies only to the operand and the declaration actually checked.
+            if let (Some(sources), Some((owner, parameter)), Some(range)) =
+                (checked.originals(db), declaration, range)
+                && overloads.iter().any(|proof| matches!(proof,
+                    CheckedDiagnostic::NativeOperand { operand, module, annotation }
+                    if *operand == range && parameter.contains_range(*annotation)
+                        && sources.files(db).contains(&(*module, owner))
+                        && native_annotation(db, owner, *annotation, false)))
+            {
+                return None;
+            }
             Some(CheckedError {
                 rule: diagnostic.id(),
                 range,
@@ -5509,6 +5587,34 @@ fn with_alias_value<'db, T>(
         return None;
     }
     Some(visit(definition, &model, expression, value))
+}
+
+/// Storage equality cannot prove a nominal brand or a literal value.
+fn native_annotation(db: &dyn Db, file: File, range: TextRange, result: bool) -> bool {
+    use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
+    use ty_python_semantic::types::Type;
+
+    let program = db.program_file(file);
+    let parsed = ruff_db::parsed::parsed_module(db, program.python_file(db)).load(db);
+    let nodes = covering_node(parsed.syntax().into(), range);
+    let annotation = nodes.ancestors().find_map(|node| match node {
+        AnyNodeRef::StmtFunctionDef(function) if result => function.returns.as_deref(),
+        AnyNodeRef::Parameter(parameter) if !result => parameter.annotation.as_deref(),
+        AnyNodeRef::StmtAnnAssign(stmt) if !result => Some(stmt.annotation.as_ref()),
+        _ => None,
+    });
+    annotation.is_some_and(|annotation| {
+        !any_annotation_operand(
+            &SemanticModel::new(db, program),
+            annotation,
+            &mut |model, expr| {
+                matches!(
+                    annotation_type(db, model, expr),
+                    Some(Type::NewTypeInstance(_) | Type::LiteralValue(_))
+                )
+            },
+        )
+    })
 }
 
 fn source_class_annotation(
@@ -6962,6 +7068,7 @@ mod diagnostic_mode_tests {
                 FallbackCalls::NamedFunctions,
                 (0..session.files.len()).map(|id| (id, id)),
                 None,
+                None,
             )
             .unwrap_err();
         assert_eq!(
@@ -6991,6 +7098,7 @@ mod diagnostic_mode_tests {
                 &[vec![]],
                 FallbackCalls::All,
                 (0..session.files.len()).map(|id| (id, id)),
+                None,
                 None,
             )
             .unwrap();

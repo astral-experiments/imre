@@ -909,8 +909,26 @@ impl Checker<'_> {
         };
         let mut check = |checker: &mut Self, index, input: Supplied<'_>| {
             let range = input.site().range();
-            check(checker, index, input)
-                .map_err(|error| error.expected_from(declaration(index), range))
+            let value = check(checker, index, input)
+                .map_err(|error| error.expected_from(declaration(index), range))?;
+            // A mutable argument may acquire other element types through an
+            // alias after this call. Keep the whole-scope check for that case.
+            if let Some(declaration) = declaration(index)
+                && !checker.types.is_display_container(value.ty)
+                && checker.native_type_proof(&value, params[index].ty)
+            {
+                checker.checked_native_operand(range, declaration);
+                // ty reports keyword and **pack errors at the entire keyword.
+                if let Some(kw) = call
+                    .arguments
+                    .keywords
+                    .iter()
+                    .find(|kw| kw.value.range().contains_range(range))
+                {
+                    checker.checked_native_operand(kw.range(), declaration);
+                }
+            }
+            Ok::<_, Failure>(value)
         };
         let offset = usize::from(receiver.is_some());
         let mut values = Vec::new();

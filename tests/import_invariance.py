@@ -39,6 +39,26 @@ SUITES = (
     "unpacking",
     "workspaces",
 )
+# These programs rely on narrowing or call binding during native lowering.
+NATIVE_FIXTURES = (
+    "callables/overload_mixed_callbacks.py",
+    "calls/closed_packs.py",
+    "calls/optional_keyword_values.py",
+    "containers/chainmap.py",
+    "expressions/operator_identity.py",
+    "files/stream_reads.py",
+    "iterables/math_sumprod.py",
+    "json_records/class_schemas.py",
+    "matching/optional_float_captures.py",
+    "paths/shutil_metadata.py",
+    "primitives/contextual_sort_ownership.py",
+    "processes/active_owners.py",
+    "processes/integer_timeouts.py",
+    "processes/pipe_classes.py",
+    "truthiness/contextual.py",
+    "truthiness/optional_selection.py",
+    "unpacking/guarded_tuple.py",
+)
 PEER = "_imre_probe_peer"
 UNUSED = "_imre_probe_import"
 IMPORTS = (
@@ -50,6 +70,9 @@ IMPORTS = (
 
 
 def programs(tests):
+    for name in NATIVE_FIXTURES:
+        source = (tests / "fixtures" / name).read_text()
+        yield name, {"main.py": source}, True
     for suite in SUITES:
         data = runpy.run_path(str(tests / f"{suite}.py"))
         # Supply the same prelude or entry file as each native test harness.

@@ -3841,8 +3841,34 @@ impl SourceGraph {
             .push(CheckedDiagnostic::ArgumentType(argument));
     }
 
-    pub(crate) fn deferred_name(&self, module: ModuleId, name: TextRange) {
-        self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::DeferredName(name));
+    /// A cached caller can replay native operand checks. Other diagnostic
+    /// decisions still require fresh lowering on each revision.
+    pub(crate) fn native_proofs_since(
+        &self,
+        module: ModuleId,
+        start: usize,
+    ) -> Option<Vec<CheckedDiagnostic>> {
+        let all = self.checked_diagnostics.borrow();
+        let notes = &all[module][start..];
+        notes
+            .iter()
+            .all(|note| {
+                matches!(
+                    note,
+                    CheckedDiagnostic::NativeOperand { .. } | CheckedDiagnostic::NativeReturn(_)
+                )
+            })
+            .then(|| notes.to_vec())
+    }
+
+    pub(crate) fn checked_native_type(&self, module: ModuleId, proof: CheckedDiagnostic) {
+        self.checked_diagnostics.borrow_mut()[module].push(proof);
+    }
+
+    /// Name lookups within this operand are deferred until Python evaluates it.
+    pub(crate) fn deferred_names(&self, module: ModuleId, operand: TextRange) {
+        self.checked_diagnostics.borrow_mut()[module]
+            .push(CheckedDiagnostic::DeferredNames(operand));
     }
 
     /// The native binder raises because this keyword's parameter was already bound.
@@ -7547,14 +7573,17 @@ impl<'a> Loader<'a> {
         let id = self.add_source(path, identity, name.to_owned(), is_package, input)?;
         self.modules[id].search_roots = SearchRoots::Single(root_index);
         self.modules[id].archive = archive;
-        // A first-party import still owns its dependency resolution, checked
-        // declarations and cyclic initialization order, even without readers.
-        if self.modules[id].is_program_source()
+        // Resolve unread source imports even when an external provider owns
+        // the initializer. Native archives still need their fixed declarations.
+        if self.modules[id].archive.is_none()
             && !self.has_checked_only_import
             && !self.ordered_imports
         {
             self.modules[id].initializer_only = unread;
-            if usage == ImportUse::Named && self.module_operand.is_none() {
+            if self.modules[id].is_program_source()
+                && usage == ImportUse::Named
+                && self.module_operand.is_none()
+            {
                 self.modules[id].unread_imports =
                     self.session
                         .unread_imports(id, self.modules[id].parsed.suite(), false);

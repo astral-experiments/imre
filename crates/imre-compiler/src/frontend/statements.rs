@@ -454,6 +454,12 @@ impl StatementLowering for Checker<'_> {
                         failure
                     }
                 })?;
+                if self.return_declaration.is_some() && self.native_type_proof(&value, expected) {
+                    self.graph.checked_native_type(
+                        self.module,
+                        crate::analysis::CheckedDiagnostic::NativeReturn(origin),
+                    );
+                }
             }
             ret.value.as_deref()
         };

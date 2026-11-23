@@ -3315,7 +3315,7 @@ fn signature(
     if inert && let Some(annotation) = function.returns.as_deref() {
         graph.checked_inert_return(module, annotation.range());
         if let ast::Expr::Name(name) = annotation {
-            graph.deferred_name(module, name.range());
+            graph.deferred_names(module, name.range());
         }
     }
     let document_return = function
@@ -5412,6 +5412,26 @@ impl<'a> Checker<'a> {
         )
     }
 
+    /// Only a concrete, successfully checked value can refine a ty diagnostic.
+    fn native_type_proof(&self, value: &Expr, expected: Type) -> bool {
+        self.inference.is_none()
+            && !value.is_unrepresented()
+            && self.unrepresented.borrow().is_none()
+            && !matches!(expected, Type::PythonObject | Type::ObjectValue)
+            && value.ty == expected
+    }
+
+    fn checked_native_operand(&self, operand: TextRange, declaration: TypeDeclaration) {
+        self.graph.checked_native_type(
+            self.module,
+            crate::analysis::CheckedDiagnostic::NativeOperand {
+                operand,
+                module: declaration.module,
+                annotation: declaration.annotation,
+            },
+        );
+    }
+
     fn annotated_local_value(
         &mut self,
         source: &ast::Expr,
@@ -5479,6 +5499,11 @@ impl<'a> Checker<'a> {
                 source,
                 "the annotated collection requires its fixed source layout",
             ));
+        }
+        if let Ok(value) = &checked
+            && self.native_type_proof(value, expected)
+        {
+            self.checked_native_operand(source.range(), declaration);
         }
         checked
     }
@@ -12208,6 +12233,12 @@ impl<'a> Checker<'a> {
                     });
                 }
                 if list.ty == Type::BuiltinClass {
+                    // The registered initializer evaluates this subscription and
+                    // can raise NameError after earlier import effects have run.
+                    if self.module_scope && self.graph.modules[self.module].initializer_only {
+                        self.graph
+                            .deferred_names(self.module, subscript.slice.range());
+                    }
                     return Err(self.object_builtin_error_with_checked_calls(
                         "a runtime generic alias",
                         subscript,

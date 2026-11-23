@@ -447,6 +447,12 @@ impl Checker<'_> {
                         return Ok(operand);
                     }
                     match checker.coerce_supplied_result(operand, expected, site) {
+                        Ok(value) if checker.native_type_proof(&value, expected) => {
+                            if let Some(owner) = declaration {
+                                checker.checked_native_operand(site.range(), owner);
+                            }
+                            Ok(value)
+                        }
                         Err(failure) if declaration.is_none() => {
                             checker.widen_inferred_store(target, site, failure)
                         }

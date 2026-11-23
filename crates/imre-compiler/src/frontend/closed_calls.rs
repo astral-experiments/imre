@@ -54,7 +54,8 @@ fn keyword(name: &str, value: ast::Expr, range: TextRange) -> ast::Keyword {
     ast::Keyword {
         node_index: ast::AtomicNodeIndex::NONE,
         range,
-        arg: Some(ast::Identifier::new(name, range)),
+        // Inference identifies inline ** fields by their value span.
+        arg: Some(ast::Identifier::new(name, value.range())),
         value,
     }
 }
@@ -81,7 +82,7 @@ impl Checker<'_> {
                     names
                         .iter()
                         .zip(&dict.items)
-                        .map(|(name, item)| keyword(name, item.value.clone(), item.value.range())),
+                        .map(|(name, item)| keyword(name, item.value.clone(), kw.range)),
                 );
                 changed = true;
             } else {

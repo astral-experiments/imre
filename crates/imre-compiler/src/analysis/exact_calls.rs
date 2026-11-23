@@ -661,7 +661,12 @@ impl<'db> Calls<'db, '_> {
         }
         let before = self.errors.len();
         self.visit_expr(value);
-        if self.failed(value, before) || self.cannot_return(value) {
+        if self.failed(value, before)
+            || self.cannot_return(value)
+            || self
+                .checked
+                .contains(&super::CheckedDiagnostic::NativeReturn(value.range()))
+        {
             return;
         }
         let db = &self.session.db;
@@ -695,6 +700,10 @@ impl<'db> Calls<'db, '_> {
             if self.excluded(value)
                 || self.failed(value, before)
                 || self.failed(store.target, before)
+                || matches!(node, ruff_python_ast::AnyNodeRef::StmtAnnAssign(stmt)
+                    if self.checked.iter().any(|note| matches!(note,
+                         super::CheckedDiagnostic::NativeOperand { operand, annotation, .. }
+                         if *operand == value.range() && *annotation == stmt.annotation.range())))
                 || self
                     .checked
                     .contains(&super::CheckedDiagnostic::FrameScalarStore(value.range()))

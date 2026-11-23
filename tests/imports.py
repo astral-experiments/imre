@@ -2880,6 +2880,7 @@ def main() -> None:
         )
         for entry, helper, diagnostic in (
             ("import helper\n" + call + "import opcode\n", "def marker(): pass\n", "main.py:4:12: Imre: expected int, got str"),
+            ("import helper\n", call, None),
             ("import helper\nimport opcode\n", call, None),
         ):
             write_files(app, {"main.py": entry})
@@ -2929,8 +2930,8 @@ def main() -> None:
         # The imported object operation precedes the call that supplies flag's type.
         for name, function, diagnostic in [
             ("annotated", "def choose(flag: bool) -> int:\n    return flag\n", "expected int, got bool"),
-            ("inferred", "def choose(flag):\n    if flag:\n        return 1\n    return 'one'\n", "inferred returns require"),
-            ("unused_object", "def choose(flag):\n    parsed = ast.parse('1')\n    if flag:\n        return 1\n    return 'one'\n", "inferred returns require"),
+            ("inferred", "def choose(flag):\n    if flag:\n        return 1\n    return 'one'\n", None),
+            ("unused_object", "def choose(flag):\n    parsed = ast.parse('1')\n    if flag:\n        return 1\n    return 'one'\n", None),
             ("live_object", "def choose(flag) -> int:\n    parsed = ast.parse('1')\n    print(parsed)\n    return 'one'\n", "helper.py:6:12: Imre: expected int, got str"),
         ]:
             case = temporary / ("object_return_" + name)
@@ -2941,7 +2942,10 @@ def main() -> None:
             command = [compiler, "check", str(case / "main.py")]
             for flags in ([], ["--reachable-only"]):
                 result = run(command + flags, temporary)
-                assert result.returncode == 1 and diagnostic in result.stderr, (name, result)
+                if diagnostic is None:
+                    require_success(result)
+                else:
+                    assert result.returncode == 1 and diagnostic in result.stderr, (name, result)
             # A consistent return type still admits the imported AST operation.
             corrected = function.replace("return flag\n", "return int(flag)\n").replace("return 'one'\n", "return 0\n")
             (case / "helper.py").write_text("import ast\ntree = ast.parse('1')\n" + corrected + "choose(True)\n")

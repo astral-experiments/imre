@@ -547,7 +547,17 @@ impl Checker<'_> {
                         self.classes.declarations,
                         self.types,
                     )?;
-                    self.expr_expected(value, ty)
+                    let result = self.expr_expected(value, ty)?;
+                    if self.native_type_proof(&result, ty) {
+                        self.checked_native_operand(
+                            value.range(),
+                            TypeDeclaration {
+                                module: self.module,
+                                annotation: assignment.annotation.range(),
+                            },
+                        );
+                    }
+                    Ok(result)
                 }
             }
             _ => unreachable!(),
@@ -814,10 +824,14 @@ impl Initialization {
         let (result, deferred, _) = graph.isolate_object_requests(|| {
             Self::lower_body(checker, available, range, output.as_deref_mut())
         });
-        // Preserve ordinary initializer errors. An object operation at this
-        // import site can execute after the application passes admission.
+        // An external provider's own annotations constrain its fixed layout.
+        // If that layout fails, Python can execute the provider once the
+        // application has passed its own source checks.
+        let provider_layout = !graph.modules[module].is_program_source()
+            && matches!(&result, Err(Failure::Diagnostic(d))
+                if d.kind == Kind::ExactType && d.operand_declaration().is_none());
         match result {
-            Err(reason) if reason.is_object() => {
+            Err(reason) if reason.is_object() || provider_layout => {
                 graph.register_import_effects.set(true);
                 // Helpers were numbered after the initializers. Reserve this
                 // slot for placement, with no native source to publish.

@@ -1079,6 +1079,26 @@ fn closed_program_keeps_first_party_contracts_across_cached_edits() {
 }
 
 #[test]
+fn native_storage_does_not_prove_a_new_type_contract() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    for prefix in ["", "import unittest\n"] {
+        for (body, rule) in [
+            ("def f(n: UserId): return n\nf(1)", "invalid-argument-type"),
+            ("def f() -> UserId: return 1\nf()", "invalid-return-type"),
+            ("n: UserId = 1", "invalid-assignment"),
+        ] {
+            let source = format!(
+                "{prefix}from typing import NewType\nUserId = NewType('UserId', int)\n{body}\n"
+            );
+            fs::write(&entry, source).unwrap();
+            let error = crate::check_file(&entry, None).unwrap_err();
+            assert!(error.contains(rule), "{error}");
+        }
+    }
+}
+
+#[test]
 fn registered_parameter_changes_recheck_the_unchanged_caller() {
     let project = tempdir().unwrap();
     let root = project.path();
@@ -1117,6 +1137,9 @@ fn registered_parameter_changes_recheck_the_unchanged_caller() {
     fs::remove_file(entry).unwrap();
     fs::remove_file(&api).unwrap();
     verify(&registered).unwrap();
+    registered[1].2 = "def value(n: int) -> str:\n    return 'changed'\n".into();
+    let error = verify(&registered).unwrap_err();
+    assert!(error.contains("invalid-return-type"), "{error}");
     // Same path, stale snapshot digest and the original caller. The provider is
     // internally well typed, so only checking them together finds the error.
     registered[1].2 = text.into();
