@@ -479,7 +479,43 @@ impl StatementLowering for Checker<'_> {
     }
 
     fn for_loop(&mut self, loop_: &ast::StmtFor) -> Result<Block, String> {
-        self.iteration(loop_, true)
+        if !self.fixed_stdin(&loop_.iter) {
+            return self.iteration(loop_, true);
+        }
+        // A source-inexpressible local lets the ordinary file loop own the
+        // stream across break, continue, return, and exceptions.
+        let input = self.hidden(Type::TextIO);
+        let name = format!("@stdin{input}");
+        let mut lowered = loop_.clone();
+        lowered.iter = Box::new(ast::Expr::Name(ast::ExprName {
+            node_index: ast::AtomicNodeIndex::NONE,
+            range: loop_.iter.range(),
+            id: name.clone().into(),
+            ctx: ast::ExprContext::Load,
+        }));
+        self.names.insert(name.clone(), input);
+        self.assigned.insert(input);
+        let result = self.iteration(&lowered, true);
+        self.names.remove(&name);
+        self.assigned.remove(&input);
+        let (mut body, continues) = result?;
+        body.insert(
+            0,
+            Statement::Assign(
+                input,
+                Expr {
+                    ty: Type::TextIO,
+                    kind: ExprKind::Builtin(Builtin::SysStdin, vec![]),
+                },
+            ),
+        );
+        Ok((
+            vec![Statement::Scope {
+                body,
+                clear: vec![input],
+            }],
+            continues,
+        ))
     }
 
     fn raised_value(

@@ -193,7 +193,12 @@ mod tests {
             &CompileOptions::default(),
         )
         .unwrap();
-        assert!(llvm.contains("cannot access local variable"));
+        let encoded = "cannot access local variable 'found' where it is not associated with a value"
+            .bytes()
+            .map(|byte| format!("\\{byte:02X}"))
+            .collect::<String>();
+        assert!(llvm.contains(&encoded));
+        assert!(llvm.contains("call void @imre_exception_raise("));
         assert!(!llvm.contains("@imre_dyn_register"));
     }
 }

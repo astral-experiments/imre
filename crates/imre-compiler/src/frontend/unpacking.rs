@@ -412,6 +412,11 @@ impl Checker<'_> {
         (expected, declaration): (Type, Option<TypeDeclaration>),
         result: ResultUse<'_>,
     ) -> Result<Expr, String> {
+        if expected == Type::TextIO
+            && let Some(stream) = self.stream_rhs(value)?
+        {
+            return Ok(stream);
+        }
         if self.inference.is_some() && expected == Type::JsonObject && target.is_attribute_expr() {
             // Keep a mutable owner until the resolved target decides its storage.
             self.document_annotation_value(value, expected, documents::MAP)
@@ -592,7 +597,11 @@ impl Checker<'_> {
                 .map_or(ResultUse::Fixed, |name| ResultUse::Store(name.id.as_str()));
             let scalar_item = context
                 .filter(|(ty, _)| target.is_subscript_expr() && ty.builtin_scalar_name().is_some());
-            let value = if let Some((_, old)) = previous {
+            let value = if context.is_none()
+                && let Some(stream) = self.stream_rhs(rhs)?
+            {
+                stream
+            } else if let Some((_, old)) = previous {
                 // An empty literal still needs the old context. Other container
                 // expressions can determine their own concrete result type.
                 self.expr_expected_if(rhs, self.locals[old], Self::rebindable_container)?
