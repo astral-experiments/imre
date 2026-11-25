@@ -243,6 +243,21 @@ pub(super) fn normalization(
             Ok(result.map_or_else(|| text, |s| ctx.text(s)))
         };
     }
+    if let Value::Str(input) = ctx.heap.get(text)
+        && input.is_ascii()
+    {
+        if input.is_empty() {
+            return Ok(if check { super::TRUE } else { text });
+        }
+        Form::parse(form)?;
+        // The historical database creates a base string even when its contents are normalized.
+        return Ok(if check {
+            super::TRUE
+        } else {
+            let result = input.clone();
+            ctx.text(result)
+        });
+    }
     let points = ctx.string_codepoints(text)?;
     if points.is_empty() {
         return Ok(if check { super::TRUE } else { text });
