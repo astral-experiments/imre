@@ -2545,6 +2545,8 @@ pub(crate) enum Builtin {
     IntFromBytes,
     /// Encodes an integer with an explicit width, byte order, and sign policy.
     IntToBytes,
+    /// A single unsigned 32-bit integer with a checked, explicit byte order.
+    PackUnsignedWord,
     /// Validates complete UTF-8 at the decode evaluation point and returns a
     /// retained bytes identity for an internal allocation-free character gather.
     BytesValidateUtf8,

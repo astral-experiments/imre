@@ -7041,6 +7041,11 @@ impl Emitter<'_, '_> {
                 none()
             }
             Builtin::IntFromBytes => self.call("imre_int_from_bytes", Type::Int, &[&args[0].value]),
+            Builtin::PackUnsignedWord => self.call(
+                "imre_pack_unsigned_word",
+                Type::Bytes,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::IntToBytes => self.call(
                 "imre_int_to_bytes",
                 Type::Bytes,
@@ -10777,6 +10782,7 @@ declare ptr @imre_zip_namelist(ptr)
 declare void @imre_zip_close(ptr)
 declare i64 @imre_int_from_bytes(ptr)
 declare ptr @imre_int_to_bytes(i64, i64, ptr, i1)
+declare ptr @imre_pack_unsigned_word(i64, i1)
 declare ptr @imre_bytes_validate_utf8(ptr)
 declare ptr @imre_binary_open(ptr, i32)
 declare ptr @imre_tempfile_new(ptr)

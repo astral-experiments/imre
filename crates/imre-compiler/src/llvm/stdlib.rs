@@ -263,6 +263,19 @@ print(total(-0.0, -3, True))
     }
 
     #[test]
+    fn native_struct_pack_uses_checked_unsigned_words() {
+        let src = "import struct\ndef pack(v: int) -> bytes:\n    return struct.pack('>I', v) + struct.pack('<I',v)\nprint(pack(256))\n";
+        let ir = crate::compile(src, &crate::CompileOptions::default()).unwrap();
+        assert!(ir.contains("call ptr @imre_pack_unsigned_word("));
+        assert!(
+            !ir.lines()
+                .any(|l| l.contains("call ") && l.contains("@imre_dyn_"))
+        );
+        let unknown = "import struct\ndef pack(fmt: str, v: int) -> bytes:\n    return struct.pack(fmt, v)\nprint(pack('>I', 1))\n";
+        assert!(crate::compile(unknown, &crate::CompileOptions::default()).is_err());
+    }
+
+    #[test]
     fn natural_log_preserves_the_integer_input_layout() {
         let src = "import math\ndef logs(x: int, y: float) -> float:\n    return math.log(x) + math.log(y)\nprint(logs(1 << 2000, 2.0))\n";
         let ir = crate::compile(src, &crate::CompileOptions::default()).unwrap();

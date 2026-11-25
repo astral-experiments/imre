@@ -3,6 +3,41 @@
 use super::*;
 
 impl Checker<'_> {
+    /// Pack an exact integer using a literal standard-width unsigned format.
+    /// The checked runtime reports struct.error on overflow, even for big integers.
+    pub(super) fn pack_unsigned_word(
+        &mut self,
+        call: &ast::ExprCall,
+    ) -> Result<Option<Expr>, String> {
+        if !call.arguments.keywords.is_empty()
+            || !self
+                .graph
+                .session
+                .is_stdlib_function(self.module, &call.func, "struct", "pack")
+        {
+            return Ok(None);
+        }
+        let [ast::Expr::StringLiteral(format), number] = call.arguments.args.as_slice() else {
+            return Ok(None);
+        };
+        let little = match format.value.to_str() {
+            ">I" | "!I" => false,
+            "<I" => true,
+            _ => return Ok(None),
+        };
+        let value = self.expr(number)?;
+        if value.ty != Type::Int {
+            return Err(self.scoped_builtin_error("struct.pack unsigned integer", number));
+        }
+        Ok(Some(Expr {
+            ty: Type::Bytes,
+            kind: ExprKind::Builtin(
+                Builtin::PackUnsignedWord,
+                vec![value, Expr::boolean(little)],
+            ),
+        }))
+    }
+
     pub(super) fn bytes_membership(
         &self,
         mut needle: Expr,

@@ -1517,6 +1517,7 @@ impl IntrinsicModule {
             (Self::PickleNative, "UnpicklingError") => {
                 Intrinsic::ScopedObjectExport("_pickle.UnpicklingError")
             }
+            (Self::Struct, "pack") => Intrinsic::ScopedObjectExport("struct.pack"),
             (Self::Struct, "_clearcache") => Intrinsic::ScopedObjectExport("struct._clearcache"),
             (Self::Tempfile, "gettempdir") => Intrinsic::ScopedObjectExport("tempfile.gettempdir"),
             (Self::Tempfile, "gettempdirb") => {

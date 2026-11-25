@@ -756,6 +756,7 @@ impl Builtin {
             | Self::StringListSortSuffix(_)
             | Self::BinaryWrite
             | Self::IntToBytes
+            | Self::PackUnsignedWord
             | Self::BytesValidateUtf8
             | Self::BytesContainsInt
             | Self::DequeNew
@@ -1078,6 +1079,7 @@ impl Builtin {
             Self::FloatDegrees | Self::FloatRadians | Self::FloatUnary(_) => {
                 signature(&[Type::Float], Type::Float)
             }
+            Self::PackUnsignedWord => signature(&[Type::Int, Type::Bool], Type::Bytes),
             Self::IntSignAsFloat | Self::IntLog | Self::IntLog10 => {
                 signature(&[Type::Int], Type::Float)
             }
@@ -1592,6 +1594,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_hash_algorithms_guaranteed"
                 | "imre_toml_keys"
                 | "imre_int_to_bytes"
+                | "imre_pack_unsigned_word"
                 | "imre_bytes_validate_utf8"
                 | "imre_binary_open"
                 | "imre_binary_read"

@@ -489,6 +489,14 @@ impl Checker<'_> {
         {
             return Ok(Some(Expr::boolean(true)));
         }
+        if self.registered.is_none()
+            && binding
+                == Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                    "struct.pack",
+                )))
+        {
+            return self.pack_unsigned_word(call);
+        }
         match binding {
             Some(Binding::Intrinsic(Intrinsic::SysDisplayHook)) => {
                 if !call.arguments.keywords.is_empty() {

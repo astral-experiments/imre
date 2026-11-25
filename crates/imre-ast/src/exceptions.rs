@@ -122,6 +122,7 @@ exception_kinds! {
         TimeoutExpired = 27 => "TimeoutExpired",
         BadGzipFile = 28 => "BadGzipFile",
         ZlibError = 29 => "error",
+        StructError = 99 => "struct.error",
         TomlDecodeError = 30 => "TOMLDecodeError",
         JsonDecodeError = 31 => "JSONDecodeError",
         CancelledError = 33 => "CancelledError",

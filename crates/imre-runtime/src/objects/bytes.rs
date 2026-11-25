@@ -384,6 +384,37 @@ pub(crate) fn integer_bytes(value: &Int, size: isize, little: bool, signed: bool
     Ok(output)
 }
 
+/// Pack one standard-width unsigned integer in the selected byte order.
+///
+/// # Safety
+/// The caller roots the canonical integer handle throughout the operation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_pack_unsigned_word(value: usize, little: bool) -> *const Bytes {
+    // SAFETY: the input handle is rooted by the caller.
+    let integer = unsafe { Int::borrow(value) };
+    let result = (|| {
+        let word = integer
+            .to_i64()
+            .and_then(|v| u32::try_from(v).ok())
+            .ok_or_else(|| {
+                Error::new(
+                    Kind::StructError,
+                    "'I' format requires 0 <= number <= 4294967295",
+                )
+            })?;
+        let mut bytes = allocate(4)?;
+        bytes.extend_from_slice(&if little {
+            word.to_le_bytes()
+        } else {
+            word.to_be_bytes()
+        });
+        crate::BytesOwner::try_new(bytes)
+            .map(crate::BytesOwner::into_raw)
+            .map_err(|_| Error::memory_error())
+    })();
+    finish(result, std::ptr::null())
+}
+
 /// Convert exact typed operands using the same width and sign rules as boxed int.to_bytes.
 ///
 /// # Safety
