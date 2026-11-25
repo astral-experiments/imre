@@ -129,6 +129,96 @@ fn first_insertion<'ast>(
 }
 
 impl Checker<'_> {
+    /// Infer nullable element storage for one fresh placeholder list followed by
+    /// a complete range-indexed fill with a fixed class constructor. The list
+    /// still contains real None values until each original store executes.
+    pub(super) fn placeholder_list_type(
+        &self,
+        target: &ast::Expr,
+        rhs: &ast::Expr,
+    ) -> Option<Type> {
+        let name = target.as_name_expr()?.id.as_str();
+        if self.module_scope || self.block_depth != 1 || self.names.contains_key(name) {
+            return None;
+        }
+        let ast::Expr::BinOp(repeat) = rhs else {
+            return None;
+        };
+        let (ast::Expr::List(initial), ast::Expr::Name(bound)) = (&*repeat.left, &*repeat.right)
+        else {
+            return None;
+        };
+        if repeat.op != ast::Operator::Mult
+            || !matches!(initial.elts.as_slice(), [ast::Expr::NoneLiteral(_)])
+        {
+            return None;
+        }
+        let module = &self.graph.modules[self.module];
+        if !module.is_program_source() {
+            return None;
+        }
+        for statement in &module.parsed.syntax().body {
+            let ast::Stmt::FunctionDef(function) = statement else {
+                continue;
+            };
+            for pair in function.body.windows(2) {
+                let (ast::Stmt::Assign(initializer), ast::Stmt::For(fill)) = (&pair[0], &pair[1])
+                else {
+                    continue;
+                };
+                if !matches!(initializer.targets.as_slice(), [stored]
+                    if stored.range() == target.range())
+                    || initializer.value.range() != rhs.range()
+                    || fill.is_async
+                    || !fill.orelse.is_empty()
+                {
+                    continue;
+                }
+                let (ast::Expr::Name(index), ast::Expr::Call(iteration)) =
+                    (&fill.target, &fill.iter)
+                else {
+                    continue;
+                };
+                if !self.unshadowed_builtin(&iteration.func, "range")
+                    || !iteration.arguments.keywords.is_empty()
+                    || !matches!(iteration.arguments.args.as_ref(), [ast::Expr::Name(limit)] if limit.id == bound.id)
+                {
+                    continue;
+                }
+                let [ast::Stmt::Assign(store)] = fill.body.as_slice() else {
+                    continue;
+                };
+                let [ast::Expr::Subscript(place)] = store.targets.as_slice() else {
+                    continue;
+                };
+                if !matches!(&*place.value, ast::Expr::Name(owner) if owner.id == name)
+                    || !matches!(&*place.slice, ast::Expr::Name(item) if item.id == index.id)
+                {
+                    continue;
+                }
+                let ast::Expr::Call(constructor) = &*store.value else {
+                    continue;
+                };
+                let simple = |value: &ast::Expr| {
+                    value.is_literal_expr()
+                        || matches!(value, ast::Expr::Name(input) if input.id != name)
+                };
+                if !constructor.arguments.args.iter().all(simple)
+                    || !constructor
+                        .arguments
+                        .keywords
+                        .iter()
+                        .all(|keyword| simple(&keyword.value))
+                {
+                    continue;
+                }
+                let class = self.class_reference(&constructor.func)?;
+                return Some(self.types.list(self.types.optional(Type::Class(class))));
+            }
+        }
+        None
+    }
+
     /// A concrete insertion can determine the layout of a fresh list or set. A set
     /// filled from an exact text iterator can also use its inferred element type.
     pub(super) fn inserted_element(
@@ -3169,6 +3259,27 @@ impl Checker<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn placeholder_fill_uses_nullable_fixed_record_storage() {
+        let source = r#"class Cell:
+    value: int
+    def __init__(self, value: int): self.value = value
+    def read(self) -> int: return self.value
+def make(count: int):
+    cells = [None] * count
+    for index in range(count):
+        cells[index] = Cell(index)
+    total = 0
+    for cell in cells:
+        total += cell.read()
+    return total
+print(make(3))
+"#;
+        let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
+        assert!(!llvm.lines().any(|line| line.contains("call ")
+            && (line.contains("@imre_dyn_") || line.contains("@imre_boxed_"))));
+    }
 
     #[test]
     fn fresh_list_joins_direct_conditional_and_loop_constructors() {

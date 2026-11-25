@@ -536,12 +536,7 @@ impl Checker<'_> {
                 return require_object_receiver(receiver, payload, attr.attr.as_str());
             }
             Type::Str if attr.attr.as_str() == "encode" => {}
-            Type::Class(_)
-                if matches!(&*attr.value, ast::Expr::Attribute(_))
-                    && self
-                        .graph
-                        .session
-                        .narrowed_instance(self.module, &attr.value) => {}
+            Type::Class(_) => {}
             _ => return receiver,
         }
         let slot = self.hidden(receiver.ty);

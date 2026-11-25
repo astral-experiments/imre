@@ -704,6 +704,11 @@ impl Checker<'_> {
                 self.inferred_containers.contains(slot) || inferred_parameter || direct_string
             });
             let mut context = self.target_expectation(target, Some(rhs));
+            if context.is_none()
+                && let Some(placeholder) = self.placeholder_list_type(target, rhs)
+            {
+                context = Some((placeholder, None));
+            }
             if matches!(context, Some((Type::Callable(_), None)))
                 && let Some((_, slot)) = local
                 && let Some(ValueSource::Function(prior)) = self.assigned.value_source(slot)
