@@ -3946,6 +3946,27 @@ impl SourceGraph {
             diagnostics.sort_unstable_by_key(|note| note.sort_key());
             diagnostics.dedup();
             let module = &self.modules[id];
+            // A guard which actually lowered to a fixed NameError has already
+            // checked this bare name. Only its exact expression may be omitted
+            // from the source diagnostics. The rest of the try and handler stay checked.
+            if module.is_program_source() {
+                for statement in &module.parsed.syntax().body {
+                    let ast::Stmt::Try(guard) = statement else {
+                        continue;
+                    };
+                    let Some(ast::Stmt::Expr(probe)) = guard.body.first() else {
+                        continue;
+                    };
+                    let range = probe.value.range();
+                    if diagnostics.iter().any(
+                        |note| matches!(note,CheckedDiagnostic::UnboundLocalRead(r) if *r==range),
+                    ) && self.closed_missing_module_probe(id, &probe.value)
+                    {
+                        skipped.get_or_insert_with(|| vec![Vec::new(); self.modules.len()])[id]
+                            .push(range);
+                    }
+                }
+            }
             if let Some(selected) = module.checked_declaration {
                 let suite = module.parsed.suite();
                 let ranges =

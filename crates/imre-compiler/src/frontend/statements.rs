@@ -435,6 +435,8 @@ impl StatementLowering for Checker<'_> {
             && !self.names.contains_key(name.id.as_str())
             && self.graph.closed_missing_module_probe(self.module, expr)
         {
+            self.graph
+                .checked_unbound_local_read(self.module, expr.range());
             let failure = unbound_locals::module_name_failure(name.id.as_str());
             return Ok((Some(self.statement_at(expr, failure)), false));
         }
@@ -807,6 +809,20 @@ impl StatementLowering for Checker<'_> {
 
 #[cfg(test)]
 mod missing_module_probe_tests {
+    #[test]
+    fn closed_name_guard_checks_only_the_exact_missing_probe() {
+        let positive = "import json\ntry:\n    absent_builtin\n    found = True\nexcept NameError:\n    found = False\n    absent_builtin = range\nprint(found)\n";
+        crate::check(positive).unwrap();
+        crate::compile(positive, &crate::CompileOptions::default()).unwrap();
+        let unrelated = format!("{positive}print(unrelated_missing_name)\n");
+        assert!(crate::check(&unrelated).is_err());
+        let type_error = format!("{positive}bad: int = 'wrong'\n");
+        assert!(crate::check(&type_error).is_err());
+        let captured =
+            "try:\n    missing_name\nexcept NameError as error:\n    print(error.name)\n";
+        assert!(crate::check(captured).is_err());
+    }
+
     #[test]
     fn closed_missing_name_is_catchable_but_builtin_mutation_is_not_assumed_away() {
         let positive = "import json\ntry:\n    missing_name\n    found = True\nexcept NameError:\n    found = False\nprint(found)\n";
