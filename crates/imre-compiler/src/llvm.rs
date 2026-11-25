@@ -6466,6 +6466,11 @@ impl Emitter<'_, '_> {
                 Type::Int,
                 &[&args[0].value, &args[1].value],
             ),
+            Builtin::ZlibCompress => self.call(
+                "imre_zlib_compress",
+                Type::Bytes,
+                &[&args[0].value, &args[1].value, &args[2].value],
+            ),
             Builtin::BinasciiEncode | Builtin::BinasciiDecode => {
                 let function = if matches!(builtin, Builtin::BinasciiEncode) {
                     "imre_binascii_encode"
@@ -6542,6 +6547,9 @@ impl Emitter<'_, '_> {
             Builtin::Decode => self.call("imre_bytes_decode", Type::Str, &[&args[0].value]),
             Builtin::CsvReader {
                 delimiter,
+                delimiter_argument,
+                dialect_argument,
+                delimiter_override,
                 quote,
                 escape,
                 flags,
@@ -6552,7 +6560,25 @@ impl Emitter<'_, '_> {
                     Type::Str => 2,
                     _ => 0,
                 };
-                let (function, terminator) = match args.as_slice() {
+                let delimiter_args = delimiter_argument.map(|index| {
+                    let text = &args[index].value;
+                    let text = if matches!(text.ty, Type::Optional(_)) {
+                        self.instruction(format!("inttoptr i64 {} to ptr", text.operand))
+                    } else {
+                        text.operand.clone()
+                    };
+                    (text, args[index + 1].value.operand.clone())
+                });
+                let remaining: Vec<_> = args
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| {
+                        delimiter_argument.is_none_or(|start| *index < start || *index >= start + 2)
+                            && dialect_argument.is_none_or(|dialect| *index != dialect)
+                    })
+                    .map(|(_, arg)| arg)
+                    .collect();
+                let (function, terminator) = match remaining.as_slice() {
                     [_, text, bad_type] => {
                         let text = if matches!(text.value.ty, Type::Optional(_)) {
                             self.instruction(format!("inttoptr i64 {} to ptr", text.value.operand))
@@ -6564,12 +6590,33 @@ impl Emitter<'_, '_> {
                             format!(", ptr {text}, ptr {}", bad_type.value.operand),
                         )
                     }
+                    [_] if delimiter_args.is_some() || dialect_argument.is_some() => (
+                        "imre_csv_reader_delimiter",
+                        ", ptr null, ptr null".to_owned(),
+                    ),
                     [_] => ("imre_csv_reader", String::new()),
                     _ => unreachable!("checked CSV arguments"),
                 };
+                let (function, delimiter) = match (delimiter_args, dialect_argument) {
+                    (Some((text, bad_type)), None) => (
+                        "imre_csv_reader_delimiter",
+                        format!("ptr {text}, ptr {bad_type}"),
+                    ),
+                    (None, Some(index)) => (
+                        "imre_csv_reader_dialect",
+                        format!(
+                            "ptr {}, i32 {}, i32 {}",
+                            args[*index].value.operand,
+                            u32::from(*delimiter),
+                            u32::from(*delimiter_override)
+                        ),
+                    ),
+                    (None, None) => (function, format!("i32 {}", u32::from(*delimiter))),
+                    _ => unreachable!("checked CSV options"),
+                };
                 let operand = self.checked_instruction(format!(
-                    "call ptr @{function}(ptr {}, i32 {source_kind}, i32 {}, i32 {}, i32 {}, i32 {flags}{terminator})",
-                    source.operand, u32::from(*delimiter), quote.map_or(u32::MAX, u32::from), escape.map_or(u32::MAX, u32::from),
+                    "call ptr @{function}(ptr {}, i32 {source_kind}, {delimiter}, i32 {}, i32 {}, i32 {flags}{terminator})",
+                    source.operand, quote.map_or(u32::MAX, u32::from), escape.map_or(u32::MAX, u32::from),
                 ));
                 Value {
                     ty: returns,
@@ -7012,6 +7059,11 @@ impl Emitter<'_, '_> {
                 none()
             }
             Builtin::IntFromBytes => self.call("imre_int_from_bytes", Type::Int, &[&args[0].value]),
+            Builtin::PackUnsignedWord => self.call(
+                "imre_pack_unsigned_word",
+                Type::Bytes,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::IntToBytes => self.call(
                 "imre_int_to_bytes",
                 Type::Bytes,
@@ -10604,6 +10656,7 @@ declare ptr @imre_base64_translate(ptr, ptr, i1)
 declare ptr @imre_binascii_ascii_input(ptr)
 declare ptr @imre_binascii_decode(ptr, i1)
 declare i64 @imre_zlib_adler32(ptr, i64)
+declare ptr @imre_zlib_compress(ptr, i64, i64)
 declare ptr @imre_binascii_encode(ptr, i1)
 declare ptr @imre_base32_encode(ptr, i1)
 declare ptr @imre_base32_decode(ptr, i1, i1)
@@ -10616,6 +10669,8 @@ declare i1 @imre_hmac_compare_digest_str(ptr, ptr)
 declare ptr @imre_sha256_hex(ptr)
 declare ptr @imre_csv_reader(ptr, i32, i32, i32, i32, i32)
 declare ptr @imre_csv_reader_terminator(ptr, i32, i32, i32, i32, i32, ptr, ptr)
+declare ptr @imre_csv_reader_delimiter(ptr, i32, ptr, ptr, i32, i32, i32, ptr, ptr)
+declare ptr @imre_csv_reader_dialect(ptr, i32, ptr, i32, i32, i32, i32, i32, ptr, ptr)
 declare ptr @imre_csv_next(ptr, i32)
 declare i64 @imre_csv_line_number(ptr)
 declare void @imre_typing_declare(ptr, i32, ptr, ptr, ptr, i32)
@@ -10747,6 +10802,7 @@ declare ptr @imre_zip_namelist(ptr)
 declare void @imre_zip_close(ptr)
 declare i64 @imre_int_from_bytes(ptr)
 declare ptr @imre_int_to_bytes(i64, i64, ptr, i1)
+declare ptr @imre_pack_unsigned_word(i64, i1)
 declare ptr @imre_bytes_validate_utf8(ptr)
 declare ptr @imre_binary_open(ptr, i32)
 declare ptr @imre_tempfile_new(ptr)

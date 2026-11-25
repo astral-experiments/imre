@@ -226,6 +226,13 @@ impl InfallibleKey for IntKey {}
 impl InfallibleKey for ObjectKey {}
 impl InfallibleKey for crate::BytesOwner {}
 
+/// The nullable key's zero word represents Python None; all nonzero words
+/// retain independent exact string owners.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct OptionalStrKey(Option<StrOwner>);
+
+impl InfallibleKey for OptionalStrKey {}
+
 impl InfallibleKey for StrOwner {
     fn same_key(&self, other: &Self) -> bool {
         if Self::ptr_eq(self, other) {
@@ -351,6 +358,31 @@ impl ScalarKey for StrOwner {
     }
     fn into_word(self) -> usize {
         StrOwner::into_raw(self) as usize
+    }
+}
+impl ScalarKey for OptionalStrKey {
+    const KIND: u32 = NULLABLE | 3;
+
+    fn word(&self) -> usize {
+        self.0
+            .as_ref()
+            .map_or(0, |value| StrOwner::as_ptr(value) as usize)
+    }
+
+    unsafe fn borrow(word: usize) -> ManuallyDrop<Self> {
+        // SAFETY: the caller roots a nullable string; ManuallyDrop borrows its owner.
+        ManuallyDrop::new(unsafe { Self::from_owned(word) })
+    }
+
+    unsafe fn from_owned(word: usize) -> Self {
+        Self((word != 0).then(|| {
+            // SAFETY: every nonzero word transfers an independent string owner.
+            unsafe { StrOwner::from_raw(word as *const Str) }
+        }))
+    }
+
+    fn into_word(self) -> usize {
+        self.0.map_or(0, |value| StrOwner::into_raw(value) as usize)
     }
 }
 impl ScalarKey for crate::BytesOwner {
@@ -759,6 +791,7 @@ enum Tables<V> {
     Int(Table<IntKey, V>),
     Enum(Table<usize, V>),
     Str(Table<StrOwner, V>),
+    OptionalStr(Table<OptionalStrKey, V>),
     Object(Table<ObjectKey, V>),
     Bytes(Table<crate::BytesOwner, V>),
     Tuple(Table<TupleKey, V>),
@@ -770,6 +803,7 @@ macro_rules! table {
             Tables::Int($table) => $body,
             Tables::Enum($table) => $body,
             Tables::Str($table) => $body,
+            Tables::OptionalStr($table) => $body,
             Tables::Object($table) => $body,
             Tables::Bytes($table) => $body,
             Tables::Tuple($table) => $body,
@@ -801,6 +835,7 @@ impl<V: Copy> Tables<V> {
             2 => Self::Int(Table::new()),
             10 => Self::Enum(Table::new()),
             3 => Self::Str(Table::new()),
+            kind if kind == NULLABLE | 3 => Self::OptionalStr(Table::new()),
             5 => Self::Object(Table::new()),
             6 => Self::Tuple(Table::new()),
             8 => Self::Bytes(Table::new()),
@@ -812,6 +847,7 @@ impl<V: Copy> Tables<V> {
             Self::Int(_) => 2,
             Self::Enum(_) => 10,
             Self::Str(_) => 3,
+            Self::OptionalStr(_) => NULLABLE | 3,
             Self::Object(_) => 5,
             Self::Bytes(_) => 8,
             Self::Tuple(_) => 6,
@@ -822,6 +858,7 @@ impl<V: Copy> Tables<V> {
             (Self::Int(table), Tables::Int(result)) => table.copy_keys(result),
             (Self::Enum(table), Tables::Enum(result)) => table.copy_keys(result),
             (Self::Str(table), Tables::Str(result)) => table.copy_keys(result),
+            (Self::OptionalStr(table), Tables::OptionalStr(result)) => table.copy_keys(result),
             (Self::Object(table), Tables::Object(result)) => table.copy_keys(result),
             (Self::Bytes(table), Tables::Bytes(result)) => table.copy_keys(result),
             (Self::Tuple(table), Tables::Tuple(result)) => table.copy_keys(result),
@@ -852,6 +889,7 @@ impl<V: Copy> Tables<V> {
             (Self::Int(a), Self::Int(b)) => same(a, b),
             (Self::Enum(a), Self::Enum(b)) => same(a, b),
             (Self::Str(a), Self::Str(b)) => same(a, b),
+            (Self::OptionalStr(a), Self::OptionalStr(b)) => same(a, b),
             (Self::Object(a), Self::Object(b)) => same(a, b),
             (Self::Bytes(a), Self::Bytes(b)) => same(a, b),
             (Self::Tuple(a), Self::Tuple(b)) => same(a, b),

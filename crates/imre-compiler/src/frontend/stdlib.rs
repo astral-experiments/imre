@@ -169,6 +169,44 @@ fn positional_template(mut rest: &str, arguments: usize) -> Option<String> {
 }
 
 impl Checker<'_> {
+    /// Lower only the qualified, immutable-byte positional signature of zlib.compress.
+    pub(super) fn zlib_compress(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let args = &call.arguments;
+        if !args.keywords.is_empty() || !(1..=3).contains(&args.args.len()) {
+            return Err(self.scoped_builtin_error("zlib.compress", call));
+        }
+        let data = self.expr(&args.args[0])?;
+        if data.ty != Type::Bytes {
+            return Err(error(
+                self.source,
+                &args.args[0],
+                "zlib.compress requires typed bytes",
+            ));
+        }
+        let mut values = vec![data];
+        for (index, default) in [(1, -1), (2, 15)] {
+            let value = if let Some(node) = args.args.get(index) {
+                let value = self.expr(node)?;
+                if value.ty != Type::Int {
+                    return Err(error(
+                        self.source,
+                        node,
+                        "zlib.compress requires integer settings",
+                    ));
+                }
+                value
+            } else {
+                Expr::integer(default)
+            };
+            values.push(value);
+        }
+        Ok(Expr {
+            ty: Type::Bytes,
+            kind: ExprKind::Builtin(Builtin::ZlibCompress, values),
+        })
+    }
+
     pub(super) fn math_fmod(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
         let args = &call.arguments;
