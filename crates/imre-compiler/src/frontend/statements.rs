@@ -222,6 +222,13 @@ fn closed_generator_ir(body: &[Statement]) -> bool {
                 | Builtin::Bool
                 | Builtin::Len
                 | Builtin::Ord => true,
+                // A statically invalid scalar operation may still be inside an
+                // unselected conditional arm. Its exact builtin exception evaluates
+                // prior operands in order and cannot inspect the virtual binding.
+                Builtin::RaiseException => matches!(args.as_slice(), [operand, error]
+                    if operand.ty == Type::Int && error.ty == Type::Exception
+                        && matches!(&error.kind, ExprKind::Exception { kind, message: Some(message) }
+                            if Some(*kind) == exception_kind("TypeError") && matches!(&message.kind, ExprKind::Str(_)))),
                 Builtin::Str => args.first().is_some_and(|x| {
                     matches!(
                         x.ty,
@@ -846,6 +853,13 @@ mod missing_module_probe_tests {
 
 #[cfg(test)]
 mod native_stored_generator_tests {
+    #[test]
+    fn a_closed_conditional_retains_its_catchable_scalar_error() {
+        let source = "if __name__ == '__main__':\n    legacy = False\n    raw = b'ab'\n    pieces = (raw[i:i + 1] for i in range(2))\n    pieces = [','.join(str(ord(c) if legacy else c) for c in part) for part in pieces]\n    print(pieces)\n";
+        let graph = crate::modules::SourceGraph::single(source).unwrap();
+        assert!(crate::frontend::lower(&graph).is_ok());
+    }
+
     #[test]
     fn adjacent_consumer_is_fused_but_escaping_or_protected_binding_is_refused() {
         let positive = "if __name__ == '__main__':\n    data = b'abcdef'\n    pieces = (data[i:i + 2] for i in range(0, len(data), 2))\n    pieces = [','.join(str(c) for c in piece) for piece in pieces]\n    print(';'.join(pieces))\n";
