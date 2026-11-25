@@ -724,10 +724,10 @@ mod tests {
 
     #[test]
     fn square_root_checks_domain_and_preserves_special_values() {
-        assert_eq!(sqrt(9.0).unwrap(), 3.0);
-        assert_eq!(sqrt(-0.0).unwrap().to_bits(), (-0.0_f64).to_bits());
-        assert_eq!(sqrt(f64::INFINITY).unwrap(), f64::INFINITY);
-        assert!(sqrt(f64::NAN).unwrap().is_nan());
+        assert_eq!(sqrt(9.0).ok().unwrap(), 3.0);
+        assert_eq!(sqrt(-0.0).ok().unwrap().to_bits(), (-0.0_f64).to_bits());
+        assert_eq!(sqrt(f64::INFINITY).ok().unwrap(), f64::INFINITY);
+        assert!(sqrt(f64::NAN).ok().unwrap().is_nan());
         assert!(sqrt(-1.0).is_err());
         assert!(sqrt(f64::NEG_INFINITY).is_err());
     }
