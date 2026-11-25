@@ -2406,6 +2406,7 @@ impl IntrinsicModule {
             (Self::Math, "isclose") => Intrinsic::ScopedObjectExport("math.isclose"),
             (Self::Math, "isfinite") => Intrinsic::ScopedObjectExport("math.isfinite"),
             (Self::Math, "lcm") => Intrinsic::ScopedObjectExport("math.lcm"),
+            (Self::Math, "log") => Intrinsic::ScopedObjectExport("math.log"),
             (Self::Math, "log10") => Intrinsic::MathLog10,
             (Self::Math, "log1p") => Intrinsic::ScopedObjectExport("math.log1p"),
             (Self::Math, "log2") => Intrinsic::ScopedObjectExport("math.log2"),

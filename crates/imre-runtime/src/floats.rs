@@ -278,6 +278,23 @@ pub extern "C" fn imre_float_log2(value: f64) -> f64 {
     finish(float_logarithm(value, f64::log2), 0.0)
 }
 
+/// Natural logarithm with Python's domain check.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_float_log(value: f64) -> f64 {
+    finish(float_logarithm(value, f64::ln), 0.0)
+}
+
+/// Compute the natural logarithm of a Python integer without overflowing an intermediate float.
+///
+/// # Safety
+/// The caller roots a canonical integer handle for the entire call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_int_log(value: usize) -> f64 {
+    // SAFETY: the caller owns a live canonical integer.
+    let value = unsafe { Int::borrow(value) };
+    finish(int_logarithm(&value, f64::ln), 0.0)
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_float_log10(value: f64) -> f64 {
     finish(float_logarithm(value, f64::log10), 0.0)

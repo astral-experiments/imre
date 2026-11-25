@@ -587,6 +587,7 @@ impl Builtin {
             | Self::EnumLookup(_)
             | Self::TomlDecode(_)
             | Self::FloatFmod
+            | Self::IntLog
             | Self::IntLog10
             | Self::FloatFormat { .. } => Contract::new(true, PreservesLists),
             Self::Abs
@@ -1077,7 +1078,9 @@ impl Builtin {
             Self::FloatDegrees | Self::FloatRadians | Self::FloatUnary(_) => {
                 signature(&[Type::Float], Type::Float)
             }
-            Self::IntSignAsFloat | Self::IntLog10 => signature(&[Type::Int], Type::Float),
+            Self::IntSignAsFloat | Self::IntLog | Self::IntLog10 => {
+                signature(&[Type::Int], Type::Float)
+            }
             Self::PairTable(op) => {
                 use crate::ir::PairTableOp::*;
                 let table = if matches!(op, New) {
@@ -1692,12 +1695,14 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_float_sin"
                 | "imre_float_cos"
                 | "imre_float_log2"
+                | "imre_float_log"
                 | "imre_float_log10"
                 | "imre_float_log1p"
                 | "imre_float_exp2"
                 | "imre_float_expm1"
                 | "imre_float_gamma"
                 | "imre_float_lgamma"
+                | "imre_int_log"
                 | "imre_int_log10"
                 | "imre_float_int"
                 | "imre_float_parse"
