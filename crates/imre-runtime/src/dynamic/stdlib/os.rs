@@ -1123,6 +1123,20 @@ pub(super) fn descriptor(
         return setgroups(ctx, groups);
     }
     #[cfg(unix)]
+    if matches!(name, "setuid" | "seteuid" | "setgid" | "setegid") {
+        let value = builtins::one_positional_arg(&format!("posix.{name}"), args, kwargs)?;
+        let group = matches!(name, "setgid" | "setegid");
+        let id = chown::owner_id(ctx, value, group)?;
+        match name {
+            "setuid" => native::setuid(id as libc::uid_t)?,
+            "seteuid" => native::seteuid(id as libc::uid_t)?,
+            "setgid" => native::setgid(id as libc::gid_t)?,
+            "setegid" => native::setegid(id as libc::gid_t)?,
+            _ => unreachable!(),
+        }
+        return Ok(NONE);
+    }
+    #[cfg(unix)]
     if name == "getpgid" {
         let [Some(pid)] = builtins::bind_builtin_arguments(name, args, kwargs, ["pid"], 1)? else {
             unreachable!("pid is required")
