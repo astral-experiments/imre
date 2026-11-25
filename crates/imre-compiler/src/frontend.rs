@@ -10308,11 +10308,18 @@ impl<'a> Checker<'a> {
         expression: &ast::Expr,
         result: ResultUse<'_>,
     ) -> Result<Expr, String> {
-        self.with_expression_site(expression, |checker| {
-            match checker.lower_expression(expression, result) {
-                Err(failure) if checker.missing_operation(&failure) => Ok(Expr::unrepresented()),
-                result => result,
-            }
+        // Expression lowering recurses through debug frames substantially larger than the
+        // visitor frames. Grow before entering them so nested calls and field accesses can
+        // compile on hosts whose default thread stack is only 1 MiB.
+        stacker::maybe_grow(512 * 1024, 2 * 1024 * 1024, || {
+            self.with_expression_site(expression, |checker| {
+                match checker.lower_expression(expression, result) {
+                    Err(failure) if checker.missing_operation(&failure) => {
+                        Ok(Expr::unrepresented())
+                    }
+                    result => result,
+                }
+            })
         })
     }
 
