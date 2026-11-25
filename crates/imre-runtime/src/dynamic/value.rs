@@ -4827,7 +4827,11 @@ impl Heap {
                 free_head = slot.gc_next.replace(UNMARKED);
                 popped += 1;
                 self.slot_shapes[index] = SlotShape::AsciiStr;
-                slot.value = Some(Value::Str(text));
+                debug_assert!(slot.value.is_none());
+                // SAFETY: only retire_slot and retire_verified_text_leaf link slots into
+                // the free list, and both set value to None before linking. This valid,
+                // uniquely borrowed field contains no live Value to drop.
+                unsafe { std::ptr::addr_of_mut!(slot.value).write(Some(Value::Str(text))) };
                 slot.may_have_buffer_views = false;
                 slot.generation = 0;
                 slot.untracked_tuple.set(false);
@@ -8849,6 +8853,37 @@ mod tests {
         assert!(matches!(batch.get(values[0]), Value::Str(s) if s == "abc"));
         assert!(matches!(batch.get(values[1]), Value::Str(s) if s == "abcdefgh"));
         assert!(matches!(batch.get(values[2]), Value::Str(s) if s == "x"));
+    }
+
+    #[test]
+    fn dense_ascii_batch_reuses_retired_owner_and_verified_leaves_before_appending() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let (owner, children) = nonshort_text_list(&mut heap, &[("alpha", true), ("bravo", true)]);
+        heap.release_temporaries_since(mark);
+        // SAFETY: this unchanged producer graph has no remaining roots or aliases, and
+        // no observer or collection can run during its immediate retirement.
+        assert!(unsafe { heap.retire_certified_nonshort_text_list(owner) });
+        let recycled = [owner, children[0], children[1]];
+        for &id in &recycled {
+            assert!(heap.slots[id as usize].value.is_none());
+            assert!(heap.slot_shapes[id as usize] == SlotShape::Vacant);
+        }
+        let appended = heap.slots.len() as Id;
+        heap.reserve_unobserved_texts(4).unwrap();
+        let input = b"\x8c\x03one\x94\x8c\x04four\x94\x8c\x05fives\x94\x8c\x08eight888\x94";
+        let mut values = Vec::with_capacity(4);
+        // SAFETY: all four complete entries are exact ASCII text within the batch's
+        // inline range, and the slot, root and output capacities were reserved.
+        let (at, count) =
+            unsafe { heap.append_reserved_dense_ascii_texts(input, 0, 4, &mut values) };
+        assert_eq!((at, count), (input.len(), 4));
+        assert_eq!(values, [owner, children[0], children[1], appended]);
+        assert_eq!((heap.free_head, heap.free_count), (END, 0));
+        assert_eq!(&heap.execution.current().live[mark..], values.as_slice());
+        for (&id, expected) in values.iter().zip(["one", "four", "fives", "eight888"]) {
+            assert!(matches!(heap.get(id), Value::Str(text) if text == expected));
+        }
     }
 
     #[test]
