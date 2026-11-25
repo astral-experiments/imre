@@ -556,6 +556,57 @@ impl Checker<'_> {
         }
     }
 
+    /// An ordinary unannotated local may receive a new representation after
+    /// a direct call. Retain the old slot until the entire RHS has succeeded.
+    fn direct_string_local_store(
+        &self,
+        name: &str,
+        slot: usize,
+        target: &ast::Expr,
+        rhs: &ast::Expr,
+    ) -> bool {
+        if self.registered.is_some()
+            || !matches!(self.locals[slot], Type::Str | Type::StrLiteral(_))
+            || self.declared_slots.contains_key(&slot)
+            || self.fixed_formals.contains(&slot)
+            || self.bound_flags.contains_key(name)
+            || !rhs.is_call_expr()
+            || narrowing::expression_assignments(rhs).contains(name)
+        {
+            return false;
+        }
+        self.graph.modules[self.module]
+            .parsed
+            .syntax()
+            .body
+            .iter()
+            .any(|stmt| {
+                let ast::Stmt::FunctionDef(function) = stmt else {
+                    return false;
+                };
+                if function
+                    .parameters
+                    .iter_non_variadic_params()
+                    .any(|param| param.name().as_str() == name)
+                {
+                    return false;
+                }
+                let mut earlier = false;
+                for statement in &function.body {
+                    if let ast::Stmt::Assign(assign) = statement
+                        && let [ast::Expr::Name(stored)] = assign.targets.as_slice()
+                        && stored.id.as_str() == name
+                    {
+                        if stored.range() == target.range() && assign.value.range() == rhs.range() {
+                            return earlier;
+                        }
+                        earlier = true;
+                    }
+                }
+                false
+            })
+    }
+
     /// A chain shares one RHS object and visits targets in source order. A later
     /// annotated target can supply the type of an otherwise empty literal.
     pub(super) fn assignment_statement(
@@ -646,8 +697,12 @@ impl Checker<'_> {
                     && self.simple_parameter_conversion(name, slot, rhs)
                     && !narrowing::expression_assignments(rhs).contains(name)
             });
-            let previous = local
-                .filter(|(_, slot)| self.inferred_containers.contains(slot) || inferred_parameter);
+            let direct_string = local.is_some_and(|(name, slot)| {
+                self.direct_string_local_store(name, slot, target, rhs)
+            });
+            let previous = local.filter(|(_, slot)| {
+                self.inferred_containers.contains(slot) || inferred_parameter || direct_string
+            });
             let mut context = self.target_expectation(target, Some(rhs));
             if matches!(context, Some((Type::Callable(_), None)))
                 && let Some((_, slot)) = local
@@ -672,7 +727,7 @@ impl Checker<'_> {
                 && let Some(stream) = self.stream_rhs(rhs)?
             {
                 stream
-            } else if inferred_parameter {
+            } else if inferred_parameter || direct_string {
                 // Both recognized conversions have a concrete RHS; the previous
                 // list element type must not constrain the new local's result.
                 self.typed_expr_for(rhs, ResultUse::Fixed)?
@@ -1865,6 +1920,18 @@ impl Checker<'_> {
 #[cfg(test)]
 mod tests {
     use crate::CompileOptions;
+
+    #[test]
+    fn unannotated_string_local_can_receive_a_call_result() {
+        let ok = "import textwrap\ndef render(label: str) -> str:\n    result = f'{label}!'\n    result = textwrap.wrap(result)\n    return ' '.join(result)\nprint(render('hello'))\n";
+        let ir = crate::compile(ok, &CompileOptions::default()).unwrap();
+        assert!(
+            !ir.lines()
+                .any(|line| line.contains("call ") && line.contains("@imre_dyn_"))
+        );
+        let annotated = "import textwrap\ndef render(label: str) -> str:\n    result: str = label\n    result = textwrap.wrap(result)\n    return result\nprint(render('hello'))\n";
+        assert!(crate::compile(annotated, &CompileOptions::default()).is_err());
+    }
 
     #[test]
     fn unannotated_list_parameter_can_be_rebound_after_its_comprehension() {
