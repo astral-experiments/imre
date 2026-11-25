@@ -21,6 +21,8 @@ mod llvm;
 mod loop_fusion;
 mod modules;
 mod narrowing;
+#[cfg(test)]
+mod native_only_tests;
 mod pair_tables;
 mod range_specialization;
 mod ranges;
@@ -491,6 +493,10 @@ struct ProgramOutput {
     whole: Option<String>,
 }
 
+// Fixed lowering is the sole successful program entry for every command.
+// Retain the registered implementation for provider tooling while it is in use.
+const NATIVE_ONLY: bool = true;
+
 /// Check the entry graph and select how its modules initialize and call compiled functions.
 fn object_fallback(
     mut output: Option<&mut ProgramOutput>,
@@ -618,6 +624,9 @@ fn object_fallback(
             Some("the module launcher requires its registered sources".into()),
             None,
         ),
+        // A loader error is already actionable. Keep its original diagnostic
+        // instead of attributing a missing file or syntax error to runtime policy.
+        Err(error) if NATIVE_ONLY => return Err(error),
         Err(error) => (Some(error.into()), None),
     };
     // Admit an unresolved fixed signature only when its own definition has checked IR
@@ -633,11 +642,18 @@ fn object_fallback(
     let kind = refusal
         .as_ref()
         .map_or(LoweringKind::Ordinary, |error| error.kind);
+    let registered_reason = if graph
+        .as_ref()
+        .is_some_and(|g| g.register_import_effects.get())
+    {
+        "imports must execute at their original statement sites"
+    } else {
+        "the checked program requires a registered entry"
+    };
     let refusal_message = || {
-        refusal.as_ref().map_or_else(
-            || "the checked program requires a registered entry".to_owned(),
-            ToString::to_string,
-        )
+        refusal
+            .as_ref()
+            .map_or_else(|| registered_reason.to_owned(), ToString::to_string)
     };
     // A newly found checked provider can lower normally. If lowering fails, its
     // dependencies alone do not admit the caller to the object importer.
@@ -663,8 +679,21 @@ fn object_fallback(
                 )))?;
             }
         }
-        Err(refusal_message())
+        let reason = refusal_message();
+        let location = match entry {
+            ProgramEntry::Source(_) => String::new(),
+            ProgramEntry::File(path, _) => format!("{}: ", path.display()),
+        };
+        Err(format!(
+            "{location}native-only compilation refused the general-purpose Python runtime: {reason}"
+        ))
     };
+    // Every fixed program has already returned, including check-only calls.
+    // Reject even a successfully checked registered entry with no prior error.
+    // Reuse the original source-contract checks so earlier type errors win.
+    if NATIVE_ONLY {
+        return fallback(graph);
+    }
     let mut checked_graph = graph;
     let graph = checked_graph
         .as_ref()

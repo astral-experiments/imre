@@ -532,8 +532,9 @@ impl Cache {
         };
         // A unit's full IR captures entry-specific codegen decisions. Identical
         // IR can share an object across invocations using the same native tools.
+        // Pre-policy objects and executables may contain registered code.
         let object_inputs = serde_json::to_vec(&(
-            1,
+            2,
             (env::consts::ARCH, env::consts::OS),
             opt.to_str()?,
             path.to_str()?,
@@ -585,7 +586,7 @@ impl Cache {
             None => None,
         };
         let link_inputs = serde_json::to_vec(&(
-            6,
+            7,
             provider_archive,
             module_objects,
             (
