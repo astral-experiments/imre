@@ -128,6 +128,52 @@ impl Checker<'_> {
         Ok(Some(Expr::integer(i64::from(setting))))
     }
 
+    /// Resolve a sealed standard input binding without invoking the object runtime.
+    pub(super) fn fixed_stdin(&self, node: &ast::Expr) -> bool {
+        self.registered.is_none()
+            && self.resolve(node) == Some(Binding::Intrinsic(Intrinsic::Stdin))
+    }
+
+    /// Lower a stream assignment, including a lazily selected input file.
+    /// Only the selected arm may acquire a file or read the stdin binding.
+    pub(super) fn stream_rhs(&mut self, node: &ast::Expr) -> Result<Option<Expr>, String> {
+        let stdin = || Expr {
+            ty: Type::TextIO,
+            kind: ExprKind::Builtin(Builtin::SysStdin, vec![]),
+        };
+        if self.fixed_stdin(node) {
+            return Ok(Some(stdin()));
+        }
+        let ast::Expr::If(choice) = node else {
+            return Ok(None);
+        };
+        let yes = self.fixed_stdin(&choice.body);
+        let no = self.fixed_stdin(&choice.orelse);
+        if !yes && !no {
+            return Ok(None);
+        }
+        let test = self.condition(&choice.test)?;
+        let mut flow = assignments::Flow::read(self);
+        self.apply_facts(&choice.test, true);
+        let body = if yes {
+            stdin()
+        } else {
+            self.expr_expected(&choice.body, Type::TextIO)?
+        };
+        flow.switch_arm(self);
+        self.apply_facts(&choice.test, false);
+        let other = if no {
+            stdin()
+        } else {
+            self.expr_expected(&choice.orelse, Type::TextIO)?
+        };
+        flow.join(self);
+        Ok(Some(Expr {
+            ty: Type::TextIO,
+            kind: ExprKind::Conditional(Box::new(test), Box::new(body), Box::new(other)),
+        }))
+    }
+
     pub(super) fn stdout_value(&self) -> Expr {
         Expr {
             ty: self.types.optional(Type::TextIO),
@@ -879,6 +925,23 @@ impl Checker<'_> {
         Expr {
             ty: crate::version::info_type(self.types),
             kind: ExprKind::Builtin(Builtin::SysVersionInfo { implementation }, vec![]),
+        }
+    }
+}
+
+#[cfg(test)]
+mod fixed_stdin_tests {
+    use crate::{CompileOptions, compile};
+
+    #[test]
+    fn sealed_stdin_and_conditional_files_use_the_native_stream() {
+        for source in [
+            "import sys\nfor line in sys.stdin:\n    print(line)\n",
+            "import sys\nstream = open(sys.argv[1]) if len(sys.argv) > 1 else sys.stdin\nfor line in stream:\n    print(line)\n",
+        ] {
+            let ir = compile(source, &CompileOptions::default()).unwrap();
+            assert!(ir.contains("call ptr @imre_sys_stdin("));
+            assert!(!ir.contains("call void @imre_dyn_register"));
         }
     }
 }

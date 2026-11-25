@@ -5880,6 +5880,7 @@ impl Emitter<'_, '_> {
                     small_integer: true,
                 }
             }
+            Builtin::SysStdin => self.call("imre_sys_stdin", Type::TextIO, &[]),
             Builtin::SysStdout => {
                 let pointer = self.checked_instruction("call ptr @imre_sys_stdout()");
                 Value {
@@ -11130,6 +11131,7 @@ declare void @imre_args_init(i32, ptr)
 declare void @imre_argparse_choice_digits(i64)
 declare ptr @imre_argparse_text(ptr, ptr, i1, i32, ptr)
 declare ptr @imre_argparse_parse(ptr, ptr, ptr, ptr, ptr, ptr, i1)
+declare ptr @imre_sys_stdin()
 declare ptr @imre_sys_stdout()
 declare i32 @imre_sys_has_stdout()
 declare ptr @imre_sys_original_output(i32)
