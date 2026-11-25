@@ -263,6 +263,14 @@ print(total(-0.0, -3, True))
     }
 
     #[test]
+    fn natural_log_preserves_the_integer_input_layout() {
+        let src = "import math\ndef logs(x: int, y: float) -> float:\n    return math.log(x) + math.log(y)\nprint(logs(1 << 2000, 2.0))\n";
+        let ir = crate::compile(src, &crate::CompileOptions::default()).unwrap();
+        assert!(ir.contains("call double @imre_int_log("));
+        assert!(ir.contains("call double @imre_float_log("));
+    }
+
+    #[test]
     fn checked_math_sqrt_uses_the_checked_numeric_operation() {
         let source = r#"
 from math import sqrt

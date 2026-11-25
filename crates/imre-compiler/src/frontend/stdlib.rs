@@ -83,6 +83,7 @@ pub(super) enum ReverseSequence {
 pub(super) fn unary_math_operation(member: &'static str) -> Option<Builtin> {
     Some(match member {
         "fabs" => Builtin::Abs,
+        "log" => Builtin::FloatUnary("imre_float_log"),
         "sqrt" => Builtin::FloatUnary("imre_float_sqrt"),
         "sin" => Builtin::FloatUnary("imre_float_sin"),
         "cos" => Builtin::FloatUnary("imre_float_cos"),
@@ -100,6 +101,9 @@ pub(super) fn unary_math_operation(member: &'static str) -> Option<Builtin> {
 pub(super) fn unary_float_builtin(builtin: Builtin, value: Expr) -> Option<Expr> {
     let (builtin, conversion, ty) = match (builtin, value.ty) {
         // A Python int can have a finite logarithm even when float(int) overflows.
+        (Builtin::FloatUnary("imre_float_log"), Type::Int | Type::Bool) => {
+            (Builtin::IntLog, Builtin::Int(None), Type::Int)
+        }
         (Builtin::FloatUnary("imre_float_log10"), Type::Int | Type::Bool) => {
             (Builtin::IntLog10, Builtin::Int(None), Type::Int)
         }

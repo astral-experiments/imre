@@ -129,6 +129,96 @@ fn first_insertion<'ast>(
 }
 
 impl Checker<'_> {
+    /// Infer nullable element storage for one fresh placeholder list followed by
+    /// a complete range-indexed fill with a fixed class constructor. The list
+    /// still contains real None values until each original store executes.
+    pub(super) fn placeholder_list_type(
+        &self,
+        target: &ast::Expr,
+        rhs: &ast::Expr,
+    ) -> Option<Type> {
+        let name = target.as_name_expr()?.id.as_str();
+        if self.module_scope || self.block_depth != 1 || self.names.contains_key(name) {
+            return None;
+        }
+        let ast::Expr::BinOp(repeat) = rhs else {
+            return None;
+        };
+        let (ast::Expr::List(initial), ast::Expr::Name(bound)) = (&*repeat.left, &*repeat.right)
+        else {
+            return None;
+        };
+        if repeat.op != ast::Operator::Mult
+            || !matches!(initial.elts.as_slice(), [ast::Expr::NoneLiteral(_)])
+        {
+            return None;
+        }
+        let module = &self.graph.modules[self.module];
+        if !module.is_program_source() {
+            return None;
+        }
+        for statement in &module.parsed.syntax().body {
+            let ast::Stmt::FunctionDef(function) = statement else {
+                continue;
+            };
+            for pair in function.body.windows(2) {
+                let (ast::Stmt::Assign(initializer), ast::Stmt::For(fill)) = (&pair[0], &pair[1])
+                else {
+                    continue;
+                };
+                if !matches!(initializer.targets.as_slice(), [stored]
+                    if stored.range() == target.range())
+                    || initializer.value.range() != rhs.range()
+                    || fill.is_async
+                    || !fill.orelse.is_empty()
+                {
+                    continue;
+                }
+                let (ast::Expr::Name(index), ast::Expr::Call(iteration)) =
+                    (&*fill.target, &*fill.iter)
+                else {
+                    continue;
+                };
+                if !self.unshadowed_builtin(&iteration.func, "range")
+                    || !iteration.arguments.keywords.is_empty()
+                    || !matches!(iteration.arguments.args.as_ref(), [ast::Expr::Name(limit)] if limit.id == bound.id)
+                {
+                    continue;
+                }
+                let [ast::Stmt::Assign(store)] = fill.body.as_slice() else {
+                    continue;
+                };
+                let [ast::Expr::Subscript(place)] = store.targets.as_slice() else {
+                    continue;
+                };
+                if !matches!(&*place.value, ast::Expr::Name(owner) if owner.id == name)
+                    || !matches!(&*place.slice, ast::Expr::Name(item) if item.id == index.id)
+                {
+                    continue;
+                }
+                let ast::Expr::Call(constructor) = &*store.value else {
+                    continue;
+                };
+                let simple = |value: &ast::Expr| {
+                    value.is_literal_expr()
+                        || matches!(value, ast::Expr::Name(input) if input.id != name)
+                };
+                if !constructor.arguments.args.iter().all(simple)
+                    || !constructor
+                        .arguments
+                        .keywords
+                        .iter()
+                        .all(|keyword| simple(&keyword.value))
+                {
+                    continue;
+                }
+                let class = self.class_reference(&constructor.func)?;
+                return Some(self.types.list(self.types.optional(Type::Class(class))));
+            }
+        }
+        None
+    }
+
     /// A concrete insertion can determine the layout of a fresh list or set. A set
     /// filled from an exact text iterator can also use its inferred element type.
     pub(super) fn inserted_element(
@@ -2847,6 +2937,97 @@ impl Checker<'_> {
         returned
     }
 
+    /// Only a plain direct source function whose first statement replaces the
+    /// incoming list by its stringified elements can consume the private frame.
+    fn numeric_list_consumer(
+        &self,
+        call: &ast::ExprCall,
+        signature: &Signature,
+        index: usize,
+    ) -> bool {
+        let Some(Binding::Definition(owner)) = self.resolve(&call.func) else {
+            return false;
+        };
+        let Some(callee) = call.func.as_name_expr() else {
+            return false;
+        };
+        let module = &self.graph.modules[owner.module];
+        if !module.is_program_source()
+            || owner.module != self.module
+            || self
+                .functions
+                .get(&owner)
+                .is_none_or(|f| f.id != signature.id)
+        {
+            return false;
+        }
+        let mut definitions = module.parsed.syntax().body.iter().filter_map(|s| match s {
+            ast::Stmt::FunctionDef(f) if f.name.as_str() == callee.id.as_str() => Some(f),
+            _ => None,
+        });
+        let Some(f) = definitions.next() else {
+            return false;
+        };
+        if definitions.next().is_some()
+            || !f.decorator_list.is_empty()
+            || f.is_async
+            || f.parameters.vararg.is_some()
+            || f.parameters.kwarg.is_some()
+        {
+            return false;
+        }
+        let Some(param) = f.parameters.iter_non_variadic_params().nth(index) else {
+            return false;
+        };
+        if param.annotation().is_some() || param.default.is_some() {
+            return false;
+        }
+        let name = param.name().as_str();
+        let Some(ast::Stmt::Assign(assign)) = f.body.first() else {
+            return false;
+        };
+        if !matches!(assign.targets.as_slice(), [ast::Expr::Name(n)] if n.id==name) {
+            return false;
+        }
+        let ast::Expr::ListComp(comp) = &*assign.value else {
+            return false;
+        };
+        let [clause] = comp.generators.as_slice() else {
+            return false;
+        };
+        let (ast::Expr::Name(input), ast::Expr::Name(item), ast::Expr::Call(conv)) =
+            (&clause.iter, &clause.target, &*comp.elt)
+        else {
+            return false;
+        };
+        input.id == name
+            && item.id != name
+            && !clause.is_async
+            && clause.ifs.is_empty()
+            && matches!(&*conv.func,ast::Expr::Name(n) if n.id=="str")
+            && conv.arguments.keywords.is_empty()
+            && matches!(conv.arguments.args.as_ref(),[ast::Expr::Name(n)] if n.id==item.id)
+    }
+
+    /// Pack a single numeric list without coercing its items or cloning its storage.
+    fn pack_numeric_list(&self, value: Expr, site: &ast::Expr) -> Result<Expr, String> {
+        let ty = self.types.numeric_list_frame();
+        let fields = self.types.fields(ty).unwrap();
+        let (left, right) = match self.types.element(value.ty) {
+            Some(Type::Int) => (value, Expr::none()),
+            Some(Type::Float) => (Expr::none(), value),
+            _ => return Err(self.scoped_builtin_error("non-numeric list argument", site)),
+        };
+        let values = vec![
+            self.coerce(left, fields[0], site)?,
+            self.coerce(right, fields[1], site)?,
+        ];
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Tuple(values),
+        })
+    }
+
     fn source_arguments(
         &mut self,
         call: &ast::ExprCall,
@@ -2916,6 +3097,17 @@ impl Checker<'_> {
                             }
                         }
                     };
+                // Once discovery has widened this ABI, every direct call must supply
+                // one exact list. Reject unknown calls and user tuples at this boundary.
+                let stored = inference.and_then(|i| i.parameter(signature.id,index)).unwrap_or(parameter.ty);
+                if checker.types.is_numeric_list_frame(stored) {
+                    if !direct || !checker.numeric_list_consumer(call,signature,index) {
+                        return Err(checker.scoped_builtin_error("numeric list argument layout",argument.site()));
+                    }
+                    let site=argument.site();
+                    let value=argument.value(checker)?;
+                    return checker.pack_numeric_list(value,site);
+                }
                 let timeout = selector_wait && parameter.name == "timeout";
                 if dedent || timeout || (stat_mode && parameter.ty == Type::Int) {
                     let node = argument.site();
@@ -2961,6 +3153,17 @@ impl Checker<'_> {
                     }
                     let types = checker.types;
                     let inferred = inference.pending.borrow()[signature.id].inferred_params[index];
+                    if direct && inferred && node.is_name_expr()
+                        && matches!(types.element(ty),Some(Type::Int | Type::Float))
+                        && checker.numeric_list_consumer(call,signature,index) {
+                        let value=argument.value(checker)?;
+                        if value.ty!=ty && matches!(types.element(value.ty),Some(Type::Int | Type::Float)) {
+                            let frame=types.numeric_list_frame();
+                            inference.widen_parameter(signature.id,index,frame);
+                            return checker.pack_numeric_list(value,node);
+                        }
+                        return direct_value(checker,value,ty,node);
+                    }
                     // Absence and a present value share the same optional ABI in either call order.
                     let nullable = |prior, actual| {
                         if inferred
@@ -3169,6 +3372,27 @@ impl Checker<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn placeholder_fill_uses_nullable_fixed_record_storage() {
+        let source = r#"class Cell:
+    value: int
+    def __init__(self, value: int): self.value = value
+    def read(self) -> int: return self.value
+def make(count: int):
+    cells = [None] * count
+    for index in range(count):
+        cells[index] = Cell(index)
+    total = 0
+    for cell in cells:
+        total += cell.read()
+    return total
+print(make(3))
+"#;
+        let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
+        assert!(!llvm.lines().any(|line| line.contains("call ")
+            && (line.contains("@imre_dyn_") || line.contains("@imre_boxed_"))));
+    }
 
     #[test]
     fn fresh_list_joins_direct_conditional_and_loop_constructors() {

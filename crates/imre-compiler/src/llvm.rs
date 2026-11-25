@@ -7464,6 +7464,7 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::FloatUnary(symbol) => self.call(symbol, Type::Float, &[&args[0].value]),
+            Builtin::IntLog => self.call("imre_int_log", Type::Float, &[&args[0].value]),
             Builtin::IntLog10 => self.call("imre_int_log10", Type::Float, &[&args[0].value]),
             Builtin::FloatIsInteger => {
                 let value = &args[0].value.operand;
@@ -10547,6 +10548,8 @@ declare double @imre_float_cos(double)
 declare double @atan(double)
 declare double @imre_float_log1p(double)
 declare double @imre_float_log2(double)
+declare double @imre_float_log(double)
+declare double @imre_int_log(i64)
 declare double @imre_float_log10(double)
 declare double @imre_int_log10(i64)
 declare double @cbrt(double)

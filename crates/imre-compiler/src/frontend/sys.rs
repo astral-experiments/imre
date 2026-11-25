@@ -591,6 +591,25 @@ impl Checker<'_> {
             return Ok(None);
         };
         let receiver = self.resolve(&attribute.value);
+        if self.registered.is_none()
+            && receiver == Some(Binding::Intrinsic(Intrinsic::Stdin))
+            && call.arguments.args.is_empty()
+            && call.arguments.keywords.is_empty()
+            && let Some(operation) = match attribute.attr.as_str() {
+                "read" => Some(Builtin::TextRead),
+                "readline" => Some(Builtin::FileReadline),
+                _ => None,
+            }
+        {
+            let stdin = Expr {
+                ty: Type::TextIO,
+                kind: ExprKind::Builtin(Builtin::SysStdin, vec![]),
+            };
+            return Ok(Some(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(operation, vec![stdin]),
+            }));
+        }
         if attribute.attr.as_str() == "reconfigure"
             && matches!(
                 receiver,
@@ -932,6 +951,17 @@ impl Checker<'_> {
 #[cfg(test)]
 mod fixed_stdin_tests {
     use crate::{CompileOptions, compile};
+
+    #[test]
+    fn direct_standard_input_reads_use_the_process_decoder() {
+        let ir = compile(
+            "import sys\nprint(sys.stdin.readline())\nprint(sys.stdin.read())\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        assert!(ir.contains("call ptr @imre_text_readline("));
+        assert!(ir.contains("call ptr @imre_text_read("));
+    }
 
     #[test]
     fn sealed_stdin_and_conditional_files_use_the_native_stream() {

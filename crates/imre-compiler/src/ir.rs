@@ -2279,6 +2279,7 @@ pub(crate) enum Builtin {
     FloatRadians,
     FloatUnary(&'static str),
     Sumprod,
+    IntLog,
     IntLog10,
     IntSignAsFloat,
     Bool,
