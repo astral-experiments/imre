@@ -51,9 +51,7 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
     }
     write(ctx, file, end)?;
     if should_flush {
-        let mark = ctx.heap.temporary_mark();
-        super::call_stream_method(ctx, file, "flush")?;
-        ctx.discard_temporaries(mark, None);
+        super::flush_stream(ctx, file)?;
     }
     Ok(NONE)
 }
