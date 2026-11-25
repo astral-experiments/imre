@@ -324,6 +324,22 @@ pub extern "C" fn imre_float_asin(value: f64) -> f64 {
     finish(asin(value), 0.0)
 }
 
+/// Compute Python math.sqrt after the caller has converted its numeric operand.
+pub(crate) fn sqrt(value: f64) -> Result<f64> {
+    if value < 0.0 {
+        return Err(Error::new(
+            Kind::ValueError,
+            format!("expected a nonnegative input, got {}", render(value)),
+        ));
+    }
+    Ok(value.sqrt())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_float_sqrt(value: f64) -> f64 {
+    finish(sqrt(value), 0.0)
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_float_int(value: f64) -> usize {
     finish(float_to_integer(value).map(|n| Int::new(n).into_raw()), 1)
@@ -675,6 +691,16 @@ mod tests {
     fn quotient(left: BigInt, right: BigInt) -> f64 {
         ratio(&Int::new(left), &Int::new(right))
             .unwrap_or_else(|_| panic!("unexpected ratio error"))
+    }
+
+    #[test]
+    fn square_root_checks_domain_and_preserves_special_values() {
+        assert_eq!(sqrt(9.0).ok().unwrap(), 3.0);
+        assert_eq!(sqrt(-0.0).ok().unwrap().to_bits(), (-0.0_f64).to_bits());
+        assert_eq!(sqrt(f64::INFINITY).ok().unwrap(), f64::INFINITY);
+        assert!(sqrt(f64::NAN).ok().unwrap().is_nan());
+        assert!(sqrt(-1.0).is_err());
+        assert!(sqrt(f64::NEG_INFINITY).is_err());
     }
 
     #[test]

@@ -2077,6 +2077,7 @@ pub(crate) enum Builtin {
     Cycle,
     /// A first-class cursor that owns its current numeric prefix.
     AccumulateCursor,
+    SysStdin,
     SysStdout,
     SysHasStdout,
     TargetLittleEndian,

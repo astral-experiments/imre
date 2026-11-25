@@ -4,6 +4,69 @@ use super::*;
 use expansions::ExpansionSource;
 
 impl Checker<'_> {
+    /// Consume a sealed map only when the assignment cannot retain its iterator.
+    /// Fixed-arity unpacking pulls one extra item to distinguish exact arity; it
+    /// must not convert the remainder after finding that extra item.
+    pub(super) fn mapped_unpack(
+        &mut self,
+        expression: &ast::Expr,
+        limit: Option<usize>,
+    ) -> Result<Option<Expr>, String> {
+        let Some(call) = expression.as_call_expr() else {
+            return Ok(None);
+        };
+        if self.registered.is_some()
+            || !matches!(
+                self.bound_callback_pipeline(call),
+                Some(pipelines::CallbackPipeline::MapBuiltin { converter, .. })
+                    if converter.id == "int"
+            )
+        {
+            return Ok(None);
+        }
+        let (source, mapped) = self.consumer_source(expression, None)?;
+        let source = match source {
+            ExpansionSource::Value(value)
+            | ExpansionSource::Iteration(Iteration::Container {
+                iterable: value,
+                items: false,
+            }) => value,
+            _ => return Err(self.scoped_builtin_error("map", call)),
+        };
+        if !matches!(
+            source.ty,
+            Type::ListInt | Type::List(_) | Type::Str | Type::Bytes
+        ) {
+            return Err(self.scoped_builtin_error("map", call));
+        }
+        let input = self.iteration_value(source, false, mapped.unwrap_or(expression))?;
+        let (body, result) =
+            self.collect_list_body(input, Type::Int, call, |checker, result, item| {
+                let item = checker.consumer_value(item, true, call)?;
+                let mut element = Some(Type::Int);
+                let mut body = checker.expansion_insert(result, &mut element, item, false, call)?;
+                if let Some(limit) = limit {
+                    let length = Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(Builtin::Len, vec![checker.local(result)]),
+                    };
+                    body.push(Statement::If(
+                        Expr {
+                            ty: Type::Bool,
+                            kind: ExprKind::Compare(
+                                vec![length, Expr::integer(limit)],
+                                vec![Compare::Greater.operator()],
+                            ),
+                        },
+                        vec![Statement::Break(None)],
+                        Vec::new(),
+                    ));
+                }
+                Ok(body)
+            })?;
+        Ok(Some(Expr::scope(body, self.local(result), vec![result])))
+    }
+
     pub(super) fn list_call(
         &mut self,
         call: &ast::ExprCall,
@@ -666,5 +729,16 @@ mod tests {
         .unwrap();
         assert!(!llvm.contains("call ptr @imre_str_int_list("));
         assert!(llvm.contains("call ptr @imre_str_iter("));
+    }
+
+    #[test]
+    fn mapped_int_unpack_uses_fixed_lowering() {
+        let llvm = compile(
+            "def parse(text: str) -> int:\n    first, second = map(int, text.split('-'))\n    return first + second\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        assert!(llvm.contains("@imre_int_parse"));
+        assert!(!llvm.contains("@imre_dyn_register"));
     }
 }

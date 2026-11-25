@@ -80,6 +80,7 @@ enum FileKind {
 }
 
 enum Stream {
+    ProcessInput,
     Standard(bool),
     Read(Input),
     Random(random::Random),
@@ -94,6 +95,8 @@ impl Stream {
     /// Closes exactly once even when flushing fails. A close error takes precedence.
     fn close(self) -> io::Result<()> {
         let (file, flushed) = match self {
+            // The process owns fd 0. Closing the wrapper only marks it closed.
+            Self::ProcessInput => return Ok(()),
             Self::Standard(stderr) => return crate::sys::close_standard_output(stderr, true),
             Self::Read(input) => (input.into_file(), Ok(())),
             Self::Random(file) => return file.close(),
@@ -294,12 +297,26 @@ impl FileState {
         if self.kind == FileKind::TextMemory {
             return self.text_memory()?.read(None, false);
         }
+        if matches!(self.stream, Some(Stream::ProcessInput)) {
+            let mut text = String::new();
+            loop {
+                let line = crate::sys::read_input_line()?;
+                if line.is_empty() {
+                    break;
+                }
+                text.push_str(&line);
+            }
+            return Ok(Str::from(text));
+        }
         self.input()?.read_text()
     }
 
     pub(super) fn readline(&mut self) -> Result<Str> {
         if self.kind == FileKind::TextMemory {
             return self.text_memory()?.read(None, true);
+        }
+        if matches!(self.stream, Some(Stream::ProcessInput)) {
+            return crate::sys::read_input_line().map(Str::from);
         }
         self.input()?.text_line()
     }
@@ -494,7 +511,8 @@ impl FileState {
             Stream::Standard(stderr) => {
                 crate::sys::flush_standard(*stderr).map_err(crate::objects::errno_error)
             }
-            Stream::Read(_)
+            Stream::ProcessInput
+            | Stream::Read(_)
             | Stream::UnreadGzip { .. }
             | Stream::Member(_)
             | Stream::Memory(_)
@@ -718,6 +736,21 @@ pub unsafe extern "C" fn imre_gzip_open(path: *const Str, binary: u32) -> *const
     // SAFETY: the caller keeps this string owner live throughout the call.
     let path = unsafe { StrOwner::acquire_word(path as usize) };
     finish(open(&path, 0, binary == 1, true), std::ptr::null())
+}
+
+/// The native input wrapper shares the same decoder and cursor as input().
+pub(super) fn standard_input() -> crate::ObjectOwner {
+    crate::ObjectOwner::new(Object(StorageCell::new(Storage::File(BoxedFile::new(
+        FileState {
+            fd: Some(io::stdin().as_raw_fd()),
+            stream: Some(Stream::ProcessInput),
+            raw: false,
+            encoding: Some(crate::sys::standard_field(0, false)),
+            errors: Some(crate::sys::standard_field(0, true)),
+            kind: FileKind::Text,
+            name: Some(StrOwner::new(Str::new("<stdin>"))),
+        },
+    )))))
 }
 
 /// The original Python wrapper shares the runtime's stdout/stderr buffer, even through an alias.
@@ -1173,7 +1206,9 @@ pub unsafe extern "C" fn imre_text_readline_inline(
     let result = unsafe {
         object(file).0.with_mut(|s| {
             let file = s.file_mut();
-            if file.kind == FileKind::TextMemory {
+            if file.kind == FileKind::TextMemory
+                || matches!(file.stream, Some(Stream::ProcessInput))
+            {
                 return file
                     .readline()
                     .map(|line| capture(Cow::Borrowed(&line), out));

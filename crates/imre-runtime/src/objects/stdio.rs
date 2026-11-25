@@ -16,6 +16,7 @@ thread_local! {
     static STDOUT: RefCell<Binding> = const { RefCell::new(Binding::Original) };
     static ORIGINAL: OnceCell<ObjectOwner> = const { OnceCell::new() };
     static STDERR: OnceCell<ObjectOwner> = const { OnceCell::new() };
+    static STDIN: OnceCell<ObjectOwner> = const { OnceCell::new() };
 }
 
 fn original(stderr: bool) -> ObjectOwner {
@@ -47,6 +48,14 @@ pub extern "C" fn imre_sys_original_output(stderr: u32) -> *const Object {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_sys_has_stdout() -> u32 {
     STDOUT.with_borrow(|b| u32::from(!matches!(b, Binding::Missing)))
+}
+
+/// Return an owned alias of the original input stream.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_sys_stdin() -> *const Object {
+    STDIN.with(|slot| {
+        ObjectOwner::into_raw(ObjectOwner::clone(slot.get_or_init(files::standard_input)))
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -168,6 +177,18 @@ impl crate::input::Backend for NativeInput {
 
     fn read_line(&mut self, stream: &InputStream) -> Result<String, Error> {
         debug_assert!(matches!(stream, InputStream::ProcessInput));
+        let closed = STDIN.with(|slot| {
+            slot.get().is_some_and(|file| {
+                // SAFETY: the thread-local owner roots the native input file throughout the borrow.
+                unsafe { file.0.with_mut(|storage| storage.file_mut().closed()) }
+            })
+        });
+        if closed {
+            return Err(Error::new(
+                Kind::ValueError,
+                "I/O operation on closed file.",
+            ));
+        }
         crate::sys::read_input_line()
     }
 

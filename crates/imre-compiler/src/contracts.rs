@@ -813,6 +813,7 @@ impl Builtin {
             | Self::Print
             | Self::SortRestore
             | Self::StderrLine
+            | Self::SysStdin
             | Self::SysStdout
             | Self::SysOriginalOutput { .. }
             | Self::SysStdoutSet
@@ -1600,6 +1601,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_input"
                 | "imre_input_select_stdout"
                 | "imre_input_finish"
+                | "imre_sys_stdin"
                 | "imre_sys_stdout"
                 | "imre_sys_stdout_del"
                 | "imre_text_optional_receiver"
@@ -1686,6 +1688,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_float_acos"
                 | "imre_float_fmod"
                 | "imre_float_asin"
+                | "imre_float_sqrt"
                 | "imre_float_log2"
                 | "imre_float_log10"
                 | "imre_float_log1p"

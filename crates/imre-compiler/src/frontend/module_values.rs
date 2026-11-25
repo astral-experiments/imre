@@ -526,7 +526,10 @@ impl Checker<'_> {
                     Expr::none()
                 })
             }
-            ast::Stmt::Assign(assignment) => self.expr(&assignment.value),
+            ast::Stmt::Assign(assignment) => match self.stream_rhs(&assignment.value)? {
+                Some(value) => Ok(value),
+                None => self.expr(&assignment.value),
+            },
             ast::Stmt::AnnAssign(assignment) => {
                 let value = assignment.value.as_deref().ok_or_else(|| {
                     error(

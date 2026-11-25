@@ -263,6 +263,22 @@ print(total(-0.0, -3, True))
     }
 
     #[test]
+    fn checked_math_sqrt_uses_the_checked_numeric_operation() {
+        let source = r#"
+from math import sqrt
+
+def roots(x: float, n: int, flag: bool) -> float:
+    return sqrt(x) + sqrt(n) + sqrt(flag)
+
+print(roots(-0.0, 9, True))
+"#;
+        let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
+        assert_eq!(llvm.matches("call double @imre_float_sqrt(").count(), 3);
+        assert!(llvm.contains("call double @imre_int_float("));
+        assert!(llvm.contains("uitofp i1"));
+    }
+
+    #[test]
     fn float_copysign_uses_the_llvm_intrinsic() {
         let source = "from math import copysign\ndef sign(x: float, y: float) -> float:\n    return copysign(x, y)\nprint(sign(1.0, -0.0))";
         let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
