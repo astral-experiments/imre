@@ -195,6 +195,8 @@ impl<'a> ModuleEntryRoot<'a> {
 pub(crate) struct InstalledWheel {
     root: PathBuf,
     canonical_root: Option<PathBuf>,
+    /// Alternate RECORD spellings proved to resolve to this installation root.
+    aliases: Vec<PathBuf>,
     members: Vec<(Rc<Path>, String)>,
 }
 
@@ -289,7 +291,21 @@ impl WheelRecords {
                     .files
                     .push((path.clone(), identity, record.digest.clone()));
             }
-            wheels.push(record.wheel(root, canonical_root.as_deref()));
+            let wheel = record.wheel(root, canonical_root.as_deref(), filesystem);
+            if let Some(canonical_root) = &canonical_root {
+                for alias in &wheel.aliases {
+                    if !inputs
+                        .directories
+                        .iter()
+                        .any(|(path, identity)| path == alias && identity == canonical_root)
+                    {
+                        inputs
+                            .directories
+                            .push((alias.clone(), canonical_root.clone()));
+                    }
+                }
+            }
+            wheels.push(wheel);
         }
         if register {
             inputs.wheel_records.push((root.to_owned(), records));
@@ -299,13 +315,27 @@ impl WheelRecords {
 }
 
 impl Record {
-    fn wheel(&mut self, root: &Path, canonical_root: Option<&Path>) -> Rc<InstalledWheel> {
+    fn wheel(
+        &mut self,
+        root: &Path,
+        canonical_root: Option<&Path>,
+        filesystem: &mut FileSystem<'_>,
+    ) -> Rc<InstalledWheel> {
+        self.wheels.retain(|wheel| {
+            wheel.root.as_os_str() != root.as_os_str()
+                || wheel.canonical_root.as_deref() != canonical_root
+                || wheel
+                    .aliases
+                    .iter()
+                    .all(|alias| filesystem.canonicalize(alias).ok().as_deref() == canonical_root)
+        });
         if let Some(wheel) = self.wheels.iter().find(|wheel| {
             wheel.root.as_os_str() == root.as_os_str()
                 && wheel.canonical_root.as_deref() == canonical_root
         }) {
             return Rc::clone(wheel);
         }
+        let mut aliases = BTreeSet::new();
         let members = self
             .paths
             .iter()
@@ -314,7 +344,15 @@ impl Record {
                     member
                         .strip_prefix(root)
                         .ok()
-                        .or_else(|| member.strip_prefix(canonical_root?).ok())?
+                        .or_else(|| member.strip_prefix(canonical_root?).ok())
+                        .or_else(|| {
+                            let identity = canonical_root?;
+                            let alias = member.ancestors().skip(1).find(|ancestor| {
+                                filesystem.canonicalize(ancestor).ok().as_deref() == Some(identity)
+                            })?;
+                            aliases.insert(alias.to_owned());
+                            member.strip_prefix(alias).ok()
+                        })?
                 } else {
                     member
                 };
@@ -325,6 +363,7 @@ impl Record {
         let wheel = Rc::new(InstalledWheel {
             root: root.to_owned(),
             canonical_root: canonical_root.map(Path::to_owned),
+            aliases: aliases.into_iter().collect(),
             members,
         });
         self.wheels.push(Rc::clone(&wheel));
