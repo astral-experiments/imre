@@ -38,6 +38,12 @@ def current():
     else:
         raise AssertionError("accepted keywords")
 
+    word = (1 << 32) - 1
+    product = word * (word + 1)
+    assert lcm(word, word + 1) == product
+    assert lcm(word, word + 1, 7) == product * 7
+    assert gcd(-(1 << 62), 0) == 1 << 62
+
     assert lcm() == 1 and lcm(Integral(-27)) == 27
     assert type(lcm(True)) is int
     assert math.lcm(-9 * big, 6 * big) == 18 * big
