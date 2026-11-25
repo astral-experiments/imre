@@ -685,7 +685,7 @@ impl Checker<'_> {
         let ast::Expr::Call(call) = rhs else {
             return false;
         };
-        if !matches!(&*call.func,ast::Expr::Attribute(attr) if attr.attr=="join" && attr.value.is_string_literal_expr())
+        if !matches!(&*call.func,ast::Expr::Attribute(attr) if attr.attr.as_str()=="join" && attr.value.is_string_literal_expr())
             || !call.arguments.keywords.is_empty()
             || !matches!(call.arguments.args.as_slice(), [ast::Expr::Name(_)])
         {
