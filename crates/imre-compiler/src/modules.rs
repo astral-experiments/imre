@@ -2456,6 +2456,7 @@ impl IntrinsicModule {
             (Self::CollectionsAbc, "Set") => Intrinsic::AbstractSet,
             (Self::Tomllib, "load") => Intrinsic::TomllibLoad,
             (Self::Tomllib, "TOMLDecodeError") => Intrinsic::TomlDecodeError,
+            (Self::Zlib, "compress") => Intrinsic::ScopedObjectExport("zlib.compress"),
             (Self::Zlib, "compressobj") => Intrinsic::ScopedObjectExport("zlib.compressobj"),
             (Self::Zlib, "ZLIB_VERSION" | "ZLIB_RUNTIME_VERSION") => {
                 Intrinsic::StringConstant(imre_ast::zlib::VERSION)

@@ -152,6 +152,7 @@ impl Builtin {
                 PreservesOwners,
             ),
             Self::Adler32 => Contract::new(false, PreservesLists),
+            Self::ZlibCompress => Contract::new(true, PreservesLists),
             Self::HmacCompareDigest { text } => Contract::new(*text, PreservesLists),
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
@@ -1064,6 +1065,7 @@ impl Builtin {
                 result == Type::Int && args.len() >= 2 && args.iter().all(|arg| arg.ty == Type::Int)
             }
             Self::IntFromBytes => signature(&[Type::Bytes], Type::Int),
+            Self::ZlibCompress => signature(&[Type::Bytes, Type::Int, Type::Int], Type::Bytes),
             Self::MathComb | Self::MathPerm => signature(&[Type::Int, Type::Int], Type::Int),
             Self::MathFactorial | Self::IntBitCount | Self::IntBitLength | Self::IntHash => {
                 signature(&[Type::Int], Type::Int)
@@ -1561,6 +1563,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_urlsafe_b64encode"
                 | "imre_base64_translate"
                 | "imre_binascii_ascii_input"
+                | "imre_zlib_compress"
                 | "imre_binascii_decode"
                 | "imre_binascii_encode"
                 | "imre_base32_encode"

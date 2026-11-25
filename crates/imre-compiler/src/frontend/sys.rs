@@ -471,6 +471,20 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(Builtin::BuiltinsHasLast, vec![]),
             }));
         }
+        if self.registered.is_none()
+            && binding
+                == Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                    "zlib.compress",
+                )))
+            && let ast::Expr::Attribute(attribute) = &*call.func
+            && attribute.attr.as_str() == "compress"
+            && self.resolve(&attribute.value)
+                == Some(Binding::IntrinsicModule(
+                    crate::modules::IntrinsicModule::Zlib,
+                ))
+        {
+            return self.zlib_compress(call).map(Some);
+        }
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "hasattr" && !self.names.contains_key("hasattr"))
             && binding.is_none()
             && call.arguments.keywords.is_empty()

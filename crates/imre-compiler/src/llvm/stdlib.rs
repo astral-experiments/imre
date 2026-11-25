@@ -284,6 +284,17 @@ print(total(-0.0, -3, True))
     }
 
     #[test]
+    fn qualified_zlib_compress_lowers_to_checked_bytes_operation() {
+        let source = r#"import zlib
+a = zlib.compress(b"abc")
+b = zlib.compress(a, zlib.Z_BEST_COMPRESSION, -15)
+print(len(b))
+"#;
+        let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
+        assert_eq!(llvm.matches("call ptr @imre_zlib_compress(").count(), 2);
+    }
+
+    #[test]
     fn checked_math_sqrt_uses_the_checked_numeric_operation() {
         let source = r#"
 from math import sqrt

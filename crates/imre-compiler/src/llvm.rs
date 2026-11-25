@@ -6466,6 +6466,11 @@ impl Emitter<'_, '_> {
                 Type::Int,
                 &[&args[0].value, &args[1].value],
             ),
+            Builtin::ZlibCompress => self.call(
+                "imre_zlib_compress",
+                Type::Bytes,
+                &[&args[0].value, &args[1].value, &args[2].value],
+            ),
             Builtin::BinasciiEncode | Builtin::BinasciiDecode => {
                 let function = if matches!(builtin, Builtin::BinasciiEncode) {
                     "imre_binascii_encode"
@@ -10651,6 +10656,7 @@ declare ptr @imre_base64_translate(ptr, ptr, i1)
 declare ptr @imre_binascii_ascii_input(ptr)
 declare ptr @imre_binascii_decode(ptr, i1)
 declare i64 @imre_zlib_adler32(ptr, i64)
+declare ptr @imre_zlib_compress(ptr, i64, i64)
 declare ptr @imre_binascii_encode(ptr, i1)
 declare ptr @imre_base32_encode(ptr, i1)
 declare ptr @imre_base32_decode(ptr, i1, i1)

@@ -2479,6 +2479,7 @@ pub(crate) enum Builtin {
     Base64Translate,
     BinasciiAsciiInput,
     Adler32,
+    ZlibCompress,
     BinasciiDecode,
     BinasciiEncode,
     BinasciiUnhexlify,
