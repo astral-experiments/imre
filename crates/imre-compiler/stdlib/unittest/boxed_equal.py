@@ -208,6 +208,7 @@ addTypeEqualityFunc.__qualname__ = "TestCase.addTypeEqualityFunc"
 TestCase.addTypeEqualityFunc = addTypeEqualityFunc
 TestCase._getAssertEqualityFunc = _getAssertEqualityFunc
 TestCase._baseAssertEqual = _baseAssertEqual
+assertEqual.__qualname__ = "TestCase.assertEqual"
 TestCase.assertEqual = assertEqual
 assertDictEqual.__qualname__ = "TestCase.assertDictEqual"
 TestCase.assertDictEqual = assertDictEqual
