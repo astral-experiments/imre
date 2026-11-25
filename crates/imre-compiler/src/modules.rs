@@ -4443,6 +4443,91 @@ impl SourceGraph {
         loader.finish(id, filename, reachable_only, profile)
     }
 
+    /// Prove that a module's initial bare-name probe raises NameError. The prologue may
+    /// contain only sealed intrinsic imports (never builtins), so no earlier Python code
+    /// or exposed namespace can install the missing name in globals or builtins.
+    pub(crate) fn closed_missing_module_probe(
+        &self,
+        module: ModuleId,
+        expression: &ast::Expr,
+    ) -> bool {
+        let ast::Expr::Name(name) = expression else {
+            return false;
+        };
+        let name = name.id.as_str();
+        let minor = crate::PYTHON_VERSION.minor;
+        if ruff_python_stdlib::builtins::is_python_builtin(name, minor, false)
+            || ruff_python_stdlib::builtins::python_magic_globals(minor)
+                .any(|global| global == name)
+            || !self.session.is_unbound_module_read(module, expression)
+        {
+            return false;
+        }
+        let source = &self.modules[module];
+        for statement in &source.parsed.syntax().body {
+            if statement.range().contains_range(expression.range()) {
+                let ast::Stmt::Try(guard) = statement else {
+                    return false;
+                };
+                let [ast::ExceptHandler::ExceptHandler(handler)] = guard.handlers.as_slice() else {
+                    return false;
+                };
+                let Some(ast::Expr::Name(kind)) = handler.type_.as_deref() else {
+                    return false;
+                };
+                // An implicit NameError carries a .name field that the fixed exception
+                // representation cannot yet store. Permit only handlers whose setup cannot
+                // obtain or expose the active exception, including through a Python call.
+                let setup = |statement: &ast::Stmt| {
+                    let ast::Stmt::Assign(assignment) = statement else {
+                        return false;
+                    };
+                    if !matches!(assignment.targets.as_slice(), [ast::Expr::Name(_)]) {
+                        return false;
+                    }
+                    match assignment.value.as_ref() {
+                        ast::Expr::BooleanLiteral(_) | ast::Expr::NoneLiteral(_) => true,
+                        ast::Expr::Name(value) => {
+                            let value = value.id.as_str();
+                            ruff_python_stdlib::builtins::is_python_builtin(value, minor, false)
+                                && !source.bindings.contains_key(value)
+                        }
+                        _ => false,
+                    }
+                };
+                return !guard.is_star
+                    && guard.orelse.is_empty()
+                    && guard.finalbody.is_empty()
+                    && matches!(guard.body.first(), Some(ast::Stmt::Expr(probe))
+                        if probe.value.range() == expression.range())
+                    && kind.id.as_str() == "NameError"
+                    && !source.bindings.contains_key("NameError")
+                    && handler.name.is_none()
+                    && !handler.body.is_empty()
+                    && handler.body.iter().all(setup);
+            }
+            match statement {
+                ast::Stmt::Expr(doc) if doc.value.is_string_literal_expr() => {}
+                ast::Stmt::Import(import) if !import.is_lazy => {
+                    if !import.names.iter().all(|alias| {
+                        let Some(intrinsic) = IntrinsicModule::named(alias.name.as_str()) else {
+                            return false;
+                        };
+                        if intrinsic == IntrinsicModule::Builtins {
+                            return false;
+                        }
+                        let local = alias.asname.as_ref().unwrap_or(&alias.name).as_str();
+                        source.bindings.get(local) == Some(&Binding::IntrinsicModule(intrinsic))
+                    }) {
+                        return false;
+                    }
+                }
+                _ => return false,
+            }
+        }
+        false
+    }
+
     /// Resolves namespace paths while leaving local-value attributes to the expression checker.
     pub(crate) fn resolve(&self, module: ModuleId, expression: &ast::Expr) -> Option<Binding> {
         if let Some(import) = self.local_static_binding(module, expression) {
