@@ -203,6 +203,37 @@ fn empty_slots(name: &str, value: &ast::Expr) -> bool {
     name == "__slots__" && matches!(value, ast::Expr::Tuple(t) if t.elts.is_empty())
 }
 
+/// Limit fixed slots to simple, unique public identifiers. Private-name
+/// mangling, dictionary/weak-reference slots, and arbitrary iterables need
+/// Python class construction and stay outside this representation.
+fn literal_fixed_slots(value: &ClassValue) -> Option<&[String]> {
+    let ClassValue::Strings {
+        values,
+        literal: true,
+        ..
+    } = value
+    else {
+        return None;
+    };
+    if values.is_empty() {
+        return None;
+    }
+    let mut seen = HashSet::new();
+    for name in values.iter() {
+        let mut bytes = name.bytes();
+        if name.starts_with("__")
+            || !bytes
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == b'_')
+            || !bytes.all(|c| c.is_ascii_alphanumeric() || c == b'_')
+            || !seen.insert(name.as_str())
+        {
+            return None;
+        }
+    }
+    Some(values)
+}
+
 impl<'syntax> Classes<'syntax> {
     pub(crate) fn has_empty_slots(&self, child: usize) -> bool {
         std::iter::once(&child)
@@ -569,6 +600,17 @@ fn collect_class<'syntax>(
     let exception_layout = declarations.layouts.contains(&definition);
     let exceptions = &declarations.ids;
     let base = parents[0];
+    if parents.iter().flatten().any(|(_, parent)| {
+        parent
+            .static_bindings
+            .get("__slots__")
+            .is_some_and(|value| literal_fixed_slots(value).is_some())
+    }) {
+        return Err(module.diagnostic(
+            node,
+            "subclasses of a fixed slotted class require Python class construction",
+        ));
+    }
     if defines_pickle_reducer(node) {
         graph.needs_object_runtime.set(true);
         if !graph.entry_profile.requires_fixed_entry() {
@@ -715,6 +757,14 @@ fn collect_class<'syntax>(
     let mut needs_object_layout = false;
     let mut builds_python_namespace = false;
     let mut initializer = None;
+    let slot_root = !is_enum && dataclass.is_none() && !exception_layout && !abc && !mapping
+        && parents.iter().all(Option::is_none)
+        && node.arguments.as_ref().is_none_or(|args| {
+            args.keywords.is_empty() && (args.args.is_empty()
+                || matches!(args.args.as_ref(), [ast::Expr::Name(name)]
+                    if name.id == "object" && graph.resolve(definition.module, &args.args[0]).is_none()))
+        });
+    let mut fixed_slots = None;
     for (ordinal, statement) in node.body.iter().enumerate() {
         let statement = graph.runtime_class_item(definition.module, statement);
         // A call through an upcast uses its declared layout. Do not erase an
@@ -1253,7 +1303,12 @@ fn collect_class<'syntax>(
             {
                 let member = name.id.as_str();
                 let protocol = context_method(member);
-                let slots = empty_slots(member, &assign.value);
+                let literal_slots = (member == "__slots__"
+                    && slot_root
+                    && matches!(&*assign.value, ast::Expr::Tuple(_)))
+                .then(|| literal_fixed_slots(&binding))
+                .flatten();
+                let slots = empty_slots(member, &assign.value) || literal_slots.is_some();
                 if !names.insert(member.to_owned())
                     || (member.starts_with("__") && member != "__doc__" && !protocol && !slots)
                     || base.is_some_and(|(_, b)| {
@@ -1265,6 +1320,9 @@ fn collect_class<'syntax>(
                     return Err(
                         module.diagnostic(name, "duplicate or reserved static class binding")
                     );
+                }
+                if let Some(values) = literal_slots {
+                    fixed_slots = Some(values.to_vec());
                 }
                 class_bindings.insert(member.to_owned());
                 static_bindings.insert(name.id.to_string(), binding);
@@ -1414,6 +1472,16 @@ fn collect_class<'syntax>(
                     Some(ClassValue::Runtime { .. })
                 )
             });
+        }
+    }
+    if let Some(slots) = &fixed_slots {
+        if slots.len() != fields.len()
+            || slots
+                .iter()
+                .any(|name| !fields.iter().any(|field| &field.name == name))
+            || slots.iter().any(|name| class_bindings.contains(name))
+        {
+            return Err(module.diagnostic(node, "fixed slots must exactly match the class's initialized fields and cannot conflict with class members"));
         }
     }
     if fields
@@ -2141,6 +2209,56 @@ impl<'a> Visitor<'a> for SelfUse<'a, '_> {
             self.1 = Some(expression);
         } else {
             walk_expr(self, expression);
+        }
+    }
+}
+
+#[cfg(test)]
+mod fixed_slot_tests {
+    use super::*;
+
+    #[test]
+    fn literal_slots_retain_tuple_and_exact_fixed_fields() {
+        let source = r#"class Coordinate(object):
+    __slots__ = ("x", "y")
+    x: float
+    y: float
+    def __init__(self, x: float, y: float):
+        self.x = x
+        self.y = y
+print(Coordinate(1.0, 2.0).x)
+"#;
+        let graph = SourceGraph::single(source).unwrap();
+        let classes = Classes::collect(&graph).unwrap();
+        let class = &classes.definitions[0];
+        assert_eq!(
+            class
+                .fields
+                .iter()
+                .map(|field| field.name.as_str())
+                .collect::<Vec<_>>(),
+            ["x", "y"]
+        );
+        assert_eq!(
+            literal_fixed_slots(&class.static_bindings["__slots__"]),
+            Some(["x".to_owned(), "y".to_owned()].as_slice())
+        );
+        let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
+        assert!(!llvm.lines().any(|line| line.contains("call ")
+            && (line.contains("@imre_dyn_") || line.contains("@imre_boxed_"))));
+    }
+
+    #[test]
+    fn partial_conflicting_private_and_inherited_slots_stay_closed() {
+        for source in [
+            "class C:\n    __slots__ = ('x', 'y')\n    x: int\n    def __init__(self, x: int): self.x = x\n",
+            "class C:\n    __slots__ = ('x',)\n    x = 1\n",
+            "class C:\n    __slots__ = ('__weakref__',)\n",
+            "class C:\n    __slots__ = ('x', 'x')\n",
+            "class C:\n    __slots__ = ('x',)\n    x: int\n    def __init__(self, x: int): self.x = x\nclass D(C): pass\n",
+        ] {
+            let graph = SourceGraph::single(source).unwrap();
+            assert!(Classes::collect(&graph).is_err(), "{source}");
         }
     }
 }
