@@ -1,4 +1,4 @@
-//! Runtime assignment flags for explicitly typed locals whose initializer may raise.
+//! Runtime assignment flags for locals whose stores may not execute or may raise.
 
 use super::*;
 use ruff_python_ast::visitor::{Visitor, walk_except_handler, walk_expr, walk_stmt};
@@ -10,6 +10,28 @@ fn nullable_return(checker: &Checker<'_>, rhs: &ast::Expr) -> Option<Type> {
     };
     let ty = checker.functions.get(&id)?.returns;
     checker.types.payload(ty).map(|_| ty)
+}
+
+/// A plain-store cache must not remove the runtime flags required by conditional
+/// loop stores. Nested function and class bodies belong to another scope.
+fn contains_loop(statements: &[ast::Stmt]) -> bool {
+    #[derive(Default)]
+    struct Scan(bool);
+    impl<'a> Visitor<'a> for Scan {
+        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+            match stmt {
+                ast::Stmt::For(_) | ast::Stmt::While(_) => self.0 = true,
+                ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_) => {}
+                _ if !self.0 => walk_stmt(self, stmt),
+                _ => {}
+            }
+        }
+
+        fn visit_expr(&mut self, _expr: &'a ast::Expr) {}
+    }
+    let mut scan = Scan::default();
+    scan.visit_body(statements);
+    scan.0
 }
 
 /// Collect guarded local stores and the optional layouts needed by earlier assignments.
@@ -38,7 +60,7 @@ pub(super) fn local_assignments(
                     }
                     Some(())
                 });
-        if plain.is_some() {
+        if plain.is_some() && !contains_loop(statements) {
             return (HashSet::new(), nullable);
         }
     }
@@ -46,6 +68,7 @@ pub(super) fn local_assignments(
     struct Scan<'a, 'b> {
         checker: &'a Checker<'b>,
         inside: bool,
+        inside_loop: bool,
         inside_match: bool,
         guarded: HashSet<String>,
         other: HashSet<String>,
@@ -60,7 +83,8 @@ pub(super) fn local_assignments(
                         self.nullable.insert(name.to_string(), ty);
                     }
                     if !self.inside_match
-                        && ((self.checker.interactive_names && self.inside)
+                        && (self.inside_loop
+                            || (self.checker.interactive_names && self.inside)
                             || self.checker.mapping_class_import(name.as_str()))
                     {
                         self.guarded.insert(name.to_string());
@@ -76,7 +100,10 @@ pub(super) fn local_assignments(
                     if s.target.as_name_expr().is_some() && s.value.is_some() =>
                 {
                     let name = &s.target.as_name_expr().unwrap().id;
-                    if self.inside || self.checker.mapping_class_import(name.as_str()) {
+                    if self.inside
+                        || self.inside_loop
+                        || self.checker.mapping_class_import(name.as_str())
+                    {
                         self.guarded.insert(name.to_string());
                     }
                     self.visit_expr(s.value.as_deref().unwrap());
@@ -91,6 +118,12 @@ pub(super) fn local_assignments(
                     }
                     self.visit_body(&s.orelse);
                     self.visit_body(&s.finalbody);
+                }
+                ast::Stmt::For(_) | ast::Stmt::While(_) => {
+                    let before = self.inside_loop;
+                    self.inside_loop = true;
+                    walk_stmt(self, stmt);
+                    self.inside_loop = before;
                 }
                 ast::Stmt::FunctionDef(f) => {
                     self.other.insert(f.name.to_string());
@@ -138,6 +171,7 @@ pub(super) fn local_assignments(
     let mut scan = Scan {
         checker,
         inside: false,
+        inside_loop: false,
         inside_match: false,
         guarded: HashSet::new(),
         other: HashSet::new(),
@@ -146,6 +180,22 @@ pub(super) fn local_assignments(
     scan.visit_body(statements);
     scan.guarded.retain(|n| !scan.other.contains(n));
     (scan.guarded, scan.nullable)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{CompileOptions, compile};
+
+    #[test]
+    fn conditional_loop_store_uses_a_checked_native_read() {
+        let llvm = compile(
+            "def find(values: list[int]) -> int:\n    for value in values:\n        if value > 0:\n            found = value\n            break\n    return found\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        assert!(llvm.contains("cannot access local variable"));
+        assert!(!llvm.contains("@imre_dyn_register"));
+    }
 }
 
 /// The flag is set after the RHS and store succeed; a failure leaves the previous
