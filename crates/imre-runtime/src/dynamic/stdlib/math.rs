@@ -314,6 +314,8 @@ pub(super) fn call(
         "lgamma" => Some(|x| crate::floats::gamma(x, true)),
         "log1p" => Some(crate::floats::log1p),
         "sqrt" => Some(crate::floats::sqrt),
+        "sin" => Some(crate::floats::sin),
+        "cos" => Some(crate::floats::cos),
         _ => None,
     };
     if let Some(function) = checked_unary {
@@ -344,7 +346,6 @@ pub(super) fn call(
         // The platform libm retains precision for inputs just above -1.
         "atanh" => Some(|x| atanh(x)),
         "cbrt" => Some(f64::cbrt),
-        "cos" => Some(f64::cos),
         "cosh" => Some(f64::cosh),
         "erf" => Some(|x| erf(x)),
         "erfc" => Some(|x| erfc(x)),
@@ -352,7 +353,6 @@ pub(super) fn call(
         "exp2" => Some(f64::exp2),
         "expm1" => Some(f64::exp_m1),
         "fabs" => Some(f64::abs),
-        "sin" => Some(f64::sin),
         "sinh" => Some(f64::sinh),
         "tan" => Some(f64::tan),
         "tanh" => Some(f64::tanh),
@@ -360,7 +360,7 @@ pub(super) fn call(
     };
     if let Some(unary) = unary {
         let x = as_double(ctx, value)?;
-        if x.is_infinite() && matches!(operation, "cos" | "sin" | "tan") {
+        if x.is_infinite() && operation == "tan" {
             return Err(Error::new(
                 "ValueError",
                 format!("expected a finite input, got {}", crate::floats::render(x)),

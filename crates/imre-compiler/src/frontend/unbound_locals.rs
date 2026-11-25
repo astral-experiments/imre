@@ -371,6 +371,11 @@ fn unbound_failure(name: &str, missing: Missing) -> Statement {
     })
 }
 
+/// Reuse the ordinary NameError construction for a proven absent module name.
+pub(super) fn module_name_failure(name: &str) -> Statement {
+    unbound_failure(name, Missing::Interactive)
+}
+
 impl Checker<'_> {
     /// Read the first operand of a call, subscription or attribute before any arguments.
     pub(super) fn unbound_assert_root<'a>(&self, expr: &'a ast::Expr) -> Option<&'a str> {

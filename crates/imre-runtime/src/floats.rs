@@ -340,6 +340,35 @@ pub extern "C" fn imre_float_sqrt(value: f64) -> f64 {
     finish(sqrt(value), 0.0)
 }
 
+/// Apply a trigonometric operation with Python's infinity-domain check.
+fn finite_trig(value: f64, operation: fn(f64) -> f64) -> Result<f64> {
+    if value.is_infinite() {
+        return Err(Error::new(
+            Kind::ValueError,
+            format!("expected a finite input, got {}", render(value)),
+        ));
+    }
+    check_math_range(value, operation(value))
+}
+
+pub(crate) fn sin(value: f64) -> Result<f64> {
+    finite_trig(value, f64::sin)
+}
+
+pub(crate) fn cos(value: f64) -> Result<f64> {
+    finite_trig(value, f64::cos)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_float_sin(value: f64) -> f64 {
+    finish(sin(value), 0.0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_float_cos(value: f64) -> f64 {
+    finish(cos(value), 0.0)
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_float_int(value: f64) -> usize {
     finish(float_to_integer(value).map(|n| Int::new(n).into_raw()), 1)
@@ -701,6 +730,18 @@ mod tests {
         assert!(sqrt(f64::NAN).ok().unwrap().is_nan());
         assert!(sqrt(-1.0).is_err());
         assert!(sqrt(f64::NEG_INFINITY).is_err());
+    }
+
+    #[test]
+    fn trigonometric_domain_checks_preserve_nan_and_signed_zero() {
+        assert_eq!(sin(-0.0).ok().unwrap().to_bits(), (-0.0_f64).to_bits());
+        assert_eq!(cos(-0.0).ok().unwrap(), 1.0);
+        assert!(sin(f64::NAN).ok().unwrap().is_nan());
+        assert!(cos(f64::NAN).ok().unwrap().is_nan());
+        for value in [f64::NEG_INFINITY, f64::INFINITY] {
+            assert!(sin(value).is_err());
+            assert!(cos(value).is_err());
+        }
     }
 
     #[test]

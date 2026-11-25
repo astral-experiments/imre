@@ -497,6 +497,65 @@ impl Checker<'_> {
         Ok(true)
     }
 
+    /// Check the source declaration itself so an inferred ABI formal is distinct
+    /// from an explicitly annotated parameter or a later annotated local.
+    fn direct_unannotated_parameter_store(
+        &self,
+        name: &str,
+        target: &ast::Expr,
+        rhs: &ast::Expr,
+    ) -> bool {
+        self.graph.modules[self.module]
+            .parsed
+            .syntax()
+            .body
+            .iter()
+            .any(|statement| {
+                let ast::Stmt::FunctionDef(function) = statement else {
+                    return false;
+                };
+                function.parameters.iter_non_variadic_params().any(|parameter| {
+                    parameter.name().as_str() == name && parameter.annotation().is_none()
+                }) && function.body.iter().any(|statement| {
+                    matches!(statement, ast::Stmt::Assign(assign)
+                        if matches!(assign.targets.as_slice(), [stored] if stored.range() == target.range())
+                            && assign.value.range() == rhs.range())
+                })
+            })
+    }
+
+    /// Keep this initial fresh-storage subset to two fixed, alias-safe shapes:
+    /// a builtin string conversion comprehension and a literal string join.
+    fn simple_parameter_conversion(&self, name: &str, slot: usize, rhs: &ast::Expr) -> bool {
+        match rhs {
+            ast::Expr::ListComp(comp) => {
+                let [clause] = comp.generators.as_slice() else {
+                    return false;
+                };
+                let (ast::Expr::Name(input), ast::Expr::Name(item), ast::Expr::Call(call)) =
+                    (&clause.iter, &clause.target, comp.elt.as_ref())
+                else {
+                    return false;
+                };
+                input.id == name
+                    && item.id != name
+                    && !clause.is_async
+                    && clause.ifs.is_empty()
+                    && self.unshadowed_builtin(&call.func, "str")
+                    && call.arguments.keywords.is_empty()
+                    && matches!(call.arguments.args.as_ref(), [ast::Expr::Name(value)] if value.id == item.id)
+            }
+            ast::Expr::Call(call) => {
+                self.types.element(self.locals[slot]) == Some(Type::Str)
+                    && matches!(&*call.func, ast::Expr::Attribute(attribute)
+                        if attribute.attr.as_str() == "join" && attribute.value.is_string_literal_expr())
+                    && call.arguments.keywords.is_empty()
+                    && matches!(call.arguments.args.as_ref(), [ast::Expr::Name(value)] if value.id == name)
+            }
+            _ => false,
+        }
+    }
+
     /// A chain shares one RHS object and visits targets in source order. A later
     /// annotated target can supply the type of an otherwise empty literal.
     pub(super) fn assignment_statement(
@@ -576,7 +635,19 @@ impl Checker<'_> {
                     !self.module_scope && self.block_depth == 1 && self.local_functions.is_empty()
                 })
                 .and_then(|name| Some((name.id.as_str(), *self.names.get(name.id.as_str())?)));
-            let previous = local.filter(|(_, slot)| self.inferred_containers.contains(slot));
+            // A signature's input type describes the incoming argument, not the
+            // later value of its unannotated Python parameter. Prove the exact
+            // direct function-suite assignment before splitting its storage.
+            let inferred_parameter = local.is_some_and(|(name, slot)| {
+                self.graph.modules[self.module].is_program_source()
+                    && matches!(self.locals[slot], Type::ListInt | Type::List(_))
+                    && !self.declared_slots.contains_key(&slot)
+                    && self.direct_unannotated_parameter_store(name, target, rhs)
+                    && self.simple_parameter_conversion(name, slot, rhs)
+                    && !narrowing::expression_assignments(rhs).contains(name)
+            });
+            let previous = local
+                .filter(|(_, slot)| self.inferred_containers.contains(slot) || inferred_parameter);
             let mut context = self.target_expectation(target, Some(rhs));
             if matches!(context, Some((Type::Callable(_), None)))
                 && let Some((_, slot)) = local
@@ -601,6 +672,10 @@ impl Checker<'_> {
                 && let Some(stream) = self.stream_rhs(rhs)?
             {
                 stream
+            } else if inferred_parameter {
+                // Both recognized conversions have a concrete RHS; the previous
+                // list element type must not constrain the new local's result.
+                self.typed_expr_for(rhs, ResultUse::Fixed)?
             } else if let Some((_, old)) = previous {
                 // An empty literal still needs the old context. Other container
                 // expressions can determine their own concrete result type.
@@ -1784,5 +1859,36 @@ impl Checker<'_> {
                 }),
             },
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::CompileOptions;
+
+    #[test]
+    fn unannotated_list_parameter_can_be_rebound_after_its_comprehension() {
+        let source = r#"def render(values):
+    values = [str(value) for value in values]
+    values = ", ".join(values)
+    return values
+print(render([1.5, 2.5]))
+"#;
+        let llvm = crate::compile(source, &CompileOptions::default()).unwrap();
+        assert!(llvm.contains("call ptr @imre_str_join"));
+        assert!(!llvm.lines().any(|line| {
+            line.contains("call ") && (line.contains("@imre_dyn_") || line.contains("@imre_boxed_"))
+        }));
+    }
+
+    #[test]
+    fn annotated_list_parameter_keeps_its_element_contract() {
+        let source = r#"def render(values: list[float]):
+    values = [str(value) for value in values]
+    return values
+print(render([1.5, 2.5]))
+"#;
+        let error = crate::compile(source, &CompileOptions::default()).unwrap_err();
+        assert!(error.contains("expected float, got str"), "{error}");
     }
 }

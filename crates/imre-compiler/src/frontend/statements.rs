@@ -219,6 +219,14 @@ impl StatementLowering for Checker<'_> {
         if expr.is_string_literal_expr() || expr.is_ellipsis_literal_expr() {
             return Ok((self.position_only(expr.range()), true));
         }
+        if self.module_scope
+            && let ast::Expr::Name(name) = expr
+            && !self.names.contains_key(name.id.as_str())
+            && self.graph.closed_missing_module_probe(self.module, expr)
+        {
+            let failure = unbound_locals::module_name_failure(name.id.as_str());
+            return Ok((Some(self.statement_at(expr, failure)), false));
+        }
         if let ast::Expr::Yield(yielded) = expr
             && let Some(element) = self.generator_item
             && let Some(value) = &yielded.value
@@ -583,5 +591,28 @@ impl StatementLowering for Checker<'_> {
                 Ok(continues)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod missing_module_probe_tests {
+    #[test]
+    fn closed_missing_name_is_catchable_but_builtin_mutation_is_not_assumed_away() {
+        let positive = "import json\ntry:\n    missing_name\n    found = True\nexcept NameError:\n    found = False\nprint(found)\n";
+        let graph = crate::modules::SourceGraph::single(positive).unwrap();
+        assert!(crate::frontend::lower(&graph).is_ok());
+
+        let changed = "import builtins\nbuiltins.missing_name = 42\ntry:\n    missing_name\nexcept NameError:\n    print(42)\n";
+        let graph = crate::modules::SourceGraph::single(changed).unwrap();
+        assert!(crate::frontend::lower(&graph).is_err());
+
+        let captured =
+            "try:\n    missing_name\nexcept NameError as error:\n    print(error.name)\n";
+        let graph = crate::modules::SourceGraph::single(captured).unwrap();
+        assert!(crate::frontend::lower(&graph).is_err());
+
+        let builtin = "try:\n    range\nexcept NameError:\n    found = False\n";
+        let graph = crate::modules::SourceGraph::single(builtin).unwrap();
+        assert!(crate::frontend::lower(&graph).is_ok());
     }
 }

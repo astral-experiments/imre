@@ -84,6 +84,8 @@ pub(super) fn unary_math_operation(member: &'static str) -> Option<Builtin> {
     Some(match member {
         "fabs" => Builtin::Abs,
         "sqrt" => Builtin::FloatUnary("imre_float_sqrt"),
+        "sin" => Builtin::FloatUnary("imre_float_sin"),
+        "cos" => Builtin::FloatUnary("imre_float_cos"),
         "cbrt" | "erf" => Builtin::FloatUnary(member),
         "exp2" => Builtin::FloatUnary("imre_float_exp2"),
         "expm1" => Builtin::FloatUnary("imre_float_expm1"),

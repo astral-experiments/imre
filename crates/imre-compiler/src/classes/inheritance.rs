@@ -415,6 +415,7 @@ fn scalar_field_annotation(
             "str"
         }
         _ if graph.session.has_string_layout(module, value) => "str",
+        _ if graph.session.scalar_type(module, value) == Some(Type::Float) => "float",
         _ => return None,
     };
     let annotation = ast::Expr::Name(ast::ExprName {
@@ -507,8 +508,12 @@ pub(super) fn infer_fields(
         let ast::Stmt::Assign(assign) = stmt else {
             continue;
         };
-        let [ast::Expr::Attribute(target)] = assign.targets.as_slice() else {
-            continue;
+        let target = match assign.targets.as_slice() {
+            [ast::Expr::Attribute(target)] => target,
+            // Python evaluates one RHS and then stores the field and local in
+            // order. The initializer validator already checks both targets.
+            [ast::Expr::Attribute(target), ast::Expr::Name(local)] if local.id != "self" => target,
+            _ => continue,
         };
         if !matches!(&*target.value, ast::Expr::Name(name) if name.id == "self")
             || fields
@@ -590,6 +595,36 @@ pub(super) fn infer_fields(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn constructor_float_expressions_and_chained_local_keep_fixed_fields() {
+        let source = r#"class Coordinate:
+    def __init__(self, count: int):
+        self.x = raw = float(count)
+        self.y = raw * 3
+    def total(self) -> float:
+        return self.x + self.y
+print(Coordinate(2).total())
+"#;
+        let graph = SourceGraph::single(source).unwrap();
+        let classes = Classes::collect(&graph).unwrap();
+        let class = &classes.definitions[0];
+        assert_eq!(
+            class
+                .fields
+                .iter()
+                .map(|field| field.name.as_str())
+                .collect::<Vec<_>>(),
+            ["x", "y"]
+        );
+        assert!(class.fields.iter().all(|field| {
+            matches!(&field.annotation, ast::Expr::Name(name) if name.id == "float")
+        }));
+        let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
+        assert!(!llvm.lines().any(|line| {
+            line.contains("call ") && (line.contains("@imre_dyn_") || line.contains("@imre_boxed_"))
+        }));
+    }
 
     #[test]
     fn plain_enum_layout_depends_on_its_member_values() {
