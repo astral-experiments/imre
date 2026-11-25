@@ -1474,15 +1474,14 @@ fn collect_class<'syntax>(
             });
         }
     }
-    if let Some(slots) = &fixed_slots {
-        if slots.len() != fields.len()
+    if let Some(slots) = &fixed_slots
+        && (slots.len() != fields.len()
             || slots
                 .iter()
                 .any(|name| !fields.iter().any(|field| &field.name == name))
-            || slots.iter().any(|name| class_bindings.contains(name))
-        {
-            return Err(module.diagnostic(node, "fixed slots must exactly match the class's initialized fields and cannot conflict with class members"));
-        }
+            || slots.iter().any(|name| class_bindings.contains(name)))
+    {
+        return Err(module.diagnostic(node, "fixed slots must exactly match the class's initialized fields and cannot conflict with class members"));
     }
     if fields
         .iter()

@@ -715,12 +715,12 @@ impl StatementLowering for Checker<'_> {
         let input = self.hidden(Type::TextIO);
         let name = format!("@stdin{input}");
         let mut lowered = loop_.clone();
-        lowered.iter = Box::new(ast::Expr::Name(ast::ExprName {
+        *lowered.iter = ast::Expr::Name(ast::ExprName {
             node_index: ast::AtomicNodeIndex::NONE,
             range: loop_.iter.range(),
             id: name.clone().into(),
             ctx: ast::ExprContext::Load,
-        }));
+        });
         self.names.insert(name.clone(), input);
         self.assigned.insert(input);
         let result = self.iteration(&lowered, true);
