@@ -172,6 +172,7 @@ pub(super) fn indexed_item(source: Expr, index: Expr, element: Type, take: bool)
 /// `evaluate` evaluates an iterable expression; `acquire` obtains its iterator.
 /// Constructor expressions fold their own acquisition into `evaluate`. Every
 /// successful `next` owns `value`, and its consumer clears that transient owner.
+#[derive(Clone)]
 pub(super) struct Prepared {
     pub evaluate: Vec<Statement>,
     pub(super) acquire: Vec<Statement>,
@@ -974,12 +975,53 @@ impl<'s> Checker<'s> {
     }
 
     /// Recognizes only sealed constructor syntax at a direct consumer boundary.
+    /// Recover a captured builtin range only while flow provenance proves its exact identity.
+    /// The callee was evaluated when the alias was stored; its arguments are still evaluated
+    /// left to right at this call, before the ordinary range cursor is acquired.
+    pub(super) fn range_alias_input(
+        &mut self,
+        expression: &ast::Expr,
+    ) -> Result<Option<Iteration>, String> {
+        let ast::Expr::Call(call) = expression else {
+            return Ok(None);
+        };
+        let ast::Expr::Name(name) = &*call.func else {
+            return Ok(None);
+        };
+        let Some(&slot) = self.names.get(name.id.as_str()) else {
+            return Ok(None);
+        };
+        if !self.assigned.contains(&slot)
+            || self.assigned.value_source(slot) != Some(ValueSource::BuiltinRange)
+            || self.live_module_name(name.id.as_str())
+        {
+            return Ok(None);
+        }
+        if !call.arguments.keywords.is_empty() || !(1..=3).contains(&call.arguments.args.len()) {
+            return Err(error(
+                self.source,
+                call,
+                "a native range alias requires one to three positional arguments",
+            ));
+        }
+        let args = call
+            .arguments
+            .args
+            .iter()
+            .map(|arg| self.expr_expected(arg, Type::Int))
+            .collect::<Result<Vec<_>, String>>()?;
+        Ok(Some(Iteration::Range(args)))
+    }
+
     pub(super) fn pipeline_input(
         &mut self,
         expression: &ast::Expr,
         element: Option<Type>,
         split_needle: Option<&str>,
     ) -> Result<Option<Iteration>, String> {
+        if let Some(input) = self.range_alias_input(expression)? {
+            return Ok(Some(input));
+        }
         if let Some(input) = self.enum_iteration(expression) {
             return Ok(Some(input));
         }
@@ -2510,7 +2552,10 @@ impl<'s> Checker<'s> {
         let lists = zip_sum
             .as_ref()
             .and_then(|_| zip_sums::lists(self, generator));
-        let mut first = self.expansion_input(plan.outer, None)?;
+        let mut first = match self.range_alias_input(plan.outer)? {
+            Some(input) => input,
+            None => self.expansion_input(plan.outer, None)?,
+        };
         if let Some(constructor) = constructor
             && let Iteration::Container {
                 iterable,

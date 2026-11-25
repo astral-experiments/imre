@@ -322,6 +322,9 @@ impl ClauseLowering for Checker<'_> {
     }
 
     fn input(&mut self, clause: &ast::Comprehension) -> Result<Iteration, String> {
+        if let Some(generator) = self.assigned.take_generator(clause.iter.range()) {
+            return Ok(Iteration::Prepared(generator));
+        }
         self.iteration_input(&clause.iter, None, async_pull(clause))
     }
 

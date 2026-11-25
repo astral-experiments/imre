@@ -99,6 +99,8 @@ pub(super) struct Assigned {
     words: rpds::HashTrieMap<usize, u64>,
     /// A value keeps its storage origin only when every incoming write agrees.
     type_sources: rpds::HashTrieMap<SourceSlot, ValueSource>,
+    /// A virtual generator exists only until its statically proved adjacent consumer.
+    stored_generators: rpds::HashTrieMap<TextRange, std::rc::Rc<pipelines::Prepared>>,
 }
 
 #[derive(Clone, Hash, PartialEq, Eq)]
@@ -118,6 +120,8 @@ pub(super) enum ValueSource {
     },
     /// The selected invoke produces a live Python handle and has no alternative fixed layout.
     PythonCall,
+    /// The current slot still owns the exact range class selected from builtins.
+    BuiltinRange,
     Declaration(TypeDeclaration),
     /// A single unbound target stored under an exact coroutine callback annotation.
     CoroutineCallback(TypeDeclaration, usize),
@@ -209,6 +213,21 @@ impl ValueSource {
 }
 
 impl Assigned {
+    pub(super) fn store_generator(&mut self, consumer: TextRange, generator: pipelines::Prepared) {
+        self.stored_generators
+            .insert_mut(consumer, std::rc::Rc::new(generator));
+    }
+
+    pub(super) fn has_stored_generator(&self, consumer: TextRange) -> bool {
+        self.stored_generators.contains_key(&consumer)
+    }
+
+    pub(super) fn take_generator(&mut self, consumer: TextRange) -> Option<pipelines::Prepared> {
+        let generator = self.stored_generators.get(&consumer)?.as_ref().clone();
+        self.stored_generators.remove_mut(&consumer);
+        Some(generator)
+    }
+
     pub(super) fn value_source(&self, slot: usize) -> Option<ValueSource> {
         self.type_sources.get(&SourceSlot::Local(slot)).cloned()
     }
