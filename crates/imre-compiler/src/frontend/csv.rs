@@ -58,6 +58,7 @@ impl Checker<'_> {
             }
         }
         let mut args = vec![input];
+        let mut delimiter_argument = None;
         let mut seen = HashSet::new();
         for option in &call.arguments.keywords {
             let name = option.arg.as_deref().unwrap_or("");
@@ -66,8 +67,15 @@ impl Checker<'_> {
             }
             match name {
                 "dialect" => {}
-                "lineterminator" => args.extend(self.csv_terminator(&option.value)?),
+                "lineterminator" => args.extend(self.csv_text_option(&option.value, name)?),
                 "delimiter" | "quotechar" | "escapechar" => {
+                    if name == "delimiter"
+                        && !matches!(&option.value, ast::Expr::StringLiteral(s) if s.value.to_str().chars().count() == 1)
+                    {
+                        delimiter_argument = Some(args.len());
+                        args.extend(self.csv_text_option(&option.value, name)?);
+                        continue;
+                    }
                     let value = match &option.value {
                         ast::Expr::NoneLiteral(_) if name != "delimiter" => None,
                         ast::Expr::StringLiteral(s) if s.value.to_str().chars().count() == 1 => {
@@ -137,6 +145,7 @@ impl Checker<'_> {
             kind: ExprKind::Builtin(
                 Builtin::CsvReader {
                     delimiter,
+                    delimiter_argument,
                     quote,
                     escape,
                     flags,
@@ -147,7 +156,7 @@ impl Checker<'_> {
     }
     /// Forward the checked text or the exact invalid type name to the runtime.
     /// Validation follows source iteration, including a closed file's own error.
-    fn csv_terminator(&mut self, option: &ast::Expr) -> Result<[Expr; 2], String> {
+    fn csv_text_option(&mut self, option: &ast::Expr, name: &str) -> Result<[Expr; 2], String> {
         let value = Self::enum_text(self.expr(option)?);
         let ty = value.ty;
         let payload = self.types.payload(ty);
@@ -180,7 +189,7 @@ impl Checker<'_> {
                 return Err(error(
                     self.source,
                     option,
-                    "unsupported csv.reader lineterminator type",
+                    &format!("unsupported csv.reader {name} type"),
                 ));
             }
         };

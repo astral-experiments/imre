@@ -2715,6 +2715,8 @@ pub(crate) enum Builtin {
     ExactRecord(usize),
     CsvReader {
         delimiter: char,
+        /// Starting index of the dynamically evaluated delimiter and diagnostic type.
+        delimiter_argument: Option<usize>,
         quote: Option<char>,
         escape: Option<char>,
         flags: u32,

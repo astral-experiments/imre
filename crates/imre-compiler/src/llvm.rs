@@ -6542,6 +6542,7 @@ impl Emitter<'_, '_> {
             Builtin::Decode => self.call("imre_bytes_decode", Type::Str, &[&args[0].value]),
             Builtin::CsvReader {
                 delimiter,
+                delimiter_argument,
                 quote,
                 escape,
                 flags,
@@ -6552,7 +6553,24 @@ impl Emitter<'_, '_> {
                     Type::Str => 2,
                     _ => 0,
                 };
-                let (function, terminator) = match args.as_slice() {
+                let delimiter_args = delimiter_argument.map(|index| {
+                    let text = &args[index].value;
+                    let text = if matches!(text.ty, Type::Optional(_)) {
+                        self.instruction(format!("inttoptr i64 {} to ptr", text.operand))
+                    } else {
+                        text.operand.clone()
+                    };
+                    (text, args[index + 1].value.operand.clone())
+                });
+                let remaining: Vec<_> = args
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| {
+                        delimiter_argument.is_none_or(|start| *index < start || *index >= start + 2)
+                    })
+                    .map(|(_, arg)| arg)
+                    .collect();
+                let (function, terminator) = match remaining.as_slice() {
                     [_, text, bad_type] => {
                         let text = if matches!(text.value.ty, Type::Optional(_)) {
                             self.instruction(format!("inttoptr i64 {} to ptr", text.value.operand))
@@ -6564,12 +6582,23 @@ impl Emitter<'_, '_> {
                             format!(", ptr {text}, ptr {}", bad_type.value.operand),
                         )
                     }
+                    [_] if delimiter_args.is_some() => (
+                        "imre_csv_reader_delimiter",
+                        ", ptr null, ptr null".to_owned(),
+                    ),
                     [_] => ("imre_csv_reader", String::new()),
                     _ => unreachable!("checked CSV arguments"),
                 };
+                let (function, delimiter) = match delimiter_args {
+                    Some((text, bad_type)) => (
+                        "imre_csv_reader_delimiter",
+                        format!("ptr {text}, ptr {bad_type}"),
+                    ),
+                    None => (function, format!("i32 {}", u32::from(*delimiter))),
+                };
                 let operand = self.checked_instruction(format!(
-                    "call ptr @{function}(ptr {}, i32 {source_kind}, i32 {}, i32 {}, i32 {}, i32 {flags}{terminator})",
-                    source.operand, u32::from(*delimiter), quote.map_or(u32::MAX, u32::from), escape.map_or(u32::MAX, u32::from),
+                    "call ptr @{function}(ptr {}, i32 {source_kind}, {delimiter}, i32 {}, i32 {}, i32 {flags}{terminator})",
+                    source.operand, quote.map_or(u32::MAX, u32::from), escape.map_or(u32::MAX, u32::from),
                 ));
                 Value {
                     ty: returns,
@@ -10616,6 +10645,7 @@ declare i1 @imre_hmac_compare_digest_str(ptr, ptr)
 declare ptr @imre_sha256_hex(ptr)
 declare ptr @imre_csv_reader(ptr, i32, i32, i32, i32, i32)
 declare ptr @imre_csv_reader_terminator(ptr, i32, i32, i32, i32, i32, ptr, ptr)
+declare ptr @imre_csv_reader_delimiter(ptr, i32, ptr, ptr, i32, i32, i32, ptr, ptr)
 declare ptr @imre_csv_next(ptr, i32)
 declare i64 @imre_csv_line_number(ptr)
 declare void @imre_typing_declare(ptr, i32, ptr, ptr, ptr, i32)
