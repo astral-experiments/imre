@@ -1407,7 +1407,7 @@ def call_allocation_flags(root):
     subprocess.run(["cc", "-c", fixtures / "itemgetter_refuse.c", "-o", wrapper], check=True)
     return "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_scoped_call_at,--wrap=imre_dyn_op_at,--wrap=imre_dyn_lookup,--wrap=imre_dyn_assign_target,--wrap=malloc,--wrap=realloc,--wrap=imre_dyn_lit,--wrap=imre_dyn_linked_string",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_scoped_call_at,--wrap=imre_dyn_positional_call_at,--wrap=imre_dyn_positional_method_at,--wrap=imre_dyn_keyword_call_at,--wrap=imre_dyn_op_at,--wrap=imre_dyn_lookup,--wrap=imre_dyn_lookup_local,--wrap=imre_dyn_assign_target,--wrap=malloc,--wrap=realloc,--wrap=imre_dyn_lit,--wrap=imre_dyn_linked_string",
     ])
 
 
@@ -1444,7 +1444,7 @@ def check_boxed_call_allocation(imre, run, flags):
     assert (result.returncode, result.stdout, result.stderr) == (0, b"37\n", b""), result
 
     source = f"import sys; sys.path.insert(0, {str(fixtures)!r}); import boxed_traceback_allocation as fixture; fixture.allocation()"
-    for size in (0, 160, 224):
+    for size in (0, 288, 192):
         result = run(imre, "-B", "-c", source, extra={
             "IMRE_ENCODED_FLAGS": flags,
             "IMRE_TEST_CALL_SIZE": str(size),
@@ -1459,7 +1459,7 @@ def check_boxed_call_allocation(imre, run, flags):
     for ordinal in (0, 1):
         result = run(imre, "-B", "-c", source, extra={
             "IMRE_ENCODED_FLAGS": flags,
-            "IMRE_TEST_CALL_SIZE": "8",
+            "IMRE_TEST_CALL_SIZE": "52",
             "IMRE_TEST_GETTER_ALLOCATION": str(ordinal),
             "IMRE_TEST_MEMORY_ERROR_KIND": "1",
         })
@@ -1469,7 +1469,7 @@ def check_boxed_call_allocation(imre, run, flags):
         ), (ordinal, result)
 
     source = import_path + "import boxed_call_labels as fixture; fixture.allocation()"
-    for size in (0, 152):
+    for size in (0, 46):
         result = run(imre, "-B", "-c", source, extra={
             "IMRE_ENCODED_FLAGS": flags,
             "IMRE_TEST_CALL_SIZE": str(size),
@@ -1482,8 +1482,8 @@ def check_boxed_call_allocation(imre, run, flags):
 
     for kind, size, ordinal in (
         ("plain", 0, 1), ("plain", 56, 3), ("plain", 56, 4),
-        ("plain", 96, 1), ("plain", 96, 2), ("plain", 116, 1), ("plain", 24, 1),
-        ("posonly", 56, 5), ("nonlocal", 116, 2),
+        ("plain", 96, 1), ("plain", 96, 2), ("plain", 264, 1), ("plain", 32, 1),
+        ("posonly", 56, 4), ("nonlocal", 80, 2),
     ):
         source = import_path + f"import boxed_call_parameters as fixture; fixture.allocation({kind!r})"
         result = run(imre, "-B", "-c", source, extra={
@@ -1497,7 +1497,7 @@ def check_boxed_call_allocation(imre, run, flags):
         ), (size, ordinal, result)
 
     source = import_path + "import boxed_call_parameters as fixture; fixture.allocation()"
-    for size, ordinal in ((0, 1), (56, 5), (52, 1)):
+    for size, ordinal in ((0, 1), (56, 4), (52, 1)):
         result = run(imre, "-B", "-c", source, extra={
             "IMRE_ENCODED_FLAGS": flags,
             "IMRE_TEST_CALL_SIZE": str(size),

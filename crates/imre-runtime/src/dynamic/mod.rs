@@ -604,7 +604,7 @@ impl CallParameters {
                 locals.insert(std::mem::take(name));
             }
         }
-        parameters.locals = locals.into();
+        parameters.locals = locals.try_into()?;
         Ok(parameters)
     }
 }
@@ -614,13 +614,14 @@ impl value::CodeDefinition {
     fn call_parameters(
         &self,
         decode: impl FnOnce() -> Result<CallParameters>,
-    ) -> Result<Arc<CallParameters>> {
+    ) -> Result<triomphe::Arc<CallParameters>> {
         if let Some(parameters) = self.parsed_parameters.get() {
-            return Ok(Arc::clone(parameters));
+            return Ok(triomphe::Arc::clone(parameters));
         }
-        let parameters = decode()?;
-        Ok(Arc::clone(
-            self.parsed_parameters.get_or_init(|| Arc::new(parameters)),
+        let parameters =
+            triomphe::Arc::try_new(decode()?).map_err(|_| Error::new("MemoryError", ""))?;
+        Ok(triomphe::Arc::clone(
+            self.parsed_parameters.get_or_init(|| parameters),
         ))
     }
 }
@@ -633,7 +634,7 @@ impl Context {
         code
     }
 
-    fn parsed_parameters(&self, code: Id) -> Result<Arc<CallParameters>> {
+    fn parsed_parameters(&self, code: Id) -> Result<triomphe::Arc<CallParameters>> {
         let code = self.code_object(code);
         code.definition
             .call_parameters(|| CallParameters::from_signature(self.str_value(code.parameters)?))
@@ -2585,7 +2586,7 @@ impl Context {
             .split_ascii_whitespace()
             .map(str::to_owned)
             .collect::<indexmap::IndexSet<_>>();
-        Ok(self.comprehension_scope_with_locals(parent, targets.into()))
+        Ok(self.comprehension_scope_with_locals(parent, targets.try_into()?))
     }
 
     fn comprehension_scope_with_locals(&mut self, parent: Id, locals: value::DeclaredLocals) -> Id {

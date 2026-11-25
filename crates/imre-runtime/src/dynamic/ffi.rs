@@ -3435,7 +3435,8 @@ fn finish_operand_position<T>(
                 },
             ));
         } else if error.kind != "MemoryError" {
-            *error = Error::new("MemoryError", "");
+            let original = std::mem::replace(error, Error::new("MemoryError", ""));
+            error.context = ctx.raised_instance(original);
         }
     }
 }
