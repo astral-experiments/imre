@@ -992,7 +992,7 @@ impl<'s> Checker<'s> {
             return Ok(None);
         };
         if !self.assigned.contains(&slot)
-            || self.assigned.value_source(slot) != Some(ValueSource::BuiltinRange)
+            || !self.assigned.is_range_alias(slot)
             || self.live_module_name(name.id.as_str())
         {
             return Ok(None);
@@ -1009,7 +1009,7 @@ impl<'s> Checker<'s> {
             .args
             .iter()
             .map(|arg| self.expr_expected(arg, Type::Int))
-            .collect::<Result<Vec<_>, String>>()?;
+            .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(Some(Iteration::Range(args)))
     }
 

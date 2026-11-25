@@ -147,8 +147,7 @@ impl<'ast> Visitor<'ast> for ClosedGeneratorExpressions<'_, '_> {
                                 .get(name.id.as_str())
                                 .is_some_and(|slot| {
                                     self.checker.assigned.contains(slot)
-                                        && self.checker.assigned.value_source(*slot)
-                                            == Some(ValueSource::BuiltinRange)
+                                        && self.checker.assigned.is_range_alias(*slot)
                                         && !self.checker.live_module_name(name.id.as_str())
                                 })
                     }
@@ -387,8 +386,7 @@ impl StatementLowering for Checker<'_> {
             && let [ast::Expr::Name(name)] = targets
             && let Some(&slot) = self.names.get(name.id.as_str())
         {
-            self.assigned
-                .set_value_source(slot, Some(ValueSource::BuiltinRange));
+            self.assigned.mark_range_alias(slot);
         }
         if continues
             && !self.module_scope
@@ -827,5 +825,23 @@ mod missing_module_probe_tests {
         let builtin = "try:\n    range\nexcept NameError:\n    found = False\n";
         let graph = crate::modules::SourceGraph::single(builtin).unwrap();
         assert!(crate::frontend::lower(&graph).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod native_stored_generator_tests {
+    #[test]
+    fn adjacent_consumer_is_fused_but_escaping_or_protected_binding_is_refused() {
+        let positive = "if __name__ == '__main__':\n    data = b'abcdef'\n    pieces = (data[i:i + 2] for i in range(0, len(data), 2))\n    pieces = [','.join(str(c) for c in piece) for piece in pieces]\n    print(';'.join(pieces))\n";
+        let graph = crate::modules::SourceGraph::single(positive).unwrap();
+        assert!(crate::frontend::lower(&graph).is_ok());
+
+        for refused in [
+            "if __name__ == '__main__':\n    values = (x for x in range(3))\n    other = values\n    values = [x for x in values]\n",
+            "if __name__ == '__main__':\n    try:\n        values = (x for x in range(3))\n        values = [1 // x for x in values]\n    except ZeroDivisionError:\n        print(next(values))\n",
+        ] {
+            let graph = crate::modules::SourceGraph::single(refused).unwrap();
+            assert!(crate::frontend::lower(&graph).is_err());
+        }
     }
 }

@@ -101,6 +101,8 @@ pub(super) struct Assigned {
     type_sources: rpds::HashTrieMap<SourceSlot, ValueSource>,
     /// A virtual generator exists only until its statically proved adjacent consumer.
     stored_generators: rpds::HashTrieMap<TextRange, std::rc::Rc<pipelines::Prepared>>,
+    /// Exact builtin-range provenance, joined like ordinary value origins.
+    range_aliases: rpds::HashTrieMap<usize, ()>,
 }
 
 #[derive(Clone, Hash, PartialEq, Eq)]
@@ -120,8 +122,6 @@ pub(super) enum ValueSource {
     },
     /// The selected invoke produces a live Python handle and has no alternative fixed layout.
     PythonCall,
-    /// The current slot still owns the exact range class selected from builtins.
-    BuiltinRange,
     Declaration(TypeDeclaration),
     /// A single unbound target stored under an exact coroutine callback annotation.
     CoroutineCallback(TypeDeclaration, usize),
@@ -228,6 +228,14 @@ impl Assigned {
         Some(generator)
     }
 
+    pub(super) fn is_range_alias(&self, slot: usize) -> bool {
+        self.range_aliases.contains_key(&slot)
+    }
+
+    pub(super) fn mark_range_alias(&mut self, slot: usize) {
+        self.range_aliases.insert_mut(slot, ());
+    }
+
     pub(super) fn value_source(&self, slot: usize) -> Option<ValueSource> {
         self.type_sources.get(&SourceSlot::Local(slot)).cloned()
     }
@@ -237,6 +245,7 @@ impl Assigned {
     }
 
     pub(super) fn set_value_source(&mut self, slot: usize, source: Option<ValueSource>) {
+        self.range_aliases.remove_mut(&slot);
         let slot = SourceSlot::Local(slot);
         if let Some(source) = source {
             self.type_sources.insert_mut(slot, source);
@@ -271,6 +280,7 @@ impl Assigned {
     }
 
     pub(super) fn insert(&mut self, slot: usize) {
+        self.range_aliases.remove_mut(&slot);
         let index = slot / 64;
         let mask = 1 << (slot % 64);
         let bits = self.words.get(&index).copied().unwrap_or(0);
@@ -280,6 +290,7 @@ impl Assigned {
     }
 
     pub(super) fn remove(&mut self, slot: &usize) {
+        self.range_aliases.remove_mut(slot);
         self.type_sources.remove_mut(&SourceSlot::Local(*slot));
         let index = slot / 64;
         if let Some(&bits) = self.words.get(&index) {
@@ -301,6 +312,20 @@ impl Assigned {
     /// A storage origin must agree on every incoming path. A frame write can
     /// affect a later read when either incoming path reaches it.
     fn merge_type_sources(&mut self, other: &Self, include_new_slots: bool) {
+        // An alias remains exact only when every incoming write agrees. New
+        // locals can be introduced by the union used for a sole reachable arm.
+        for (&slot, ()) in &self.range_aliases.clone() {
+            if (!include_new_slots || other.contains(&slot)) && !other.is_range_alias(slot) {
+                self.range_aliases.remove_mut(&slot);
+            }
+        }
+        if include_new_slots {
+            for (&slot, ()) in &other.range_aliases {
+                if !self.contains(&slot) {
+                    self.range_aliases.insert_mut(slot, ());
+                }
+            }
+        }
         self.has_frame_writes |= other.has_frame_writes;
         self.alternatives |= other.alternatives;
         if self.type_sources.ptr_eq(&other.type_sources) {
@@ -1124,5 +1149,22 @@ print(read(True))
         joined.extend(&branch);
         assert!(joined.contains(&65));
         assert!(!joined.contains(&0) && !joined.contains(&128));
+    }
+}
+
+#[cfg(test)]
+mod native_range_alias_tests {
+    use super::Assigned;
+
+    #[test]
+    fn range_alias_is_lost_on_new_assignment_or_disagreement() {
+        let mut assigned = Assigned::default();
+        assigned.insert(4);
+        assigned.mark_range_alias(4);
+        let mut different = assigned.clone();
+        different.insert(4);
+        assert!(!different.is_range_alias(4));
+        assigned.intersect(&different);
+        assert!(!assigned.is_range_alias(4));
     }
 }
