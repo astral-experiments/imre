@@ -536,7 +536,15 @@ impl Checker<'_> {
                 return require_object_receiver(receiver, payload, attr.attr.as_str());
             }
             Type::Str if attr.attr.as_str() == "encode" => {}
-            Type::Class(_) => {}
+            // Native placeholder lists yield nullable records through names
+            // and indexing. Keep the existing narrowing proof for field reads.
+            Type::Class(_)
+                if matches!(&*attr.value, ast::Expr::Name(_) | ast::Expr::Subscript(_))
+                    || (matches!(&*attr.value, ast::Expr::Attribute(_))
+                        && self
+                            .graph
+                            .session
+                            .narrowed_instance(self.module, &attr.value)) => {}
             _ => return receiver,
         }
         let slot = self.hidden(receiver.ty);
