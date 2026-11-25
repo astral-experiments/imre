@@ -489,8 +489,20 @@ impl Checker<'_> {
         {
             return Ok(Some(Expr::boolean(true)));
         }
+        // The semantic function test can see typeshed's re-export from _struct.
+        // A sealed qualified module binding also proves the operation's identity.
         if self.registered.is_none()
-            && binding
+            && let ast::Expr::Attribute(attr) = &*call.func
+            && attr.attr.as_str() == "pack"
+            && self.resolve(&attr.value)
+                == Some(Binding::IntrinsicModule(
+                    crate::modules::IntrinsicModule::Struct,
+                ))
+            && self
+                .graph
+                .session
+                .is_stdlib_module(self.module, &attr.value, "struct")
+            && self.resolve(&call.func)
                 == Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
                     "struct.pack",
                 )))

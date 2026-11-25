@@ -9,12 +9,7 @@ impl Checker<'_> {
         &mut self,
         call: &ast::ExprCall,
     ) -> Result<Option<Expr>, String> {
-        if !call.arguments.keywords.is_empty()
-            || !self
-                .graph
-                .session
-                .is_stdlib_function(self.module, &call.func, "struct", "pack")
-        {
+        if !call.arguments.keywords.is_empty() {
             return Ok(None);
         }
         let [ast::Expr::StringLiteral(format), number] = call.arguments.args.as_slice() else {
