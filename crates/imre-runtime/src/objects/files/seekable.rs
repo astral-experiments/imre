@@ -368,6 +368,7 @@ impl FileState {
             Stream::Memory(m) => m.seek(at),
             Stream::Member(m) => m.seek(at),
             Stream::UnreadGzip { .. }
+            | Stream::ProcessInput
             | Stream::Standard(_)
             | Stream::Write(_)
             | Stream::TextMemory(_) => Err(Error::new(Kind::UnsupportedOperation, "seek")),
@@ -391,9 +392,10 @@ impl FileState {
                 buf[..bytes.len()].copy_from_slice(&bytes);
                 Ok(bytes.len())
             }
-            Stream::Standard(_) | Stream::Write(_) | Stream::TextMemory(_) => {
-                Err(Error::new(Kind::UnsupportedOperation, "read"))
-            }
+            Stream::ProcessInput
+            | Stream::Standard(_)
+            | Stream::Write(_)
+            | Stream::TextMemory(_) => Err(Error::new(Kind::UnsupportedOperation, "read")),
         }
     }
 }
