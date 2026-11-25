@@ -27,6 +27,20 @@ def current():
 
     assert literal_eval("(-2.5-3j, b'x', ..., {1, 1}, set())") == (-2.5-3j, b"x", ..., {1}, set())
     assert literal_eval("{'x': 1, 'x': [True, None]}") == {"x": [True, None]}
+    assert literal_eval("[None, True, ..., b'x', 1+0j]") == [None, True, ..., b"x", 1+0j]
+    assert literal_eval("('left' 'right', 2j, 0x12, False)") == ("leftright", 2j, 18, False)
+
+    def read_elts(self, name):
+        if name == "elts":
+            return [ast.Constant("overridden")]
+        return object.__getattribute__(self, name)
+
+    ast.List.__getattribute__ = read_elts
+    try:
+        assert literal_eval("[1, 2]") == ["overridden"]
+    finally:
+        del ast.List.__getattribute__
+
     tree = ast.parse("1+0j", mode="eval")
     tree.body.right = ast.Constant(6j)
     assert literal_eval(node_or_string=tree) == 1+6j
