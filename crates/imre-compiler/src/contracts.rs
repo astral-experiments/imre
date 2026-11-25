@@ -1686,6 +1686,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_float_acos"
                 | "imre_float_fmod"
                 | "imre_float_asin"
+                | "imre_float_sqrt"
                 | "imre_float_log2"
                 | "imre_float_log10"
                 | "imre_float_log1p"

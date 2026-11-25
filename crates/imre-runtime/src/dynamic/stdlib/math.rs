@@ -313,6 +313,7 @@ pub(super) fn call(
         "gamma" => Some(|x| crate::floats::gamma(x, false)),
         "lgamma" => Some(|x| crate::floats::gamma(x, true)),
         "log1p" => Some(crate::floats::log1p),
+        "sqrt" => Some(crate::floats::sqrt),
         _ => None,
     };
     if let Some(function) = checked_unary {
@@ -391,19 +392,6 @@ pub(super) fn call(
     }
     if operation == "modf" {
         return modf(ctx, value);
-    }
-    if operation == "sqrt" {
-        let x = as_double(ctx, value)?;
-        if x < 0.0 {
-            return Err(Error::new(
-                "ValueError",
-                format!(
-                    "expected a nonnegative input, got {}",
-                    crate::floats::render(x)
-                ),
-            ));
-        }
-        return Ok(ctx.alloc(Value::Float(x.sqrt())));
     }
     let slot = match operation {
         "trunc" => "__trunc__",
