@@ -175,7 +175,7 @@ impl Checker<'_> {
                     continue;
                 }
                 let (ast::Expr::Name(index), ast::Expr::Call(iteration)) =
-                    (&fill.target, &fill.iter)
+                    (&*fill.target, &*fill.iter)
                 else {
                     continue;
                 };
