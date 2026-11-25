@@ -576,7 +576,28 @@ impl Checker<'_> {
                     !self.module_scope && self.block_depth == 1 && self.local_functions.is_empty()
                 })
                 .and_then(|name| Some((name.id.as_str(), *self.names.get(name.id.as_str())?)));
-            let previous = local.filter(|(_, slot)| self.inferred_containers.contains(slot));
+            // Rebinding an inferred list parameter to a comprehension over its
+            // current value changes only this straight-line local binding. Keep
+            // the old slot alive while evaluating the RHS, then use the same
+            // fresh-storage path as other inferred container replacements.
+            let inferred_comprehension = local.is_some_and(|(name, slot)| {
+                self.registered.is_none()
+                    && self.graph.modules[self.module].is_program_source()
+                    && matches!(self.locals[slot], Type::ListInt | Type::List(_))
+                    && !self.declared_slots.contains_key(&slot)
+                    && !self.fixed_formals.contains(&slot)
+                    && self.graph.session.inferred_name_store(self.module, target)
+                    && matches!(rhs, ast::Expr::ListComp(comp)
+                        if matches!(comp.generators.as_slice(), [clause]
+                            if !clause.is_async
+                                && clause.ifs.is_empty()
+                                && matches!(&clause.iter, ast::Expr::Name(input) if input.id == name)
+                                && matches!(&clause.target, ast::Expr::Name(item) if item.id != name)))
+                    && !narrowing::expression_assignments(rhs).contains(name)
+            });
+            let previous = local.filter(|(_, slot)| {
+                self.inferred_containers.contains(slot) || inferred_comprehension
+            });
             let mut context = self.target_expectation(target, Some(rhs));
             if matches!(context, Some((Type::Callable(_), None)))
                 && let Some((_, slot)) = local
@@ -1784,5 +1805,35 @@ impl Checker<'_> {
                 }),
             },
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::CompileOptions;
+
+    #[test]
+    fn unannotated_list_parameter_can_be_rebound_after_its_comprehension() {
+        let source = r#"def render(values):
+    values = [str(value) for value in values]
+    return ", ".join(values)
+print(render([1.5, 2.5]))
+"#;
+        let llvm = crate::compile(source, &CompileOptions::default()).unwrap();
+        assert!(llvm.contains("call ptr @imre_str_join"));
+        assert!(!llvm.lines().any(|line| {
+            line.contains("call ") && (line.contains("@imre_dyn_") || line.contains("@imre_boxed_"))
+        }));
+    }
+
+    #[test]
+    fn annotated_list_parameter_keeps_its_element_contract() {
+        let source = r#"def render(values: list[float]):
+    values = [str(value) for value in values]
+    return values
+print(render([1.5, 2.5]))
+"#;
+        let error = crate::compile(source, &CompileOptions::default()).unwrap_err();
+        assert!(error.contains("expected float, got str"), "{error}");
     }
 }
