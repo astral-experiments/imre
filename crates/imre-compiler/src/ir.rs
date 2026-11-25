@@ -2719,6 +2719,10 @@ pub(crate) enum Builtin {
         delimiter: char,
         /// Starting index of the dynamically evaluated delimiter and diagnostic type.
         delimiter_argument: Option<usize>,
+        /// Index of an evaluated runtime registry name.
+        dialect_argument: Option<usize>,
+        /// An explicit delimiter overrides the named dialect's default.
+        delimiter_override: bool,
         quote: Option<char>,
         escape: Option<char>,
         flags: u32,

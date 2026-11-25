@@ -4,9 +4,9 @@ use super::*;
 
 impl Checker<'_> {
     pub(super) fn csv_reader(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let (lines, mut dialect) = match call.arguments.args.as_ref() {
-            [lines] => (lines, None),
-            [lines, dialect] => (lines, Some(dialect)),
+        let (lines, mut dialect, positional_dialect) = match call.arguments.args.as_ref() {
+            [lines] => (lines, None, false),
+            [lines, dialect] => (lines, Some(dialect), true),
             _ => {
                 return Err(error(
                     self.source,
@@ -37,6 +37,7 @@ impl Checker<'_> {
             }
         }
         let (mut delimiter, mut quote, mut escape, mut flags) = (',', Some('"'), None, 1);
+        let mut dynamic_dialect = None;
         match dialect {
             None | Some(ast::Expr::NoneLiteral(_)) => {}
             Some(ast::Expr::StringLiteral(name)) => {
@@ -49,16 +50,16 @@ impl Checker<'_> {
                     _ => flags |= 16, // Registry lookup follows source iterator construction.
                 }
             }
-            Some(value) => {
-                return Err(error(
-                    self.source,
-                    value,
-                    "expected a literal CSV dialect name",
-                ));
-            }
+            Some(value) => dynamic_dialect = Some(value),
         }
         let mut args = vec![input];
         let mut delimiter_argument = None;
+        let mut dialect_argument = None;
+        let mut delimiter_override = false;
+        if positional_dialect && let Some(value) = dynamic_dialect {
+            dialect_argument = Some(args.len());
+            args.push(self.csv_dialect_name(value)?);
+        }
         let mut seen = HashSet::new();
         for option in &call.arguments.keywords {
             let name = option.arg.as_deref().unwrap_or("");
@@ -66,9 +67,15 @@ impl Checker<'_> {
                 return Err(error(self.source, option, "repeated csv.reader option"));
             }
             match name {
-                "dialect" => {}
+                "dialect" => {
+                    if let Some(value) = dynamic_dialect {
+                        dialect_argument = Some(args.len());
+                        args.push(self.csv_dialect_name(value)?);
+                    }
+                }
                 "lineterminator" => args.extend(self.csv_text_option(&option.value, name)?),
                 "delimiter" | "quotechar" | "escapechar" => {
+                    delimiter_override |= name == "delimiter";
                     if name == "delimiter"
                         && !matches!(&option.value, ast::Expr::StringLiteral(s) if s.value.to_str().chars().count() == 1)
                     {
@@ -140,12 +147,21 @@ impl Checker<'_> {
                 }
             }
         }
+        if dialect_argument.is_some() && delimiter_argument.is_some() {
+            return Err(error(
+                self.source,
+                call,
+                "a runtime CSV dialect and delimiter cannot yet be combined",
+            ));
+        }
         Ok(Expr {
             ty: Type::CsvReader,
             kind: ExprKind::Builtin(
                 Builtin::CsvReader {
                     delimiter,
                     delimiter_argument,
+                    dialect_argument,
+                    delimiter_override,
                     quote,
                     escape,
                     flags,
@@ -153,6 +169,18 @@ impl Checker<'_> {
                 args,
             ),
         })
+    }
+    fn csv_dialect_name(&mut self, option: &ast::Expr) -> Result<Expr, String> {
+        let value = Self::enum_text(self.expr(option)?);
+        if matches!(value.ty, Type::Str | Type::StrLiteral(_)) {
+            Ok(value)
+        } else {
+            Err(error(
+                self.source,
+                option,
+                "expected a CSV dialect name of type str",
+            ))
+        }
     }
     /// Forward the checked text or the exact invalid type name to the runtime.
     /// Validation follows source iteration, including a closed file's own error.

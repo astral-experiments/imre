@@ -6543,6 +6543,8 @@ impl Emitter<'_, '_> {
             Builtin::CsvReader {
                 delimiter,
                 delimiter_argument,
+                dialect_argument,
+                delimiter_override,
                 quote,
                 escape,
                 flags,
@@ -6567,6 +6569,7 @@ impl Emitter<'_, '_> {
                     .enumerate()
                     .filter(|(index, _)| {
                         delimiter_argument.is_none_or(|start| *index < start || *index >= start + 2)
+                            && dialect_argument.is_none_or(|dialect| *index != dialect)
                     })
                     .map(|(_, arg)| arg)
                     .collect();
@@ -6582,19 +6585,29 @@ impl Emitter<'_, '_> {
                             format!(", ptr {text}, ptr {}", bad_type.value.operand),
                         )
                     }
-                    [_] if delimiter_args.is_some() => (
+                    [_] if delimiter_args.is_some() || dialect_argument.is_some() => (
                         "imre_csv_reader_delimiter",
                         ", ptr null, ptr null".to_owned(),
                     ),
                     [_] => ("imre_csv_reader", String::new()),
                     _ => unreachable!("checked CSV arguments"),
                 };
-                let (function, delimiter) = match delimiter_args {
-                    Some((text, bad_type)) => (
+                let (function, delimiter) = match (delimiter_args, dialect_argument) {
+                    (Some((text, bad_type)), None) => (
                         "imre_csv_reader_delimiter",
                         format!("ptr {text}, ptr {bad_type}"),
                     ),
-                    None => (function, format!("i32 {}", u32::from(*delimiter))),
+                    (None, Some(index)) => (
+                        "imre_csv_reader_dialect",
+                        format!(
+                            "ptr {}, i32 {}, i32 {}",
+                            args[*index].value.operand,
+                            u32::from(*delimiter),
+                            u32::from(*delimiter_override)
+                        ),
+                    ),
+                    (None, None) => (function, format!("i32 {}", u32::from(*delimiter))),
+                    _ => unreachable!("checked CSV options"),
                 };
                 let operand = self.checked_instruction(format!(
                     "call ptr @{function}(ptr {}, i32 {source_kind}, {delimiter}, i32 {}, i32 {}, i32 {flags}{terminator})",
@@ -10651,6 +10664,7 @@ declare ptr @imre_sha256_hex(ptr)
 declare ptr @imre_csv_reader(ptr, i32, i32, i32, i32, i32)
 declare ptr @imre_csv_reader_terminator(ptr, i32, i32, i32, i32, i32, ptr, ptr)
 declare ptr @imre_csv_reader_delimiter(ptr, i32, ptr, ptr, i32, i32, i32, ptr, ptr)
+declare ptr @imre_csv_reader_dialect(ptr, i32, ptr, i32, i32, i32, i32, i32, ptr, ptr)
 declare ptr @imre_csv_next(ptr, i32)
 declare i64 @imre_csv_line_number(ptr)
 declare void @imre_typing_declare(ptr, i32, ptr, ptr, ptr, i32)

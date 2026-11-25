@@ -477,6 +477,54 @@ pub unsafe extern "C" fn imre_csv_reader_delimiter(
     }
 }
 
+/// Create a reader from a runtime name in the supported fixed dialect registry.
+///
+/// # Safety
+/// Source matches kind, name is a rooted string, and explicitly supplied
+/// terminator inputs follow the same contract as imre_csv_reader_delimiter.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_csv_reader_dialect(
+    source: *const Object,
+    kind: u32,
+    name: *const Str,
+    mut delimiter: u32,
+    delimiter_override: u32,
+    quote: u32,
+    escape: u32,
+    mut flags: u32,
+    terminator: *const Str,
+    terminator_bad_type: *const Str,
+) -> *const Object {
+    // SAFETY: the compiler roots the name, source and option values.
+    unsafe {
+        flags |= 8;
+        match (*name).as_str() {
+            "excel" | "unix" => {}
+            "excel-tab" => {
+                if delimiter_override == 0 {
+                    delimiter = u32::from('\t');
+                }
+            }
+            _ => flags |= 16,
+        }
+        let terminator = if terminator_bad_type.is_null() {
+            Ok("\r\n")
+        } else {
+            terminator
+                .as_ref()
+                .map(Str::as_str)
+                .ok_or_else(|| (*terminator_bad_type).as_str())
+        };
+        create(
+            source,
+            kind,
+            || Ok(Dialect::new(delimiter, quote, escape, flags)),
+            terminator,
+            flags,
+        )
+    }
+}
+
 unsafe fn create(
     source: *const Object,
     kind: u32,
