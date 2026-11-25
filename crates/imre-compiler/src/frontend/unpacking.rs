@@ -579,7 +579,9 @@ impl Checker<'_> {
             let ty = self.types.payload(input.ty).unwrap();
             let temp = self.hidden(ty);
             let previous = self.names.insert(name.to_string(), temp);
+            self.assigned.insert(temp);
             let converted = self.typed_expr_for(rhs, ResultUse::Fixed);
+            self.assigned.remove(&temp);
             self.names.insert(name.to_string(), previous.unwrap());
             let converted = converted?;
             if self.types.element(converted.ty) != Some(Type::Str) {
