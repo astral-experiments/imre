@@ -705,7 +705,7 @@ jobs:
           python3 tests/differential.py --compiler target/release/imre --runtime "target/asan/$imre_target/release/libimre_runtime.a" --clang clang-18 --sanitize --opt-levels 1
       - &asan-suites
         name: Run the full AddressSanitizer suites
-        if: github.event_name != 'workflow_dispatch' || inputs.full_asan
+        if: github.event_name == 'pull_request' || inputs.full_asan
         run: |
           imre_target="$(rustc -vV | sed -n 's/^host: //p')"
           python3 tests/run_suites.py --log-dir /tmp/imre-suites-asan-o1 --suites imports classes containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
