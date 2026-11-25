@@ -11962,6 +11962,24 @@ impl<'a> Checker<'a> {
                             kind: ExprKind::Compare(values, vec![op]),
                         });
                     }
+                    if ty != right
+                        && matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
+                        && self
+                            .types
+                            .fields(ty)
+                            .zip(self.types.fields(right))
+                            .is_some_and(|(left, right)| {
+                                left.iter()
+                                    .chain(right.iter())
+                                    .any(|&field| field == Type::PythonObject)
+                            })
+                    {
+                        self.require_registered_operation(expression)?;
+                        return Ok(Expr {
+                            ty: Type::Bool,
+                            kind: ExprKind::Compare(values, vec![op]),
+                        });
+                    }
                     // Counters compare counts even when their key representations differ.
                     if self.types.is_counter(ty)
                         && self.types.is_counter(right)
