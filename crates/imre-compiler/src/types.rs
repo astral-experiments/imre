@@ -36,6 +36,8 @@ enum Shape {
     NamedTuple(TupleOrigin, Vec<Type>),
     PartialFrame(Vec<Type>),
     LenFrame(Vec<Type>),
+    /// Private argument storage for two distinct numeric list layouts.
+    NumericListFrame(Vec<Type>),
     /// The class name, owned positional tuple and its formatting capability travel together.
     CallbackArgument(Type),
     /// Its concrete record descriptor owns the argument and describes its real type.
@@ -296,6 +298,7 @@ impl Types {
                         | Shape::NamedTuple(..)
                         | Shape::PartialFrame(_)
                         | Shape::LenFrame(_)
+                        | Shape::NumericListFrame(_)
                         | Shape::CallbackArgument(_)
                         | Shape::CallbackPositional
                         | Shape::DeferredCmpFrame(..)
@@ -438,7 +441,7 @@ impl Types {
         for (id, shape) in storage.shapes.iter().enumerate() {
             let children: Vec<Type> = match shape {
                 Shape::StringLiterals(_) => Vec::new(),
-                Shape::LenFrame(prefix) => prefix.clone(),
+                Shape::LenFrame(prefix) | Shape::NumericListFrame(prefix) => prefix.clone(),
                 Shape::CallbackArgument(positional) => vec![Type::Str, *positional, Type::Bool],
                 Shape::CallbackPositional => Vec::new(),
                 Shape::DisplayTuple(parts) => parts.iter().map(|&(ty, _)| ty).collect(),
@@ -1125,6 +1128,19 @@ impl Types {
         } else {
             Type::List(self.intern(Shape::List(element)))
         }
+    }
+
+    /// Keep numeric lists in their original storage until the callee consumes them.
+    /// Exactly one optional field is present. The private shape never aliases a Python tuple.
+    pub(crate) fn numeric_list_frame(&self) -> Type {
+        let integers = self.optional(self.list(Type::Int));
+        let floats = self.optional(self.list(Type::Float));
+        Type::Tuple(self.intern(Shape::NumericListFrame(vec![integers, floats])))
+    }
+
+    /// Identify the private argument layout without accepting a user-provided tuple.
+    pub(crate) fn is_numeric_list_frame(&self, ty: Type) -> bool {
+        matches!(ty, Type::Tuple(id) if matches!(&self.0.borrow().shapes[id], Shape::NumericListFrame(_)))
     }
 
     /// A live len argument owns its concrete value after its class and hash diagnostic.
@@ -1911,7 +1927,7 @@ impl Types {
             return None;
         };
         match &self.0.borrow().shapes[id] {
-            Shape::LenFrame(prefix) => Some(prefix.clone()),
+            Shape::LenFrame(prefix) | Shape::NumericListFrame(prefix) => Some(prefix.clone()),
             Shape::CallbackArgument(positional) => Some(vec![Type::Str, *positional, Type::Bool]),
             Shape::CallbackPositional => Some(Vec::new()),
             Shape::Tuple(fields)
@@ -1951,7 +1967,9 @@ impl Types {
             .iter()
             .enumerate()
             .filter_map(|(id, shape)| match shape {
-                Shape::LenFrame(prefix) => Some((Type::Tuple(id), prefix.clone())),
+                Shape::LenFrame(prefix) | Shape::NumericListFrame(prefix) => {
+                    Some((Type::Tuple(id), prefix.clone()))
+                }
                 Shape::CallbackArgument(positional) => {
                     Some((Type::Tuple(id), vec![Type::Str, *positional, Type::Bool]))
                 }
@@ -2171,6 +2189,7 @@ impl TypeDescription<'_> {
                     write!(self, "{value:?}")?;
                 }
             }
+            Shape::NumericListFrame(_) => return self.write_str("list[int] or list[float]"),
             Shape::LenFrame(prefix) => {
                 return self.write_str(if prefix.len() == 3 {
                     "len argument"
