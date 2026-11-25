@@ -839,9 +839,13 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("sys", "_base_executable") if ctx.config["executable"].is_string() => {
             path_text(ctx, &layout(ctx)?.base_executable)?
         }
-        ("sys", "executable" | "_base_executable") => {
-            ctx.text(ctx.interpreter.helper_executable.clone())
-        }
+        ("sys", "executable" | "_base_executable") => ctx.text(
+            ctx.interpreter
+                .executable
+                .to_str()
+                .unwrap_or_default()
+                .to_owned(),
+        ),
         ("sys", "_imre_executable_suffix") => ctx.text(std::env::consts::EXE_SUFFIX),
         ("sys", "maxsize") => ctx.int(crate::sys::MAXSIZE as i64),
         ("sys", "maxunicode") => ctx.int(0x10FFFF),
