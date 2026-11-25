@@ -553,8 +553,15 @@ impl Checker<'_> {
             }
         }
         if let [target] = targets {
-            if pattern_elements(target).is_some() {
-                let value = self.unpacking_value(target, rhs)?;
+            if let Some(elements) = pattern_elements(target) {
+                let limit = (!elements
+                    .iter()
+                    .any(|element| matches!(element, ast::Expr::Starred(_))))
+                .then_some(elements.len());
+                let value = match self.mapped_unpack(rhs, limit)? {
+                    Some(value) => value,
+                    None => self.unpacking_value(target, rhs)?,
+                };
                 bind_assignment(self, targets, value, output)?;
                 return Ok(true);
             }
