@@ -2937,6 +2937,97 @@ impl Checker<'_> {
         returned
     }
 
+    /// Only a plain direct source function whose first statement replaces the
+    /// incoming list by its stringified elements can consume the private frame.
+    fn numeric_list_consumer(
+        &self,
+        call: &ast::ExprCall,
+        signature: &Signature,
+        index: usize,
+    ) -> bool {
+        let Some(Binding::Definition(owner)) = self.resolve(&call.func) else {
+            return false;
+        };
+        let Some(callee) = call.func.as_name_expr() else {
+            return false;
+        };
+        let module = &self.graph.modules[owner.module];
+        if !module.is_program_source()
+            || owner.module != self.module
+            || self
+                .functions
+                .get(&owner)
+                .is_none_or(|f| f.id != signature.id)
+        {
+            return false;
+        }
+        let mut definitions = module.parsed.syntax().body.iter().filter_map(|s| match s {
+            ast::Stmt::FunctionDef(f) if f.name.as_str() == callee.id.as_str() => Some(f),
+            _ => None,
+        });
+        let Some(f) = definitions.next() else {
+            return false;
+        };
+        if definitions.next().is_some()
+            || !f.decorator_list.is_empty()
+            || f.is_async
+            || f.parameters.vararg.is_some()
+            || f.parameters.kwarg.is_some()
+        {
+            return false;
+        }
+        let Some(param) = f.parameters.iter_non_variadic_params().nth(index) else {
+            return false;
+        };
+        if param.annotation().is_some() || param.default.is_some() {
+            return false;
+        }
+        let name = param.name().as_str();
+        let Some(ast::Stmt::Assign(assign)) = f.body.first() else {
+            return false;
+        };
+        if !matches!(assign.targets.as_slice(), [ast::Expr::Name(n)] if n.id==name) {
+            return false;
+        }
+        let ast::Expr::ListComp(comp) = &*assign.value else {
+            return false;
+        };
+        let [clause] = comp.generators.as_slice() else {
+            return false;
+        };
+        let (ast::Expr::Name(input), ast::Expr::Name(item), ast::Expr::Call(conv)) =
+            (&clause.iter, &clause.target, &*comp.elt)
+        else {
+            return false;
+        };
+        input.id == name
+            && item.id != name
+            && !clause.is_async
+            && clause.ifs.is_empty()
+            && matches!(&*conv.func,ast::Expr::Name(n) if n.id=="str")
+            && conv.arguments.keywords.is_empty()
+            && matches!(conv.arguments.args.as_ref(),[ast::Expr::Name(n)] if n.id==item.id)
+    }
+
+    /// Pack a single numeric list without coercing its items or cloning its storage.
+    fn pack_numeric_list(&self, value: Expr, site: &ast::Expr) -> Result<Expr, String> {
+        let ty = self.types.numeric_list_frame();
+        let fields = self.types.fields(ty).unwrap();
+        let (left, right) = match self.types.element(value.ty) {
+            Some(Type::Int) => (value, Expr::none()),
+            Some(Type::Float) => (Expr::none(), value),
+            _ => return Err(self.scoped_builtin_error("non-numeric list argument", site)),
+        };
+        let values = vec![
+            self.coerce(left, fields[0], site)?,
+            self.coerce(right, fields[1], site)?,
+        ];
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Tuple(values),
+        })
+    }
+
     fn source_arguments(
         &mut self,
         call: &ast::ExprCall,
@@ -3006,6 +3097,17 @@ impl Checker<'_> {
                             }
                         }
                     };
+                // Once discovery has widened this ABI, every direct call must supply
+                // one exact list. Reject unknown calls and user tuples at this boundary.
+                let stored = inference.and_then(|i| i.parameter(signature.id,index)).unwrap_or(parameter.ty);
+                if checker.types.is_numeric_list_frame(stored) {
+                    if !direct || !checker.numeric_list_consumer(call,signature,index) {
+                        return Err(checker.scoped_builtin_error("numeric list argument layout",argument.site()));
+                    }
+                    let site=argument.site();
+                    let value=argument.value(checker)?;
+                    return checker.pack_numeric_list(value,site);
+                }
                 let timeout = selector_wait && parameter.name == "timeout";
                 if dedent || timeout || (stat_mode && parameter.ty == Type::Int) {
                     let node = argument.site();
@@ -3051,6 +3153,17 @@ impl Checker<'_> {
                     }
                     let types = checker.types;
                     let inferred = inference.pending.borrow()[signature.id].inferred_params[index];
+                    if direct && inferred && node.is_name_expr()
+                        && matches!(types.element(ty),Some(Type::Int | Type::Float))
+                        && checker.numeric_list_consumer(call,signature,index) {
+                        let value=argument.value(checker)?;
+                        if value.ty!=ty && matches!(types.element(value.ty),Some(Type::Int | Type::Float)) {
+                            let frame=types.numeric_list_frame();
+                            inference.widen_parameter(signature.id,index,frame);
+                            return checker.pack_numeric_list(value,node);
+                        }
+                        return direct_value(checker,value,ty,node);
+                    }
                     // Absence and a present value share the same optional ABI in either call order.
                     let nullable = |prior, actual| {
                         if inferred

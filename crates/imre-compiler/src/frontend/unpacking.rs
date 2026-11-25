@@ -556,6 +556,60 @@ impl Checker<'_> {
         }
     }
 
+    /// Lower the same pure string conversion for each layout, selecting one
+    /// branch at run time. The argument stays rooted until the conversion finishes.
+    fn stringify_numeric_lists(
+        &mut self,
+        name: &str,
+        old: usize,
+        rhs: &ast::Expr,
+    ) -> Result<Expr, String> {
+        let fields = self.types.fields(self.locals[old]).unwrap();
+        let project = |index: usize| Expr {
+            ty: fields[index],
+            kind: ExprKind::Field(Box::new(self.local(old)), index),
+        };
+        let inputs = [project(0), project(1)];
+        let absent = Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Builtin(Builtin::IsNone, vec![inputs[0].clone()]),
+        };
+        let mut arms = Vec::new();
+        for input in inputs {
+            let ty = self.types.payload(input.ty).unwrap();
+            let temp = self.hidden(ty);
+            let previous = self.names.insert(name.to_string(), temp);
+            self.assigned.insert(temp);
+            let converted = self.typed_expr_for(rhs, ResultUse::Fixed);
+            self.assigned.remove(&temp);
+            self.names.insert(name.to_string(), previous.unwrap());
+            let converted = converted?;
+            if self.types.element(converted.ty) != Some(Type::Str) {
+                return Err(self.scoped_builtin_error("numeric list conversion", rhs));
+            }
+            arms.push(Expr {
+                ty: converted.ty,
+                kind: ExprKind::Scope {
+                    body: vec![Statement::Assign(
+                        temp,
+                        Expr {
+                            ty,
+                            kind: ExprKind::Unwrap(Box::new(input)),
+                        },
+                    )],
+                    value: Box::new(converted),
+                    clear: vec![temp],
+                },
+            });
+        }
+        let floats = arms.pop().unwrap();
+        let ints = arms.pop().unwrap();
+        Ok(Expr {
+            ty: ints.ty,
+            kind: ExprKind::Conditional(Box::new(absent), Box::new(floats), Box::new(ints)),
+        })
+    }
+
     /// An ordinary unannotated local may receive a new representation after
     /// a direct call. Retain the old slot until the entire RHS has succeeded.
     fn direct_string_local_store(
@@ -691,12 +745,18 @@ impl Checker<'_> {
             // direct function-suite assignment before splitting its storage.
             let inferred_parameter = local.is_some_and(|(name, slot)| {
                 self.graph.modules[self.module].is_program_source()
-                    && matches!(self.locals[slot], Type::ListInt | Type::List(_))
+                    && (matches!(self.locals[slot], Type::ListInt | Type::List(_))
+                        || self.types.is_numeric_list_frame(self.locals[slot]))
                     && !self.declared_slots.contains_key(&slot)
                     && self.direct_unannotated_parameter_store(name, target, rhs)
                     && self.simple_parameter_conversion(name, slot, rhs)
                     && !narrowing::expression_assignments(rhs).contains(name)
             });
+            let numeric_frame =
+                local.filter(|(_, slot)| self.types.is_numeric_list_frame(self.locals[*slot]));
+            if numeric_frame.is_some() && !inferred_parameter {
+                return Err(self.scoped_builtin_error("numeric list conversion", rhs));
+            }
             let direct_string = local.is_some_and(|(name, slot)| {
                 self.direct_string_local_store(name, slot, target, rhs)
             });
@@ -732,6 +792,8 @@ impl Checker<'_> {
                 && let Some(stream) = self.stream_rhs(rhs)?
             {
                 stream
+            } else if let Some((name, old)) = numeric_frame {
+                self.stringify_numeric_lists(name, old, rhs)?
             } else if inferred_parameter || direct_string {
                 // Both recognized conversions have a concrete RHS; the previous
                 // list element type must not constrain the new local's result.
@@ -1925,6 +1987,22 @@ impl Checker<'_> {
 #[cfg(test)]
 mod tests {
     use crate::CompileOptions;
+
+    #[test]
+    fn numeric_list_conversion_preserves_both_argument_layouts() {
+        for (first, second) in [("[1.0]", "[1]"), ("[1]", "[1.0]")] {
+            let src = format!(
+                "def render(values):\n    values = [str(v) for v in values]\n    return ','.join(values)\ndef run():\n    a = {first}\n    b = {second}\n    print(render(a),render(b))\nrun()\n"
+            );
+            let ir = crate::compile(&src, &CompileOptions::default()).unwrap();
+            assert!(
+                !ir.lines()
+                    .any(|l| l.contains("call ") && l.contains("@imre_dyn_"))
+            );
+        }
+        let annotated = "def render(values: list[int]):\n    values = [str(v) for v in values]\n    return ','.join(values)\nprint(render([1.0]))\n";
+        assert!(crate::compile(annotated, &CompileOptions::default()).is_err());
+    }
 
     #[test]
     fn unannotated_string_local_can_receive_a_call_result() {
