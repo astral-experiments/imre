@@ -34,3 +34,26 @@ fn runtime_csv_delimiter_and_terminator_keep_both_keyword_orders() {
         ));
     }
 }
+
+#[test]
+fn runtime_csv_dialect_names_use_the_checked_registry_reader() {
+    for call in [
+        "csv.reader(['a,b'], dialect=name)",
+        "csv.reader(['a,b'], name, delimiter=',')",
+        "csv.reader(['a,b'], lineterminator=terminator, dialect=name)",
+    ] {
+        let source = format!(
+            "import csv\n\ndef read(name: str, terminator: str) -> None:\n    {call}\n\nread('excel', '\\r\\n')\n"
+        );
+        imre_compiler::check(&source).unwrap();
+        let ir = imre_compiler::compile(&source, &CompileOptions::default()).unwrap();
+        assert!(
+            ir.lines()
+                .any(|line| line.contains("call ptr @imre_csv_reader_dialect("))
+        );
+        assert!(
+            !ir.lines()
+                .any(|line| line.contains("call ") && line.contains("@imre_dyn_"))
+        );
+    }
+}
