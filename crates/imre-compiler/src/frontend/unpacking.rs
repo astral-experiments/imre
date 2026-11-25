@@ -661,6 +661,91 @@ impl Checker<'_> {
             })
     }
 
+    /// Split an unannotated bytes binding when a literal string join replaces it
+    /// in a closed, straight-line entry suite. No later branch can read the old slot.
+    fn entry_bytes_join_store(
+        &self,
+        name: &str,
+        slot: usize,
+        target: &ast::Expr,
+        rhs: &ast::Expr,
+    ) -> bool {
+        if !self.module_scope
+            || self.module != self.graph.entry
+            || self.registered.is_some()
+            || !self.module_namespace.is_unexposed()
+            || self.live_module_name(name)
+            || self.locals[slot] != Type::Bytes
+            || self.declared_slots.contains_key(&slot)
+            || self.bound_flags.contains_key(name)
+            || !self.assigned.contains(&slot)
+        {
+            return false;
+        }
+        let ast::Expr::Call(call) = rhs else {
+            return false;
+        };
+        if !matches!(&*call.func,ast::Expr::Attribute(attr) if attr.attr.as_str()=="join" && attr.value.is_string_literal_expr())
+            || !call.arguments.keywords.is_empty()
+            || !matches!(call.arguments.args.as_slice(), [ast::Expr::Name(_)])
+        {
+            return false;
+        }
+        let body = &self.graph.modules[self.module].parsed.syntax().body;
+        // Refuse nested definitions and delayed expression references. Such a
+        // scope could observe a module value after the original slot is cleared.
+        use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
+        struct Leaks<'a> {
+            name: &'a str,
+            delayed: bool,
+            rejected: bool,
+        }
+        impl<'a> Visitor<'a> for Leaks<'_> {
+            fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+                if matches!(stmt, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)) {
+                    self.rejected = true;
+                    return;
+                }
+                walk_stmt(self, stmt);
+            }
+            fn visit_expr(&mut self, expr: &'a ast::Expr) {
+                if self.delayed && matches!(expr,ast::Expr::Name(n) if n.id==self.name) {
+                    self.rejected = true;
+                }
+                let saved = self.delayed;
+                self.delayed |= matches!(expr, ast::Expr::Lambda(_) | ast::Expr::Generator(_));
+                walk_expr(self, expr);
+                self.delayed = saved;
+            }
+        }
+        let mut leaks = Leaks {
+            name,
+            delayed: false,
+            rejected: false,
+        };
+        leaks.visit_body(body);
+        if leaks.rejected {
+            return false;
+        }
+        let direct_store = |suite: &[ast::Stmt]| {
+            let mut earlier = false;
+            for stmt in suite {
+                if let ast::Stmt::Assign(assign) = stmt
+                    && let [ast::Expr::Name(stored)] = assign.targets.as_slice()
+                    && stored.id == name
+                {
+                    if stored.range() == target.range() && assign.value.range() == rhs.range() {
+                        return earlier;
+                    }
+                    earlier = true;
+                }
+            }
+            false
+        };
+        direct_store(body)
+            || matches!(body.last(),Some(ast::Stmt::If(guard)) if guard.elif_else_clauses.is_empty() && direct_store(&guard.body))
+    }
+
     /// A chain shares one RHS object and visits targets in source order. A later
     /// annotated target can supply the type of an otherwise empty literal.
     pub(super) fn assignment_statement(
@@ -732,6 +817,20 @@ impl Checker<'_> {
                     None => self.unpacking_value(target, rhs)?,
                 };
                 bind_assignment(self, targets, value, output)?;
+                return Ok(true);
+            }
+            if let Some(name) = target.as_name_expr()
+                && let Some(&old) = self.names.get(name.id.as_str())
+                && self.entry_bytes_join_store(name.id.as_str(), old, target, rhs)
+            {
+                let value = self.typed_expr_for(rhs, ResultUse::Fixed)?;
+                if value.ty != Type::Str {
+                    return Err(self.scoped_builtin_error("entry string join", rhs));
+                }
+                statements::append_block(
+                    output,
+                    self.replace_local(name.id.as_str(), old, value.ty, value),
+                );
                 return Ok(true);
             }
             let local = target
@@ -1987,6 +2086,19 @@ impl Checker<'_> {
 #[cfg(test)]
 mod tests {
     use crate::CompileOptions;
+
+    #[test]
+    fn closed_entry_bytes_can_be_rebound_to_a_joined_string() {
+        let source = "if __name__ == '__main__':\n    text = b'abc'\n    chunks = ['one', 'two']\n    text = ','.join(chunks)\n    print(text)\n";
+        let ir = crate::compile(source, &CompileOptions::default()).unwrap();
+        assert!(
+            !ir.lines()
+                .any(|l| l.contains("call ") && l.contains("@imre_dyn_"))
+        );
+        let annotated =
+            "text: bytes = b'abc'\nchunks = ['abc']\ntext = ','.join(chunks)\nprint(text)\n";
+        assert!(crate::compile(annotated, &CompileOptions::default()).is_err());
+    }
 
     #[test]
     fn numeric_list_conversion_preserves_both_argument_layouts() {

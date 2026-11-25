@@ -152,6 +152,7 @@ impl Builtin {
                 PreservesOwners,
             ),
             Self::Adler32 => Contract::new(false, PreservesLists),
+            Self::ZlibCompress => Contract::new(true, PreservesLists),
             Self::HmacCompareDigest { text } => Contract::new(*text, PreservesLists),
             Self::ImportErrorReset => Contract::new(false, Unknown),
             Self::ImportErrorRejectReset => Contract::new(true, Unknown),
@@ -756,6 +757,7 @@ impl Builtin {
             | Self::StringListSortSuffix(_)
             | Self::BinaryWrite
             | Self::IntToBytes
+            | Self::PackUnsignedWord
             | Self::BytesValidateUtf8
             | Self::BytesContainsInt
             | Self::DequeNew
@@ -1063,6 +1065,7 @@ impl Builtin {
                 result == Type::Int && args.len() >= 2 && args.iter().all(|arg| arg.ty == Type::Int)
             }
             Self::IntFromBytes => signature(&[Type::Bytes], Type::Int),
+            Self::ZlibCompress => signature(&[Type::Bytes, Type::Int, Type::Int], Type::Bytes),
             Self::MathComb | Self::MathPerm => signature(&[Type::Int, Type::Int], Type::Int),
             Self::MathFactorial | Self::IntBitCount | Self::IntBitLength | Self::IntHash => {
                 signature(&[Type::Int], Type::Int)
@@ -1078,6 +1081,7 @@ impl Builtin {
             Self::FloatDegrees | Self::FloatRadians | Self::FloatUnary(_) => {
                 signature(&[Type::Float], Type::Float)
             }
+            Self::PackUnsignedWord => signature(&[Type::Int, Type::Bool], Type::Bytes),
             Self::IntSignAsFloat | Self::IntLog | Self::IntLog10 => {
                 signature(&[Type::Int], Type::Float)
             }
@@ -1559,6 +1563,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_urlsafe_b64encode"
                 | "imre_base64_translate"
                 | "imre_binascii_ascii_input"
+                | "imre_zlib_compress"
                 | "imre_binascii_decode"
                 | "imre_binascii_encode"
                 | "imre_base32_encode"
@@ -1592,6 +1597,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_hash_algorithms_guaranteed"
                 | "imre_toml_keys"
                 | "imre_int_to_bytes"
+                | "imre_pack_unsigned_word"
                 | "imre_bytes_validate_utf8"
                 | "imre_binary_open"
                 | "imre_binary_read"

@@ -1517,6 +1517,7 @@ impl IntrinsicModule {
             (Self::PickleNative, "UnpicklingError") => {
                 Intrinsic::ScopedObjectExport("_pickle.UnpicklingError")
             }
+            (Self::Struct, "pack") => Intrinsic::ScopedObjectExport("struct.pack"),
             (Self::Struct, "_clearcache") => Intrinsic::ScopedObjectExport("struct._clearcache"),
             (Self::Tempfile, "gettempdir") => Intrinsic::ScopedObjectExport("tempfile.gettempdir"),
             (Self::Tempfile, "gettempdirb") => {
@@ -2455,6 +2456,7 @@ impl IntrinsicModule {
             (Self::CollectionsAbc, "Set") => Intrinsic::AbstractSet,
             (Self::Tomllib, "load") => Intrinsic::TomllibLoad,
             (Self::Tomllib, "TOMLDecodeError") => Intrinsic::TomlDecodeError,
+            (Self::Zlib, "compress") => Intrinsic::ScopedObjectExport("zlib.compress"),
             (Self::Zlib, "compressobj") => Intrinsic::ScopedObjectExport("zlib.compressobj"),
             (Self::Zlib, "ZLIB_VERSION" | "ZLIB_RUNTIME_VERSION") => {
                 Intrinsic::StringConstant(imre_ast::zlib::VERSION)
@@ -3944,6 +3946,27 @@ impl SourceGraph {
             diagnostics.sort_unstable_by_key(|note| note.sort_key());
             diagnostics.dedup();
             let module = &self.modules[id];
+            // A guard which actually lowered to a fixed NameError has already
+            // checked this bare name. Only its exact expression may be omitted
+            // from the source diagnostics. The rest of the try and handler stay checked.
+            if module.is_program_source() {
+                for statement in &module.parsed.syntax().body {
+                    let ast::Stmt::Try(guard) = statement else {
+                        continue;
+                    };
+                    let Some(ast::Stmt::Expr(probe)) = guard.body.first() else {
+                        continue;
+                    };
+                    let range = probe.value.range();
+                    if diagnostics.iter().any(
+                        |note| matches!(note,CheckedDiagnostic::UnboundLocalRead(r) if *r==range),
+                    ) && self.closed_missing_module_probe(id, &probe.value)
+                    {
+                        skipped.get_or_insert_with(|| vec![Vec::new(); self.modules.len()])[id]
+                            .push(range);
+                    }
+                }
+            }
             if let Some(selected) = module.checked_declaration {
                 let suite = module.parsed.suite();
                 let ranges =

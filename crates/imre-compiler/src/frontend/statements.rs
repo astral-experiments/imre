@@ -1,6 +1,7 @@
 //! Ordinary source statements shared by typed code and registered Python scopes.
 
 use super::*;
+use ruff_python_ast::visitor::{Visitor, walk_expr};
 
 pub(super) type Block = (Vec<Statement>, bool);
 
@@ -73,6 +74,173 @@ pub(super) fn push_if(
         unreachable!()
     };
     (yes, no)
+}
+
+/// Find only a straight-line entry-suite pair whose generator has exactly one
+/// adjacent consumer. Protected suites and functions are deliberately not traversed:
+/// a caught failure could expose the generator binding before replacement.
+fn adjacent_generator_consumer<'a>(
+    suite: &'a [ast::Stmt],
+    generator: TextRange,
+    name: &str,
+) -> Option<&'a ast::ExprListComp> {
+    for pair in suite.windows(2) {
+        let (ast::Stmt::Assign(first), ast::Stmt::Assign(second)) = (&pair[0], &pair[1]) else {
+            continue;
+        };
+        if first.value.range() != generator
+            || !matches!(first.targets.as_slice(), [ast::Expr::Name(n)] if n.id == name)
+            || !matches!(second.targets.as_slice(), [ast::Expr::Name(n)] if n.id == name)
+        {
+            continue;
+        }
+        let ast::Expr::ListComp(display) = &*second.value else {
+            continue;
+        };
+        let [clause] = display.generators.as_slice() else {
+            continue;
+        };
+        if !clause.is_async && matches!(&clause.iter, ast::Expr::Name(n) if n.id == name) {
+            return Some(display);
+        }
+    }
+    for statement in suite {
+        if let ast::Stmt::If(branch) = statement {
+            for (_, arm) in if_clauses(branch) {
+                if let Some(found) = adjacent_generator_consumer(arm, generator, name) {
+                    return Some(found);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// The virtual binding cannot escape to callbacks, frames, or namespace lookup.
+/// Limit calls to sealed scalar builtins and a literal string's immutable join
+/// descriptor; lowered IR is independently checked before the consumer is accepted.
+struct ClosedGeneratorExpressions<'a, 'g> {
+    checker: &'a Checker<'g>,
+    name: &'a str,
+    reads: usize,
+    valid: bool,
+}
+
+impl<'ast> Visitor<'ast> for ClosedGeneratorExpressions<'_, '_> {
+    fn visit_expr(&mut self, expression: &'ast ast::Expr) {
+        match expression {
+            ast::Expr::Name(name) => {
+                if name.id == self.name {
+                    self.reads += 1;
+                }
+            }
+            ast::Expr::Call(call) => {
+                let sealed = match &*call.func {
+                    ast::Expr::Name(name) => {
+                        matches!(name.id.as_str(), "str" | "ord" | "len" | "range")
+                            && self
+                                .checker
+                                .unshadowed_builtin(&call.func, name.id.as_str())
+                            || self
+                                .checker
+                                .names
+                                .get(name.id.as_str())
+                                .is_some_and(|slot| {
+                                    self.checker.assigned.contains(slot)
+                                        && self.checker.assigned.is_range_alias(*slot)
+                                        && !self.checker.live_module_name(name.id.as_str())
+                                })
+                    }
+                    ast::Expr::Attribute(attribute) => {
+                        attribute.attr.as_str() == "join"
+                            && matches!(&*attribute.value, ast::Expr::StringLiteral(_))
+                    }
+                    _ => false,
+                };
+                self.valid &= sealed
+                    && call.arguments.keywords.is_empty()
+                    && call
+                        .arguments
+                        .args
+                        .iter()
+                        .all(|arg| !matches!(arg, ast::Expr::Starred(_)));
+                self.visit_arguments(&call.arguments);
+            }
+            ast::Expr::BoolOp(_)
+            | ast::Expr::BinOp(_)
+            | ast::Expr::UnaryOp(_)
+            | ast::Expr::If(_)
+            | ast::Expr::ListComp(_)
+            | ast::Expr::Generator(_)
+            | ast::Expr::Compare(_)
+            | ast::Expr::StringLiteral(_)
+            | ast::Expr::BytesLiteral(_)
+            | ast::Expr::NumberLiteral(_)
+            | ast::Expr::BooleanLiteral(_)
+            | ast::Expr::NoneLiteral(_)
+            | ast::Expr::Subscript(_)
+            | ast::Expr::Tuple(_)
+            | ast::Expr::Slice(_) => walk_expr(self, expression),
+            _ => self.valid = false,
+        }
+    }
+}
+
+/// A native operation may not observe the eliminated generator binding. Python
+/// handles, source calls, overloaded protocols, and namespace operations remain unsupported.
+fn closed_generator_ir(body: &[Statement]) -> bool {
+    let mut closed = true;
+    ir::walk_expressions(body, &mut |value| {
+        closed &= !matches!(
+            value.ty,
+            Type::PythonObject
+                | Type::ObjectValue
+                | Type::SourceModule
+                | Type::ModuleNamespace
+                | Type::Class(_)
+                | Type::Callable(_)
+        );
+        closed &= match &value.kind {
+            ExprKind::Call(..)
+            | ExprKind::Invoke { .. }
+            | ExprKind::Construct { .. }
+            | ExprKind::Callable { .. }
+            | ExprKind::Field(..)
+            | ExprKind::Bind(..) => false,
+            ExprKind::Builtin(op, args) => match op {
+                Builtin::GeneratorFrameEnter(_)
+                | Builtin::GeneratorFrameLeave
+                | Builtin::ActiveException
+                | Builtin::Slice
+                | Builtin::BytesGet
+                | Builtin::StringGet
+                | Builtin::Append
+                | Builtin::StringJoin
+                | Builtin::JoinBufferNew
+                | Builtin::JoinBufferAppend
+                | Builtin::JoinBufferFinish
+                | Builtin::Bool
+                | Builtin::Len
+                | Builtin::Ord => true,
+                // A statically invalid scalar operation may still be inside an
+                // unselected conditional arm. Its exact builtin exception evaluates
+                // prior operands in order and cannot inspect the virtual binding.
+                Builtin::RaiseException => matches!(args.as_slice(), [operand, error]
+                    if operand.ty == Type::Int && error.ty == Type::Exception
+                        && matches!(&error.kind, ExprKind::Exception { kind, message: Some(message) }
+                            if Some(*kind) == exception_kind("TypeError") && matches!(&message.kind, ExprKind::Str(_)))),
+                Builtin::Str => args.first().is_some_and(|x| {
+                    matches!(
+                        x.ty,
+                        Type::Int | Type::Float | Type::Bool | Type::Str | Type::Bytes
+                    )
+                }),
+                _ => false,
+            },
+            _ => true,
+        };
+    });
+    closed
 }
 
 pub(super) trait StatementLowering {
@@ -176,7 +344,57 @@ impl StatementLowering for Checker<'_> {
         rhs: &ast::Expr,
         body: &mut Vec<Statement>,
     ) -> Result<bool, String> {
+        if _annotation.is_none()
+            && self.module_scope
+            && self.module == self.graph.entry
+            && self.registered.is_none()
+            && self.module_namespace.is_unexposed()
+            && let ([ast::Expr::Name(name)], ast::Expr::Generator(generator)) = (targets, rhs)
+            && self
+                .names
+                .get(name.id.as_str())
+                .is_none_or(|slot| !self.assigned.contains(slot))
+            && let Some(display) = adjacent_generator_consumer(
+                &self.graph.modules[self.module].parsed.syntax().body,
+                rhs.range(),
+                name.id.as_str(),
+            )
+        {
+            let mut proof = ClosedGeneratorExpressions {
+                checker: self,
+                name: name.id.as_str(),
+                reads: 0,
+                valid: true,
+            };
+            proof.visit_expr(rhs);
+            proof.visit_expr(&ast::Expr::ListComp(display.clone()));
+            if proof.valid && proof.reads == 1 {
+                let consumer = display.generators[0].iter.range();
+                let mut prepared = self.generator_input(generator, None, None, None)?;
+                if closed_generator_ir(&prepared.evaluate) && closed_generator_ir(&prepared.next) {
+                    body.append(&mut prepared.evaluate);
+                    self.assigned.store_generator(consumer, prepared);
+                    return Ok(true);
+                }
+            }
+        }
+        let fused = matches!(rhs, ast::Expr::ListComp(display) if display.generators.first().is_some_and(|clause| self.assigned.has_stored_generator(clause.iter.range())));
+        let start = body.len();
+        let builtin_range = _annotation.is_none() && self.unshadowed_builtin(rhs, "range");
         let continues = self.assignment_statement(targets, rhs, body)?;
+        if fused && !closed_generator_ir(&body[start..]) {
+            return Err(error(
+                self.source,
+                rhs,
+                "a stored generator consumer can observe its binding",
+            ));
+        }
+        if builtin_range
+            && let [ast::Expr::Name(name)] = targets
+            && let Some(&slot) = self.names.get(name.id.as_str())
+        {
+            self.assigned.mark_range_alias(slot);
+        }
         if continues
             && !self.module_scope
             && self.reachable
@@ -224,6 +442,8 @@ impl StatementLowering for Checker<'_> {
             && !self.names.contains_key(name.id.as_str())
             && self.graph.closed_missing_module_probe(self.module, expr)
         {
+            self.graph
+                .checked_unbound_local_read(self.module, expr.range());
             let failure = unbound_locals::module_name_failure(name.id.as_str());
             return Ok((Some(self.statement_at(expr, failure)), false));
         }
@@ -597,6 +817,20 @@ impl StatementLowering for Checker<'_> {
 #[cfg(test)]
 mod missing_module_probe_tests {
     #[test]
+    fn closed_name_guard_checks_only_the_exact_missing_probe() {
+        let positive = "import json\ntry:\n    absent_builtin\n    found = True\nexcept NameError:\n    found = False\n    absent_builtin = range\nprint(found)\n";
+        crate::check(positive).unwrap();
+        crate::compile(positive, &crate::CompileOptions::default()).unwrap();
+        let unrelated = format!("{positive}print(unrelated_missing_name)\n");
+        assert!(crate::check(&unrelated).is_err());
+        let type_error = format!("{positive}bad: int = 'wrong'\n");
+        assert!(crate::check(&type_error).is_err());
+        let captured =
+            "try:\n    missing_name\nexcept NameError as error:\n    print(error.name)\n";
+        assert!(crate::check(captured).is_err());
+    }
+
+    #[test]
     fn closed_missing_name_is_catchable_but_builtin_mutation_is_not_assumed_away() {
         let positive = "import json\ntry:\n    missing_name\n    found = True\nexcept NameError:\n    found = False\nprint(found)\n";
         let graph = crate::modules::SourceGraph::single(positive).unwrap();
@@ -614,5 +848,30 @@ mod missing_module_probe_tests {
         let builtin = "try:\n    range\nexcept NameError:\n    found = False\n";
         let graph = crate::modules::SourceGraph::single(builtin).unwrap();
         assert!(crate::frontend::lower(&graph).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod native_stored_generator_tests {
+    #[test]
+    fn a_closed_conditional_retains_its_catchable_scalar_error() {
+        let source = "if __name__ == '__main__':\n    legacy = False\n    raw = b'ab'\n    pieces = (raw[i:i + 1] for i in range(2))\n    pieces = [','.join(str(ord(c) if legacy else c) for c in part) for part in pieces]\n    print(pieces)\n";
+        let graph = crate::modules::SourceGraph::single(source).unwrap();
+        assert!(crate::frontend::lower(&graph).is_ok());
+    }
+
+    #[test]
+    fn adjacent_consumer_is_fused_but_escaping_or_protected_binding_is_refused() {
+        let positive = "if __name__ == '__main__':\n    data = b'abcdef'\n    pieces = (data[i:i + 2] for i in range(0, len(data), 2))\n    pieces = [','.join(str(c) for c in piece) for piece in pieces]\n    print(';'.join(pieces))\n";
+        let graph = crate::modules::SourceGraph::single(positive).unwrap();
+        assert!(crate::frontend::lower(&graph).is_ok());
+
+        for refused in [
+            "if __name__ == '__main__':\n    values = (x for x in range(3))\n    other = values\n    values = [x for x in values]\n",
+            "if __name__ == '__main__':\n    try:\n        values = (x for x in range(3))\n        values = [1 // x for x in values]\n    except ZeroDivisionError:\n        print(next(values))\n",
+        ] {
+            let graph = crate::modules::SourceGraph::single(refused).unwrap();
+            assert!(crate::frontend::lower(&graph).is_err());
+        }
     }
 }

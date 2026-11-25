@@ -376,7 +376,7 @@ pub unsafe extern "C" fn imre_csv_reader(
         create(
             source,
             kind,
-            Dialect::new(delimiter, quote, escape, flags),
+            || Ok(Dialect::new(delimiter, quote, escape, flags)),
             Ok("\r\n"),
             flags,
         )
@@ -408,8 +408,118 @@ pub unsafe extern "C" fn imre_csv_reader_terminator(
         create(
             source,
             kind,
-            Dialect::new(delimiter, quote, escape, flags),
+            || Ok(Dialect::new(delimiter, quote, escape, flags)),
             value,
+            flags,
+        )
+    }
+}
+
+/// Create a reader with a delimiter whose exact character is checked at runtime.
+///
+/// # Safety
+/// Source matches kind. Delimiter and terminator, when nonnull, are rooted strings;
+/// their diagnostic type names are rooted strings when the respective value is null.
+/// A null terminator type name selects the default terminator.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_csv_reader_delimiter(
+    source: *const Object,
+    kind: u32,
+    delimiter: *const Str,
+    delimiter_bad_type: *const Str,
+    quote: u32,
+    escape: u32,
+    flags: u32,
+    terminator: *const Str,
+    terminator_bad_type: *const Str,
+) -> *const Object {
+    // SAFETY: the compiler roots the checked values and supplied diagnostic names.
+    unsafe {
+        let terminator = if terminator_bad_type.is_null() {
+            Ok("\r\n")
+        } else {
+            terminator
+                .as_ref()
+                .map(Str::as_str)
+                .ok_or_else(|| (*terminator_bad_type).as_str())
+        };
+        create(
+            source,
+            kind,
+            || {
+                let Some(value) = delimiter.as_ref().map(Str::as_str) else {
+                    return Err(Error::new(
+                        Kind::TypeError,
+                        format!(
+                            "\"delimiter\" must be a unicode character, not {}",
+                            (*delimiter_bad_type).as_str()
+                        ),
+                    ));
+                };
+                let mut chars = value.chars();
+                let delimiter = match (chars.next(), chars.next()) {
+                    (Some(delimiter), None) => delimiter,
+                    _ => {
+                        return Err(Error::new(
+                            Kind::TypeError,
+                            format!(
+                                "\"delimiter\" must be a unicode character, not a string of length {}",
+                                value.chars().count()
+                            ),
+                        ));
+                    }
+                };
+                Ok(Dialect::new(u32::from(delimiter), quote, escape, flags))
+            },
+            terminator,
+            flags,
+        )
+    }
+}
+
+/// Create a reader from a runtime name in the supported fixed dialect registry.
+///
+/// # Safety
+/// Source matches kind, name is a rooted string, and explicitly supplied
+/// terminator inputs follow the same contract as imre_csv_reader_delimiter.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_csv_reader_dialect(
+    source: *const Object,
+    kind: u32,
+    name: *const Str,
+    mut delimiter: u32,
+    delimiter_override: u32,
+    quote: u32,
+    escape: u32,
+    mut flags: u32,
+    terminator: *const Str,
+    terminator_bad_type: *const Str,
+) -> *const Object {
+    // SAFETY: the compiler roots the name, source and option values.
+    unsafe {
+        flags |= 8;
+        match (*name).as_str() {
+            "excel" | "unix" => {}
+            "excel-tab" => {
+                if delimiter_override == 0 {
+                    delimiter = u32::from('\t');
+                }
+            }
+            _ => flags |= 16,
+        }
+        let terminator = if terminator_bad_type.is_null() {
+            Ok("\r\n")
+        } else {
+            terminator
+                .as_ref()
+                .map(Str::as_str)
+                .ok_or_else(|| (*terminator_bad_type).as_str())
+        };
+        create(
+            source,
+            kind,
+            || Ok(Dialect::new(delimiter, quote, escape, flags)),
+            terminator,
             flags,
         )
     }
@@ -418,7 +528,7 @@ pub unsafe extern "C" fn imre_csv_reader_terminator(
 unsafe fn create(
     source: *const Object,
     kind: u32,
-    dialect: Dialect,
+    dialect: impl FnOnce() -> Result<Dialect>,
     terminator: std::result::Result<&str, &str>,
     flags: u32,
 ) -> *const Object {
@@ -444,31 +554,33 @@ unsafe fn create(
         );
     }
     finish(
-        terminator
-            .map_err(|name| {
-                Error::new(
-                    Kind::TypeError,
-                    format!("\"lineterminator\" must be a string, not {name}"),
-                )
-            })
-            .and_then(|terminator| {
-                if flags & 8 != 0 && dialect.quote.is_none() {
-                    return Err(Error::new(
+        dialect().and_then(|dialect| {
+            terminator
+                .map_err(|name| {
+                    Error::new(
                         Kind::TypeError,
-                        "quotechar must be set if quoting enabled",
-                    ));
-                }
-                dialect.validate(terminator)
-            })
-            .map(|()| {
-                crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
-                    Storage::CsvReader(Box::new(Reader {
-                        lines,
-                        dialect,
-                        line_num: 0,
-                    })),
-                ))))
-            }),
+                        format!("\"lineterminator\" must be a string, not {name}"),
+                    )
+                })
+                .and_then(|terminator| {
+                    if flags & 8 != 0 && dialect.quote.is_none() {
+                        return Err(Error::new(
+                            Kind::TypeError,
+                            "quotechar must be set if quoting enabled",
+                        ));
+                    }
+                    dialect.validate(terminator)
+                })
+                .map(|()| {
+                    crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
+                        Storage::CsvReader(Box::new(Reader {
+                            lines,
+                            dialect,
+                            line_num: 0,
+                        })),
+                    ))))
+                })
+        }),
         ptr::null(),
     )
 }
