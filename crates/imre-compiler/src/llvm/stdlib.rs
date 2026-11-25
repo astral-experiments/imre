@@ -279,6 +279,20 @@ print(roots(-0.0, 9, True))
     }
 
     #[test]
+    fn checked_trigonometric_calls_lower_without_object_operations() {
+        let source = r#"from math import sin, cos
+def f(x: float, n: int, flag: bool) -> float:
+    return sin(x) + cos(n) + sin(flag)
+print(f(0.5, 1, True))
+"#;
+        let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
+        assert_eq!(llvm.matches("call double @imre_float_sin(").count(), 2);
+        assert_eq!(llvm.matches("call double @imre_float_cos(").count(), 1);
+        assert!(llvm.contains("call double @imre_int_float("));
+        assert!(llvm.contains("uitofp i1"));
+    }
+
+    #[test]
     fn float_copysign_uses_the_llvm_intrinsic() {
         let source = "from math import copysign\ndef sign(x: float, y: float) -> float:\n    return copysign(x, y)\nprint(sign(1.0, -0.0))";
         let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
