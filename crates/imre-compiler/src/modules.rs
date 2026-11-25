@@ -2386,6 +2386,7 @@ impl IntrinsicModule {
             (Self::Math, "perm") => Intrinsic::MathPerm,
             (Self::Math, "factorial") => Intrinsic::ScopedObjectExport("math.factorial"),
             (Self::Math, "comb") => Intrinsic::ScopedObjectExport("math.comb"),
+            (Self::Math, "cos") => Intrinsic::ScopedObjectExport("math.cos"),
             (Self::Math, "cosh") => Intrinsic::ScopedObjectExport("math.cosh"),
             (Self::Math, "degrees") => Intrinsic::MathDegrees,
             (Self::Math, "fmod") => Intrinsic::MathFmod,
